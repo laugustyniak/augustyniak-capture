@@ -1,0 +1,86 @@
+<style>
+  .direction-grid { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:18px; margin-top:24px; }
+  .direction { cursor:pointer; border:2px solid transparent; border-radius:22px; overflow:hidden; background:#101827; transition:.2s ease; }
+  .direction:hover { transform:translateY(-3px); }
+  .direction.selected { border-color:#61dafb; box-shadow:0 0 0 4px rgba(97,218,251,.12); }
+  .preview { min-height:420px; padding:18px; }
+  .phone { width:100%; min-height:382px; border-radius:24px; padding:18px; box-sizing:border-box; position:relative; overflow:hidden; }
+  .top { display:flex; justify-content:space-between; align-items:center; margin-bottom:26px; }
+  .brand { font-size:17px; font-weight:800; letter-spacing:-.02em; }
+  .avatar { width:31px; height:31px; border-radius:50%; display:grid; place-items:center; font-size:11px; font-weight:800; }
+  .eyebrow { font-size:9px; font-weight:800; letter-spacing:.12em; opacity:.65; }
+  .headline { margin:6px 0 16px; font-size:24px; line-height:1.08; font-weight:800; letter-spacing:-.03em; }
+  .record { width:76px; height:76px; border-radius:50%; display:grid; place-items:center; margin:18px auto; font-size:28px; box-shadow:0 12px 35px rgba(0,0,0,.24); }
+  .mini-card { border-radius:15px; padding:13px; margin-top:10px; }
+  .row { display:flex; gap:9px; align-items:center; }
+  .wave { flex:1; height:28px; border-radius:8px; opacity:.65; background:repeating-linear-gradient(90deg,currentColor 0 2px,transparent 2px 6px); }
+  .pill { display:inline-block; font-size:8px; font-weight:800; padding:5px 7px; border-radius:999px; margin-right:4px; }
+  .metric-row { display:grid; grid-template-columns:repeat(3,1fr); gap:7px; }
+  .metric { border-radius:12px; padding:10px 7px; font-size:8px; }
+  .metric b { display:block; font-size:17px; margin-bottom:3px; }
+  .direction-body { padding:18px 20px 21px; background:#151f31; min-height:120px; }
+  .direction-body h3 { margin:0 0 7px; }
+  .direction-body p { margin:0; opacity:.72; font-size:13px; line-height:1.45; }
+  .recommended { color:#6ee7b7; font-size:9px; font-weight:900; letter-spacing:.11em; margin-bottom:6px; }
+  .calm { background:linear-gradient(160deg,#f5f0e8,#e6ebf4); color:#17202d; }
+  .calm .avatar { background:#29264e; color:#fff; }
+  .calm .record { background:#6b5ce7; color:#fff; }
+  .calm .mini-card { background:rgba(255,255,255,.72); box-shadow:0 8px 24px rgba(61,54,93,.08); }
+  .calm .pill { background:#e1ddff; color:#5245ba; }
+  .hybrid { background:linear-gradient(160deg,#071521,#10283a); color:#edf9ff; }
+  .hybrid .avatar { background:#4ad9db; color:#062226; }
+  .hybrid .record { background:#4ad9db; color:#062226; }
+  .hybrid .mini-card { background:#153449; border:1px solid #23516b; }
+  .hybrid .pill { background:#123f45; color:#73edc0; }
+  .console { background:#050d18; color:#d8ecf8; }
+  .console .avatar { background:#31d5f4; color:#00131a; border-radius:10px; }
+  .console .record { width:62px; height:62px; background:#31d5f4; color:#00131a; border-radius:18px; }
+  .console .mini-card,.console .metric { background:#10243a; border:1px solid #1b3852; }
+  .console .pill { background:#18384a; color:#31d5f4; }
+  @media(max-width:900px){.direction-grid{grid-template-columns:1fr}.preview{min-height:auto}.phone{min-height:350px}}
+</style>
+
+<h2>Which visual personality should define Audivoa?</h2>
+<p class="subtitle">All three preserve offline-first safety. The difference is what the interface communicates first.</p>
+
+<div class="direction-grid">
+  <div class="direction" data-choice="calm-capture" onclick="toggleSelect(this)">
+    <div class="preview calm">
+      <div class="phone calm">
+        <div class="top"><div class="brand">audivoa</div><div class="avatar">LA</div></div>
+        <div class="eyebrow">READY TO CAPTURE</div>
+        <div class="headline">What’s on your mind?</div>
+        <div class="record">●</div>
+        <div class="mini-card"><div class="row"><div><b>Project reflection</b><br><small>2 min ago · 04:18</small></div><div class="wave"></div></div><div style="margin-top:10px"><span class="pill">Note ready</span></div></div>
+      </div>
+    </div>
+    <div class="direction-body"><h3>A · Calm Capture</h3><p>Warm, quiet and personal. Recording is primary; system details stay out of sight until needed.</p></div>
+  </div>
+
+  <div class="direction" data-choice="balanced-workspace" onclick="toggleSelect(this)">
+    <div class="preview hybrid">
+      <div class="phone hybrid">
+        <div class="top"><div class="brand">Audivoa</div><div class="avatar">A</div></div>
+        <div class="eyebrow">YOUR VOICE WORKSPACE</div>
+        <div class="headline">Capture now.<br>Shape it later.</div>
+        <div class="record">●</div>
+        <div class="mini-card"><b>Design review</b><br><small style="opacity:.7">Transcript + structured note</small><div style="margin-top:10px"><span class="pill">Stored locally</span><span class="pill">Ready</span></div></div>
+        <div class="mini-card"><b>Client follow-up</b><br><small style="opacity:.7">3 actions extracted</small></div>
+      </div>
+    </div>
+    <div class="direction-body"><div class="recommended">RECOMMENDED</div><h3>B · Balanced Workspace</h3><p>Human and approachable on mobile, structured and powerful on larger screens. Technical state remains available, not dominant.</p></div>
+  </div>
+
+  <div class="direction" data-choice="processing-console" onclick="toggleSelect(this)">
+    <div class="preview console">
+      <div class="phone console">
+        <div class="top"><div><div class="brand">Audivoa Core</div><div class="eyebrow">LOCAL-FIRST PROCESSING</div></div><div class="avatar">AI</div></div>
+        <div class="metric-row"><div class="metric"><b style="color:#4ade80">12</b>READY</div><div class="metric"><b style="color:#31d5f4">2</b>RUNNING</div><div class="metric"><b style="color:#ff6b81">1</b>FAILED</div></div>
+        <div style="margin:18px 0"><span class="pill">QUEUE</span><span class="pill">RAW</span><span class="pill">FAILED</span></div>
+        <div class="mini-card"><b>4b7d…9a2.m4a</b><br><small style="opacity:.65">2026-07-23 · 04:18</small><div style="margin-top:10px"><span class="pill">FILE VERIFIED</span><span class="pill">WHISPER</span></div></div>
+        <div class="record">●</div>
+      </div>
+    </div>
+    <div class="direction-body"><h3>C · Processing Console</h3><p>Dense, technical and status-driven. Best for operators, but heavier for everyday personal capture.</p></div>
+  </div>
+</div>
