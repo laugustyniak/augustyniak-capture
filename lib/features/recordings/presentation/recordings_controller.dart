@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:io';
 
+import 'package:audioplayers/audioplayers.dart';
 import 'package:flutter/foundation.dart';
 import 'package:record/record.dart';
 import 'package:uuid/uuid.dart';
@@ -14,13 +15,23 @@ class RecordingsController extends ChangeNotifier {
     required RecordingsRepository repository,
     required TranscriptionService transcriptionService,
     AudioRecorder? recorder,
+    AudioPlayer? player,
   })  : _repository = repository,
         _transcriptionService = transcriptionService,
-        _recorder = recorder ?? AudioRecorder();
+        _recorder = recorder ?? AudioRecorder(),
+        _player = player ?? AudioPlayer() {
+    // Reset the "now playing" marker when a clip finishes on its own.
+    _playerCompleteSub = _player.onPlayerComplete.listen((_) {
+      _playingId = null;
+      notifyListeners();
+    });
+  }
 
   final RecordingsRepository _repository;
   final TranscriptionService _transcriptionService;
   final AudioRecorder _recorder;
+  final AudioPlayer _player;
+  StreamSubscription<void>? _playerCompleteSub;
 
   final Stopwatch _stopwatch = Stopwatch();
   Timer? _timer;
@@ -28,12 +39,14 @@ class RecordingsController extends ChangeNotifier {
   bool _isRecording = false;
   bool _isBusy = false;
   String? _activeFilePath;
+  String? _playingId;
   String? _error;
 
   List<Recording> get recordings => List<Recording>.unmodifiable(_recordings);
   bool get isRecording => _isRecording;
   bool get isBusy => _isBusy;
   Duration get elapsed => _stopwatch.elapsed;
+  String? get playingId => _playingId;
   String? get error => _error;
 
   Future<void> initialize() async {
@@ -119,6 +132,36 @@ class RecordingsController extends ChangeNotifier {
     }
   }
 
+  /// Play the recording's audio, or stop it if it is already playing.
+  /// Independent of the transcription pipeline and the `_isBusy` lock.
+  Future<void> togglePlayback(String id) async {
+    _error = null;
+    try {
+      if (_playingId == id) {
+        await _player.stop();
+        _playingId = null;
+        notifyListeners();
+        return;
+      }
+
+      final Recording recording =
+          _recordings.firstWhere((Recording item) => item.id == id);
+      final File file = File(recording.filePath);
+      if (!await file.exists()) {
+        throw FileSystemException('Plik nagrania nie istnieje.', recording.filePath);
+      }
+
+      await _player.stop();
+      _playingId = id;
+      notifyListeners();
+      await _player.play(DeviceFileSource(recording.filePath));
+    } catch (exception) {
+      _playingId = null;
+      _error = exception.toString();
+      notifyListeners();
+    }
+  }
+
   Future<void> toggleProcessed(String id) async {
     final Recording recording =
         _recordings.firstWhere((Recording item) => item.id == id);
@@ -193,6 +236,8 @@ class RecordingsController extends ChangeNotifier {
   @override
   void dispose() {
     _timer?.cancel();
+    _playerCompleteSub?.cancel();
+    _player.dispose();
     _recorder.dispose();
     super.dispose();
   }
