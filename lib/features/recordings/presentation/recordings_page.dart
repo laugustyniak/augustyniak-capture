@@ -153,6 +153,10 @@ class _RecordingsPageState extends State<RecordingsPage> {
                             padding: const EdgeInsets.only(bottom: 11),
                             child: _RecordingCard(
                               recording: recording,
+                              isPlaying:
+                                  controller.playingId == recording.id,
+                              onTogglePlay: () =>
+                                  controller.togglePlayback(recording.id),
                               onRetry: () =>
                                   controller.retryTranscription(recording.id),
                               onToggleProcessed: () async {
@@ -432,60 +436,18 @@ class _AnimatedMetricCard extends StatelessWidget {
   }
 }
 
-class _MetricCard extends StatelessWidget {
-  const _MetricCard({
-    required this.value,
-    required this.label,
-    this.accent = const Color(0xFF31D5F4),
-  });
-
-  final String value;
-  final String label;
-  final Color accent;
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.all(12),
-      decoration: BoxDecoration(
-        color: const Color(0xFF10243A),
-        borderRadius: BorderRadius.circular(15),
-        border: Border.all(color: const Color(0xFF1B3852)),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: <Widget>[
-          Text(
-            value,
-            style: TextStyle(
-              color: accent,
-              fontSize: 19,
-              fontWeight: FontWeight.w900,
-            ),
-          ),
-          const SizedBox(height: 3),
-          Text(
-            label,
-            style: const TextStyle(
-              color: Color(0xFF6F8CA5),
-              fontSize: 8,
-              fontWeight: FontWeight.w800,
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
 class _RecordingCard extends StatelessWidget {
   const _RecordingCard({
     required this.recording,
+    required this.isPlaying,
+    required this.onTogglePlay,
     required this.onRetry,
     required this.onToggleProcessed,
   });
 
   final Recording recording;
+  final bool isPlaying;
+  final VoidCallback onTogglePlay;
   final VoidCallback onRetry;
   final VoidCallback onToggleProcessed;
 
@@ -566,6 +528,38 @@ class _RecordingCard extends StatelessWidget {
                     ],
                   ),
                 ),
+                Semantics(
+                  button: true,
+                  label: isPlaying ? 'Stop playback' : 'Play recording',
+                  child: InkResponse(
+                    onTap: onTogglePlay,
+                    radius: 25,
+                    child: Container(
+                      width: 40,
+                      height: 40,
+                      alignment: Alignment.center,
+                      decoration: BoxDecoration(
+                        color: isPlaying
+                            ? const Color(0xFF143C54)
+                            : const Color(0xFF102434),
+                        borderRadius: BorderRadius.circular(13),
+                        border: Border.all(
+                          color: isPlaying
+                              ? const Color(0xFF31D5F4)
+                              : const Color(0xFF1B3852),
+                        ),
+                      ),
+                      child: Icon(
+                        isPlaying
+                            ? Icons.stop_rounded
+                            : Icons.play_arrow_rounded,
+                        color: const Color(0xFF31D5F4),
+                        size: 24,
+                      ),
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 8),
                 Semantics(
                   button: true,
                   checked: reviewed,
