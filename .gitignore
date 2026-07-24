@@ -10,3 +10,6 @@ build/
 android/.gradle/
 ios/Pods/
 ios/.symlinks/
+
+# Superpowers brainstorm tooling state
+.superpowers/
