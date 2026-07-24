@@ -35,18 +35,39 @@ class _RecordingsPageState extends State<RecordingsPage> {
 
   // Wire a real endpoint when configured at build time, otherwise fall back to
   // the disabled service that reports "endpoint is not configured".
-  //   flutter run --dart-define=TRANSCRIPTION_ENDPOINT=https://host/transcribe \
+  //
+  // OpenAI (endpoint defaults to OpenAI when a token is set):
+  //   flutter run --dart-define=TRANSCRIPTION_TOKEN=sk-... \
+  //               --dart-define=TRANSCRIPTION_MODEL=whisper-1 \
+  //               --dart-define=TRANSCRIPTION_LANGUAGE=pl
+  //
+  // Any OpenAI-compatible server (Groq, local whisper.cpp, ...):
+  //   flutter run --dart-define=TRANSCRIPTION_ENDPOINT=https://host/v1/audio/transcriptions \
   //               --dart-define=TRANSCRIPTION_TOKEN=secret
+  static const String _openAiEndpoint =
+      'https://api.openai.com/v1/audio/transcriptions';
+
   static TranscriptionService _buildTranscriptionService() {
-    const String endpoint =
+    const String endpointDefine =
         String.fromEnvironment('TRANSCRIPTION_ENDPOINT');
     const String token = String.fromEnvironment('TRANSCRIPTION_TOKEN');
+    const String model =
+        String.fromEnvironment('TRANSCRIPTION_MODEL', defaultValue: 'whisper-1');
+    const String language = String.fromEnvironment('TRANSCRIPTION_LANGUAGE');
+
+    // Default to OpenAI's endpoint when only a token is supplied.
+    final String endpoint = endpointDefine.isNotEmpty
+        ? endpointDefine
+        : (token.isNotEmpty ? _openAiEndpoint : '');
     if (endpoint.isEmpty) {
       return const DisabledTranscriptionService();
     }
+
     return HttpWhisperTranscriptionService(
       endpoint: Uri.parse(endpoint),
       bearerToken: token.isEmpty ? null : token,
+      model: model.isEmpty ? null : model,
+      language: language.isEmpty ? null : language,
     );
   }
 
