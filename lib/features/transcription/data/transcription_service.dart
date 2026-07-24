@@ -20,17 +20,34 @@ class HttpWhisperTranscriptionService implements TranscriptionService {
   HttpWhisperTranscriptionService({
     required this.endpoint,
     this.bearerToken,
+    this.model,
+    this.language,
     http.Client? client,
   }) : _client = client ?? http.Client();
 
   final Uri endpoint;
   final String? bearerToken;
+
+  /// Model form field. Required by OpenAI (`whisper-1`, `gpt-4o-transcribe`,
+  /// `gpt-4o-mini-transcribe`); ignored by servers that don't expect it.
+  final String? model;
+
+  /// Optional ISO-639-1 hint (e.g. `pl`). Improves accuracy on known-language
+  /// audio and skips language auto-detection.
+  final String? language;
   final http.Client _client;
 
   @override
   Future<String> transcribe(File audioFile) async {
     final http.MultipartRequest request = http.MultipartRequest('POST', endpoint)
       ..files.add(await http.MultipartFile.fromPath('file', audioFile.path));
+
+    if (model != null && model!.isNotEmpty) {
+      request.fields['model'] = model!;
+    }
+    if (language != null && language!.isNotEmpty) {
+      request.fields['language'] = language!;
+    }
 
     if (bearerToken != null && bearerToken!.isNotEmpty) {
       request.headers['Authorization'] = 'Bearer $bearerToken';
