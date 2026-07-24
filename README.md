@@ -67,13 +67,53 @@ Oczekiwana odpowiedź endpointu:
 
 Endpoint powinien przyjmować `multipart/form-data` z polem `file`.
 
+## Zakładki
+
+Aplikacja ma cztery zakładki w dolnej nawigacji:
+
+| Zakładka | Do czego służy |
+| --- | --- |
+| **Queue** | lista nagrań, filtry statusu, wyszukiwarka, przycisk nagrywania, odtwarzanie |
+| **Models** | profile providerów transkrypcji: dodawanie, edycja, usuwanie, wybór aktywnego |
+| **Logs** | strumień zdarzeń potoku (zapis, kolejka, transkrypcja, błędy), filtr poziomu |
+| **Config** | parametry nagrywania, podsumowanie aktywnego providera, informacje o plikach |
+
+### Models — profile providerów
+
+Zamiast edycji kodu wystarczy dodać profil w zakładce Models. Gotowe presety:
+OpenAI Whisper, OpenAI GPT-4o transcribe, Groq, lokalny whisper.cpp
+(`http://localhost:8080/inference`) oraz własny endpoint.
+
+Aktywny jest zawsze jeden profil. Brak profilu = transkrypcja wyłączona
+(nagrywanie i zapis lokalny działają bez zmian). Wartości z `--dart-define`
+zasilają pierwszy profil przy pierwszym uruchomieniu; potem obowiązuje
+`settings.json`.
+
+> Tokeny są zapisywane jawnym tekstem w `settings.json` w katalogu dokumentów
+> aplikacji. Szyfrowanie zaplanowano na kolejną fazę.
+
+### Config — parametry nagrywania
+
+Edytowalne: sample rate (8/16/22.05/44.1 kHz), bitrate (32–128 kbps), kanały
+(mono/stereo). Kodek AAC-LC i kontener `.m4a` są stałe. Zmiana dotyczy wyłącznie
+kolejnych nagrań — pliki już zapisane pozostają nietknięte.
+
+## Pliki na dysku
+
+Wszystko w podkatalogu `recordings/` katalogu dokumentów aplikacji, każdy zapis
+atomowy (`.tmp` → `rename`):
+
+- `<uuid>.m4a` — audio,
+- `recordings.json` — indeks nagrań,
+- `settings.json` — profile providerów i parametry audio,
+- `logs.json` — historia zdarzeń (bufor cykliczny, maks. 500 wpisów).
+
 ## Kolejna faza
 
 - kolejka background jobs,
 - WorkManager na Androidzie i BGTaskScheduler na iOS,
-- odtwarzanie nagrań,
 - edycja tytułu i transkrypcji,
-- wybór providera transkrypcji,
+- lokalne modele na urządzeniu (whisper.cpp przez FFI),
 - szyfrowanie tokenów,
 - synchronizacja z Obsidian/Notion.
 

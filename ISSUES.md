@@ -2,53 +2,53 @@
 
 Local issue tracker (no GitHub remote yet). Move to `gh issue` once a remote exists.
 
-## Nav-tab backends
+## Open
 
-The bottom-nav tabs Models/Logs/Config are scaffolded with `_PlaceholderTab`
-(`lib/features/recordings/presentation/recordings_page.dart`). Each needs a real
-backend + screen body. Swap the placeholder for the screen when the feature
-lands.
+### Background transcription queue
 
-### 1. Models tab — local transcription model management
+Transcription runs inline under the `_isBusy` lock, so a long job blocks the
+next capture. Needs a real job queue plus WorkManager (Android) /
+BGTaskScheduler (iOS) so jobs survive app suspension.
 
-- **Now:** placeholder. Transcription service is selected once at startup from
-  `--dart-define` (`_buildTranscriptionService`); no model concept exists.
-- **Build:**
-  - Model domain type (id, name, size, download state, local path).
-  - Registry/repository listing available + installed models.
-  - Download + delete with progress; persist installed set.
-  - Screen body: list, download/delete actions, active-model selection.
-  - Wire selection into the transcription service the controller uses.
-- **Invariant:** must not touch the recording→persist→transcribe ordering in
-  `RecordingsController.stopRecording()`.
+### On-device models
 
-### 2. Logs tab — processing console / job history
+The Models tab manages *remote* provider profiles only. Local inference
+(whisper.cpp via FFI: model catalog, download with progress, local path,
+delete, active-model selection) is a separate, much larger piece of work and
+needs a native dependency that is not in `pubspec.yaml` today.
 
-- **Now:** placeholder. No log store; errors surface only per-recording via the
-  `error` string + `_ErrorBanner`.
-- **Build:**
-  - Append-only log/event store (in-memory + optional persisted ring buffer).
-  - Emit events from controller transitions (saved → pending → transcribing →
-    completed/failed, retries).
-  - Screen body: reverse-chronological stream, filter by level/recording.
-- **Note:** read-only view; no mutation of recordings.
+**Invariant for any future work here:** must not touch the
+recording→persist→transcribe ordering in `RecordingsController.stopRecording()`.
 
-### 3. Config tab — runtime settings
+### Token encryption
 
-- **Now:** placeholder. Endpoint + token are compile-time only
-  (`TRANSCRIPTION_ENDPOINT`, `TRANSCRIPTION_TOKEN`).
-- **Build:**
-  - Settings domain + persistence (JSON in app docs dir, same pattern as
-    `recordings.json`).
-  - Editable: transcription endpoint URL, bearer token, audio format params
-    (currently hardcoded AAC-LC 16 kHz mono 64 kbps).
-  - Rebuild/replace the transcription service when endpoint/token change.
-  - Screen body: form with validation; secure-ish handling of the token field.
-- **Migration:** keep `--dart-define` values as defaults when no saved settings.
+`settings.json` stores bearer tokens in plaintext in the app documents
+directory. The Models tab warns about this. Move to platform secure storage.
 
-## Done (scaffold — branch `feat/nav-tabs-search-scaffold`)
+### Transcript editing
 
-- Nav tabs routed: non-zero index renders `_PlaceholderTab`; record FAB gated to
-  Queue tab.
-- Search field live: filters visible list by transcript + filename + id on top
-  of the status filter; clear button.
+No way to fix a bad transcript or set a title. Read-only today.
+
+## Done — nav tabs (branch `feat/nav-tabs-search-scaffold`)
+
+- **Scaffold:** tabs routed, record FAB gated to Queue, live search over
+  transcript + filename + id on top of the status filter.
+- **Models tab** (`features/settings`): `ProviderProfile` domain type,
+  `AppSettings` + `SettingsRepository` (`settings.json`, atomic write),
+  `SettingsController`, profile list with add/edit/delete, active selection,
+  five presets, plaintext-token warning. The active profile's service is pushed
+  into `RecordingsController` on every change; `--dart-define` values seed the
+  first profile on first run only.
+- **Logs tab** (`features/logs`): `LogEvent` + `LogStore` — newest-first ring
+  buffer, capacity 500, coalesced single-flight persistence behind the
+  `LogArchive` interface (`FileLogArchive` → `logs.json`).
+  `RecordingsController` takes an optional `LogSink` and emits one event per
+  pipeline transition. Level filter, copy-on-long-press, clear with confirm.
+- **Config tab**: editable sample rate / bitrate / channels (encoder and `.m4a`
+  container stay fixed), estimated size per hour, reset to defaults,
+  active-provider summary, storage paths and file inventory.
+- **Refactor:** queue body extracted from the 988-line `recordings_page.dart`
+  into `queue_tab.dart`; shared palette and widgets moved to
+  `lib/app/ui_kit.dart`; the page is now a shell hosting four tabs in an
+  `IndexedStack` so tab state survives switching.
+- Design doc: `docs/superpowers/specs/2026-07-25-nav-tabs-design.md`.

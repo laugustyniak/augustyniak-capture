@@ -6,6 +6,8 @@ import 'package:flutter/foundation.dart';
 import 'package:record/record.dart';
 import 'package:uuid/uuid.dart';
 
+import '../../logs/domain/log_event.dart';
+import '../../settings/domain/audio_config.dart';
 import '../../transcription/data/transcription_service.dart';
 import '../data/recordings_repository.dart';
 import '../domain/recording.dart';
@@ -14,10 +16,14 @@ class RecordingsController extends ChangeNotifier {
   RecordingsController({
     required RecordingsRepository repository,
     required TranscriptionService transcriptionService,
+    AudioConfig audioConfig = AudioConfig.defaults,
+    LogSink logSink = const NoopLogSink(),
     AudioRecorder? recorder,
     AudioPlayer? player,
   })  : _repository = repository,
         _transcriptionService = transcriptionService,
+        _audioConfig = audioConfig,
+        _logSink = logSink,
         _recorder = recorder ?? AudioRecorder(),
         _player = player ?? AudioPlayer() {
     // Reset the "now playing" marker when a clip finishes on its own.
@@ -28,7 +34,13 @@ class RecordingsController extends ChangeNotifier {
   }
 
   final RecordingsRepository _repository;
-  final TranscriptionService _transcriptionService;
+  final LogSink _logSink;
+
+  // Both are swappable at runtime from the Models/Config tabs. A swap only
+  // affects work started afterwards; it never touches an in-flight pipeline.
+  TranscriptionService _transcriptionService;
+  AudioConfig _audioConfig;
+
   final AudioRecorder _recorder;
   final AudioPlayer _player;
   StreamSubscription<void>? _playerCompleteSub;
@@ -48,9 +60,24 @@ class RecordingsController extends ChangeNotifier {
   Duration get elapsed => _stopwatch.elapsed;
   String? get playingId => _playingId;
   String? get error => _error;
+  AudioConfig get audioConfig => _audioConfig;
+
+  /// Applied to the next transcription attempt. A job already running keeps the
+  /// service it started with.
+  set transcriptionService(TranscriptionService value) {
+    if (identical(_transcriptionService, value)) return;
+    _transcriptionService = value;
+  }
+
+  /// Applied to the next capture. Never changes a recording already on disk.
+  set audioConfig(AudioConfig value) {
+    if (_audioConfig == value) return;
+    _audioConfig = value;
+  }
 
   Future<void> initialize() async {
     _recordings = await _repository.loadAll();
+    _logSink.log('Wczytano ${_recordings.length} nagrań z dysku.');
     notifyListeners();
   }
 
@@ -61,6 +88,7 @@ class RecordingsController extends ChangeNotifier {
     final bool allowed = await _recorder.hasPermission();
     if (!allowed) {
       _error = 'Brak uprawnienia do mikrofonu.';
+      _logSink.log('Odmowa dostępu do mikrofonu.', level: LogLevel.error);
       notifyListeners();
       return;
     }
@@ -70,13 +98,18 @@ class RecordingsController extends ChangeNotifier {
     _activeFilePath = audioFile.path;
 
     await _recorder.start(
-      const RecordConfig(
+      RecordConfig(
         encoder: AudioEncoder.aacLc,
-        sampleRate: 16000,
-        numChannels: 1,
-        bitRate: 64000,
+        sampleRate: _audioConfig.sampleRate,
+        numChannels: _audioConfig.numChannels,
+        bitRate: _audioConfig.bitRate,
       ),
       path: audioFile.path,
+    );
+    _logSink.log(
+      'Start nagrywania · ${_audioConfig.sampleRate} Hz · '
+      '${_audioConfig.numChannels} kanał(y) · ${_audioConfig.bitRate ~/ 1000} kbps',
+      recordingId: id,
     );
 
     _stopwatch
@@ -120,11 +153,16 @@ class RecordingsController extends ChangeNotifier {
       // Critical invariant: persist metadata only after the audio file exists.
       _recordings = <Recording>[saved, ..._recordings];
       await _repository.saveAll(_recordings);
+      _logSink.log(
+        'Plik zweryfikowany i zapisany · ${await file.length()} B',
+        recordingId: saved.id,
+      );
 
       // Transcription is a separate step and starts only after durable save.
       await _markAndTranscribe(saved.id);
     } catch (exception) {
       _error = exception.toString();
+      _logSink.log('Błąd zapisu nagrania: $exception', level: LogLevel.error);
     } finally {
       _isBusy = false;
       _activeFilePath = null;
@@ -158,6 +196,11 @@ class RecordingsController extends ChangeNotifier {
     } catch (exception) {
       _playingId = null;
       _error = exception.toString();
+      _logSink.log(
+        'Odtwarzanie nieudane: $exception',
+        level: LogLevel.error,
+        recordingId: id,
+      );
       notifyListeners();
     }
   }
@@ -180,6 +223,7 @@ class RecordingsController extends ChangeNotifier {
   Future<void> retryTranscription(String id) async {
     if (_isBusy) return;
     _isBusy = true;
+    _logSink.log('Ponowna próba transkrypcji.', level: LogLevel.warn, recordingId: id);
     notifyListeners();
     try {
       await _markAndTranscribe(id);
@@ -198,10 +242,13 @@ class RecordingsController extends ChangeNotifier {
       ),
     );
 
+    _logSink.log('W kolejce do transkrypcji.', recordingId: id);
+
     await _update(
       id,
       (Recording item) => item.copyWith(status: RecordingStatus.transcribing),
     );
+    _logSink.log('Transkrypcja uruchomiona.', recordingId: id);
 
     final Recording recording = _recordings.firstWhere((Recording item) => item.id == id);
     try {
@@ -214,6 +261,10 @@ class RecordingsController extends ChangeNotifier {
           clearError: true,
         ),
       );
+      _logSink.log(
+        'Transkrypcja gotowa · ${transcript.length} znaków',
+        recordingId: id,
+      );
     } catch (exception) {
       await _update(
         id,
@@ -221,6 +272,11 @@ class RecordingsController extends ChangeNotifier {
           status: RecordingStatus.failed,
           error: exception.toString(),
         ),
+      );
+      _logSink.log(
+        'Transkrypcja nieudana: $exception',
+        level: LogLevel.error,
+        recordingId: id,
       );
     }
   }

@@ -1,15 +1,21 @@
 import 'dart:io';
 
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 
+import '../../../app/ui_kit.dart';
+import '../../logs/data/log_store.dart';
+import '../../logs/presentation/logs_tab.dart';
+import '../../settings/presentation/config_tab.dart';
+import '../../settings/presentation/models_tab.dart';
+import '../../settings/presentation/settings_controller.dart';
 import '../../transcription/data/transcription_service.dart';
 import '../data/recordings_repository.dart';
-import '../domain/recording.dart';
+import 'queue_tab.dart';
 import 'recordings_controller.dart';
 
-enum RecordingFilter { queue, ready, failed, raw }
-
+/// Shell for the four navigation tabs. Owns the controllers and keeps the
+/// recordings controller in sync with settings; every tab body lives in its own
+/// file.
 class RecordingsPage extends StatefulWidget {
   const RecordingsPage({super.key});
 
@@ -18,84 +24,71 @@ class RecordingsPage extends StatefulWidget {
 }
 
 class _RecordingsPageState extends State<RecordingsPage> {
+  // Indices used in code; Logs (2) and Config (3) are only ever selected by the
+  // NavigationBar itself.
+  static const int queueIndex = 0;
+  static const int modelsIndex = 1;
+
+  final RecordingsRepository repository = RecordingsRepository();
+  late final SettingsController settings;
+  late final LogStore logs;
   late final RecordingsController controller;
-  RecordingFilter selectedFilter = RecordingFilter.queue;
-  int navigationIndex = 0;
-  String searchQuery = '';
-  final TextEditingController searchController = TextEditingController();
+  late final Listenable listenable;
+
+  int navigationIndex = queueIndex;
+  String? storagePath;
 
   @override
   void initState() {
     super.initState();
+    settings = SettingsController();
+    logs = LogStore(archive: FileLogArchive());
     controller = RecordingsController(
-      repository: RecordingsRepository(),
-      transcriptionService: _buildTranscriptionService(),
-    )..initialize();
+      repository: repository,
+      // Replaced as soon as settings load; a fresh install with no profile
+      // keeps this disabled service, which is the pre-existing behaviour.
+      transcriptionService: const DisabledTranscriptionService(),
+      logSink: logs,
+    );
+
+    settings.addListener(_applySettings);
+    listenable = Listenable.merge(<Listenable>[controller, settings, logs]);
+    _bootstrap();
   }
 
-  // Wire a real endpoint when configured at build time, otherwise fall back to
-  // the disabled service that reports "endpoint is not configured".
-  //
-  // OpenAI (endpoint defaults to OpenAI when a token is set):
-  //   flutter run --dart-define=TRANSCRIPTION_TOKEN=sk-... \
-  //               --dart-define=TRANSCRIPTION_MODEL=whisper-1 \
-  //               --dart-define=TRANSCRIPTION_LANGUAGE=pl
-  //
-  // Any OpenAI-compatible server (Groq, local whisper.cpp, ...):
-  //   flutter run --dart-define=TRANSCRIPTION_ENDPOINT=https://host/v1/audio/transcriptions \
-  //               --dart-define=TRANSCRIPTION_TOKEN=secret
-  static const String _openAiEndpoint =
-      'https://api.openai.com/v1/audio/transcriptions';
+  Future<void> _bootstrap() async {
+    await logs.initialize();
+    // Settings first so the very first recording already uses the saved
+    // provider and capture parameters.
+    await settings.initialize();
+    await controller.initialize();
 
-  static TranscriptionService _buildTranscriptionService() {
-    const String endpointDefine =
-        String.fromEnvironment('TRANSCRIPTION_ENDPOINT');
-    const String token = String.fromEnvironment('TRANSCRIPTION_TOKEN');
-    const String model =
-        String.fromEnvironment('TRANSCRIPTION_MODEL', defaultValue: 'whisper-1');
-    const String language = String.fromEnvironment('TRANSCRIPTION_LANGUAGE');
+    final Directory directory = await repository.recordingsDirectory();
+    if (!mounted) return;
+    setState(() => storagePath = directory.path);
+  }
 
-    // Default to OpenAI's endpoint when only a token is supplied.
-    final String endpoint = endpointDefine.isNotEmpty
-        ? endpointDefine
-        : (token.isNotEmpty ? _openAiEndpoint : '');
-    if (endpoint.isEmpty) {
-      return const DisabledTranscriptionService();
-    }
-
-    return HttpWhisperTranscriptionService(
-      endpoint: Uri.parse(endpoint),
-      bearerToken: token.isEmpty ? null : token,
-      model: model.isEmpty ? null : model,
-      language: language.isEmpty ? null : language,
-    );
+  /// Push provider + audio changes into the recordings controller. Only affects
+  /// work started after the swap.
+  void _applySettings() {
+    controller.transcriptionService = settings.transcriptionService;
+    controller.audioConfig = settings.audio;
   }
 
   @override
   void dispose() {
+    settings.removeListener(_applySettings);
     controller.dispose();
-    searchController.dispose();
+    settings.dispose();
+    logs.dispose();
     super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
     return AnimatedBuilder(
-      animation: controller,
+      animation: listenable,
       builder: (BuildContext context, Widget? child) {
-        final List<Recording> visible = _filter(controller.recordings);
-        final int processingCount = controller.recordings
-            .where((Recording item) =>
-                item.status == RecordingStatus.pendingTranscription ||
-                item.status == RecordingStatus.transcribing)
-            .length;
-        final int failedCount = controller.recordings
-            .where((Recording item) => item.status == RecordingStatus.failed)
-            .length;
-        final int reviewedCount = controller.recordings
-            .where((Recording item) => item.isProcessedByUser)
-            .length;
-
         return Scaffold(
           appBar: AppBar(
             titleSpacing: 20,
@@ -109,7 +102,7 @@ class _RecordingsPageState extends State<RecordingsPage> {
                 Text(
                   'LOCAL-FIRST PROCESSING CONSOLE',
                   style: TextStyle(
-                    color: Color(0xFF6F8CA5),
+                    color: Console.muted,
                     fontSize: 9,
                     letterSpacing: 1.2,
                     fontWeight: FontWeight.w700,
@@ -124,14 +117,14 @@ class _RecordingsPageState extends State<RecordingsPage> {
                   width: 38,
                   height: 38,
                   decoration: BoxDecoration(
-                    color: const Color(0xFF31D5F4),
+                    color: Console.cyan,
                     borderRadius: BorderRadius.circular(13),
                   ),
                   alignment: Alignment.center,
                   child: const Text(
                     'AI',
                     style: TextStyle(
-                      color: Color(0xFF00131A),
+                      color: Console.ink,
                       fontWeight: FontWeight.w900,
                     ),
                   ),
@@ -139,114 +132,56 @@ class _RecordingsPageState extends State<RecordingsPage> {
               ),
             ],
           ),
-          body: navigationIndex != 0
-              ? _PlaceholderTab(index: navigationIndex)
-              : SafeArea(
-            child: Column(
-              children: <Widget>[
-                if (controller.error != null)
-                  _ErrorBanner(message: controller.error!),
-                Expanded(
-                  child: ListView(
-                    padding: const EdgeInsets.fromLTRB(18, 8, 18, 110),
-                    children: <Widget>[
-                      _SearchField(
-                        controller: searchController,
-                        value: searchQuery,
-                        onChanged: (String value) {
-                          setState(() => searchQuery = value);
-                        },
-                      ),
-                      const SizedBox(height: 14),
-                      _FilterRow(
-                        selected: selectedFilter,
-                        onSelected: (RecordingFilter value) {
-                          setState(() => selectedFilter = value);
-                        },
-                      ),
-                      const SizedBox(height: 16),
-                      _MetricsRow(
-                        total: controller.recordings.length,
-                        reviewed: reviewedCount,
-                        running: processingCount,
-                        failed: failedCount,
-                      ),
-                      const SizedBox(height: 20),
-                      Row(
-                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                        children: <Widget>[
-                          Text(
-                            _sectionTitle(selectedFilter),
-                            style: const TextStyle(
-                              fontSize: 14,
-                              fontWeight: FontWeight.w800,
-                              letterSpacing: .2,
-                            ),
-                          ),
-                          Text(
-                            '${visible.length} ITEMS',
-                            style: const TextStyle(
-                              color: Color(0xFF6F8CA5),
-                              fontSize: 10,
-                              fontWeight: FontWeight.w800,
-                            ),
-                          ),
-                        ],
-                      ),
-                      const SizedBox(height: 12),
-                      if (visible.isEmpty)
-                        _EmptyState(filter: selectedFilter)
-                      else
-                        ...visible.map(
-                          (Recording recording) => Padding(
-                            padding: const EdgeInsets.only(bottom: 11),
-                            child: _RecordingCard(
-                              recording: recording,
-                              isPlaying:
-                                  controller.playingId == recording.id,
-                              onTogglePlay: () =>
-                                  controller.togglePlayback(recording.id),
-                              onRetry: () =>
-                                  controller.retryTranscription(recording.id),
-                              onToggleProcessed: () async {
-                                await HapticFeedback.selectionClick();
-                                await controller.toggleProcessed(recording.id);
-                              },
-                            ),
-                          ),
-                        ),
-                    ],
-                  ),
-                ),
-              ],
-            ),
+          // IndexedStack so the Queue tab keeps its search text and filter
+          // while the user visits Models/Logs/Config.
+          body: IndexedStack(
+            index: navigationIndex,
+            children: <Widget>[
+              QueueTab(controller: controller),
+              ModelsTab(controller: settings),
+              LogsTab(store: logs),
+              ConfigTab(
+                controller: settings,
+                storagePath: storagePath,
+                recordingsCount: controller.recordings.length,
+                logCount: logs.events.length,
+                onOpenModels: () =>
+                    setState(() => navigationIndex = modelsIndex),
+              ),
+            ],
           ),
           floatingActionButtonLocation: FloatingActionButtonLocation.endFloat,
-          floatingActionButton: navigationIndex == 0
-              ? _RecordButton(controller: controller)
+          floatingActionButton: navigationIndex == queueIndex
+              ? RecordButton(controller: controller)
               : null,
           bottomNavigationBar: NavigationBar(
             selectedIndex: navigationIndex,
             onDestinationSelected: (int value) {
               setState(() => navigationIndex = value);
             },
-            destinations: const <NavigationDestination>[
-              NavigationDestination(
+            destinations: <NavigationDestination>[
+              const NavigationDestination(
                 icon: Icon(Icons.inbox_outlined),
                 selectedIcon: Icon(Icons.inbox),
                 label: 'Queue',
               ),
               NavigationDestination(
-                icon: Icon(Icons.memory_outlined),
-                selectedIcon: Icon(Icons.memory),
+                icon: _ProfileBadge(
+                  hasActiveProfile: settings.activeProfile != null,
+                  selected: false,
+                ),
+                selectedIcon: _ProfileBadge(
+                  hasActiveProfile: settings.activeProfile != null,
+                  selected: true,
+                ),
                 label: 'Models',
               ),
-              NavigationDestination(
+              const NavigationDestination(
                 icon: Icon(Icons.terminal_outlined),
                 selectedIcon: Icon(Icons.terminal),
                 label: 'Logs',
               ),
-              NavigationDestination(
+              const NavigationDestination(
                 icon: Icon(Icons.tune_outlined),
                 selectedIcon: Icon(Icons.tune),
                 label: 'Config',
@@ -257,747 +192,27 @@ class _RecordingsPageState extends State<RecordingsPage> {
       },
     );
   }
-
-  List<Recording> _filter(List<Recording> recordings) {
-    final List<Recording> byStatus = switch (selectedFilter) {
-      RecordingFilter.queue => recordings
-          .where((Recording item) =>
-              item.status == RecordingStatus.pendingTranscription ||
-              item.status == RecordingStatus.transcribing ||
-              item.status == RecordingStatus.saved)
-          .toList(),
-      RecordingFilter.ready => recordings
-          .where((Recording item) => item.status == RecordingStatus.completed)
-          .toList(),
-      RecordingFilter.failed => recordings
-          .where((Recording item) => item.status == RecordingStatus.failed)
-          .toList(),
-      RecordingFilter.raw => recordings,
-    };
-    final String query = searchQuery.trim().toLowerCase();
-    if (query.isEmpty) {
-      return byStatus;
-    }
-    return byStatus.where((Recording item) {
-      final String haystack = <String?>[
-        item.transcript,
-        item.filePath.split(Platform.pathSeparator).last,
-        item.id,
-      ].whereType<String>().join(' ').toLowerCase();
-      return haystack.contains(query);
-    }).toList();
-  }
 }
 
-class _SearchField extends StatelessWidget {
-  const _SearchField({
-    required this.controller,
-    required this.value,
-    required this.onChanged,
-  });
+/// Amber dot on the Models tab while no provider profile is active, so the
+/// "transcription is off" state is visible without opening the tab.
+class _ProfileBadge extends StatelessWidget {
+  const _ProfileBadge({required this.hasActiveProfile, required this.selected});
 
-  final TextEditingController controller;
-  final String value;
-  final ValueChanged<String> onChanged;
+  final bool hasActiveProfile;
+  final bool selected;
 
   @override
   Widget build(BuildContext context) {
-    return TextField(
-      controller: controller,
-      onChanged: onChanged,
-      style: const TextStyle(color: Color(0xFFE6F1FA), fontSize: 13),
-      decoration: InputDecoration(
-        hintText: 'Search recordings and transcripts',
-        hintStyle: const TextStyle(color: Color(0xFF6F8CA5), fontSize: 13),
-        prefixIcon: const Icon(Icons.search, color: Color(0xFF6F8CA5)),
-        suffixIcon: value.isEmpty
-            ? null
-            : IconButton(
-                icon: const Icon(Icons.close, color: Color(0xFF6F8CA5)),
-                onPressed: () {
-                  controller.clear();
-                  onChanged('');
-                },
-              ),
-        filled: true,
-        fillColor: const Color(0xFF0C1D2E),
-        border: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(16),
-          borderSide: const BorderSide(color: Color(0xFF1B3852)),
-        ),
-        enabledBorder: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(16),
-          borderSide: const BorderSide(color: Color(0xFF1B3852)),
-        ),
-        disabledBorder: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(16),
-          borderSide: const BorderSide(color: Color(0xFF1B3852)),
-        ),
-      ),
-    );
-  }
-}
+    final Icon icon = selected
+        ? const Icon(Icons.memory)
+        : const Icon(Icons.memory_outlined);
+    if (hasActiveProfile) return icon;
 
-class _FilterRow extends StatelessWidget {
-  const _FilterRow({required this.selected, required this.onSelected});
-
-  final RecordingFilter selected;
-  final ValueChanged<RecordingFilter> onSelected;
-
-  @override
-  Widget build(BuildContext context) {
-    return SingleChildScrollView(
-      scrollDirection: Axis.horizontal,
-      child: Row(
-        children: RecordingFilter.values.map((RecordingFilter item) {
-          final bool active = item == selected;
-          return Padding(
-            padding: const EdgeInsets.only(right: 8),
-            child: ChoiceChip(
-              selected: active,
-              onSelected: (_) => onSelected(item),
-              label: Text(_filterLabel(item)),
-              labelStyle: TextStyle(
-                fontSize: 11,
-                fontWeight: FontWeight.w800,
-                color: active
-                    ? const Color(0xFF00131A)
-                    : const Color(0xFF9CB3C7),
-              ),
-              selectedColor: const Color(0xFF31D5F4),
-              backgroundColor: const Color(0xFF112B42),
-              side: BorderSide.none,
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(999),
-              ),
-            ),
-          );
-        }).toList(),
-      ),
-    );
-  }
-}
-
-class _MetricsRow extends StatelessWidget {
-  const _MetricsRow({
-    required this.total,
-    required this.reviewed,
-    required this.running,
-    required this.failed,
-  });
-
-  final int total;
-  final int reviewed;
-  final int running;
-  final int failed;
-
-  @override
-  Widget build(BuildContext context) {
-    return Column(
-      children: <Widget>[
-        Row(
-          children: <Widget>[
-            Expanded(
-              child: _AnimatedMetricCard(
-                value: reviewed,
-                suffix: '/$total',
-                label: 'REVIEWED',
-                accent: const Color(0xFF4ADE80),
-              ),
-            ),
-            const SizedBox(width: 9),
-            Expanded(
-              child: _AnimatedMetricCard(
-                value: running,
-                label: 'RUNNING',
-              ),
-            ),
-            const SizedBox(width: 9),
-            Expanded(
-              child: _AnimatedMetricCard(
-                value: failed,
-                label: 'FAILED',
-                accent: failed == 0
-                    ? const Color(0xFF4ADE80)
-                    : const Color(0xFFFF6B81),
-              ),
-            ),
-          ],
-        ),
-        const SizedBox(height: 9),
-        ClipRRect(
-          borderRadius: BorderRadius.circular(99),
-          child: TweenAnimationBuilder<double>(
-            tween: Tween<double>(end: total == 0 ? 0 : reviewed / total),
-            duration: const Duration(milliseconds: 550),
-            curve: Curves.easeOutCubic,
-            builder: (BuildContext context, double value, Widget? child) {
-              return LinearProgressIndicator(
-                value: value,
-                minHeight: 5,
-                color: const Color(0xFF4ADE80),
-                backgroundColor: const Color(0xFF17314B),
-              );
-            },
-          ),
-        ),
-      ],
-    );
-  }
-}
-
-class _AnimatedMetricCard extends StatelessWidget {
-  const _AnimatedMetricCard({
-    required this.value,
-    required this.label,
-    this.suffix = '',
-    this.accent = const Color(0xFF31D5F4),
-  });
-
-  final int value;
-  final String suffix;
-  final String label;
-  final Color accent;
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.all(12),
-      decoration: BoxDecoration(
-        color: const Color(0xFF10243A),
-        borderRadius: BorderRadius.circular(15),
-        border: Border.all(color: const Color(0xFF1B3852)),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: <Widget>[
-          AnimatedSwitcher(
-            duration: const Duration(milliseconds: 320),
-            transitionBuilder: (Widget child, Animation<double> animation) {
-              return ScaleTransition(
-                scale: CurvedAnimation(parent: animation, curve: Curves.easeOutBack),
-                child: FadeTransition(opacity: animation, child: child),
-              );
-            },
-            child: Text(
-              '$value$suffix',
-              key: ValueKey<String>('$value$suffix'),
-              style: TextStyle(
-                color: accent,
-                fontSize: 19,
-                fontWeight: FontWeight.w900,
-              ),
-            ),
-          ),
-          const SizedBox(height: 3),
-          Text(
-            label,
-            style: const TextStyle(
-              color: Color(0xFF6F8CA5),
-              fontSize: 8,
-              fontWeight: FontWeight.w800,
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class _RecordingCard extends StatelessWidget {
-  const _RecordingCard({
-    required this.recording,
-    required this.isPlaying,
-    required this.onTogglePlay,
-    required this.onRetry,
-    required this.onToggleProcessed,
-  });
-
-  final Recording recording;
-  final bool isPlaying;
-  final VoidCallback onTogglePlay;
-  final VoidCallback onRetry;
-  final VoidCallback onToggleProcessed;
-
-  @override
-  Widget build(BuildContext context) {
-    final bool canRetry = recording.status == RecordingStatus.failed;
-    final bool reviewed = recording.isProcessedByUser;
-    final _StatusVisual visual = _statusVisual(recording.status);
-    final String filename = File(recording.filePath).uri.pathSegments.last;
-
-    return AnimatedContainer(
-      duration: const Duration(milliseconds: 420),
-      curve: Curves.easeOutCubic,
-      decoration: BoxDecoration(
-        color: reviewed ? const Color(0xFF102C31) : const Color(0xFF10243A),
-        borderRadius: BorderRadius.circular(18),
-        border: Border.all(
-          color: reviewed ? const Color(0xFF2F8B68) : const Color(0xFF1B3852),
-          width: reviewed ? 1.4 : 1,
-        ),
-        boxShadow: reviewed
-            ? const <BoxShadow>[
-                BoxShadow(
-                  color: Color(0x2231D58D),
-                  blurRadius: 18,
-                  spreadRadius: 1,
-                ),
-              ]
-            : const <BoxShadow>[],
-      ),
-      child: Padding(
-        padding: const EdgeInsets.all(14),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: <Widget>[
-            Row(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: <Widget>[
-                AnimatedContainer(
-                  duration: const Duration(milliseconds: 350),
-                  width: 40,
-                  height: 40,
-                  decoration: BoxDecoration(
-                    color: reviewed
-                        ? const Color(0xFF194E40)
-                        : const Color(0xFF143C54),
-                    borderRadius: BorderRadius.circular(13),
-                  ),
-                  child: Icon(
-                    reviewed ? Icons.done_all_rounded : Icons.graphic_eq,
-                    color: reviewed
-                        ? const Color(0xFF4ADE80)
-                        : const Color(0xFF31D5F4),
-                  ),
-                ),
-                const SizedBox(width: 11),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: <Widget>[
-                      Text(
-                        filename,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: const TextStyle(
-                          fontSize: 13,
-                          fontWeight: FontWeight.w800,
-                        ),
-                      ),
-                      const SizedBox(height: 4),
-                      Text(
-                        '${_date(recording.createdAt)} · ${_formatDuration(Duration(milliseconds: recording.durationMs))}',
-                        style: const TextStyle(
-                          color: Color(0xFF7894AA),
-                          fontSize: 10,
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-                Semantics(
-                  button: true,
-                  label: isPlaying ? 'Stop playback' : 'Play recording',
-                  child: InkResponse(
-                    onTap: onTogglePlay,
-                    radius: 25,
-                    child: Container(
-                      width: 40,
-                      height: 40,
-                      alignment: Alignment.center,
-                      decoration: BoxDecoration(
-                        color: isPlaying
-                            ? const Color(0xFF143C54)
-                            : const Color(0xFF102434),
-                        borderRadius: BorderRadius.circular(13),
-                        border: Border.all(
-                          color: isPlaying
-                              ? const Color(0xFF31D5F4)
-                              : const Color(0xFF1B3852),
-                        ),
-                      ),
-                      child: Icon(
-                        isPlaying
-                            ? Icons.stop_rounded
-                            : Icons.play_arrow_rounded,
-                        color: const Color(0xFF31D5F4),
-                        size: 24,
-                      ),
-                    ),
-                  ),
-                ),
-                const SizedBox(width: 8),
-                Semantics(
-                  button: true,
-                  checked: reviewed,
-                  label: reviewed
-                      ? 'Mark note as not reviewed'
-                      : 'Mark note as reviewed',
-                  child: InkResponse(
-                    onTap: onToggleProcessed,
-                    radius: 25,
-                    child: AnimatedSwitcher(
-                      duration: const Duration(milliseconds: 320),
-                      transitionBuilder: (Widget child, Animation<double> animation) {
-                        return ScaleTransition(
-                          scale: CurvedAnimation(
-                            parent: animation,
-                            curve: Curves.easeOutBack,
-                          ),
-                          child: FadeTransition(opacity: animation, child: child),
-                        );
-                      },
-                      child: Icon(
-                        reviewed
-                            ? Icons.check_circle_rounded
-                            : Icons.radio_button_unchecked_rounded,
-                        key: ValueKey<bool>(reviewed),
-                        color: reviewed
-                            ? const Color(0xFF4ADE80)
-                            : const Color(0xFF6F8CA5),
-                        size: 28,
-                      ),
-                    ),
-                  ),
-                ),
-              ],
-            ),
-            const SizedBox(height: 12),
-            Wrap(
-              spacing: 7,
-              runSpacing: 7,
-              children: <Widget>[
-                _StatusPill(label: visual.label, color: visual.color),
-                const _StatusPill(
-                  label: 'LOCAL FILE VERIFIED',
-                  color: Color(0xFF4ADE80),
-                ),
-                AnimatedSwitcher(
-                  duration: const Duration(milliseconds: 300),
-                  child: reviewed
-                      ? const _StatusPill(
-                          key: ValueKey<String>('reviewed'),
-                          label: 'REVIEWED BY YOU',
-                          color: Color(0xFF4ADE80),
-                        )
-                      : const _StatusPill(
-                          key: ValueKey<String>('unreviewed'),
-                          label: 'NEEDS REVIEW',
-                          color: Color(0xFFFBBF24),
-                        ),
-                ),
-              ],
-            ),
-            if (recording.status == RecordingStatus.transcribing) ...<Widget>[
-              const SizedBox(height: 12),
-              const LinearProgressIndicator(
-                minHeight: 4,
-                color: Color(0xFF31D5F4),
-                backgroundColor: Color(0xFF1A3A51),
-              ),
-            ],
-            if (recording.transcript != null) ...<Widget>[
-              const SizedBox(height: 12),
-              Text(
-                recording.transcript!,
-                maxLines: 4,
-                overflow: TextOverflow.ellipsis,
-                style: const TextStyle(
-                  color: Color(0xFFC8D7E4),
-                  fontSize: 12,
-                  height: 1.45,
-                ),
-              ),
-            ],
-            if (recording.error != null) ...<Widget>[
-              const SizedBox(height: 10),
-              Text(
-                recording.error!,
-                maxLines: 2,
-                overflow: TextOverflow.ellipsis,
-                style: const TextStyle(color: Color(0xFFFF8FA1), fontSize: 10),
-              ),
-            ],
-            if (canRetry) ...<Widget>[
-              const SizedBox(height: 8),
-              Align(
-                alignment: Alignment.centerRight,
-                child: TextButton.icon(
-                  onPressed: onRetry,
-                  icon: const Icon(Icons.refresh, size: 17),
-                  label: const Text('RETRY TRANSCRIPTION'),
-                ),
-              ),
-            ],
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-class _StatusPill extends StatelessWidget {
-  const _StatusPill({super.key, required this.label, required this.color});
-
-  final String label;
-  final Color color;
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 6),
-      decoration: BoxDecoration(
-        color: color.withValues(alpha: .12),
-        borderRadius: BorderRadius.circular(999),
-      ),
-      child: Text(
-        label,
-        style: TextStyle(
-          color: color,
-          fontSize: 8,
-          fontWeight: FontWeight.w900,
-          letterSpacing: .25,
-        ),
-      ),
-    );
-  }
-}
-
-class _RecordButton extends StatelessWidget {
-  const _RecordButton({required this.controller});
-
-  final RecordingsController controller;
-
-  @override
-  Widget build(BuildContext context) {
-    final bool recording = controller.isRecording;
-    return FloatingActionButton.extended(
-      heroTag: 'record',
-      backgroundColor: recording
-          ? const Color(0xFFFF6B81)
-          : const Color(0xFF31D5F4),
-      foregroundColor: const Color(0xFF00131A),
-      onPressed: controller.isBusy
-          ? null
-          : recording
-              ? controller.stopRecording
-              : controller.startRecording,
-      icon: Icon(recording ? Icons.stop_rounded : Icons.mic_rounded),
-      label: Text(
-        recording
-            ? 'SAVE ${_formatDuration(controller.elapsed)}'
-            : controller.isBusy
-                ? 'PROCESSING'
-                : 'CAPTURE',
-        style: const TextStyle(fontWeight: FontWeight.w900),
-      ),
-    );
-  }
-}
-
-class _EmptyState extends StatelessWidget {
-  const _EmptyState({required this.filter});
-
-  final RecordingFilter filter;
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 22, vertical: 42),
-      decoration: BoxDecoration(
-        color: const Color(0xFF0C1D2E),
-        borderRadius: BorderRadius.circular(20),
-        border: Border.all(color: const Color(0xFF1B3852)),
-      ),
-      child: Column(
-        children: <Widget>[
-          const Icon(Icons.graphic_eq, size: 42, color: Color(0xFF31D5F4)),
-          const SizedBox(height: 13),
-          Text(
-            _emptyLabel(filter),
-            textAlign: TextAlign.center,
-            style: const TextStyle(fontWeight: FontWeight.w800),
-          ),
-          const SizedBox(height: 7),
-          const Text(
-            'Audio is always persisted and verified before transcription starts.',
-            textAlign: TextAlign.center,
-            style: TextStyle(color: Color(0xFF7894AA), fontSize: 11, height: 1.45),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class _ErrorBanner extends StatelessWidget {
-  const _ErrorBanner({required this.message});
-
-  final String message;
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      margin: const EdgeInsets.fromLTRB(18, 4, 18, 8),
-      padding: const EdgeInsets.all(12),
-      decoration: BoxDecoration(
-        color: const Color(0xFF3A1823),
-        borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: const Color(0xFF6D2A3C)),
-      ),
-      child: Row(
-        children: <Widget>[
-          const Icon(Icons.error_outline, color: Color(0xFFFF8FA1)),
-          const SizedBox(width: 10),
-          Expanded(
-            child: Text(message, style: const TextStyle(fontSize: 11)),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class _StatusVisual {
-  const _StatusVisual(this.label, this.color);
-  final String label;
-  final Color color;
-}
-
-_StatusVisual _statusVisual(RecordingStatus status) => switch (status) {
-      RecordingStatus.saved =>
-        const _StatusVisual('SAVED · WAITING', Color(0xFFFBBF24)),
-      RecordingStatus.pendingTranscription =>
-        const _StatusVisual('QUEUED', Color(0xFFFBBF24)),
-      RecordingStatus.transcribing =>
-        const _StatusVisual('WHISPER RUNNING', Color(0xFF31D5F4)),
-      RecordingStatus.completed =>
-        const _StatusVisual('TRANSCRIPT READY', Color(0xFF4ADE80)),
-      RecordingStatus.failed =>
-        const _StatusVisual('TRANSCRIPTION FAILED', Color(0xFFFF6B81)),
-    };
-
-String _filterLabel(RecordingFilter filter) => switch (filter) {
-      RecordingFilter.queue => 'Queue',
-      RecordingFilter.ready => 'Ready',
-      RecordingFilter.failed => 'Failed',
-      RecordingFilter.raw => 'Raw',
-    };
-
-String _sectionTitle(RecordingFilter filter) => switch (filter) {
-      RecordingFilter.queue => 'PROCESSING QUEUE',
-      RecordingFilter.ready => 'READY TRANSCRIPTS',
-      RecordingFilter.failed => 'FAILED JOBS',
-      RecordingFilter.raw => 'ALL LOCAL CAPTURES',
-    };
-
-String _emptyLabel(RecordingFilter filter) => switch (filter) {
-      RecordingFilter.queue => 'The processing queue is empty.',
-      RecordingFilter.ready => 'No completed transcripts yet.',
-      RecordingFilter.failed => 'No failed transcription jobs.',
-      RecordingFilter.raw => 'No local recordings yet.',
-    };
-
-String _formatDuration(Duration duration) {
-  final String minutes = duration.inMinutes.remainder(60).toString().padLeft(2, '0');
-  final String seconds = duration.inSeconds.remainder(60).toString().padLeft(2, '0');
-  return '$minutes:$seconds';
-}
-
-String _date(DateTime value) {
-  final DateTime local = value.toLocal();
-  return '${local.year}-${local.month.toString().padLeft(2, '0')}-${local.day.toString().padLeft(2, '0')} '
-      '${local.hour.toString().padLeft(2, '0')}:${local.minute.toString().padLeft(2, '0')}';
-}
-
-/// Placeholder for navigation tabs that are wired but not yet built:
-/// Models (1), Logs (2), Config (3). Swap the body for the real screen when
-/// each feature lands.
-class _PlaceholderTab extends StatelessWidget {
-  const _PlaceholderTab({required this.index});
-
-  final int index;
-
-  static const Map<int, ({IconData icon, String title, String blurb})> _specs =
-      <int, ({IconData icon, String title, String blurb})>{
-    1: (
-      icon: Icons.memory_outlined,
-      title: 'Models',
-      blurb: 'Pick, download, and manage local transcription models here. '
-          'Backend not implemented yet.',
-    ),
-    2: (
-      icon: Icons.terminal_outlined,
-      title: 'Logs',
-      blurb: 'Processing console output and per-recording job history will '
-          'stream here. No log store exists yet.',
-    ),
-    3: (
-      icon: Icons.tune_outlined,
-      title: 'Config',
-      blurb: 'Transcription endpoint, bearer token, and audio settings will be '
-          'editable here. Currently set via --dart-define at build time.',
-    ),
-  };
-
-  @override
-  Widget build(BuildContext context) {
-    final ({IconData icon, String title, String blurb}) spec =
-        _specs[index] ??
-            (
-              icon: Icons.help_outline,
-              title: 'Unknown',
-              blurb: 'No screen defined for this tab.',
-            );
-    return SafeArea(
-      child: Center(
-        child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 40),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: <Widget>[
-              Icon(spec.icon, size: 44, color: const Color(0xFF31D5F4)),
-              const SizedBox(height: 18),
-              Text(
-                spec.title,
-                style: const TextStyle(
-                  fontSize: 18,
-                  fontWeight: FontWeight.w800,
-                ),
-              ),
-              const SizedBox(height: 10),
-              Container(
-                padding:
-                    const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-                decoration: BoxDecoration(
-                  color: const Color(0xFF112B42),
-                  borderRadius: BorderRadius.circular(999),
-                ),
-                child: const Text(
-                  'PLANNED',
-                  style: TextStyle(
-                    fontSize: 9,
-                    letterSpacing: 1.2,
-                    fontWeight: FontWeight.w800,
-                    color: Color(0xFF8EABC2),
-                  ),
-                ),
-              ),
-              const SizedBox(height: 16),
-              Text(
-                spec.blurb,
-                textAlign: TextAlign.center,
-                style: const TextStyle(
-                  color: Color(0xFF6F8CA5),
-                  fontSize: 13,
-                  height: 1.5,
-                ),
-              ),
-            ],
-          ),
-        ),
-      ),
+    return Badge(
+      backgroundColor: Console.amber,
+      smallSize: 7,
+      child: icon,
     );
   }
 }

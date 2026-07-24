@@ -1,0 +1,204 @@
+import 'package:flutter/foundation.dart';
+import 'package:uuid/uuid.dart';
+
+import '../../transcription/data/transcription_service.dart';
+import '../data/settings_repository.dart';
+import '../domain/app_settings.dart';
+import '../domain/audio_config.dart';
+import '../domain/provider_profile.dart';
+
+/// Owns runtime settings: transcription provider profiles and capture
+/// parameters. Every mutation persists the whole `settings.json`, mirroring how
+/// `RecordingsController` rewrites the whole recordings index.
+class SettingsController extends ChangeNotifier {
+  SettingsController({SettingsRepository? repository})
+      : _repository = repository ?? SettingsRepository();
+
+  static const String openAiEndpoint =
+      'https://api.openai.com/v1/audio/transcriptions';
+
+  final SettingsRepository _repository;
+  final Uuid _uuid = const Uuid();
+
+  AppSettings _settings = AppSettings.empty;
+  bool _isLoaded = false;
+  String? _error;
+
+  // Cached so that unrelated changes (audio params, profile reordering) don't
+  // spawn a fresh HttpWhisperTranscriptionService — and with it a fresh
+  // http.Client — on every notification.
+  TranscriptionService? _service;
+  String? _serviceSignature;
+
+  AppSettings get settings => _settings;
+  List<ProviderProfile> get profiles => _settings.profiles;
+  ProviderProfile? get activeProfile => _settings.activeProfile;
+  AudioConfig get audio => _settings.audio;
+  bool get isLoaded => _isLoaded;
+  String? get error => _error;
+
+  /// The service the recordings controller should use right now. No active
+  /// profile means transcription reports "not configured" — same as a fresh
+  /// install with no `--dart-define`.
+  ///
+  /// The same instance is returned until the active profile's connection
+  /// details actually change.
+  TranscriptionService get transcriptionService {
+    final ProviderProfile? active = _settings.activeProfile;
+    final String signature = active == null
+        ? 'disabled'
+        : <String?>[
+            active.id,
+            active.endpoint,
+            active.model,
+            active.language,
+            active.bearerToken,
+          ].join('|');
+
+    if (_service == null || _serviceSignature != signature) {
+      _service = active?.toService() ?? const DisabledTranscriptionService();
+      _serviceSignature = signature;
+    }
+    return _service!;
+  }
+
+  Future<void> initialize() async {
+    try {
+      final AppSettings? stored = await _repository.load();
+      if (stored != null) {
+        _settings = stored;
+      } else {
+        // First run: build-time defines seed the first profile, then the saved
+        // file wins forever after.
+        _settings = _seedFromEnvironment();
+        if (_settings.profiles.isNotEmpty) {
+          await _repository.save(_settings);
+        }
+      }
+    } catch (exception) {
+      _error = exception.toString();
+    } finally {
+      _isLoaded = true;
+      notifyListeners();
+    }
+  }
+
+  Future<ProviderProfile> addProfile({
+    required String name,
+    required String endpoint,
+    String? model,
+    String? language,
+    String? bearerToken,
+    bool activate = true,
+  }) async {
+    final ProviderProfile profile = ProviderProfile(
+      id: _uuid.v4(),
+      name: name.trim().isEmpty ? 'Profil' : name.trim(),
+      endpoint: endpoint.trim(),
+      model: model,
+      language: language,
+      bearerToken: bearerToken,
+    );
+
+    await _persist(
+      _settings.copyWith(
+        profiles: <ProviderProfile>[..._settings.profiles, profile],
+        activeProfileId:
+            activate || _settings.activeProfileId == null ? profile.id : null,
+      ),
+    );
+    return profile;
+  }
+
+  Future<void> updateProfile(ProviderProfile updated) async {
+    await _persist(
+      _settings.copyWith(
+        profiles: _settings.profiles
+            .map((ProviderProfile item) =>
+                item.id == updated.id ? updated : item)
+            .toList(),
+      ),
+    );
+  }
+
+  Future<void> deleteProfile(String id) async {
+    final List<ProviderProfile> remaining = _settings.profiles
+        .where((ProviderProfile item) => item.id != id)
+        .toList();
+    final bool wasActive = _settings.activeProfileId == id;
+
+    await _persist(
+      _settings.copyWith(
+        profiles: remaining,
+        // Deleting the active profile falls back to the first one left, or to
+        // nothing at all — never to a dangling id.
+        activeProfileId:
+            wasActive ? (remaining.isEmpty ? null : remaining.first.id) : null,
+        clearActiveProfileId: wasActive && remaining.isEmpty,
+      ),
+    );
+  }
+
+  Future<void> setActiveProfile(String? id) async {
+    await _persist(
+      _settings.copyWith(
+        activeProfileId: id,
+        clearActiveProfileId: id == null,
+      ),
+    );
+  }
+
+  Future<void> updateAudio(AudioConfig audio) async {
+    await _persist(_settings.copyWith(audio: audio));
+  }
+
+  Future<void> resetAudio() => updateAudio(AudioConfig.defaults);
+
+  Future<void> _persist(AppSettings next) async {
+    _settings = next;
+    _error = null;
+    notifyListeners();
+    try {
+      await _repository.save(next);
+    } catch (exception) {
+      _error = exception.toString();
+      notifyListeners();
+    }
+  }
+
+  /// Legacy `--dart-define` path, kept as the first-run default:
+  ///   flutter run --dart-define=TRANSCRIPTION_TOKEN=sk-... \
+  ///               --dart-define=TRANSCRIPTION_MODEL=whisper-1
+  static AppSettings _seedFromEnvironment() {
+    const String endpointDefine =
+        String.fromEnvironment('TRANSCRIPTION_ENDPOINT');
+    const String token = String.fromEnvironment('TRANSCRIPTION_TOKEN');
+    const String model =
+        String.fromEnvironment('TRANSCRIPTION_MODEL', defaultValue: 'whisper-1');
+    const String language = String.fromEnvironment('TRANSCRIPTION_LANGUAGE');
+
+    final String endpoint = endpointDefine.isNotEmpty
+        ? endpointDefine
+        : (token.isNotEmpty ? openAiEndpoint : '');
+    if (endpoint.isEmpty) {
+      return AppSettings.empty;
+    }
+
+    const ProviderProfile seeded = ProviderProfile(
+      id: 'build-define',
+      name: 'Z konfiguracji budowania',
+      endpoint: '',
+    );
+    final ProviderProfile profile = seeded.copyWith(
+      endpoint: endpoint,
+      model: model.isEmpty ? null : model,
+      language: language.isEmpty ? null : language,
+      bearerToken: token.isEmpty ? null : token,
+    );
+
+    return AppSettings(
+      profiles: <ProviderProfile>[profile],
+      activeProfileId: profile.id,
+    );
+  }
+}
