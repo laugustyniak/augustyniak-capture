@@ -1,0 +1,610 @@
+import 'package:flutter/material.dart';
+
+import '../../../app/ui_kit.dart';
+import '../domain/provider_profile.dart';
+import 'settings_controller.dart';
+
+/// Manages transcription provider profiles. Exactly one is active; the page
+/// shell pushes the active profile's service into the recordings controller.
+class ModelsTab extends StatelessWidget {
+  const ModelsTab({super.key, required this.controller});
+
+  final SettingsController controller;
+
+  @override
+  Widget build(BuildContext context) {
+    final List<ProviderProfile> profiles = controller.profiles;
+    final ProviderProfile? active = controller.activeProfile;
+
+    return SafeArea(
+      child: ListView(
+        padding: const EdgeInsets.fromLTRB(18, 8, 18, 40),
+        children: <Widget>[
+          if (controller.error != null) ErrorBanner(message: controller.error!),
+          _ActiveProfileCard(profile: active),
+          const SizedBox(height: 18),
+          SectionHeader(
+            title: 'PROVIDER PROFILES',
+            trailing: '${profiles.length} ITEMS',
+          ),
+          const SizedBox(height: 12),
+          if (profiles.isEmpty)
+            const EmptyPanel(
+              icon: Icons.memory_outlined,
+              title: 'Brak profili transkrypcji.',
+              blurb: 'Dodaj profil, aby włączyć transkrypcję. '
+                  'Nagrywanie działa również bez niego — audio zawsze zapisuje się lokalnie.',
+            )
+          else
+            ...profiles.map(
+              (ProviderProfile profile) => Padding(
+                padding: const EdgeInsets.only(bottom: 11),
+                child: _ProfileCard(
+                  profile: profile,
+                  isActive: profile.id == controller.settings.activeProfileId,
+                  onActivate: () => controller.setActiveProfile(profile.id),
+                  onEdit: () => _openEditor(context, existing: profile),
+                  onDelete: () => _confirmDelete(context, profile),
+                ),
+              ),
+            ),
+          const SizedBox(height: 16),
+          FilledButton.icon(
+            onPressed: () => _openEditor(context),
+            style: FilledButton.styleFrom(
+              backgroundColor: Console.cyan,
+              foregroundColor: Console.ink,
+              padding: const EdgeInsets.symmetric(vertical: 14),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(14),
+              ),
+            ),
+            icon: const Icon(Icons.add),
+            label: const Text(
+              'DODAJ PROFIL',
+              style: TextStyle(fontWeight: FontWeight.w900, letterSpacing: .5),
+            ),
+          ),
+          const SizedBox(height: 14),
+          const ConsoleCard(
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: <Widget>[
+                Icon(Icons.lock_outline, size: 16, color: Console.amber),
+                SizedBox(width: 10),
+                Expanded(
+                  child: Text(
+                    'Tokeny są zapisywane jawnym tekstem w katalogu dokumentów '
+                    'aplikacji (settings.json). Szyfrowanie zaplanowano na '
+                    'kolejną fazę.',
+                    style: TextStyle(
+                      color: Console.mutedSoft,
+                      fontSize: 11,
+                      height: 1.45,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _openEditor(
+    BuildContext context, {
+    ProviderProfile? existing,
+  }) async {
+    final _ProfileDraft? draft = await showModalBottomSheet<_ProfileDraft>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Console.surfaceDeep,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(22)),
+      ),
+      builder: (BuildContext sheetContext) =>
+          _ProfileEditorSheet(existing: existing),
+    );
+    if (draft == null) return;
+
+    if (existing == null) {
+      await controller.addProfile(
+        name: draft.name,
+        endpoint: draft.endpoint,
+        model: draft.model,
+        language: draft.language,
+        bearerToken: draft.bearerToken,
+      );
+    } else {
+      await controller.updateProfile(
+        existing.copyWith(
+          name: draft.name,
+          endpoint: draft.endpoint,
+          model: draft.model,
+          language: draft.language,
+          bearerToken: draft.bearerToken,
+          clearModel: draft.model == null,
+          clearLanguage: draft.language == null,
+          clearBearerToken: draft.bearerToken == null,
+        ),
+      );
+    }
+  }
+
+  Future<void> _confirmDelete(
+    BuildContext context,
+    ProviderProfile profile,
+  ) async {
+    final bool? confirmed = await showDialog<bool>(
+      context: context,
+      builder: (BuildContext dialogContext) => AlertDialog(
+        backgroundColor: Console.surface,
+        title: const Text('Usunąć profil?', style: TextStyle(fontSize: 16)),
+        content: Text(
+          '"${profile.name}" zostanie usunięty. Nagrania i transkrypcje '
+          'pozostaną nietknięte.',
+          style: const TextStyle(fontSize: 12, height: 1.45),
+        ),
+        actions: <Widget>[
+          TextButton(
+            onPressed: () => Navigator.of(dialogContext).pop(false),
+            child: const Text('ANULUJ'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.of(dialogContext).pop(true),
+            style: TextButton.styleFrom(foregroundColor: Console.red),
+            child: const Text('USUŃ'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed == true) {
+      await controller.deleteProfile(profile.id);
+    }
+  }
+}
+
+class _ActiveProfileCard extends StatelessWidget {
+  const _ActiveProfileCard({required this.profile});
+
+  final ProviderProfile? profile;
+
+  @override
+  Widget build(BuildContext context) {
+    final ProviderProfile? item = profile;
+    return ConsoleCard(
+      accent: item == null ? Console.border : Console.cyan,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: <Widget>[
+          Row(
+            children: <Widget>[
+              Container(
+                width: 40,
+                height: 40,
+                decoration: BoxDecoration(
+                  color: const Color(0xFF143C54),
+                  borderRadius: BorderRadius.circular(13),
+                ),
+                child: Icon(
+                  item == null ? Icons.cloud_off : Icons.memory,
+                  color: item == null ? Console.muted : Console.cyan,
+                ),
+              ),
+              const SizedBox(width: 11),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: <Widget>[
+                    Text(
+                      item?.name ?? 'Transkrypcja wyłączona',
+                      style: const TextStyle(
+                        fontSize: 14,
+                        fontWeight: FontWeight.w800,
+                      ),
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      item?.host ?? 'Brak aktywnego profilu',
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(
+                        color: Console.mutedSoft,
+                        fontSize: 10,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 12),
+          Wrap(
+            spacing: 7,
+            runSpacing: 7,
+            children: <Widget>[
+              StatusPill(
+                label: item == null ? 'NOT CONFIGURED' : 'ACTIVE PROVIDER',
+                color: item == null ? Console.amber : Console.cyan,
+              ),
+              if (item?.model != null)
+                StatusPill(label: item!.model!.toUpperCase(), color: Console.green),
+              if (item?.language != null)
+                StatusPill(
+                  label: 'LANG ${item!.language!.toUpperCase()}',
+                  color: Console.green,
+                ),
+              if (item != null && item.bearerToken != null)
+                const StatusPill(label: 'TOKEN SET', color: Console.green),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _ProfileCard extends StatelessWidget {
+  const _ProfileCard({
+    required this.profile,
+    required this.isActive,
+    required this.onActivate,
+    required this.onEdit,
+    required this.onDelete,
+  });
+
+  final ProviderProfile profile;
+  final bool isActive;
+  final VoidCallback onActivate;
+  final VoidCallback onEdit;
+  final VoidCallback onDelete;
+
+  @override
+  Widget build(BuildContext context) {
+    return ConsoleCard(
+      accent: isActive ? Console.cyan : Console.border,
+      child: Row(
+        children: <Widget>[
+          Semantics(
+            button: true,
+            selected: isActive,
+            label: 'Ustaw profil jako aktywny',
+            child: InkResponse(
+              onTap: onActivate,
+              radius: 24,
+              child: Icon(
+                isActive
+                    ? Icons.radio_button_checked
+                    : Icons.radio_button_unchecked,
+                color: isActive ? Console.cyan : Console.muted,
+              ),
+            ),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: <Widget>[
+                Text(
+                  profile.name,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(
+                    fontSize: 13,
+                    fontWeight: FontWeight.w800,
+                  ),
+                ),
+                const SizedBox(height: 3),
+                Text(
+                  profile.hasEndpoint ? profile.endpoint : 'Brak adresu',
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    color: profile.hasEndpoint ? Console.mutedSoft : Console.amber,
+                    fontSize: 10,
+                  ),
+                ),
+                if (profile.model != null) ...<Widget>[
+                  const SizedBox(height: 6),
+                  StatusPill(
+                    label: profile.model!.toUpperCase(),
+                    color: Console.muted,
+                  ),
+                ],
+              ],
+            ),
+          ),
+          IconButton(
+            onPressed: onEdit,
+            icon: const Icon(Icons.edit_outlined, size: 19),
+            color: Console.muted,
+            tooltip: 'Edytuj',
+          ),
+          IconButton(
+            onPressed: onDelete,
+            icon: const Icon(Icons.delete_outline, size: 19),
+            color: Console.redSoft,
+            tooltip: 'Usuń',
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// Values returned by the editor sheet. Null fields mean "clear this field".
+class _ProfileDraft {
+  const _ProfileDraft({
+    required this.name,
+    required this.endpoint,
+    this.model,
+    this.language,
+    this.bearerToken,
+  });
+
+  final String name;
+  final String endpoint;
+  final String? model;
+  final String? language;
+  final String? bearerToken;
+}
+
+class _ProfileEditorSheet extends StatefulWidget {
+  const _ProfileEditorSheet({this.existing});
+
+  final ProviderProfile? existing;
+
+  @override
+  State<_ProfileEditorSheet> createState() => _ProfileEditorSheetState();
+}
+
+class _ProfileEditorSheetState extends State<_ProfileEditorSheet> {
+  final GlobalKey<FormState> _formKey = GlobalKey<FormState>();
+  late final TextEditingController _name;
+  late final TextEditingController _endpoint;
+  late final TextEditingController _model;
+  late final TextEditingController _language;
+  late final TextEditingController _token;
+  bool _obscureToken = true;
+
+  @override
+  void initState() {
+    super.initState();
+    final ProviderProfile? existing = widget.existing;
+    _name = TextEditingController(text: existing?.name ?? '');
+    _endpoint = TextEditingController(text: existing?.endpoint ?? '');
+    _model = TextEditingController(text: existing?.model ?? '');
+    _language = TextEditingController(text: existing?.language ?? '');
+    _token = TextEditingController(text: existing?.bearerToken ?? '');
+  }
+
+  @override
+  void dispose() {
+    _name.dispose();
+    _endpoint.dispose();
+    _model.dispose();
+    _language.dispose();
+    _token.dispose();
+    super.dispose();
+  }
+
+  void _applyPreset(ProviderPreset preset) {
+    setState(() {
+      if (_name.text.trim().isEmpty) _name.text = preset.name;
+      _endpoint.text = preset.endpoint;
+      _model.text = preset.model ?? '';
+    });
+  }
+
+  void _submit() {
+    if (!(_formKey.currentState?.validate() ?? false)) return;
+    Navigator.of(context).pop(
+      _ProfileDraft(
+        name: _name.text.trim(),
+        endpoint: _endpoint.text.trim(),
+        model: _nullIfBlank(_model.text),
+        language: _nullIfBlank(_language.text),
+        bearerToken: _nullIfBlank(_token.text),
+      ),
+    );
+  }
+
+  static String? _nullIfBlank(String value) {
+    final String trimmed = value.trim();
+    return trimmed.isEmpty ? null : trimmed;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final bool isEdit = widget.existing != null;
+    return Padding(
+      padding: EdgeInsets.only(
+        left: 18,
+        right: 18,
+        top: 18,
+        bottom: MediaQuery.of(context).viewInsets.bottom + 18,
+      ),
+      child: Form(
+        key: _formKey,
+        child: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: <Widget>[
+              Text(
+                isEdit ? 'EDYCJA PROFILU' : 'NOWY PROFIL',
+                style: const TextStyle(
+                  fontSize: 12,
+                  fontWeight: FontWeight.w900,
+                  letterSpacing: 1.1,
+                  color: Console.muted,
+                ),
+              ),
+              const SizedBox(height: 14),
+              if (!isEdit) ...<Widget>[
+                SizedBox(
+                  height: 34,
+                  child: ListView.separated(
+                    scrollDirection: Axis.horizontal,
+                    itemCount: ProviderPreset.all.length,
+                    separatorBuilder: (_, __) => const SizedBox(width: 8),
+                    itemBuilder: (BuildContext context, int index) {
+                      final ProviderPreset preset = ProviderPreset.all[index];
+                      return ActionChip(
+                        onPressed: () => _applyPreset(preset),
+                        label: Text(preset.name),
+                        labelStyle: const TextStyle(
+                          fontSize: 10,
+                          fontWeight: FontWeight.w800,
+                          color: Console.textSoft,
+                        ),
+                        backgroundColor: Console.surfaceRaised,
+                        side: BorderSide.none,
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(999),
+                        ),
+                      );
+                    },
+                  ),
+                ),
+                const SizedBox(height: 14),
+              ],
+              _SheetField(
+                controller: _name,
+                label: 'Nazwa',
+                hint: 'np. OpenAI Whisper',
+                validator: (String? value) =>
+                    (value == null || value.trim().isEmpty)
+                        ? 'Podaj nazwę profilu.'
+                        : null,
+              ),
+              _SheetField(
+                controller: _endpoint,
+                label: 'Endpoint',
+                hint: 'https://…/v1/audio/transcriptions',
+                keyboardType: TextInputType.url,
+                validator: (String? value) {
+                  final String text = (value ?? '').trim();
+                  if (text.isEmpty) return 'Podaj adres endpointu.';
+                  final Uri? uri = Uri.tryParse(text);
+                  if (uri == null || !uri.hasScheme || uri.host.isEmpty) {
+                    return 'Adres musi zawierać schemat, np. https://host/ścieżka';
+                  }
+                  return null;
+                },
+              ),
+              _SheetField(
+                controller: _model,
+                label: 'Model',
+                hint: 'whisper-1 (opcjonalnie)',
+              ),
+              _SheetField(
+                controller: _language,
+                label: 'Język',
+                hint: 'pl (opcjonalnie, ISO-639-1)',
+              ),
+              _SheetField(
+                controller: _token,
+                label: 'Token',
+                hint: 'Bearer token (opcjonalnie)',
+                obscure: _obscureToken,
+                suffix: IconButton(
+                  icon: Icon(
+                    _obscureToken
+                        ? Icons.visibility_outlined
+                        : Icons.visibility_off_outlined,
+                    size: 18,
+                    color: Console.muted,
+                  ),
+                  onPressed: () =>
+                      setState(() => _obscureToken = !_obscureToken),
+                ),
+              ),
+              const SizedBox(height: 8),
+              Row(
+                children: <Widget>[
+                  Expanded(
+                    child: TextButton(
+                      onPressed: () => Navigator.of(context).pop(),
+                      child: const Text('ANULUJ'),
+                    ),
+                  ),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: FilledButton(
+                      onPressed: _submit,
+                      style: FilledButton.styleFrom(
+                        backgroundColor: Console.cyan,
+                        foregroundColor: Console.ink,
+                        padding: const EdgeInsets.symmetric(vertical: 14),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(14),
+                        ),
+                      ),
+                      child: Text(
+                        isEdit ? 'ZAPISZ' : 'DODAJ',
+                        style: const TextStyle(fontWeight: FontWeight.w900),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _SheetField extends StatelessWidget {
+  const _SheetField({
+    required this.controller,
+    required this.label,
+    required this.hint,
+    this.validator,
+    this.keyboardType,
+    this.obscure = false,
+    this.suffix,
+  });
+
+  final TextEditingController controller;
+  final String label;
+  final String hint;
+  final String? Function(String?)? validator;
+  final TextInputType? keyboardType;
+  final bool obscure;
+  final Widget? suffix;
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 12),
+      child: TextFormField(
+        controller: controller,
+        validator: validator,
+        keyboardType: keyboardType,
+        obscureText: obscure,
+        style: const TextStyle(color: Console.text, fontSize: 13),
+        decoration: InputDecoration(
+          labelText: label,
+          labelStyle: const TextStyle(color: Console.muted, fontSize: 12),
+          hintText: hint,
+          hintStyle: const TextStyle(color: Console.muted, fontSize: 12),
+          suffixIcon: suffix,
+          filled: true,
+          fillColor: Console.surface,
+          border: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(14),
+            borderSide: const BorderSide(color: Console.border),
+          ),
+          enabledBorder: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(14),
+            borderSide: const BorderSide(color: Console.border),
+          ),
+        ),
+      ),
+    );
+  }
+}
