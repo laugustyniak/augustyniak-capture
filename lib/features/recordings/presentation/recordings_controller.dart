@@ -251,8 +251,11 @@ class RecordingsController extends ChangeNotifier {
     _logSink.log('Transkrypcja uruchomiona.', recordingId: id);
 
     final Recording recording = _recordings.firstWhere((Recording item) => item.id == id);
+    // Pin the service for this job: a runtime swap (Models tab) during the await
+    // gaps above must not redirect a job that already started.
+    final TranscriptionService service = _transcriptionService;
     try {
-      final String transcript = await _transcriptionService.transcribe(File(recording.filePath));
+      final String transcript = await service.transcribe(File(recording.filePath));
       await _update(
         id,
         (Recording item) => item.copyWith(
