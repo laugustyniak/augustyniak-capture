@@ -75,6 +75,18 @@ class _RecordingsPageState extends State<RecordingsPage> {
     controller.audioConfig = settings.audio;
   }
 
+  Future<void> _composeTextNote(BuildContext context) async {
+    final String? body = await showModalBottomSheet<String>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Console.background,
+      builder: (BuildContext context) => const _TextNoteSheet(),
+    );
+    if (body != null && body.trim().isNotEmpty) {
+      await controller.addTextNote(body);
+    }
+  }
+
   @override
   void dispose() {
     settings.removeListener(_applySettings);
@@ -152,7 +164,25 @@ class _RecordingsPageState extends State<RecordingsPage> {
           ),
           floatingActionButtonLocation: FloatingActionButtonLocation.endFloat,
           floatingActionButton: navigationIndex == queueIndex
-              ? RecordButton(controller: controller)
+              ? Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.end,
+                  children: <Widget>[
+                    // Non-audio capture. Hidden while recording so the stop
+                    // action stands alone.
+                    if (!controller.isRecording && !controller.isBusy) ...<Widget>[
+                      FloatingActionButton.small(
+                        heroTag: 'note',
+                        backgroundColor: Console.surfaceRaised,
+                        foregroundColor: Console.cyan,
+                        onPressed: () => _composeTextNote(context),
+                        child: const Icon(Icons.note_add_outlined),
+                      ),
+                      const SizedBox(height: 12),
+                    ],
+                    RecordButton(controller: controller),
+                  ],
+                )
               : null,
           bottomNavigationBar: NavigationBar(
             selectedIndex: navigationIndex,
@@ -213,6 +243,91 @@ class _ProfileBadge extends StatelessWidget {
       backgroundColor: Console.amber,
       smallSize: 7,
       child: icon,
+    );
+  }
+}
+
+/// Compose sheet for a text note. Returns the typed body via `Navigator.pop`;
+/// the page persists it through `RecordingsController.addTextNote`.
+class _TextNoteSheet extends StatefulWidget {
+  const _TextNoteSheet();
+
+  @override
+  State<_TextNoteSheet> createState() => _TextNoteSheetState();
+}
+
+class _TextNoteSheetState extends State<_TextNoteSheet> {
+  final TextEditingController _controller = TextEditingController();
+  bool _canSave = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _controller.addListener(() {
+      final bool next = _controller.text.trim().isNotEmpty;
+      if (next != _canSave) setState(() => _canSave = next);
+    });
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final double bottomInset = MediaQuery.of(context).viewInsets.bottom;
+    return Padding(
+      padding: EdgeInsets.fromLTRB(18, 18, 18, bottomInset + 18),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: <Widget>[
+          const Text(
+            'Nowa notatka',
+            style: TextStyle(fontWeight: FontWeight.w800, fontSize: 16),
+          ),
+          const SizedBox(height: 14),
+          TextField(
+            controller: _controller,
+            autofocus: true,
+            maxLines: 6,
+            minLines: 3,
+            style: const TextStyle(color: Console.text, fontSize: 14),
+            decoration: InputDecoration(
+              hintText: 'Wpisz treść notatki…',
+              hintStyle: const TextStyle(color: Console.muted, fontSize: 13),
+              filled: true,
+              fillColor: Console.surfaceDeep,
+              border: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(14),
+                borderSide: const BorderSide(color: Console.border),
+              ),
+              enabledBorder: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(14),
+                borderSide: const BorderSide(color: Console.border),
+              ),
+            ),
+          ),
+          const SizedBox(height: 16),
+          SizedBox(
+            width: double.infinity,
+            child: FilledButton(
+              onPressed: _canSave
+                  ? () => Navigator.pop(context, _controller.text)
+                  : null,
+              style: FilledButton.styleFrom(
+                backgroundColor: Console.cyan,
+                foregroundColor: Console.ink,
+                disabledBackgroundColor: Console.surfaceRaised,
+                padding: const EdgeInsets.symmetric(vertical: 14),
+              ),
+              child: const Text('Zapisz notatkę'),
+            ),
+          ),
+        ],
+      ),
     );
   }
 }

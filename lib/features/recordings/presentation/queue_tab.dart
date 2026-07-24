@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import '../../../app/ui_kit.dart';
+import '../domain/capture_type.dart';
 import '../domain/recording.dart';
 import 'recordings_controller.dart';
 
@@ -448,7 +449,7 @@ class _RecordingCard extends StatelessWidget {
                     borderRadius: BorderRadius.circular(13),
                   ),
                   child: Icon(
-                    reviewed ? Icons.done_all_rounded : Icons.graphic_eq,
+                    reviewed ? Icons.done_all_rounded : _typeIcon(recording.type),
                     color: reviewed ? Console.green : Console.cyan,
                   ),
                 ),
@@ -468,8 +469,10 @@ class _RecordingCard extends StatelessWidget {
                       ),
                       const SizedBox(height: 4),
                       Text(
-                        '${formatDateTime(recording.createdAt)} · '
-                        '${formatDuration(Duration(milliseconds: recording.durationMs))}',
+                        recording.durationMs > 0
+                            ? '${formatDateTime(recording.createdAt)} · '
+                                '${formatDuration(Duration(milliseconds: recording.durationMs))}'
+                            : formatDateTime(recording.createdAt),
                         style: const TextStyle(
                           color: Console.mutedSoft,
                           fontSize: 10,
@@ -478,36 +481,39 @@ class _RecordingCard extends StatelessWidget {
                     ],
                   ),
                 ),
-                Semantics(
-                  button: true,
-                  label: isPlaying ? 'Stop playback' : 'Play recording',
-                  child: InkResponse(
-                    onTap: onTogglePlay,
-                    radius: 25,
-                    child: Container(
-                      width: 40,
-                      height: 40,
-                      alignment: Alignment.center,
-                      decoration: BoxDecoration(
-                        color: isPlaying
-                            ? const Color(0xFF143C54)
-                            : const Color(0xFF102434),
-                        borderRadius: BorderRadius.circular(13),
-                        border: Border.all(
-                          color: isPlaying ? Console.cyan : Console.border,
+                // Playback is audio-only; text/image/video items have no track.
+                if (recording.type.isPlayableAudio) ...<Widget>[
+                  Semantics(
+                    button: true,
+                    label: isPlaying ? 'Stop playback' : 'Play recording',
+                    child: InkResponse(
+                      onTap: onTogglePlay,
+                      radius: 25,
+                      child: Container(
+                        width: 40,
+                        height: 40,
+                        alignment: Alignment.center,
+                        decoration: BoxDecoration(
+                          color: isPlaying
+                              ? const Color(0xFF143C54)
+                              : const Color(0xFF102434),
+                          borderRadius: BorderRadius.circular(13),
+                          border: Border.all(
+                            color: isPlaying ? Console.cyan : Console.border,
+                          ),
                         ),
-                      ),
-                      child: Icon(
-                        isPlaying
-                            ? Icons.stop_rounded
-                            : Icons.play_arrow_rounded,
-                        color: Console.cyan,
-                        size: 24,
+                        child: Icon(
+                          isPlaying
+                              ? Icons.stop_rounded
+                              : Icons.play_arrow_rounded,
+                          color: Console.cyan,
+                          size: 24,
+                        ),
                       ),
                     ),
                   ),
-                ),
-                const SizedBox(width: 8),
+                  const SizedBox(width: 8),
+                ],
                 Semantics(
                   button: true,
                   checked: reviewed,
@@ -616,6 +622,14 @@ class _RecordingCard extends StatelessWidget {
     );
   }
 }
+
+IconData _typeIcon(CaptureType type) => switch (type) {
+      CaptureType.audioRecording => Icons.graphic_eq,
+      CaptureType.audioUpload => Icons.audio_file_outlined,
+      CaptureType.image => Icons.image_outlined,
+      CaptureType.text => Icons.sticky_note_2_outlined,
+      CaptureType.video => Icons.movie_outlined,
+    };
 
 class _StatusVisual {
   const _StatusVisual(this.label, this.color);

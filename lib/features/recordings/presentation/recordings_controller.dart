@@ -3,13 +3,17 @@ import 'dart:io';
 
 import 'package:audioplayers/audioplayers.dart';
 import 'package:flutter/foundation.dart';
+import 'package:path/path.dart' as p;
 import 'package:record/record.dart';
 import 'package:uuid/uuid.dart';
 
 import '../../logs/domain/log_event.dart';
+import '../../processing/domain/processor.dart';
+import '../../processing/domain/processor_registry.dart';
 import '../../settings/domain/audio_config.dart';
 import '../../transcription/data/transcription_service.dart';
 import '../data/recordings_repository.dart';
+import '../domain/capture_type.dart';
 import '../domain/recording.dart';
 
 class RecordingsController extends ChangeNotifier {
@@ -18,6 +22,7 @@ class RecordingsController extends ChangeNotifier {
     required TranscriptionService transcriptionService,
     AudioConfig audioConfig = AudioConfig.defaults,
     LogSink logSink = const NoopLogSink(),
+    ProcessorRegistry? processorRegistry,
     AudioRecorder? recorder,
     AudioPlayer? player,
   })  : _repository = repository,
@@ -26,6 +31,12 @@ class RecordingsController extends ChangeNotifier {
         _logSink = logSink,
         _recorder = recorder ?? AudioRecorder(),
         _player = player ?? AudioPlayer() {
+    // The default registry resolves the transcription service lazily, so the
+    // Models tab can keep swapping it without rebuilding the registry.
+    _registry = processorRegistry ??
+        ProcessorRegistry.standard(
+          transcriptionService: () => _transcriptionService,
+        );
     // Reset the "now playing" marker when a clip finishes on its own.
     _playerCompleteSub = _player.onPlayerComplete.listen((_) {
       _playingId = null;
@@ -35,6 +46,7 @@ class RecordingsController extends ChangeNotifier {
 
   final RecordingsRepository _repository;
   final LogSink _logSink;
+  late final ProcessorRegistry _registry;
 
   // Both are swappable at runtime from the Models/Config tabs. A swap only
   // affects work started afterwards; it never touches an in-flight pipeline.
@@ -51,6 +63,7 @@ class RecordingsController extends ChangeNotifier {
   bool _isRecording = false;
   bool _isBusy = false;
   String? _activeFilePath;
+  String? _activeId;
   String? _playingId;
   String? _error;
 
@@ -96,6 +109,7 @@ class RecordingsController extends ChangeNotifier {
     final String id = const Uuid().v4();
     final File audioFile = await _repository.createAudioFile(id);
     _activeFilePath = audioFile.path;
+    _activeId = id;
 
     await _recorder.start(
       RecordConfig(
@@ -141,13 +155,17 @@ class RecordingsController extends ChangeNotifier {
         throw FileSystemException('Recording file was not persisted correctly.', path);
       }
 
-      final String id = file.uri.pathSegments.last.replaceAll('.m4a', '');
+      // Use the id generated at record start rather than parsing it back out of
+      // the filename: extensions vary per capture type, and the round-trip
+      // through the path was the only thing coupling id to `.m4a`.
+      final String id = _activeId ?? p.basenameWithoutExtension(path);
       final Recording saved = Recording(
         id: id,
         filePath: path,
         createdAt: DateTime.now(),
         durationMs: _stopwatch.elapsedMilliseconds,
         status: RecordingStatus.saved,
+        type: CaptureType.audioRecording,
       );
 
       // Critical invariant: persist metadata only after the audio file exists.
@@ -158,14 +176,66 @@ class RecordingsController extends ChangeNotifier {
         recordingId: saved.id,
       );
 
-      // Transcription is a separate step and starts only after durable save.
-      await _markAndTranscribe(saved.id);
+      // Processing is a separate step and starts only after durable save.
+      await _markAndProcess(saved.id);
     } catch (exception) {
       _error = exception.toString();
       _logSink.log('Błąd zapisu nagrania: $exception', level: LogLevel.error);
     } finally {
       _isBusy = false;
       _activeFilePath = null;
+      _activeId = null;
+      notifyListeners();
+    }
+  }
+
+  /// Save a typed text note. Follows the exact ordering of [stopRecording]:
+  /// write the `.txt` source, verify it exists with length > 0, build the item
+  /// with status `saved`, persist the index, and only then process it. The
+  /// text processor is a passthrough, so the item lands `completed` — but it
+  /// travels the same persist-then-process path as every other capture, and a
+  /// failure never deletes the source.
+  Future<void> addTextNote(String body) async {
+    if (_isRecording || _isBusy) return;
+    final String trimmed = body.trim();
+    if (trimmed.isEmpty) return;
+
+    _isBusy = true;
+    _error = null;
+    notifyListeners();
+
+    try {
+      final String id = const Uuid().v4();
+      final File file = await _repository.createSourceFile(id, 'txt');
+      await file.writeAsString(trimmed, flush: true);
+      if (!await file.exists() || await file.length() == 0) {
+        throw FileSystemException('Note file was not persisted correctly.', file.path);
+      }
+
+      final Recording saved = Recording(
+        id: id,
+        filePath: file.path,
+        createdAt: DateTime.now(),
+        durationMs: 0,
+        status: RecordingStatus.saved,
+        type: CaptureType.text,
+        sourceMimeType: 'text/plain',
+      );
+
+      // Critical invariant: index the note only after the .txt exists on disk.
+      _recordings = <Recording>[saved, ..._recordings];
+      await _repository.saveAll(_recordings);
+      _logSink.log(
+        'Notatka zapisana · ${await file.length()} B',
+        recordingId: saved.id,
+      );
+
+      await _markAndProcess(saved.id);
+    } catch (exception) {
+      _error = exception.toString();
+      _logSink.log('Błąd zapisu notatki: $exception', level: LogLevel.error);
+    } finally {
+      _isBusy = false;
       notifyListeners();
     }
   }
@@ -223,17 +293,19 @@ class RecordingsController extends ChangeNotifier {
   Future<void> retryTranscription(String id) async {
     if (_isBusy) return;
     _isBusy = true;
-    _logSink.log('Ponowna próba transkrypcji.', level: LogLevel.warn, recordingId: id);
+    _logSink.log('Ponowna próba przetwarzania.', level: LogLevel.warn, recordingId: id);
     notifyListeners();
     try {
-      await _markAndTranscribe(id);
+      await _markAndProcess(id);
     } finally {
       _isBusy = false;
       notifyListeners();
     }
   }
 
-  Future<void> _markAndTranscribe(String id) async {
+  /// Generic processing step: same state machine for every [CaptureType], only
+  /// the processor differs. Never touches the source file.
+  Future<void> _markAndProcess(String id) async {
     await _update(
       id,
       (Recording item) => item.copyWith(
@@ -242,20 +314,20 @@ class RecordingsController extends ChangeNotifier {
       ),
     );
 
-    _logSink.log('W kolejce do transkrypcji.', recordingId: id);
+    _logSink.log('W kolejce do przetwarzania.', recordingId: id);
 
     await _update(
       id,
       (Recording item) => item.copyWith(status: RecordingStatus.transcribing),
     );
-    _logSink.log('Transkrypcja uruchomiona.', recordingId: id);
+    _logSink.log('Przetwarzanie uruchomione.', recordingId: id);
 
     final Recording recording = _recordings.firstWhere((Recording item) => item.id == id);
-    // Pin the service for this job: a runtime swap (Models tab) during the await
-    // gaps above must not redirect a job that already started.
-    final TranscriptionService service = _transcriptionService;
+    // Pin the processor for this job: a runtime swap (Models tab) during the
+    // await gaps above must not redirect a job that already started.
+    final Processor processor = _registry.forType(recording.type);
     try {
-      final String transcript = await service.transcribe(File(recording.filePath));
+      final String transcript = await processor.process(recording);
       await _update(
         id,
         (Recording item) => item.copyWith(
@@ -265,7 +337,7 @@ class RecordingsController extends ChangeNotifier {
         ),
       );
       _logSink.log(
-        'Transkrypcja gotowa · ${transcript.length} znaków',
+        'Przetwarzanie zakończone · ${transcript.length} znaków',
         recordingId: id,
       );
     } catch (exception) {
@@ -277,7 +349,7 @@ class RecordingsController extends ChangeNotifier {
         ),
       );
       _logSink.log(
-        'Transkrypcja nieudana: $exception',
+        'Przetwarzanie nieudane: $exception',
         level: LogLevel.error,
         recordingId: id,
       );
