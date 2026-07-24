@@ -21,19 +21,39 @@ class _RecordingsPageState extends State<RecordingsPage> {
   late final RecordingsController controller;
   RecordingFilter selectedFilter = RecordingFilter.queue;
   int navigationIndex = 0;
+  String searchQuery = '';
+  final TextEditingController searchController = TextEditingController();
 
   @override
   void initState() {
     super.initState();
     controller = RecordingsController(
       repository: RecordingsRepository(),
-      transcriptionService: const DisabledTranscriptionService(),
+      transcriptionService: _buildTranscriptionService(),
     )..initialize();
+  }
+
+  // Wire a real endpoint when configured at build time, otherwise fall back to
+  // the disabled service that reports "endpoint is not configured".
+  //   flutter run --dart-define=TRANSCRIPTION_ENDPOINT=https://host/transcribe \
+  //               --dart-define=TRANSCRIPTION_TOKEN=secret
+  static TranscriptionService _buildTranscriptionService() {
+    const String endpoint =
+        String.fromEnvironment('TRANSCRIPTION_ENDPOINT');
+    const String token = String.fromEnvironment('TRANSCRIPTION_TOKEN');
+    if (endpoint.isEmpty) {
+      return const DisabledTranscriptionService();
+    }
+    return HttpWhisperTranscriptionService(
+      endpoint: Uri.parse(endpoint),
+      bearerToken: token.isEmpty ? null : token,
+    );
   }
 
   @override
   void dispose() {
     controller.dispose();
+    searchController.dispose();
     super.dispose();
   }
 
@@ -98,7 +118,9 @@ class _RecordingsPageState extends State<RecordingsPage> {
               ),
             ],
           ),
-          body: SafeArea(
+          body: navigationIndex != 0
+              ? _PlaceholderTab(index: navigationIndex)
+              : SafeArea(
             child: Column(
               children: <Widget>[
                 if (controller.error != null)
@@ -107,7 +129,13 @@ class _RecordingsPageState extends State<RecordingsPage> {
                   child: ListView(
                     padding: const EdgeInsets.fromLTRB(18, 8, 18, 110),
                     children: <Widget>[
-                      const _SearchField(),
+                      _SearchField(
+                        controller: searchController,
+                        value: searchQuery,
+                        onChanged: (String value) {
+                          setState(() => searchQuery = value);
+                        },
+                      ),
                       const SizedBox(height: 14),
                       _FilterRow(
                         selected: selectedFilter,
@@ -173,7 +201,9 @@ class _RecordingsPageState extends State<RecordingsPage> {
             ),
           ),
           floatingActionButtonLocation: FloatingActionButtonLocation.endFloat,
-          floatingActionButton: _RecordButton(controller: controller),
+          floatingActionButton: navigationIndex == 0
+              ? _RecordButton(controller: controller)
+              : null,
           bottomNavigationBar: NavigationBar(
             selectedIndex: navigationIndex,
             onDestinationSelected: (int value) {
@@ -208,7 +238,7 @@ class _RecordingsPageState extends State<RecordingsPage> {
   }
 
   List<Recording> _filter(List<Recording> recordings) {
-    return switch (selectedFilter) {
+    final List<Recording> byStatus = switch (selectedFilter) {
       RecordingFilter.queue => recordings
           .where((Recording item) =>
               item.status == RecordingStatus.pendingTranscription ||
@@ -223,34 +253,51 @@ class _RecordingsPageState extends State<RecordingsPage> {
           .toList(),
       RecordingFilter.raw => recordings,
     };
+    final String query = searchQuery.trim().toLowerCase();
+    if (query.isEmpty) {
+      return byStatus;
+    }
+    return byStatus.where((Recording item) {
+      final String haystack = <String?>[
+        item.transcript,
+        item.filePath.split(Platform.pathSeparator).last,
+        item.id,
+      ].whereType<String>().join(' ').toLowerCase();
+      return haystack.contains(query);
+    }).toList();
   }
 }
 
 class _SearchField extends StatelessWidget {
-  const _SearchField();
+  const _SearchField({
+    required this.controller,
+    required this.value,
+    required this.onChanged,
+  });
+
+  final TextEditingController controller;
+  final String value;
+  final ValueChanged<String> onChanged;
 
   @override
   Widget build(BuildContext context) {
     return TextField(
-      enabled: false,
+      controller: controller,
+      onChanged: onChanged,
+      style: const TextStyle(color: Color(0xFFE6F1FA), fontSize: 13),
       decoration: InputDecoration(
         hintText: 'Search recordings and transcripts',
         hintStyle: const TextStyle(color: Color(0xFF6F8CA5), fontSize: 13),
         prefixIcon: const Icon(Icons.search, color: Color(0xFF6F8CA5)),
-        suffixIcon: Padding(
-          padding: const EdgeInsets.all(11),
-          child: Container(
-            decoration: BoxDecoration(
-              border: Border.all(color: const Color(0xFF2A4862)),
-              borderRadius: BorderRadius.circular(7),
-            ),
-            alignment: Alignment.center,
-            child: const Text(
-              '⌘K',
-              style: TextStyle(fontSize: 9, color: Color(0xFF8EABC2)),
-            ),
-          ),
-        ),
+        suffixIcon: value.isEmpty
+            ? null
+            : IconButton(
+                icon: const Icon(Icons.close, color: Color(0xFF6F8CA5)),
+                onPressed: () {
+                  controller.clear();
+                  onChanged('');
+                },
+              ),
         filled: true,
         fillColor: const Color(0xFF0C1D2E),
         border: OutlineInputBorder(
@@ -841,4 +888,95 @@ String _date(DateTime value) {
   final DateTime local = value.toLocal();
   return '${local.year}-${local.month.toString().padLeft(2, '0')}-${local.day.toString().padLeft(2, '0')} '
       '${local.hour.toString().padLeft(2, '0')}:${local.minute.toString().padLeft(2, '0')}';
+}
+
+/// Placeholder for navigation tabs that are wired but not yet built:
+/// Models (1), Logs (2), Config (3). Swap the body for the real screen when
+/// each feature lands.
+class _PlaceholderTab extends StatelessWidget {
+  const _PlaceholderTab({required this.index});
+
+  final int index;
+
+  static const Map<int, ({IconData icon, String title, String blurb})> _specs =
+      <int, ({IconData icon, String title, String blurb})>{
+    1: (
+      icon: Icons.memory_outlined,
+      title: 'Models',
+      blurb: 'Pick, download, and manage local transcription models here. '
+          'Backend not implemented yet.',
+    ),
+    2: (
+      icon: Icons.terminal_outlined,
+      title: 'Logs',
+      blurb: 'Processing console output and per-recording job history will '
+          'stream here. No log store exists yet.',
+    ),
+    3: (
+      icon: Icons.tune_outlined,
+      title: 'Config',
+      blurb: 'Transcription endpoint, bearer token, and audio settings will be '
+          'editable here. Currently set via --dart-define at build time.',
+    ),
+  };
+
+  @override
+  Widget build(BuildContext context) {
+    final ({IconData icon, String title, String blurb}) spec =
+        _specs[index] ??
+            (
+              icon: Icons.help_outline,
+              title: 'Unknown',
+              blurb: 'No screen defined for this tab.',
+            );
+    return SafeArea(
+      child: Center(
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 40),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: <Widget>[
+              Icon(spec.icon, size: 44, color: const Color(0xFF31D5F4)),
+              const SizedBox(height: 18),
+              Text(
+                spec.title,
+                style: const TextStyle(
+                  fontSize: 18,
+                  fontWeight: FontWeight.w800,
+                ),
+              ),
+              const SizedBox(height: 10),
+              Container(
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                decoration: BoxDecoration(
+                  color: const Color(0xFF112B42),
+                  borderRadius: BorderRadius.circular(999),
+                ),
+                child: const Text(
+                  'PLANNED',
+                  style: TextStyle(
+                    fontSize: 9,
+                    letterSpacing: 1.2,
+                    fontWeight: FontWeight.w800,
+                    color: Color(0xFF8EABC2),
+                  ),
+                ),
+              ),
+              const SizedBox(height: 16),
+              Text(
+                spec.blurb,
+                textAlign: TextAlign.center,
+                style: const TextStyle(
+                  color: Color(0xFF6F8CA5),
+                  fontSize: 13,
+                  height: 1.5,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
 }
