@@ -74,7 +74,9 @@ class LogStore extends ChangeNotifier implements LogSink {
   Future<void> clear() async {
     _events = <LogEvent>[];
     notifyListeners();
-    await _archive?.save(_events);
+    // Route through the coalescing flush so this write can't race an in-flight
+    // one over the shared `.tmp` file (double rename → ENOENT).
+    _scheduleFlush();
   }
 
   List<LogEvent> _capped(List<LogEvent> events) {
