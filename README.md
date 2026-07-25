@@ -4,25 +4,43 @@ Minimalna aplikacja Flutter do nagrywania notatek głosowych w modelu **offline-
 
 ## Gwarancja kolejności
 
-Aplikacja zawsze wykonuje operacje w tej kolejności:
+Każdy sposób dodania pozycji — nagranie z mikrofonu, notatka tekstowa i (w
+kolejnych fazach) plik audio, zdjęcie, wideo — wykonuje dokładnie tę samą
+kolejność:
 
-1. uruchamia nagrywanie do pliku `.m4a`,
-2. zatrzymuje recorder,
+1. tworzy materiał źródłowy (nagranie do `.m4a`, treść notatki do `.txt`),
+2. zatrzymuje recorder / kończy zapis pliku,
 3. sprawdza, czy plik istnieje i ma niezerowy rozmiar,
-4. zapisuje metadane nagrania atomowo do `recordings.json`,
-5. dopiero wtedy ustawia status `pendingTranscription`,
-6. uruchamia transkrypcję,
-7. błąd transkrypcji nie usuwa nagrania.
+4. zapisuje metadane atomowo do `recordings.json`,
+5. dopiero wtedy ustawia status „w kolejce”,
+6. uruchamia przetwarzanie właściwe dla typu (transkrypcja, przepisanie treści),
+7. błąd przetwarzania nigdy nie usuwa materiału źródłowego.
 
-## Funkcje fazy 1
+Procesor **wyłącznie czyta** plik źródłowy — nigdy go nie zmienia ani nie kasuje.
 
-- nagrywanie AAC/M4A, mono, 16 kHz,
+## Funkcje
+
+- nagrywanie AAC/M4A, mono, 16 kHz (parametry edytowalne w zakładce Config),
+- notatki tekstowe zapisywane jako `.txt` w tym samym potoku co nagrania,
 - lokalny zapis w katalogu dokumentów aplikacji,
-- lista nagrań,
-- trwałe statusy transkrypcji,
-- ponawianie nieudanej transkrypcji,
+- wspólna lista wszystkich pozycji z ikoną i kartą zależną od typu,
+- trwałe statusy przetwarzania,
+- ponawianie nieudanego przetwarzania,
 - adapter HTTP gotowy pod Whisper/OpenAI/Hugging Face,
-- brak funkcji usuwania nagrania w MVP, aby ograniczyć ryzyko utraty danych.
+- brak funkcji usuwania w MVP, aby ograniczyć ryzyko utraty danych.
+
+### Typy pozycji
+
+| Typ | Rozszerzenie | Przetwarzanie | Status |
+| --- | --- | --- | --- |
+| nagranie z mikrofonu | `.m4a` | transkrypcja przez aktywny profil | działa |
+| notatka tekstowa | `.txt` | przepisanie treści (bez sieci) | działa |
+| plik audio | oryginalne | transkrypcja przez aktywny profil | zaplanowane |
+| obraz | `.jpg`/`.png` | OCR offline | zaplanowane |
+| wideo | `.mp4`/`.mov` | ścieżka audio → transkrypcja | zaplanowane |
+
+Typy zaplanowane mają już model i zapis na dysku; ich procesory zgłaszają na
+razie „niedostępne”, więc pozycja kończy się czytelnym błędem, nigdy awarią.
 
 ## Start
 
@@ -73,7 +91,7 @@ Aplikacja ma cztery zakładki w dolnej nawigacji:
 
 | Zakładka | Do czego służy |
 | --- | --- |
-| **Queue** | lista nagrań, filtry statusu, wyszukiwarka, przycisk nagrywania, odtwarzanie |
+| **Queue** | lista wszystkich pozycji, filtry statusu, wyszukiwarka, przyciski nagrywania i notatki, odtwarzanie |
 | **Models** | profile providerów transkrypcji: dodawanie, edycja, usuwanie, wybór aktywnego |
 | **Logs** | strumień zdarzeń potoku (zapis, kolejka, transkrypcja, błędy), filtr poziomu |
 | **Config** | parametry nagrywania, podsumowanie aktywnego providera, informacje o plikach |
@@ -92,6 +110,16 @@ zasilają pierwszy profil przy pierwszym uruchomieniu; potem obowiązuje
 > Tokeny są zapisywane jawnym tekstem w `settings.json` w katalogu dokumentów
 > aplikacji. Szyfrowanie zaplanowano na kolejną fazę.
 
+### Queue — dodawanie pozycji
+
+Nad przyciskiem nagrywania jest mniejszy przycisk notatki. Otwiera arkusz z
+polem tekstowym; zapis tworzy plik `.txt`, weryfikuje go, indeksuje i dopiero
+wtedy przetwarza (przepisanie treści, bez sieci). Przycisk notatki znika na
+czas nagrywania, żeby akcja „SAVE” była jednoznaczna.
+
+Karta pozycji zależy od typu: ikona, przycisk odtwarzania tylko dla audio,
+czas trwania ukryty dla notatek i obrazów.
+
 ### Config — parametry nagrywania
 
 Edytowalne: sample rate (8/16/22.05/44.1 kHz), bitrate (32–128 kbps), kanały
@@ -103,19 +131,22 @@ kolejnych nagrań — pliki już zapisane pozostają nietknięte.
 Wszystko w podkatalogu `recordings/` katalogu dokumentów aplikacji, każdy zapis
 atomowy (`.tmp` → `rename`):
 
-- `<uuid>.m4a` — audio,
-- `recordings.json` — indeks nagrań,
+- `<uuid>.<ext>` — materiał źródłowy pozycji (`.m4a` nagranie, `.txt` notatka),
+- `recordings.json` — indeks wszystkich pozycji,
 - `settings.json` — profile providerów i parametry audio,
 - `logs.json` — historia zdarzeń (bufor cykliczny, maks. 500 wpisów).
 
 ## Kolejna faza
 
+- pozostałe typy pozycji: wgrywanie plików audio, obrazy z OCR offline, wideo,
 - kolejka background jobs,
 - WorkManager na Androidzie i BGTaskScheduler na iOS,
 - edycja tytułu i transkrypcji,
 - lokalne modele na urządzeniu (whisper.cpp przez FFI),
 - szyfrowanie tokenów,
 - synchronizacja z Obsidian/Notion.
+
+Projekt techniczny: `docs/superpowers/specs/2026-07-25-multimodal-capture-design.md`.
 
 ## Processing Console UI
 
