@@ -1,6 +1,10 @@
 import '../../recordings/domain/capture_type.dart';
 import '../../transcription/data/transcription_service.dart';
+import '../data/ocr_processor.dart';
+import '../data/ocr_service.dart';
 import '../data/transcription_processor.dart';
+import '../data/video_audio_extractor.dart';
+import '../data/video_transcription_processor.dart';
 import 'processor.dart';
 
 /// Resolves `CaptureType → Processor`.
@@ -12,12 +16,16 @@ import 'processor.dart';
 class ProcessorRegistry {
   const ProcessorRegistry(this._processors);
 
-  /// Everything Slice 0 can actually do: audio via the configured transcription
-  /// service, text via passthrough. Image and video are declared unavailable
-  /// until their slices land, so an item of that type fails with a readable
-  /// reason instead of silently going nowhere.
+  /// Audio via the configured transcription service, text via passthrough,
+  /// images via the configured OCR service, and video via audio-extraction plus
+  /// the transcription service. Each backend defaults to a disabled/unavailable
+  /// impl so an unconfigured platform fails cleanly. All service getters resolve
+  /// lazily so the Models/Config tabs can keep swapping them without rebuilding
+  /// the registry.
   factory ProcessorRegistry.standard({
     required TranscriptionService Function() transcriptionService,
+    OcrService Function() ocrService = _disabledOcr,
+    VideoAudioExtractor Function() videoAudioExtractor = _unavailableExtractor,
   }) {
     final TranscriptionProcessor transcription =
         TranscriptionProcessor(transcriptionService);
@@ -25,14 +33,17 @@ class ProcessorRegistry {
       CaptureType.audioRecording: transcription,
       CaptureType.audioUpload: transcription,
       CaptureType.text: const TextPassthroughProcessor(),
-      CaptureType.image: const UnavailableProcessor(
-        'OCR obrazów nie jest jeszcze dostępne.',
-      ),
-      CaptureType.video: const UnavailableProcessor(
-        'Przetwarzanie wideo nie jest jeszcze dostępne.',
+      CaptureType.image: OcrProcessor(ocrService),
+      CaptureType.video: VideoTranscriptionProcessor(
+        transcriptionService,
+        videoAudioExtractor,
       ),
     });
   }
+
+  static OcrService _disabledOcr() => const DisabledOcrService();
+  static VideoAudioExtractor _unavailableExtractor() =>
+      const UnavailableVideoAudioExtractor();
 
   final Map<CaptureType, Processor> _processors;
 

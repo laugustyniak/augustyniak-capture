@@ -8,6 +8,8 @@ import 'package:record/record.dart';
 import 'package:uuid/uuid.dart';
 
 import '../../logs/domain/log_event.dart';
+import '../../processing/data/ocr_service.dart';
+import '../../processing/data/video_audio_extractor.dart';
 import '../../processing/domain/processor.dart';
 import '../../processing/domain/processor_registry.dart';
 import '../../settings/domain/audio_config.dart';
@@ -22,6 +24,9 @@ class RecordingsController extends ChangeNotifier {
   RecordingsController({
     required RecordingsRepository repository,
     required TranscriptionService transcriptionService,
+    OcrService ocrService = const DisabledOcrService(),
+    VideoAudioExtractor videoAudioExtractor =
+        const UnavailableVideoAudioExtractor(),
     AudioConfig audioConfig = AudioConfig.defaults,
     LogSink logSink = const NoopLogSink(),
     ProcessorRegistry? processorRegistry,
@@ -30,17 +35,21 @@ class RecordingsController extends ChangeNotifier {
     AudioPlayer? player,
   })  : _repository = repository,
         _transcriptionService = transcriptionService,
+        _ocrService = ocrService,
+        _videoAudioExtractor = videoAudioExtractor,
         _audioConfig = audioConfig,
         _logSink = logSink,
         _mediaPicker = mediaPicker ?? const FilePickerMediaPicker(),
         _importer = MediaImporter(repository),
         _recorder = recorder ?? AudioRecorder(),
         _player = player ?? AudioPlayer() {
-    // The default registry resolves the transcription service lazily, so the
-    // Models tab can keep swapping it without rebuilding the registry.
+    // The default registry resolves the services lazily, so the Models/Config
+    // tabs can keep swapping them without rebuilding the registry.
     _registry = processorRegistry ??
         ProcessorRegistry.standard(
           transcriptionService: () => _transcriptionService,
+          ocrService: () => _ocrService,
+          videoAudioExtractor: () => _videoAudioExtractor,
         );
     // Reset the "now playing" marker when a clip finishes on its own.
     _playerCompleteSub = _player.onPlayerComplete.listen((_) {
@@ -55,9 +64,11 @@ class RecordingsController extends ChangeNotifier {
   final MediaImporter _importer;
   late final ProcessorRegistry _registry;
 
-  // Both are swappable at runtime from the Models/Config tabs. A swap only
-  // affects work started afterwards; it never touches an in-flight pipeline.
+  // All swappable at runtime from the Models/Config tabs. A swap only affects
+  // work started afterwards; it never touches an in-flight pipeline.
   TranscriptionService _transcriptionService;
+  OcrService _ocrService;
+  VideoAudioExtractor _videoAudioExtractor;
   AudioConfig _audioConfig;
 
   final AudioRecorder _recorder;
@@ -87,6 +98,20 @@ class RecordingsController extends ChangeNotifier {
   set transcriptionService(TranscriptionService value) {
     if (identical(_transcriptionService, value)) return;
     _transcriptionService = value;
+  }
+
+  /// Applied to the next image OCR attempt. A job already running keeps the
+  /// service it started with.
+  set ocrService(OcrService value) {
+    if (identical(_ocrService, value)) return;
+    _ocrService = value;
+  }
+
+  /// Applied to the next video processing attempt. A job already running keeps
+  /// the extractor it started with.
+  set videoAudioExtractor(VideoAudioExtractor value) {
+    if (identical(_videoAudioExtractor, value)) return;
+    _videoAudioExtractor = value;
   }
 
   /// Applied to the next capture. Never changes a recording already on disk.

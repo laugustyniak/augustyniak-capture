@@ -1,0 +1,79 @@
+import 'dart:io';
+
+import 'package:path/path.dart' as p;
+
+import '../domain/processor.dart';
+
+/// Extracts a video's audio track to a standalone audio file so the existing
+/// transcription pipeline can handle it. The returned file is a **derived**
+/// temp artifact (not the source) — the caller deletes it after use; the source
+/// video is never touched.
+abstract interface class VideoAudioExtractor {
+  Future<File> extractAudio(File video);
+}
+
+/// Default where no extractor is available (e.g. mobile before an ffmpeg_kit
+/// impl lands). Fails the item cleanly and retryably.
+class UnavailableVideoAudioExtractor implements VideoAudioExtractor {
+  const UnavailableVideoAudioExtractor([
+    this.reason = 'Ekstrakcja audio z wideo nie jest dostępna na tej platformie.',
+  ]);
+
+  final String reason;
+
+  @override
+  Future<File> extractAudio(File video) async =>
+      throw ProcessorNotConfiguredException(reason);
+}
+
+/// Desktop extractor via the system `ffmpeg` binary (already relied on by
+/// `record_linux`). Produces 16 kHz mono AAC `.m4a` — the same format the app
+/// records — into a fresh temp directory. A missing binary makes `Process.run`
+/// throw, so the item fails cleanly and this can be wired unconditionally on
+/// desktop.
+class FfmpegVideoAudioExtractor implements VideoAudioExtractor {
+  const FfmpegVideoAudioExtractor({this.executable = 'ffmpeg'});
+
+  final String executable;
+
+  @override
+  Future<File> extractAudio(File video) async {
+    if (!await video.exists()) {
+      throw FileSystemException('Plik wideo nie istnieje.', video.path);
+    }
+
+    final Directory tempDir =
+        await Directory.systemTemp.createTemp('audivoa_video_audio');
+    final String outPath = p.join(tempDir.path, 'audio.m4a');
+    final List<String> args = <String>[
+      '-y',
+      '-i', video.path,
+      '-vn', // drop the video stream
+      '-ac', '1',
+      '-ar', '16000',
+      '-c:a', 'aac',
+      '-b:a', '64k',
+      outPath,
+    ];
+
+    final ProcessResult result = await Process.run(
+      executable,
+      args,
+      stderrEncoding: SystemEncoding(),
+    );
+
+    final File out = File(outPath);
+    if (result.exitCode != 0 || !await out.exists() || await out.length() == 0) {
+      // Clean up the temp dir on failure so we don't leak it.
+      if (await tempDir.exists()) await tempDir.delete(recursive: true);
+      throw ProcessException(
+        executable,
+        args,
+        (result.stderr as String).trim(),
+        result.exitCode,
+      );
+    }
+
+    return out;
+  }
+}

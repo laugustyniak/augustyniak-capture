@@ -4,21 +4,25 @@ Local issue tracker (no GitHub remote yet). Move to `gh issue` once a remote exi
 
 ## Open
 
-### Multi-modal slices 2–4
+### Mobile OCR + video processing
 
-Design: `docs/superpowers/specs/2026-07-25-multimodal-capture-design.md`.
-Slices 0 (domain generalization) and 1 (text notes) have landed. Each remaining
-slice is a vertical cut: capture entry point + processor + card variant + tests,
-all mirroring the `stopRecording()` ordering.
+Desktop processing for image (OCR) and video is done — `TesseractOcrService`
+and `FfmpegVideoAudioExtractor` shell out to system binaries behind the
+`OcrService` / `VideoAudioExtractor` seams. Mobile has neither wired:
+- **Image OCR:** add `MlKitOcrService implements OcrService`
+  (`google_mlkit_text_recognition`, Android/iOS only) and select it for
+  `Platform.isAndroid || Platform.isIOS` in `RecordingsPage._buildOcrService`.
+- **Video:** add an `ffmpeg_kit_flutter_*`-backed `VideoAudioExtractor` for
+  mobile in `_buildVideoAudioExtractor`. Both large mobile-only binaries, left
+  out of `pubspec.yaml` to keep the Linux build green.
 
-- **Slice 2 — audio upload.** `file_picker`, copy-then-verify-then-index, reuses
-  `TranscriptionProcessor`. No new processor logic.
-- **Slice 3 — images + offline OCR.** `image_picker`/`file_picker` plus
-  `google_mlkit_text_recognition` (Android/iOS only). Thumbnail card. Must
-  capability-gate: on Linux desktop the processor stays `UnavailableProcessor`.
-- **Slice 4 — video.** ffmpeg audio extraction → existing transcription, poster
-  frame as a *derived* file (`<id>.thumb.jpg`), never confused with the source.
-  Largest binary cost; ship last.
+Until then mobile degrades to disabled/unavailable (item `failed`, retryable).
+
+### Video poster + in-app playback
+
+Video items show a movie icon, not a poster. Extract a *derived*
+`<id>.thumb.jpg` (ffmpeg on desktop / `video_thumbnail` on mobile) — never
+confused with the source — and add an in-app or external video player.
 
 ### Background transcription queue
 
