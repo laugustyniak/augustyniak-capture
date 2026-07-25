@@ -24,13 +24,13 @@ flutter pub get
 - Single test by name: `flutter test --plain-name "legacy JSON defaults to not reviewed"`
 - Analyze/lint: `flutter analyze` (config in `analysis_options.yaml`: `flutter_lints` + `avoid_print`, `prefer_final_locals`)
 
-Dart SDK `>=3.10.0 <4.0.0`. Runtime deps: `record` (capture), `path_provider` (app docs dir), `uuid` (id = audio filename), `http` (Whisper adapter). No state-mgmt/DI package.
+Dart SDK `>=3.10.0 <4.0.0`. Runtime deps: `record` (capture), `audioplayers` (playback), `path_provider` (app docs dir), `uuid` (id = source filename), `http` (Whisper adapter), `file_picker` (upload picker). No state-mgmt/DI package.
 
 ## Architecture
 
 Feature-first layout under `lib/features/<feature>/{domain,data,presentation}`. Five features: `recordings`, `transcription`, `processing`, `settings`, `logs`. No state-management or DI package — plain `ChangeNotifier` + constructor injection.
 
-**Capture types** — the queue is multi-modal. `CaptureType` (`recordings/domain/capture_type.dart`) is `audioRecording` / `audioUpload` / `image` / `text` / `video`. `CaptureType.fromName(null | unknown)` returns `audioRecording`, which is the legacy-defaulting point for rows written before the field existed. Shipped today: mic recordings and text notes; the rest have domain + storage support but their processors report unavailable.
+**Capture types** — the queue is multi-modal. `CaptureType` (`recordings/domain/capture_type.dart`) is `audioRecording` / `audioUpload` / `image` / `text` / `video`. `CaptureType.fromName(null | unknown)` returns `audioRecording`, which is the legacy-defaulting point for rows written before the field existed. Shipped today: mic recordings, text notes, and **file upload for all types** (audio/image/video) via the `+` capture menu → `file_picker`. Processing coverage differs from ingestion: audio (recorded or uploaded) transcribes and text passes through, but **image (OCR) and video (ffmpeg) processors report unavailable** — those engines are mobile-only and not wired yet, so an uploaded image/video is ingested and listed but its processing lands `failed` (retryable, source intact).
 
 **Navigation** — four bottom-nav tabs, one file per body, all hosted by the `RecordingsPage` shell (`features/recordings/presentation/recordings_page.dart`) inside an `IndexedStack` so tab state survives switching:
 
@@ -50,11 +50,11 @@ The shell owns all three controllers, merges them into one `Listenable`, and on 
 4. `repository.saveAll()` — atomic persist (write `.tmp`, then `rename`)
 5. only then `_markAndProcess()` sets `pendingTranscription` → `transcribing` → `completed`/`failed`
 
-Any new capture path (upload, image, video) must mirror steps 1–5 exactly. Processing runs as a separate step; on error the item stays with status `failed` and an `error` string, retryable via `retryTranscription()`. There is intentionally **no delete** in the MVP.
+Any new capture path (upload, image, video) must mirror steps 1–5 exactly. Uploads do so via `MediaImporter` (`recordings/data/media_importer.dart`): it copies the picked file into the recordings dir as `<id>.<ext>` and verifies length > 0 (steps 1–2) before `addUpload` indexes it — the file source comes from the injectable `MediaPicker` seam (`FilePickerMediaPicker` in production, a fake in tests). Processing runs as a separate step; on error the item stays with status `failed` and an `error` string, retryable via `retryTranscription()`. There is intentionally **no delete** in the MVP.
 
 **Controller invariants** (`recordings_controller.dart`) — beyond the pipeline order:
 - Every state mutation goes through `_update()`, which calls `repository.saveAll(_recordings)` — the **entire** `recordings.json` index is atomically rewritten on each status transition, toggle, and retry. There is no partial/incremental write.
-- A single `_isBusy` flag serializes all work: `startRecording`, `stopRecording`, `addTextNote`, and `retryTranscription` early-return if busy. No two operations run concurrently.
+- A single `_isBusy` flag serializes all work: `startRecording`, `stopRecording`, `addTextNote`, `addUpload`, and `retryTranscription` early-return if busy. No two operations run concurrently. `addUpload` holds the lock across the whole pick→copy→process, including the file-dialog await.
 - `startRecording()` gates on `recorder.hasPermission()` and sets a Polish mic-permission error on denial before any file is created.
 - `id` is generated (`uuid.v4()`) at capture start and used as the source filename. It is **passed through** the pipeline (`_activeId`), not parsed back out of the path — extensions vary per capture type, so the old `replaceAll('.m4a', '')` round-trip is gone.
 - `transcriptionService` and `audioConfig` are **settable at runtime** (from the Models/Config tabs). A swap only affects work started afterwards — it must never mutate an in-flight pipeline or a file already on disk.
