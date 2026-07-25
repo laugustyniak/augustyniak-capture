@@ -1,4 +1,6 @@
 import 'package:flutter_test/flutter_test.dart';
+import 'package:voice_notes_phase1/features/processing/data/ocr_processor.dart';
+import 'package:voice_notes_phase1/features/processing/data/video_transcription_processor.dart';
 import 'package:voice_notes_phase1/features/processing/domain/processor.dart';
 import 'package:voice_notes_phase1/features/processing/domain/processor_registry.dart';
 import 'package:voice_notes_phase1/features/recordings/data/recordings_repository.dart';
@@ -118,13 +120,13 @@ void main() {
           isA<TextPassthroughProcessor>());
     });
 
-    test('image and video are unavailable until their slices land', () {
-      expect(build().forType(CaptureType.image), isA<UnavailableProcessor>());
-      expect(build().forType(CaptureType.video), isA<UnavailableProcessor>());
+    test('image routes to OCR, video routes to the video processor', () {
+      expect(build().forType(CaptureType.image), isA<OcrProcessor>());
+      expect(build().forType(CaptureType.video),
+          isA<VideoTranscriptionProcessor>());
     });
 
-    test('UnavailableProcessor fails cleanly with ProcessorNotConfigured',
-        () async {
+    test('default OCR service is disabled and degrades cleanly', () async {
       final Recording item = Recording(
         id: 'i',
         filePath: '/docs/i.jpg',
@@ -135,6 +137,22 @@ void main() {
       );
       await expectLater(
         build().forType(CaptureType.image).process(item),
+        throwsA(isA<ProcessorNotConfiguredException>()),
+      );
+    });
+
+    test('default video extractor is unavailable and degrades cleanly',
+        () async {
+      final Recording item = Recording(
+        id: 'v',
+        filePath: '/docs/v.mp4',
+        createdAt: DateTime.utc(2026),
+        durationMs: 0,
+        status: RecordingStatus.pendingTranscription,
+        type: CaptureType.video,
+      );
+      await expectLater(
+        build().forType(CaptureType.video).process(item),
         throwsA(isA<ProcessorNotConfiguredException>()),
       );
     });

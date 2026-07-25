@@ -5,6 +5,8 @@ import 'package:flutter/material.dart';
 import '../../../app/ui_kit.dart';
 import '../../logs/data/log_store.dart';
 import '../../logs/presentation/logs_tab.dart';
+import '../../processing/data/ocr_service.dart';
+import '../../processing/data/video_audio_extractor.dart';
 import '../../settings/presentation/config_tab.dart';
 import '../../settings/presentation/models_tab.dart';
 import '../../settings/presentation/settings_controller.dart';
@@ -49,12 +51,34 @@ class _RecordingsPageState extends State<RecordingsPage> {
       // Replaced as soon as settings load; a fresh install with no profile
       // keeps this disabled service, which is the pre-existing behaviour.
       transcriptionService: const DisabledTranscriptionService(),
+      ocrService: _buildOcrService(),
+      videoAudioExtractor: _buildVideoAudioExtractor(),
       logSink: logs,
     );
 
     settings.addListener(_applySettings);
     listenable = Listenable.merge(<Listenable>[controller, settings, logs]);
     _bootstrap();
+  }
+
+  /// Desktop shells out to the system `tesseract` binary (fails cleanly if it is
+  /// absent). Mobile has no OCR yet — ML Kit is a later slice — so it degrades
+  /// to the disabled service, which reports "not configured" and stays retryable.
+  static OcrService _buildOcrService() {
+    if (Platform.isLinux || Platform.isMacOS || Platform.isWindows) {
+      return const TesseractOcrService();
+    }
+    return const DisabledOcrService();
+  }
+
+  /// Desktop extracts the audio track with the system `ffmpeg` binary (fails
+  /// cleanly if absent), then reuses the transcription pipeline. Mobile has no
+  /// ffmpeg yet — ffmpeg_kit is a later add — so it degrades to "unavailable".
+  static VideoAudioExtractor _buildVideoAudioExtractor() {
+    if (Platform.isLinux || Platform.isMacOS || Platform.isWindows) {
+      return const FfmpegVideoAudioExtractor();
+    }
+    return const UnavailableVideoAudioExtractor();
   }
 
   Future<void> _bootstrap() async {
