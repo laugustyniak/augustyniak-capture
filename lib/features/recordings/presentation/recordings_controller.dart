@@ -12,6 +12,8 @@ import '../../processing/domain/processor.dart';
 import '../../processing/domain/processor_registry.dart';
 import '../../settings/domain/audio_config.dart';
 import '../../transcription/data/transcription_service.dart';
+import '../data/media_importer.dart';
+import '../data/media_picker.dart';
 import '../data/recordings_repository.dart';
 import '../domain/capture_type.dart';
 import '../domain/recording.dart';
@@ -23,12 +25,15 @@ class RecordingsController extends ChangeNotifier {
     AudioConfig audioConfig = AudioConfig.defaults,
     LogSink logSink = const NoopLogSink(),
     ProcessorRegistry? processorRegistry,
+    MediaPicker? mediaPicker,
     AudioRecorder? recorder,
     AudioPlayer? player,
   })  : _repository = repository,
         _transcriptionService = transcriptionService,
         _audioConfig = audioConfig,
         _logSink = logSink,
+        _mediaPicker = mediaPicker ?? const FilePickerMediaPicker(),
+        _importer = MediaImporter(repository),
         _recorder = recorder ?? AudioRecorder(),
         _player = player ?? AudioPlayer() {
     // The default registry resolves the transcription service lazily, so the
@@ -46,6 +51,8 @@ class RecordingsController extends ChangeNotifier {
 
   final RecordingsRepository _repository;
   final LogSink _logSink;
+  final MediaPicker _mediaPicker;
+  final MediaImporter _importer;
   late final ProcessorRegistry _registry;
 
   // Both are swappable at runtime from the Models/Config tabs. A swap only
@@ -234,6 +241,48 @@ class RecordingsController extends ChangeNotifier {
     } catch (exception) {
       _error = exception.toString();
       _logSink.log('Błąd zapisu notatki: $exception', level: LogLevel.error);
+    } finally {
+      _isBusy = false;
+      notifyListeners();
+    }
+  }
+
+  /// Import an existing file (audio, image or video) as a new item. Mirrors the
+  /// ordering of [stopRecording]: pick, copy the source into the app directory
+  /// and verify it (via [MediaImporter]), index with status `saved`, and only
+  /// then process. A cancelled pick is a no-op; a copy or processing failure
+  /// never deletes the source.
+  Future<void> addUpload(CaptureType type) async {
+    if (_isRecording || _isBusy) return;
+    _isBusy = true;
+    _error = null;
+    notifyListeners();
+
+    try {
+      final PickedMedia? picked = await _mediaPicker.pick(type);
+      if (picked == null) return; // user cancelled
+
+      final String id = const Uuid().v4();
+      final Recording saved = await _importer.importFile(
+        id: id,
+        type: type,
+        source: picked.file,
+        mimeType: picked.mimeType,
+        createdAt: DateTime.now(),
+      );
+
+      // Critical invariant: index only after the source is copied and verified.
+      _recordings = <Recording>[saved, ..._recordings];
+      await _repository.saveAll(_recordings);
+      _logSink.log(
+        'Zaimportowano plik · ${type.name} · ${await File(saved.filePath).length()} B',
+        recordingId: saved.id,
+      );
+
+      await _markAndProcess(saved.id);
+    } catch (exception) {
+      _error = exception.toString();
+      _logSink.log('Błąd importu pliku: $exception', level: LogLevel.error);
     } finally {
       _isBusy = false;
       notifyListeners();

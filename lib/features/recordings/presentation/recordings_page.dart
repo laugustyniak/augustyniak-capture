@@ -10,6 +10,7 @@ import '../../settings/presentation/models_tab.dart';
 import '../../settings/presentation/settings_controller.dart';
 import '../../transcription/data/transcription_service.dart';
 import '../data/recordings_repository.dart';
+import '../domain/capture_type.dart';
 import 'queue_tab.dart';
 import 'recordings_controller.dart';
 
@@ -84,6 +85,26 @@ class _RecordingsPageState extends State<RecordingsPage> {
     );
     if (body != null && body.trim().isNotEmpty) {
       await controller.addTextNote(body);
+    }
+  }
+
+  Future<void> _openCaptureMenu(BuildContext context) async {
+    final _CaptureAction? action = await showModalBottomSheet<_CaptureAction>(
+      context: context,
+      backgroundColor: Console.background,
+      builder: (BuildContext context) => const _CaptureMenuSheet(),
+    );
+    if (action == null || !context.mounted) return;
+
+    switch (action) {
+      case _CaptureAction.textNote:
+        await _composeTextNote(context);
+      case _CaptureAction.audioUpload:
+        await controller.addUpload(CaptureType.audioUpload);
+      case _CaptureAction.imageUpload:
+        await controller.addUpload(CaptureType.image);
+      case _CaptureAction.videoUpload:
+        await controller.addUpload(CaptureType.video);
     }
   }
 
@@ -172,11 +193,11 @@ class _RecordingsPageState extends State<RecordingsPage> {
                     // action stands alone.
                     if (!controller.isRecording && !controller.isBusy) ...<Widget>[
                       FloatingActionButton.small(
-                        heroTag: 'note',
+                        heroTag: 'add',
                         backgroundColor: Console.surfaceRaised,
                         foregroundColor: Console.cyan,
-                        onPressed: () => _composeTextNote(context),
-                        child: const Icon(Icons.note_add_outlined),
+                        onPressed: () => _openCaptureMenu(context),
+                        child: const Icon(Icons.add),
                       ),
                       const SizedBox(height: 12),
                     ],
@@ -328,6 +349,46 @@ class _TextNoteSheetState extends State<_TextNoteSheet> {
           ),
         ],
       ),
+    );
+  }
+}
+
+enum _CaptureAction { textNote, audioUpload, imageUpload, videoUpload }
+
+/// Menu of non-recording capture options, opened from the "+" FAB. Recording
+/// audio stays on its own dedicated button.
+class _CaptureMenuSheet extends StatelessWidget {
+  const _CaptureMenuSheet();
+
+  @override
+  Widget build(BuildContext context) {
+    return SafeArea(
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: <Widget>[
+          const SizedBox(height: 8),
+          _row(context, Icons.sticky_note_2_outlined, 'Nowa notatka',
+              _CaptureAction.textNote),
+          _row(context, Icons.audio_file_outlined, 'Wgraj plik audio',
+              _CaptureAction.audioUpload),
+          _row(context, Icons.image_outlined, 'Wgraj obraz',
+              _CaptureAction.imageUpload),
+          _row(context, Icons.movie_outlined, 'Wgraj wideo',
+              _CaptureAction.videoUpload),
+          const SizedBox(height: 8),
+        ],
+      ),
+    );
+  }
+
+  Widget _row(BuildContext context, IconData icon, String label,
+      _CaptureAction action) {
+    return ListTile(
+      leading: Icon(icon, color: Console.cyan),
+      title: Text(label,
+          style: const TextStyle(
+              color: Console.text, fontWeight: FontWeight.w700, fontSize: 14)),
+      onTap: () => Navigator.pop(context, action),
     );
   }
 }
