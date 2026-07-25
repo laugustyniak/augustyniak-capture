@@ -32,7 +32,9 @@ class FilePickerMediaPicker implements MediaPicker {
     final FilePickerResult? result = await FilePicker.platform.pickFiles(
       type: _filterFor(type),
     );
-    final String? path = result?.files.single.path;
+    final List<PlatformFile>? files = result?.files;
+    if (files == null || files.isEmpty) return null;
+    final String? path = files.first.path;
     if (path == null) return null;
     return PickedMedia(file: File(path), mimeType: mimeForPath(path));
   }
