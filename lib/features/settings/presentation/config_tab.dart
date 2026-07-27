@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 
 import '../../../app/ui_kit.dart';
+import '../../shortcuts/domain/shortcut_action.dart';
+import '../../shortcuts/presentation/shortcuts_section.dart';
 import '../domain/audio_config.dart';
 import '../domain/provider_profile.dart';
 import 'settings_controller.dart';
@@ -15,6 +17,8 @@ class ConfigTab extends StatelessWidget {
     required this.recordingsCount,
     required this.logCount,
     required this.onOpenModels,
+    this.showShortcuts = false,
+    this.rejectedShortcuts = const <ShortcutAction>{},
   });
 
   final SettingsController controller;
@@ -22,6 +26,11 @@ class ConfigTab extends StatelessWidget {
   final int recordingsCount;
   final int logCount;
   final VoidCallback onOpenModels;
+
+  /// Global hotkeys are desktop-only; the shell does the platform check, this
+  /// tab just renders what it is told — same split as the OCR/video services.
+  final bool showShortcuts;
+  final Set<ShortcutAction> rejectedShortcuts;
 
   @override
   Widget build(BuildContext context) {
@@ -137,6 +146,13 @@ class ConfigTab extends StatelessWidget {
               ],
             ),
           ),
+          if (showShortcuts) ...<Widget>[
+            const SizedBox(height: 22),
+            ShortcutsSection(
+              controller: controller,
+              rejected: rejectedShortcuts,
+            ),
+          ],
           const SizedBox(height: 22),
           const SectionHeader(title: 'STORAGE'),
           const SizedBox(height: 12),

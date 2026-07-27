@@ -1,6 +1,8 @@
 import 'package:flutter/foundation.dart';
 import 'package:uuid/uuid.dart';
 
+import '../../shortcuts/domain/hotkey_binding.dart';
+import '../../shortcuts/domain/shortcut_action.dart';
 import '../../transcription/data/transcription_service.dart';
 import '../data/settings_repository.dart';
 import '../domain/app_settings.dart';
@@ -153,6 +155,34 @@ class SettingsController extends ChangeNotifier {
   }
 
   Future<void> resetAudio() => updateAudio(AudioConfig.defaults);
+
+  /// Bind [action] to [binding].
+  ///
+  /// A combination can only drive one action, so taking it from another leaves
+  /// that one unbound rather than registering the same hotkey twice — the OS
+  /// would hand the press to whichever registration happened to win, which is
+  /// not a coin flip worth exposing to the user.
+  Future<void> setShortcut(ShortcutAction action, HotkeyBinding binding) async {
+    if (!binding.isValid) return;
+    final Map<ShortcutAction, HotkeyBinding> next =
+        Map<ShortcutAction, HotkeyBinding>.from(_settings.shortcuts)
+          ..removeWhere((ShortcutAction other, HotkeyBinding existing) =>
+              other != action && existing == binding)
+          ..[action] = binding;
+    await _persist(_settings.copyWith(shortcuts: next));
+  }
+
+  /// Unbind [action]. Persisting the map with the entry removed is what stops
+  /// the default from coming back on the next launch.
+  Future<void> clearShortcut(ShortcutAction action) async {
+    final Map<ShortcutAction, HotkeyBinding> next =
+        Map<ShortcutAction, HotkeyBinding>.from(_settings.shortcuts)
+          ..remove(action);
+    await _persist(_settings.copyWith(shortcuts: next));
+  }
+
+  Future<void> resetShortcuts() =>
+      _persist(_settings.copyWith(resetShortcuts: true));
 
   Future<void> _persist(AppSettings next) async {
     _settings = next;
