@@ -409,6 +409,9 @@ class _RecordingCard extends StatelessWidget {
     final bool reviewed = recording.isProcessedByUser;
     final _StatusVisual visual = _statusVisual(recording.status);
     final String filename = File(recording.filePath).uri.pathSegments.last;
+    // Generic processor output: a transcription, OCR text or a note body.
+    final String transcript = recording.transcript ?? '';
+    final bool hasTranscript = transcript.trim().isNotEmpty;
 
     return AnimatedContainer(
       duration: const Duration(milliseconds: 420),
@@ -583,17 +586,31 @@ class _RecordingCard extends StatelessWidget {
                 backgroundColor: Color(0xFF1A3A51),
               ),
             ],
-            if (recording.transcript != null) ...<Widget>[
+            if (hasTranscript) ...<Widget>[
               const SizedBox(height: 12),
-              Text(
-                recording.transcript!,
-                maxLines: 4,
-                overflow: TextOverflow.ellipsis,
-                style: const TextStyle(
-                  color: Console.textSoft,
-                  fontSize: 12,
-                  height: 1.45,
-                ),
+              Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: <Widget>[
+                  Expanded(
+                    child: Text(
+                      transcript,
+                      maxLines: 4,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(
+                        color: Console.textSoft,
+                        fontSize: 12,
+                        height: 1.45,
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  // Copies the whole text, not the four lines rendered above.
+                  CopyButton(
+                    text: transcript,
+                    tooltip: 'Copy transcript',
+                    semanticLabel: 'Copy transcript to clipboard',
+                  ),
+                ],
               ),
             ],
             if (recording.error != null) ...<Widget>[

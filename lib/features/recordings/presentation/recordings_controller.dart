@@ -18,6 +18,7 @@ import '../data/media_importer.dart';
 import '../data/media_picker.dart';
 import '../data/recordings_repository.dart';
 import '../domain/capture_type.dart';
+import '../domain/clipboard_sink.dart';
 import '../domain/recording.dart';
 
 class RecordingsController extends ChangeNotifier {
@@ -29,6 +30,7 @@ class RecordingsController extends ChangeNotifier {
         const UnavailableVideoAudioExtractor(),
     AudioConfig audioConfig = AudioConfig.defaults,
     LogSink logSink = const NoopLogSink(),
+    ClipboardSink clipboardSink = const NoopClipboardSink(),
     ProcessorRegistry? processorRegistry,
     MediaPicker? mediaPicker,
     AudioRecorder? recorder,
@@ -39,6 +41,7 @@ class RecordingsController extends ChangeNotifier {
         _videoAudioExtractor = videoAudioExtractor,
         _audioConfig = audioConfig,
         _logSink = logSink,
+        _clipboardSink = clipboardSink,
         _mediaPicker = mediaPicker ?? const FilePickerMediaPicker(),
         _importer = MediaImporter(repository),
         _recorder = recorder ?? AudioRecorder(),
@@ -60,6 +63,7 @@ class RecordingsController extends ChangeNotifier {
 
   final RecordingsRepository _repository;
   final LogSink _logSink;
+  final ClipboardSink _clipboardSink;
   final MediaPicker _mediaPicker;
   final MediaImporter _importer;
   late final ProcessorRegistry _registry;
@@ -414,6 +418,9 @@ class RecordingsController extends ChangeNotifier {
         'Przetwarzanie zakończone · ${transcript.length} znaków',
         recordingId: id,
       );
+      // Deliberately last: the item is already `completed` and persisted, so a
+      // refusing clipboard cannot undo a successful capture.
+      await _copyToClipboard(recording.type, transcript, id);
     } catch (exception) {
       await _update(
         id,
@@ -425,6 +432,26 @@ class RecordingsController extends ChangeNotifier {
       _logSink.log(
         'Przetwarzanie nieudane: $exception',
         level: LogLevel.error,
+        recordingId: id,
+      );
+    }
+  }
+
+  /// Hand freshly derived text to the clipboard so a clipboard manager records
+  /// it as a history entry. Text notes are skipped: their processor output is
+  /// the body the user just typed, so nothing was derived worth handing back.
+  ///
+  /// Swallows every error, on the same rule as logging — this runs after the
+  /// item is already `completed` on disk and must never fail the pipeline.
+  Future<void> _copyToClipboard(CaptureType type, String text, String id) async {
+    if (type == CaptureType.text || text.trim().isEmpty) return;
+    try {
+      await _clipboardSink.copy(text);
+      _logSink.log('Wynik skopiowany do schowka.', recordingId: id);
+    } catch (exception) {
+      _logSink.log(
+        'Kopiowanie do schowka nieudane: $exception',
+        level: LogLevel.warn,
         recordingId: id,
       );
     }

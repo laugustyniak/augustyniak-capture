@@ -12,6 +12,7 @@ import '../../settings/presentation/models_tab.dart';
 import '../../settings/presentation/settings_controller.dart';
 import '../../transcription/data/transcription_service.dart';
 import '../data/recordings_repository.dart';
+import '../data/system_clipboard_sink.dart';
 import '../domain/capture_type.dart';
 import 'queue_tab.dart';
 import 'recordings_controller.dart';
@@ -54,6 +55,9 @@ class _RecordingsPageState extends State<RecordingsPage> {
       ocrService: _buildOcrService(),
       videoAudioExtractor: _buildVideoAudioExtractor(),
       logSink: logs,
+      // Finished processor output lands on the system clipboard, so a clipboard
+      // manager keeps it in history. Tests get the no-op default instead.
+      clipboardSink: const SystemClipboardSink(),
     );
 
     settings.addListener(_applySettings);
