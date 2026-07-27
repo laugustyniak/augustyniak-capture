@@ -13,12 +13,18 @@ class ShortcutsSection extends StatelessWidget {
     super.key,
     required this.controller,
     required this.rejected,
+    required this.runWithHotkeysSuspended,
   });
 
   final SettingsController controller;
 
   /// Actions the OS refused to bind, reported back by the registrar.
   final Set<ShortcutAction> rejected;
+
+  /// Runs [action] with every global registration released. Supplied by the
+  /// shell, which owns the coordinator; see [_capture] for why it is needed.
+  final Future<void> Function(Future<void> Function() action)
+      runWithHotkeysSuspended;
 
   @override
   Widget build(BuildContext context) {
@@ -77,15 +83,22 @@ class ShortcutsSection extends StatelessWidget {
     );
   }
 
-  Future<void> _capture(BuildContext context, ShortcutAction action) async {
-    final HotkeyBinding? binding = await showModalBottomSheet<HotkeyBinding>(
-      context: context,
-      backgroundColor: Console.background,
-      builder: (BuildContext context) => _HotkeyCaptureSheet(action: action),
-    );
-    if (binding != null) {
-      await controller.setShortcut(action, binding);
-    }
+  /// A system-scope hotkey is consumed by the OS *before* the focused window
+  /// sees the event, so with the registrations live the user could never rebind
+  /// a combination that is already bound — pressing Alt+Shift+R to change it
+  /// would start a recording instead. Everything is released for the lifetime
+  /// of the sheet and re-registered (with the new binding) on close.
+  Future<void> _capture(BuildContext context, ShortcutAction action) {
+    return runWithHotkeysSuspended(() async {
+      final HotkeyBinding? binding = await showModalBottomSheet<HotkeyBinding>(
+        context: context,
+        backgroundColor: Console.background,
+        builder: (BuildContext context) => _HotkeyCaptureSheet(action: action),
+      );
+      if (binding != null) {
+        await controller.setShortcut(action, binding);
+      }
+    });
   }
 }
 
@@ -201,7 +214,12 @@ class _HotkeyCaptureSheetState extends State<_HotkeyCaptureSheet> {
   String? _hint;
 
   KeyEventResult _onKeyEvent(FocusNode node, KeyEvent event) {
-    // Key-up and auto-repeat carry no new information here.
+    // Releasing a modifier changes what the live preview should show.
+    if (event is KeyUpEvent) {
+      if (HotkeyBinding.isModifierKey(event.logicalKey)) setState(() {});
+      return KeyEventResult.handled;
+    }
+    // Auto-repeat carries no new information here.
     if (event is! KeyDownEvent) return KeyEventResult.handled;
 
     final LogicalKeyboardKey logical = event.logicalKey;

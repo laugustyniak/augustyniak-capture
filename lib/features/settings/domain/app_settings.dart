@@ -34,8 +34,14 @@ class AppSettings {
   /// touches anything the map is stored in full and becomes authoritative: an
   /// action *missing* from a stored map is deliberately unbound, not defaulted
   /// back. That is what makes "clear this shortcut" survive a restart.
+  ///
+  /// Handed out unmodifiable — `_shortcuts` is a plain map, and callers pass it
+  /// straight into the coordinator, so an in-place mutation would desync
+  /// persisted state from what is registered with the OS.
   Map<ShortcutAction, HotkeyBinding> get shortcuts =>
-      _shortcuts ?? ShortcutDefaults.bindings;
+      Map<ShortcutAction, HotkeyBinding>.unmodifiable(
+        _shortcuts ?? ShortcutDefaults.bindings,
+      );
 
   /// False while the defaults are still in force, so the UI can disable its
   /// "restore defaults" button.

@@ -8,12 +8,13 @@ import '../domain/hotkey_registrar.dart';
 import '../domain/shortcut_action.dart';
 import '../domain/window_presenter.dart';
 
-/// Turns a global hotkey press into exactly one capture action.
+/// Turns a global hotkey press into exactly one capture action, and owns the
+/// lifecycle of the OS registrations.
 ///
-/// Deliberately thin. It owns no capture logic of its own: every action calls
-/// the same `RecordingsController` entry point the FAB calls, so the
-/// persist-before-process ordering stays defined in one place and a shortcut can
-/// never become a second, divergent capture path.
+/// Deliberately thin on capture. It has no capture logic of its own: every
+/// action calls the same `RecordingsController` entry point the FAB calls, so
+/// the persist-before-process ordering stays defined in one place and a shortcut
+/// can never become a second, divergent capture path.
 class ShortcutsCoordinator {
   ShortcutsCoordinator({
     required RecordingsController recordings,
@@ -34,29 +35,96 @@ class ShortcutsCoordinator {
   final LogSink _logSink;
 
   Map<ShortcutAction, HotkeyBinding>? _applied;
+  Set<ShortcutAction> _rejected = const <ShortcutAction>{};
   bool _composingNote = false;
+  bool _suspended = false;
+  bool _disposed = false;
+
+  /// Every registrar call is chained onto this so two overlapping operations can
+  /// never interleave. `SystemHotkeyRegistrar.apply` starts by unregistering
+  /// everything, so a concurrent second apply could otherwise wipe the first
+  /// one's registrations halfway through its loop and leave a mixed OS state.
+  Future<void> _queue = Future<void>.value();
 
   /// Bindings the OS refused, surfaced in the Config tab so an unavailable
   /// combination is visible rather than mysteriously dead.
-  Set<ShortcutAction> rejected = const <ShortcutAction>{};
+  Set<ShortcutAction> get rejected => _rejected;
+
+  Future<T> _serial<T>(Future<T> Function() operation) {
+    final Future<T> next = _queue.then((_) => operation());
+    // Swallow here only: the caller still sees the original future's error.
+    _queue = next.then((_) {}, onError: (Object _) {});
+    return next;
+  }
 
   /// (Re)registers the whole set. Cheap to call on every settings notification:
   /// an unchanged map short-circuits, so unrelated changes (a provider swap, an
   /// audio parameter) never churn the OS hotkey table.
   Future<Set<ShortcutAction>> apply(
     Map<ShortcutAction, HotkeyBinding> bindings,
-  ) async {
-    if (_applied != null && mapEquals(_applied, bindings)) return rejected;
-    _applied = Map<ShortcutAction, HotkeyBinding>.from(bindings);
+  ) =>
+      _serial(() => _apply(bindings));
 
-    rejected = await _registrar.apply(_applied!, handle);
-    for (final ShortcutAction action in rejected) {
+  Future<Set<ShortcutAction>> _apply(
+    Map<ShortcutAction, HotkeyBinding> bindings,
+  ) async {
+    if (_disposed) return _rejected;
+    if (_applied != null && mapEquals(_applied, bindings)) return _rejected;
+    _applied = Map<ShortcutAction, HotkeyBinding>.from(bindings);
+    // While the capture sheet is open nothing may be registered; `resume` picks
+    // the new map up.
+    if (_suspended) return _rejected;
+    await _register();
+    return _rejected;
+  }
+
+  /// Releases every registration until [resume].
+  ///
+  /// Required while the key-capture sheet is open: a system-scope hotkey is
+  /// consumed by the OS *before* the focused window sees the event, so trying to
+  /// rebind the combination that is currently bound would fire its action
+  /// instead of being captured.
+  Future<void> suspend() => _serial(() async {
+        if (_disposed || _suspended) return;
+        _suspended = true;
+        try {
+          await _registrar.unregisterAll();
+        } catch (exception) {
+          _logSink.log(
+            'Nie udało się zwolnić skrótów: $exception',
+            level: LogLevel.error,
+          );
+        }
+      });
+
+  Future<void> resume() => _serial(() async {
+        if (_disposed || !_suspended) return;
+        _suspended = false;
+        await _register();
+      });
+
+  Future<void> _register() async {
+    final Map<ShortcutAction, HotkeyBinding>? bindings = _applied;
+    if (bindings == null) return;
+    try {
+      _rejected = await _registrar.apply(bindings, handle);
+      for (final ShortcutAction action in _rejected) {
+        _logSink.log(
+          'Skrót zajęty przez inną aplikację: ${action.label}.',
+          level: LogLevel.warn,
+        );
+      }
+    } catch (exception) {
+      // Clearing `_applied` matters: leaving it set would make every later
+      // identical apply short-circuit, wedging the feature off permanently
+      // after one transient platform failure.
+      _applied = null;
+      _rejected = const <ShortcutAction>{};
       _logSink.log(
-        'Skrót zajęty przez inną aplikację: ${action.label}.',
-        level: LogLevel.warn,
+        'Rejestracja skrótów nieudana: $exception',
+        level: LogLevel.error,
       );
     }
-    return rejected;
   }
 
   /// Public so a test can fire an action without going through the OS.
@@ -65,6 +133,11 @@ class ShortcutsCoordinator {
   /// convenience layer and must never surface an exception into the capture
   /// pipeline, which does its own error handling and marks items `failed`.
   Future<void> handle(ShortcutAction action) async {
+    // Synchronous kill switch. `dispose` cannot await the OS before the shell
+    // disposes the controller, so a press landing in that window must stop here
+    // rather than reach a disposed controller.
+    if (_disposed) return;
+
     // Only the note sheet needs a re-entrancy guard: the controller's `_isBusy`
     // flag already serialises recording and uploads, but the compose sheet is
     // pure UI and a second press would stack a second sheet on top of it.
@@ -76,6 +149,11 @@ class ShortcutsCoordinator {
       if (_composingNote) return;
       _composingNote = true;
     }
+
+    // Logged before dispatch, not after: a cancelled file dialog and a capture
+    // that failed inside the controller both return normally, so a trailing
+    // "done" line would claim a success that never happened.
+    _logSink.log('Skrót globalny: ${action.label}.');
 
     try {
       if (action.needsWindow) {
@@ -100,7 +178,6 @@ class ShortcutsCoordinator {
         case ShortcutAction.uploadVideo:
           await _recordings.addUpload(CaptureType.video);
       }
-      _logSink.log('Skrót globalny: ${action.label}.');
     } catch (exception) {
       _logSink.log(
         'Skrót nieudany (${action.label}): $exception',
@@ -113,5 +190,10 @@ class ShortcutsCoordinator {
     }
   }
 
-  Future<void> dispose() => _registrar.unregisterAll();
+  Future<void> dispose() {
+    // Set synchronously so `handle` starts refusing immediately, before the
+    // unregister round-trip completes.
+    _disposed = true;
+    return _serial(() => _registrar.unregisterAll());
+  }
 }
