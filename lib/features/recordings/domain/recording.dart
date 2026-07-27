@@ -25,6 +25,7 @@ class Recording {
     this.type = CaptureType.audioRecording,
     this.sourceMimeType,
     this.transcript,
+    this.title,
     this.error,
     this.isProcessedByUser = false,
     this.processedAt,
@@ -70,7 +71,13 @@ class Recording {
 
   /// Processor output text: transcript, OCR result, or the note body. Nullable
   /// until processing completes; this is what the Queue search matches on.
+  /// User-editable after processing (never touched by the pipeline once set by
+  /// the user — edits and re-processing are distinct paths).
   final String? transcript;
+
+  /// Optional user-set display name. Null on legacy rows and until named; the
+  /// card falls back to the filename. Never set by processing.
+  final String? title;
   final String? error;
 
   /// User-level state. This is intentionally separate from AI processing.
@@ -80,6 +87,8 @@ class Recording {
   Recording copyWith({
     RecordingStatus? status,
     String? transcript,
+    String? title,
+    bool clearTitle = false,
     String? error,
     bool clearError = false,
     bool? isProcessedByUser,
@@ -95,6 +104,7 @@ class Recording {
       sourceMimeType: sourceMimeType,
       status: status ?? this.status,
       transcript: transcript ?? this.transcript,
+      title: clearTitle ? null : (title ?? this.title),
       error: clearError ? null : (error ?? this.error),
       isProcessedByUser: isProcessedByUser ?? this.isProcessedByUser,
       processedAt: clearProcessedAt ? null : (processedAt ?? this.processedAt),
@@ -110,6 +120,7 @@ class Recording {
         'type': type.name,
         'sourceMimeType': sourceMimeType,
         'transcript': transcript,
+        'title': title,
         'error': error,
         'isProcessedByUser': isProcessedByUser,
         'processedAt': processedAt?.toIso8601String(),
@@ -127,6 +138,7 @@ class Recording {
       type: CaptureType.fromName(json['type'] as String?),
       sourceMimeType: json['sourceMimeType'] as String?,
       transcript: json['transcript'] as String?,
+      title: json['title'] as String?,
       error: json['error'] as String?,
       isProcessedByUser: json['isProcessedByUser'] as bool? ?? false,
       processedAt: json['processedAt'] == null

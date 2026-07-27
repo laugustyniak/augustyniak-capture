@@ -353,6 +353,33 @@ class RecordingsController extends ChangeNotifier {
     }
   }
 
+  /// Overwrite an item's processor-output text (transcript / OCR / note body)
+  /// with a user edit. Distinct from [retryTranscription], which re-runs the
+  /// processor. A blank edit is ignored so an item is never left textless.
+  Future<void> editTranscript(String id, String text) async {
+    final String trimmed = text.trim();
+    if (trimmed.isEmpty) return;
+    await _update(id, (Recording item) => item.copyWith(transcript: trimmed));
+    _logSink.log('Zaktualizowano tekst.', recordingId: id);
+  }
+
+  /// Set or clear an item's display title. An empty value clears it (the card
+  /// falls back to the filename).
+  Future<void> setTitle(String id, String? title) async {
+    final String trimmed = (title ?? '').trim();
+    await _update(
+      id,
+      (Recording item) => item.copyWith(
+        title: trimmed.isEmpty ? null : trimmed,
+        clearTitle: trimmed.isEmpty,
+      ),
+    );
+    _logSink.log(
+      trimmed.isEmpty ? 'Usunięto tytuł.' : 'Ustawiono tytuł.',
+      recordingId: id,
+    );
+  }
+
   Future<void> toggleProcessed(String id) async {
     final Recording recording =
         _recordings.firstWhere((Recording item) => item.id == id);
