@@ -11,6 +11,7 @@ void main() {
       durationMs: 1500,
       status: RecordingStatus.completed,
       transcript: 'Test',
+      title: 'Spotkanie z klientem',
       isProcessedByUser: true,
       processedAt: processedAt,
     );
@@ -20,8 +21,30 @@ void main() {
     expect(restored.id, original.id);
     expect(restored.status, RecordingStatus.completed);
     expect(restored.transcript, 'Test');
+    expect(restored.title, 'Spotkanie z klientem');
     expect(restored.isProcessedByUser, isTrue);
     expect(restored.processedAt, processedAt);
+  });
+
+  test('copyWith edits transcript and title, and clears the title', () {
+    final Recording original = Recording(
+      id: 'x',
+      filePath: '/tmp/x.m4a',
+      createdAt: DateTime.utc(2026, 7, 20),
+      durationMs: 100,
+      status: RecordingStatus.completed,
+      transcript: 'old',
+      title: 'old title',
+    );
+
+    final Recording edited =
+        original.copyWith(transcript: 'new', title: 'new title');
+    expect(edited.transcript, 'new');
+    expect(edited.title, 'new title');
+
+    final Recording untitled = edited.copyWith(clearTitle: true);
+    expect(untitled.title, isNull);
+    expect(untitled.transcript, 'new'); // unaffected
   });
 
   test('legacy JSON defaults to not reviewed', () {
@@ -37,5 +60,6 @@ void main() {
 
     expect(restored.isProcessedByUser, isFalse);
     expect(restored.processedAt, isNull);
+    expect(restored.title, isNull); // no title key on legacy rows
   });
 }
