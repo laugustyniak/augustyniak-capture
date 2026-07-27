@@ -118,7 +118,12 @@ class AppSettings {
     final dynamic rawAudio = json['audio'];
     return AppSettings(
       profiles: profiles,
-      activeProfileId: json['activeProfileId'] as String?,
+      // Type-checked rather than cast: a hand-edited or corrupted settings.json
+      // holding a non-string here would throw out of the whole load, taking the
+      // profiles and audio config with it. Same defensive shape as `profiles`
+      // and `audio` above.
+      activeProfileId:
+          json['activeProfileId'] is String ? json['activeProfileId'] as String : null,
       audio: rawAudio is Map<String, dynamic>
           ? AudioConfig.fromJson(rawAudio)
           : AudioConfig.defaults,

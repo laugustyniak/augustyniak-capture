@@ -572,8 +572,14 @@ class RecordingsController extends ChangeNotifier {
     _recordings = _recordings
         .map((Recording item) => item.id == id ? transform(item) : item)
         .toList();
+    // Persist even after dispose: the drain can be mid-job when the shell tears
+    // the page down, and the status it just computed still belongs on disk.
     await _persistAll();
-    notifyListeners();
+    // Notifying does not. `_processOne` awaits a processor, so dispose can land
+    // inside that gap; a disposed ChangeNotifier throws from notifyListeners,
+    // and the drain runs unawaited, so the error would surface as an unhandled
+    // async exception with the queue left mid-flight.
+    if (!_disposed) notifyListeners();
   }
 
   /// Serialized write of the whole index. `RecordingsRepository.saveAll` writes

@@ -37,11 +37,9 @@ class _QueueTabState extends State<QueueTab> {
   Widget build(BuildContext context) {
     final RecordingsController controller = widget.controller;
     final List<Recording> visible = _filter(controller.recordings);
-    final int processingCount = controller.recordings
-        .where((Recording item) =>
-            item.status == RecordingStatus.pendingTranscription ||
-            item.status == RecordingStatus.transcribing)
-        .length;
+    // The controller derives this from the same statuses; keeping a second
+    // copy here is how the two drift apart.
+    final int processingCount = controller.pendingProcessingCount;
     final int failedCount = controller.recordings
         .where((Recording item) => item.status == RecordingStatus.failed)
         .length;

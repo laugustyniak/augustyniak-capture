@@ -129,6 +129,30 @@ void main() {
         throwsA(isA<ProcessException>()),
       );
     });
+
+    test('a missing binary leaves no temp directory behind', () async {
+      final File vid = File(p.join(tmp.path, 'v.mp4'));
+      await vid.writeAsBytes(<int>[1, 2, 3]);
+
+      // The extractor creates its scratch dir before invoking ffmpeg, so a
+      // throwing `Process.run` — the normal path on a machine without ffmpeg —
+      // must still clean it up rather than leaking one dir per failed video.
+      int scratchDirs() => Directory.systemTemp
+          .listSync()
+          .whereType<Directory>()
+          .where((Directory dir) =>
+              p.basename(dir.path).startsWith('audivoa_video_audio'))
+          .length;
+
+      final int before = scratchDirs();
+      await expectLater(
+        const FfmpegVideoAudioExtractor(executable: 'ffmpeg_definitely_absent')
+            .extractAudio(vid),
+        throwsA(isA<ProcessException>()),
+      );
+
+      expect(scratchDirs(), before);
+    });
   });
 
   group('video ingestion routes to extract+transcribe (real upload path)', () {

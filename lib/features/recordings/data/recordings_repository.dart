@@ -34,14 +34,6 @@ class RecordingsRepository {
     return File(p.join(directory.path, '$id.$extension'));
   }
 
-  /// Convenience over [createSourceFile] using the per-type extension policy.
-  Future<File> createSourceFileFor(
-    String id,
-    CaptureType type, {
-    String? mimeType,
-  }) =>
-      createSourceFile(id, policy.extensionFor(type, mimeType: mimeType));
-
   /// Mic-capture path, unchanged.
   Future<File> createAudioFile(String id) => createSourceFile(id, 'm4a');
 

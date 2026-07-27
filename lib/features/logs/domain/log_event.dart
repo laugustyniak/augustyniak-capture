@@ -40,12 +40,8 @@ class LogEvent {
 
   /// Unknown or missing levels degrade to `info` instead of throwing, so a log
   /// file written by a newer build still loads.
-  static LogLevel _levelFromName(String? name) {
-    for (final LogLevel level in LogLevel.values) {
-      if (level.name == name) return level;
-    }
-    return LogLevel.info;
-  }
+  static LogLevel _levelFromName(String? name) =>
+      LogLevel.values.asNameMap()[name] ?? LogLevel.info;
 }
 
 /// Write-only seam used by `RecordingsController`. Defaults to a no-op so the
