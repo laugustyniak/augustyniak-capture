@@ -1,6 +1,8 @@
 import 'dart:async';
 import 'dart:io';
 
+// `setEquals` lives in foundation and is NOT among the handful of symbols
+// material re-exports from it.
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 
@@ -157,6 +159,25 @@ class _RecordingsPageState extends State<RecordingsPage> {
     setState(() => rejectedShortcuts = rejected);
   }
 
+  /// Pairs suspend/resume in one place so the Config tab cannot leak a
+  /// suspended state if the capture sheet throws or is dismissed.
+  Future<void> _runWithHotkeysSuspended(
+    Future<void> Function() action,
+  ) async {
+    await shortcuts.suspend();
+    try {
+      await action();
+    } finally {
+      await shortcuts.resume();
+      // Re-read the refusal set. A rebind notifies settings while the hotkeys
+      // are still suspended, so that `apply` short-circuits and hands back the
+      // pre-suspend value; only `resume` re-registers and learns what the OS
+      // actually refused. Without this the Config tab keeps showing the stale
+      // amber flags until some unrelated setting changes.
+      await _applyShortcuts();
+    }
+  }
+
   Future<void> _composeTextNote(BuildContext context) async {
     final String? body = await showModalBottomSheet<String>(
       context: context,
@@ -192,8 +213,9 @@ class _RecordingsPageState extends State<RecordingsPage> {
   @override
   void dispose() {
     settings.removeListener(_applySettings);
-    // The OS keeps a registration until it is told otherwise; leaving one behind
-    // would make the hotkey fire into a disposed controller.
+    // The OS keeps a registration until it is told otherwise. This cannot be
+    // awaited here, so the coordinator sets its `_disposed` flag synchronously
+    // and refuses presses landing in the gap before the unregister completes.
     unawaited(shortcuts.dispose());
     controller.dispose();
     settings.dispose();
@@ -266,6 +288,7 @@ class _RecordingsPageState extends State<RecordingsPage> {
                     setState(() => navigationIndex = modelsIndex),
                 showShortcuts: _supportsGlobalHotkeys,
                 rejectedShortcuts: rejectedShortcuts,
+                runWithHotkeysSuspended: _runWithHotkeysSuspended,
               ),
             ],
           ),

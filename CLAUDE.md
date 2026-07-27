@@ -17,12 +17,25 @@ flutter create --platforms=android,ios .
 flutter pub get
 ```
 
+**Linux builds need `keybinder-3.0` installed first.** `hotkey_manager` (global
+shortcuts) links against it, and without it `flutter build linux` aborts at
+*"Unable to generate build files"* — this is a **build-time** failure, not a
+runtime degradation, so nothing runs at all:
+
+```bash
+sudo apt-get install keybinder-3.0   # resolves to libkeybinder-3.0-dev
+```
+
 - Run: `flutter run`
 - Run with transcription token: `flutter run --dart-define=TRANSCRIPTION_TOKEN=secret`
 - All tests: `flutter test`
 - Single test file: `flutter test test/recording_test.dart`
 - Single test by name: `flutter test --plain-name "legacy JSON defaults to not reviewed"`
 - Analyze/lint: `flutter analyze` (config in `analysis_options.yaml`: `flutter_lints` + `avoid_print`, `prefer_final_locals`)
+
+There is **no CI** — `.github/workflows/ci.yml.disabled` is a commented-out template (Actions is metered on this private repo and the budget blocked every job). `flutter analyze && flutter test` locally is therefore a hard gate, not a nicety; nothing else will catch a compile error. Re-enable by renaming the file to `ci.yml` and uncommenting.
+
+Global shortcuts on **Linux** additionally need `sudo apt-get install keybinder-3.0` (`hotkey_manager`'s system dependency). Without it the registrar fails at runtime and the shortcuts degrade to unavailable — everything else still works.
 
 Dart SDK `>=3.10.0 <4.0.0`. Runtime deps: `record` (capture), `audioplayers` (playback), `path_provider` (app docs dir), `uuid` (id = source filename), `http` (Whisper adapter), `file_picker` (upload picker), `hotkey_manager` + `window_manager` (desktop global shortcuts). No state-mgmt/DI package.
 
@@ -41,7 +54,7 @@ Feature-first layout under `lib/features/<feature>/{domain,data,presentation}`. 
 | 2 | Logs | `logs/presentation/logs_tab.dart` | `LogStore` |
 | 3 | Config | `settings/presentation/config_tab.dart` | `SettingsController` |
 
-The shell owns all three controllers, merges them into one `Listenable`, and on every settings change pushes `settings.transcriptionService` and `settings.audio` into the recordings controller — plus `settings.shortcuts` into the `ShortcutsCoordinator` it also owns. The capture FAB is gated to index 0.
+The shell owns the three controllers plus the `ShortcutsCoordinator`, merges the controllers into one `Listenable`, and on every settings change pushes `settings.transcriptionService` and `settings.audio` into the recordings controller — plus `settings.shortcuts` into the `ShortcutsCoordinator` it also owns. The capture FAB is gated to index 0.
 
 **Capture lifecycle** — the ordered pipeline. Every capture entry point follows the identical order; `RecordingsController.stopRecording()` is the reference implementation and `addTextNote()` mirrors it. Do not reorder these steps:
 1. obtain the source bytes (`recorder.stop()` → file path; for a note, write the `.txt`)
@@ -94,7 +107,12 @@ The shell picks the desktop impls (`Tesseract`/`Ffmpeg`) on Linux/macOS/Windows 
 - Two swappable seams, same shape as `OcrService`: `HotkeyRegistrar` (`NoopHotkeyRegistrar` default, `SystemHotkeyRegistrar` on desktop) and `WindowPresenter` (`NoopWindowPresenter` / `SystemWindowPresenter`). `apply()` replaces the **whole** registration set and **returns** the actions the OS refused rather than throwing — one unavailable combination must not cost the user the others; the shell surfaces them in the Config tab.
 - `ShortcutsCoordinator` (`presentation/`) owns dispatch and holds **no capture logic**: every action calls the same `RecordingsController` entry point the FAB calls, so a shortcut can never become a second capture path. Two rules to preserve: `toggleRecording` **must not raise the window** (the point of a global record hotkey is not leaving the app you are in), while every other action must, because it opens a sheet or a file dialog. The note action takes its re-entrancy flag **before the first `await`**, not after presenting the window. Errors are swallowed and logged, like `ClipboardSink`.
 - Persisted in `settings.json` under `shortcuts`. **Absent** = never configured → defaults (so a later build can still ship a default for a new action). **Present** = authoritative: an action missing from a stored map is deliberately unbound, which is what makes "clear this shortcut" survive a restart. `AppSettings._shortcuts` is private and nullable precisely to encode that difference.
+- **Registrations are suspended while the key-capture sheet is open.** A `HotKeyScope.system` hotkey is consumed by the OS *before* the focused window sees the event, so with them live the user could never rebind a combination that is already bound — pressing Alt+Shift+R to change it would start a recording instead. `ConfigTab`/`ShortcutsSection` receive a `runWithHotkeysSuspended` callback; the shell pairs `coordinator.suspend()`/`resume()` around it. An `apply()` arriving while suspended records the map but registers nothing; `resume()` picks it up.
+- **Every registrar call is serialized** through an internal queue in the coordinator. `SystemHotkeyRegistrar.apply` starts by unregistering everything, so two overlapping applies could otherwise wipe each other mid-loop. A registrar failure clears `_applied` — leaving it set would make every later identical apply short-circuit and wedge the feature off for the session.
+- `dispose()` sets a `_disposed` flag **synchronously** and `handle()` checks it first. The shell cannot await the unregister before disposing the controller, so that flag is the only thing stopping a press in that window from reaching a disposed controller.
 - `main.dart` calls `windowManager.ensureInitialized()` and `hotKeyManager.unregisterAll()` on desktop before `runApp` — the latter clears registrations a hot restart would otherwise leave firing into a dead isolate.
+- Two caveats worth knowing. **`rejected` may always be empty**: it depends on `hotKeyManager.register` throwing when the OS refuses a combination, which the plugin does not document — the amber "combination taken" row is unverified. And `Platform.isMacOS` is branched on in `main.dart` and the shell, but there is no `macos/` target in the repo, so that path is currently unreachable.
+- Layering note: `hotkey_binding.dart` imports `package:flutter/services.dart` for `PhysicalKeyboardKey`/`LogicalKeyboardKey`. These are pure key-identity constants, not a platform channel, so the domain layer stays test-friendly and the `ClipboardSink` rule above is not violated in spirit — but it is the one place `domain/` touches `services.dart`.
 
 **Logs** (`features/logs/`): `LogStore` is a `ChangeNotifier` ring buffer implementing `LogSink`, newest-first, capacity 500. The `LogArchive` interface keeps the store pure-Dart testable; `FileLogArchive` is the platform impl. Read-only view — nothing in the Logs tab mutates recordings.
 

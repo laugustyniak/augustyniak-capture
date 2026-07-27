@@ -54,6 +54,17 @@ flutter run
 
 Polecenie `flutter create .` zachowa pliki w `lib/`, a wygeneruje pełne pliki Gradle/Xcode wymagane przez lokalną wersję Fluttera.
 
+### Linux: wymagany `keybinder-3.0`
+
+Skróty globalne (`hotkey_manager`) linkują się z `keybinder-3.0`. Bez tej
+biblioteki `flutter build linux` **przerywa się na etapie generowania plików
+budowania** („Unable to generate build files") — to błąd kompilacji, nie
+degradacja w czasie działania, więc aplikacja w ogóle się nie uruchomi:
+
+```bash
+sudo apt-get install keybinder-3.0
+```
+
 ## Włączenie endpointu Whisper
 
 W `lib/features/recordings/presentation/recordings_page.dart` zamień:

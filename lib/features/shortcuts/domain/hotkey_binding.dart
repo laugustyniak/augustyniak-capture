@@ -78,21 +78,61 @@ class HotkeyBinding {
       ].join(' + ');
 
   String get keyLabel {
+    final String? explicit = _explicitLabels[logicalKeyId];
+    if (explicit != null) return explicit;
+
     final LogicalKeyboardKey? key =
         LogicalKeyboardKey.findKeyByKeyId(logicalKeyId);
-    if (key == null) return '0x${logicalKeyId.toRadixString(16)}';
-    // Space and the other whitespace keys have a blank `keyLabel`; `debugName`
-    // is the only readable fallback and is itself null in release builds.
+    if (key == null) return _hex;
     final String raw = key.keyLabel.trim();
-    if (raw.isEmpty) return key.debugName ?? '0x${logicalKeyId.toRadixString(16)}';
+    // `debugName` is null in release builds, so this last fallback is hex. Any
+    // key a user is likely to bind should be in [_explicitLabels] instead.
+    if (raw.isEmpty) return key.debugName ?? _hex;
     return raw.length == 1 ? raw.toUpperCase() : raw;
   }
+
+  String get _hex => '0x${logicalKeyId.toRadixString(16)}';
+
+  /// Keys whose `keyLabel` is blank or unhelpful. Without these a shortcut on
+  /// Space or F5 would render as `0x20`/`0x…` to anyone running a release build,
+  /// where `debugName` is stripped.
+  static final Map<int, String> _explicitLabels = <int, String>{
+    LogicalKeyboardKey.space.keyId: 'Space',
+    LogicalKeyboardKey.enter.keyId: 'Enter',
+    LogicalKeyboardKey.tab.keyId: 'Tab',
+    LogicalKeyboardKey.backspace.keyId: 'Backspace',
+    LogicalKeyboardKey.delete.keyId: 'Delete',
+    LogicalKeyboardKey.escape.keyId: 'Esc',
+    LogicalKeyboardKey.insert.keyId: 'Insert',
+    LogicalKeyboardKey.home.keyId: 'Home',
+    LogicalKeyboardKey.end.keyId: 'End',
+    LogicalKeyboardKey.pageUp.keyId: 'PgUp',
+    LogicalKeyboardKey.pageDown.keyId: 'PgDn',
+    LogicalKeyboardKey.arrowUp.keyId: '↑',
+    LogicalKeyboardKey.arrowDown.keyId: '↓',
+    LogicalKeyboardKey.arrowLeft.keyId: '←',
+    LogicalKeyboardKey.arrowRight.keyId: '→',
+    LogicalKeyboardKey.f1.keyId: 'F1',
+    LogicalKeyboardKey.f2.keyId: 'F2',
+    LogicalKeyboardKey.f3.keyId: 'F3',
+    LogicalKeyboardKey.f4.keyId: 'F4',
+    LogicalKeyboardKey.f5.keyId: 'F5',
+    LogicalKeyboardKey.f6.keyId: 'F6',
+    LogicalKeyboardKey.f7.keyId: 'F7',
+    LogicalKeyboardKey.f8.keyId: 'F8',
+    LogicalKeyboardKey.f9.keyId: 'F9',
+    LogicalKeyboardKey.f10.keyId: 'F10',
+    LogicalKeyboardKey.f11.keyId: 'F11',
+    LogicalKeyboardKey.f12.keyId: 'F12',
+  };
 
   /// Modifiers cannot be the *triggering* key of a combination — pressing Shift
   /// alone must not be captured as a binding.
   static bool isModifierKey(LogicalKeyboardKey key) =>
       _modifierKeys.contains(key);
 
+  // `final`, not `const`: `LogicalKeyboardKey` overrides `operator ==`, and a
+  // const set may only hold elements with primitive equality.
   static final Set<LogicalKeyboardKey> _modifierKeys = <LogicalKeyboardKey>{
     LogicalKeyboardKey.control,
     LogicalKeyboardKey.controlLeft,
@@ -100,6 +140,10 @@ class HotkeyBinding {
     LogicalKeyboardKey.alt,
     LogicalKeyboardKey.altLeft,
     LogicalKeyboardKey.altRight,
+    // AltGr is the whole reason the defaults avoid Ctrl+Alt; depending on the
+    // platform and layout Flutter reports it here rather than as altRight, and
+    // it must never be accepted as a trigger key.
+    LogicalKeyboardKey.altGraph,
     LogicalKeyboardKey.shift,
     LogicalKeyboardKey.shiftLeft,
     LogicalKeyboardKey.shiftRight,

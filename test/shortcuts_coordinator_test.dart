@@ -65,7 +65,9 @@ class _DenyingRecorder implements AudioRecorder {
 
 class _FakeRegistrar implements HotkeyRegistrar {
   int applyCount = 0;
-  bool unregistered = false;
+  int unregisterCount = 0;
+  bool throwOnApply = false;
+  Completer<void>? gate;
   Set<ShortcutAction> refuse = const <ShortcutAction>{};
   Map<ShortcutAction, HotkeyBinding> applied =
       const <ShortcutAction, HotkeyBinding>{};
@@ -76,13 +78,16 @@ class _FakeRegistrar implements HotkeyRegistrar {
     ShortcutTrigger onTriggered,
   ) async {
     applyCount++;
+    final Completer<void>? pending = gate;
+    if (pending != null) await pending.future;
+    if (throwOnApply) throw StateError('platform channel unavailable');
     applied = bindings;
     return refuse;
   }
 
   @override
   Future<void> unregisterAll() async {
-    unregistered = true;
+    unregisterCount++;
   }
 }
 
@@ -91,6 +96,9 @@ class _CountingPresenter implements WindowPresenter {
 
   @override
   Future<void> present() async {
+    // A real suspension point. Raising a window is an OS round-trip; a guard
+    // that only holds when this completes synchronously is a false pass.
+    await Future<void>.delayed(Duration.zero);
     presents++;
   }
 }
@@ -104,6 +112,7 @@ void main() {
   late _CountingPresenter presenter;
   late int noteCalls;
   late Completer<void>? noteGate;
+  late bool noteThrows;
 
   ShortcutsCoordinator build() => ShortcutsCoordinator(
         recordings: recordings,
@@ -111,9 +120,18 @@ void main() {
           noteCalls++;
           final Completer<void>? gate = noteGate;
           if (gate != null) await gate.future;
+          if (noteThrows) throw StateError('sheet blew up');
         },
         registrar: registrar,
         windowPresenter: presenter,
+      );
+
+  /// A binding that is not in the defaults, for "did the map actually change"
+  /// assertions.
+  HotkeyBinding altF9() => HotkeyBinding.fromKeys(
+        physical: PhysicalKeyboardKey.f9,
+        logical: LogicalKeyboardKey.f9,
+        modifiers: const <HotkeyModifier>{HotkeyModifier.control},
       );
 
   setUp(() {
@@ -131,6 +149,7 @@ void main() {
     presenter = _CountingPresenter();
     noteCalls = 0;
     noteGate = null;
+    noteThrows = false;
   });
 
   tearDown(() {
@@ -138,109 +157,208 @@ void main() {
     appDir.deleteSync(recursive: true);
   });
 
-  test('showWindow raises the window and does nothing else', () async {
-    final ShortcutsCoordinator coordinator = build();
+  group('dispatch', () {
+    test('showWindow raises the window and does nothing else', () async {
+      final ShortcutsCoordinator coordinator = build();
 
-    await coordinator.handle(ShortcutAction.showWindow);
+      await coordinator.handle(ShortcutAction.showWindow);
 
-    expect(presenter.presents, 1);
-    expect(recordings.recordings, isEmpty);
-    expect(noteCalls, 0);
-  });
-
-  test('toggleRecording reaches the controller without raising the window',
-      () async {
-    final ShortcutsCoordinator coordinator = build();
-
-    await coordinator.handle(ShortcutAction.toggleRecording);
-
-    // The whole point of a global record hotkey: it must not pull the user out
-    // of whatever they were working in.
-    expect(presenter.presents, 0);
-    // The denied microphone proves `startRecording` actually ran.
-    expect(recordings.error, 'Brak uprawnienia do mikrofonu.');
-  });
-
-  test('newTextNote raises the window before opening the sheet', () async {
-    final ShortcutsCoordinator coordinator = build();
-
-    await coordinator.handle(ShortcutAction.newTextNote);
-
-    expect(presenter.presents, 1);
-    expect(noteCalls, 1);
-  });
-
-  test('a second note hotkey while the sheet is open is ignored', () async {
-    final ShortcutsCoordinator coordinator = build();
-    noteGate = Completer<void>();
-
-    final Future<void> first = coordinator.handle(ShortcutAction.newTextNote);
-    await coordinator.handle(ShortcutAction.newTextNote);
-
-    expect(noteCalls, 1, reason: 'the sheet must not stack on itself');
-    noteGate!.complete();
-    await first;
-
-    // Once the sheet closes the shortcut works again.
-    noteGate = null;
-    await coordinator.handle(ShortcutAction.newTextNote);
-    expect(noteCalls, 2);
-  });
-
-  test('upload shortcuts route to the matching capture type', () async {
-    final ShortcutsCoordinator coordinator = build();
-
-    await coordinator.handle(ShortcutAction.uploadImage);
-    expect(picker.requested, CaptureType.image);
-    expect(presenter.presents, 1, reason: 'the file dialog needs the window');
-
-    await coordinator.handle(ShortcutAction.uploadVideo);
-    expect(picker.requested, CaptureType.video);
-
-    await coordinator.handle(ShortcutAction.uploadAudio);
-    expect(picker.requested, CaptureType.audioUpload);
-  });
-
-  test('re-applying an unchanged map leaves the OS hotkey table alone',
-      () async {
-    final ShortcutsCoordinator coordinator = build();
-    final Map<ShortcutAction, HotkeyBinding> bindings =
-        Map<ShortcutAction, HotkeyBinding>.from(ShortcutDefaults.bindings);
-
-    await coordinator.apply(bindings);
-    await coordinator.apply(Map<ShortcutAction, HotkeyBinding>.from(bindings));
-
-    expect(registrar.applyCount, 1);
-
-    // A real change does go through.
-    await coordinator.apply(<ShortcutAction, HotkeyBinding>{
-      ...bindings,
-      ShortcutAction.showWindow: HotkeyBinding.fromKeys(
-        physical: PhysicalKeyboardKey.keyZ,
-        logical: LogicalKeyboardKey.keyZ,
-        modifiers: const <HotkeyModifier>{HotkeyModifier.control},
-      ),
+      expect(presenter.presents, 1);
+      expect(recordings.recordings, isEmpty);
+      expect(noteCalls, 0);
     });
-    expect(registrar.applyCount, 2);
+
+    test('toggleRecording reaches the controller without raising the window',
+        () async {
+      final ShortcutsCoordinator coordinator = build();
+
+      await coordinator.handle(ShortcutAction.toggleRecording);
+
+      // The whole point of a global record hotkey: it must not pull the user
+      // out of whatever they were working in.
+      expect(presenter.presents, 0);
+      // The denied microphone proves `startRecording` actually ran.
+      expect(recordings.error, 'Brak uprawnienia do mikrofonu.');
+    });
+
+    test('newTextNote raises the window before opening the sheet', () async {
+      final ShortcutsCoordinator coordinator = build();
+
+      await coordinator.handle(ShortcutAction.newTextNote);
+
+      expect(presenter.presents, 1);
+      expect(noteCalls, 1);
+    });
+
+    test('upload shortcuts route to the matching capture type', () async {
+      final ShortcutsCoordinator coordinator = build();
+
+      await coordinator.handle(ShortcutAction.uploadImage);
+      expect(picker.requested, CaptureType.image);
+      expect(presenter.presents, 1, reason: 'the file dialog needs the window');
+
+      await coordinator.handle(ShortcutAction.uploadVideo);
+      expect(picker.requested, CaptureType.video);
+
+      await coordinator.handle(ShortcutAction.uploadAudio);
+      expect(picker.requested, CaptureType.audioUpload);
+    });
+
+    test('a second note hotkey while the sheet is open is ignored', () async {
+      final ShortcutsCoordinator coordinator = build();
+      noteGate = Completer<void>();
+
+      final Future<void> first = coordinator.handle(ShortcutAction.newTextNote);
+      // Let the first press travel all the way to the sheet, so the second one
+      // is genuinely blocked by the guard rather than by scheduling order.
+      await pumpEventQueue();
+      expect(noteCalls, 1);
+
+      await coordinator.handle(ShortcutAction.newTextNote);
+      await pumpEventQueue();
+      expect(noteCalls, 1, reason: 'the sheet must not stack on itself');
+
+      noteGate!.complete();
+      await first;
+
+      // Once the sheet closes the shortcut works again.
+      noteGate = null;
+      await coordinator.handle(ShortcutAction.newTextNote);
+      expect(noteCalls, 2);
+    });
+
+    test('a throwing sheet is swallowed and still releases the note guard',
+        () async {
+      final ShortcutsCoordinator coordinator = build();
+      noteThrows = true;
+
+      // Must complete normally: a shortcut may never surface an exception.
+      await coordinator.handle(ShortcutAction.newTextNote);
+      expect(noteCalls, 1);
+
+      noteThrows = false;
+      await coordinator.handle(ShortcutAction.newTextNote);
+      expect(noteCalls, 2, reason: 'the guard must be released in `finally`');
+    });
+
+    test('a press landing after dispose is refused', () async {
+      final ShortcutsCoordinator coordinator = build();
+
+      // Not awaited on purpose: this is the window the shell disposes the
+      // controller in, and the synchronous `_disposed` flag has to cover it.
+      unawaited(coordinator.dispose());
+      await coordinator.handle(ShortcutAction.showWindow);
+
+      expect(presenter.presents, 0);
+    });
   });
 
-  test('refused combinations are reported instead of thrown', () async {
-    registrar.refuse = <ShortcutAction>{ShortcutAction.showWindow};
-    final ShortcutsCoordinator coordinator = build();
+  group('registration', () {
+    test('re-applying an unchanged map leaves the OS hotkey table alone',
+        () async {
+      final ShortcutsCoordinator coordinator = build();
+      final Map<ShortcutAction, HotkeyBinding> bindings =
+          Map<ShortcutAction, HotkeyBinding>.from(ShortcutDefaults.bindings);
 
-    final Set<ShortcutAction> rejected =
-        await coordinator.apply(ShortcutDefaults.bindings);
+      await coordinator.apply(bindings);
+      await coordinator.apply(Map<ShortcutAction, HotkeyBinding>.from(bindings));
 
-    expect(rejected, <ShortcutAction>{ShortcutAction.showWindow});
-    expect(coordinator.rejected, rejected);
-  });
+      expect(registrar.applyCount, 1);
 
-  test('dispose releases the OS registrations', () async {
-    final ShortcutsCoordinator coordinator = build();
-    await coordinator.apply(ShortcutDefaults.bindings);
+      await coordinator.apply(<ShortcutAction, HotkeyBinding>{
+        ...bindings,
+        ShortcutAction.showWindow: altF9(),
+      });
+      expect(registrar.applyCount, 2);
+    });
 
-    await coordinator.dispose();
+    test('overlapping applies are serialized, not interleaved', () async {
+      final ShortcutsCoordinator coordinator = build();
+      registrar.gate = Completer<void>();
 
-    expect(registrar.unregistered, isTrue);
+      final Future<Set<ShortcutAction>> first =
+          coordinator.apply(ShortcutDefaults.bindings);
+      final Future<Set<ShortcutAction>> second =
+          coordinator.apply(<ShortcutAction, HotkeyBinding>{
+        ...ShortcutDefaults.bindings,
+        ShortcutAction.showWindow: altF9(),
+      });
+      await pumpEventQueue();
+
+      // The registrar unregisters everything before it registers, so a second
+      // apply running concurrently could wipe the first one's work mid-loop.
+      expect(registrar.applyCount, 1);
+
+      registrar.gate!.complete();
+      registrar.gate = null;
+      await Future.wait<Set<ShortcutAction>>(
+        <Future<Set<ShortcutAction>>>[first, second],
+      );
+
+      expect(registrar.applyCount, 2);
+      expect(registrar.applied[ShortcutAction.showWindow], altF9());
+    });
+
+    test('a failing registration is logged, not thrown, and stays retryable',
+        () async {
+      final ShortcutsCoordinator coordinator = build();
+      registrar.throwOnApply = true;
+
+      await coordinator.apply(ShortcutDefaults.bindings);
+      expect(coordinator.rejected, isEmpty);
+
+      // The retry must not short-circuit on "same map as last time" — a
+      // transient platform failure would otherwise wedge the feature off for
+      // the rest of the session.
+      registrar.throwOnApply = false;
+      await coordinator.apply(ShortcutDefaults.bindings);
+      expect(registrar.applyCount, 2);
+      expect(registrar.applied, isNotEmpty);
+    });
+
+    test('refused combinations are reported instead of thrown', () async {
+      registrar.refuse = <ShortcutAction>{ShortcutAction.showWindow};
+      final ShortcutsCoordinator coordinator = build();
+
+      final Set<ShortcutAction> rejected =
+          await coordinator.apply(ShortcutDefaults.bindings);
+
+      expect(rejected, <ShortcutAction>{ShortcutAction.showWindow});
+      expect(coordinator.rejected, rejected);
+    });
+
+    test('suspend releases everything and resume restores the newest map',
+        () async {
+      final ShortcutsCoordinator coordinator = build();
+      await coordinator.apply(ShortcutDefaults.bindings);
+      expect(registrar.applyCount, 1);
+
+      await coordinator.suspend();
+      expect(registrar.unregisterCount, greaterThan(0));
+
+      // A rebind saved while the capture sheet is open must not register yet —
+      // the OS would swallow the very keys the sheet is trying to read.
+      final Map<ShortcutAction, HotkeyBinding> rebound =
+          <ShortcutAction, HotkeyBinding>{
+        ...ShortcutDefaults.bindings,
+        ShortcutAction.toggleRecording: altF9(),
+      };
+      await coordinator.apply(rebound);
+      expect(registrar.applyCount, 1);
+
+      // ...but closing the sheet must pick it up.
+      await coordinator.resume();
+      expect(registrar.applyCount, 2);
+      expect(registrar.applied[ShortcutAction.toggleRecording], altF9());
+    });
+
+    test('dispose releases the OS registrations', () async {
+      final ShortcutsCoordinator coordinator = build();
+      await coordinator.apply(ShortcutDefaults.bindings);
+
+      await coordinator.dispose();
+
+      expect(registrar.unregisterCount, greaterThan(0));
+    });
   });
 }
