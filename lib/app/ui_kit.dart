@@ -1,4 +1,7 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
 /// Shared "Processing Console" palette and the small widgets every tab reuses.
 /// Kept in one place so Queue, Models, Logs and Config stay visually identical.
@@ -20,6 +23,103 @@ class Console {
   static const Color red = Color(0xFFFF6B81);
   static const Color redSoft = Color(0xFFFF8FA1);
   static const Color ink = Color(0xFF00131A);
+}
+
+/// Copy-to-clipboard affordance, reusable by any tab that renders text worth
+/// lifting out of the app.
+///
+/// Owns the short-lived "just copied" flag so the widgets embedding it can stay
+/// stateless. Feedback is inline — the icon morphs into a check and settles
+/// back — because the app deliberately uses no snackbars or dialogs anywhere.
+class CopyButton extends StatefulWidget {
+  const CopyButton({
+    super.key,
+    required this.text,
+    this.tooltip = 'Copy text',
+    this.semanticLabel = 'Copy text to clipboard',
+  });
+
+  /// Copied verbatim and in full, even when the caller renders it truncated.
+  final String text;
+  final String tooltip;
+  final String semanticLabel;
+
+  @override
+  State<CopyButton> createState() => _CopyButtonState();
+}
+
+class _CopyButtonState extends State<CopyButton> {
+  static const Duration _feedbackDuration = Duration(milliseconds: 1600);
+
+  Timer? _resetTimer;
+  bool _copied = false;
+
+  @override
+  void dispose() {
+    // A card can leave the tree while the timer is still pending; without this
+    // the callback would fire setState on a disposed element.
+    _resetTimer?.cancel();
+    super.dispose();
+  }
+
+  Future<void> _copy() async {
+    await Clipboard.setData(ClipboardData(text: widget.text));
+    if (!mounted) return;
+    setState(() => _copied = true);
+    _resetTimer?.cancel();
+    _resetTimer = Timer(_feedbackDuration, () {
+      if (mounted) {
+        setState(() => _copied = false);
+      }
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Semantics(
+      button: true,
+      label: _copied ? 'Text copied to clipboard' : widget.semanticLabel,
+      child: Tooltip(
+        message: _copied ? 'Copied' : widget.tooltip,
+        child: InkResponse(
+          onTap: _copy,
+          radius: 22,
+          child: AnimatedContainer(
+            duration: const Duration(milliseconds: 260),
+            width: 34,
+            height: 34,
+            alignment: Alignment.center,
+            decoration: BoxDecoration(
+              color:
+                  _copied ? const Color(0xFF14402C) : const Color(0xFF102434),
+              borderRadius: BorderRadius.circular(11),
+              border: Border.all(
+                color: _copied ? Console.green : Console.border,
+              ),
+            ),
+            child: AnimatedSwitcher(
+              duration: const Duration(milliseconds: 260),
+              transitionBuilder: (Widget child, Animation<double> animation) {
+                return ScaleTransition(
+                  scale: CurvedAnimation(
+                    parent: animation,
+                    curve: Curves.easeOutBack,
+                  ),
+                  child: FadeTransition(opacity: animation, child: child),
+                );
+              },
+              child: Icon(
+                _copied ? Icons.check_rounded : Icons.copy_rounded,
+                key: ValueKey<bool>(_copied),
+                color: _copied ? Console.green : Console.muted,
+                size: 17,
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
 }
 
 class StatusPill extends StatelessWidget {
