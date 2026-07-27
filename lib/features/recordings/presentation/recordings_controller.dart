@@ -95,6 +95,8 @@ class RecordingsController extends ChangeNotifier {
   final List<String> _processingQueue = <String>[];
   bool _isDraining = false;
   bool _disposed = false;
+  String? _processingId; // the id currently running in the drain loop, if any
+  Future<void>? _saveInFlight; // serializes saveAll (shared temp file)
 
   List<Recording> get recordings => List<Recording>.unmodifiable(_recordings);
   bool get isRecording => _isRecording;
@@ -238,7 +240,7 @@ class RecordingsController extends ChangeNotifier {
 
       // Critical invariant: persist metadata only after the audio file exists.
       _recordings = <Recording>[saved, ..._recordings];
-      await _repository.saveAll(_recordings);
+      await _persistAll();
       _logSink.log(
         'Plik zweryfikowany i zapisany · ${await file.length()} B',
         recordingId: saved.id,
@@ -294,7 +296,7 @@ class RecordingsController extends ChangeNotifier {
 
       // Critical invariant: index the note only after the .txt exists on disk.
       _recordings = <Recording>[saved, ..._recordings];
-      await _repository.saveAll(_recordings);
+      await _persistAll();
       _logSink.log(
         'Notatka zapisana · ${await file.length()} B',
         recordingId: saved.id,
@@ -338,7 +340,7 @@ class RecordingsController extends ChangeNotifier {
 
       // Critical invariant: index only after the source is copied and verified.
       _recordings = <Recording>[saved, ..._recordings];
-      await _repository.saveAll(_recordings);
+      await _persistAll();
       _logSink.log(
         'Zaimportowano plik · ${type.name} · ${await File(saved.filePath).length()} B',
         recordingId: saved.id,
@@ -419,9 +421,11 @@ class RecordingsController extends ChangeNotifier {
   /// queued state is persisted; the actual processing runs in the background.
   /// De-dupes so a double capture/retry cannot enqueue the same item twice.
   Future<void> _enqueueProcessing(String id) async {
-    if (!_processingQueue.contains(id)) {
-      _processingQueue.add(id);
-    }
+    // Idempotent: don't re-enqueue an item that is already queued or currently
+    // running — that would process it twice (the UI only ever retries `failed`
+    // items, so this is a defensive guard).
+    if (id == _processingId || _processingQueue.contains(id)) return;
+    _processingQueue.add(id);
     await _update(
       id,
       (Recording item) => item.copyWith(
@@ -468,46 +472,52 @@ class RecordingsController extends ChangeNotifier {
   /// the clipboard hand-off. Same state machine for every [CaptureType]; only
   /// the processor differs. Never touches the source file.
   Future<void> _processOne(String id) async {
-    await _update(
-      id,
-      (Recording item) => item.copyWith(status: RecordingStatus.transcribing),
-    );
-    _logSink.log('Przetwarzanie uruchomione.', recordingId: id);
-
-    final Recording recording = _recordings.firstWhere((Recording item) => item.id == id);
-    // Pin the processor for this job: a runtime swap (Models tab) during the
-    // await gaps above must not redirect a job that already started.
-    final Processor processor = _registry.forType(recording.type);
+    _processingId = id; // marks this id in-flight so it can't be re-enqueued
     try {
-      final String transcript = await processor.process(recording);
       await _update(
         id,
-        (Recording item) => item.copyWith(
-          status: RecordingStatus.completed,
-          transcript: transcript,
-          clearError: true,
-        ),
+        (Recording item) => item.copyWith(status: RecordingStatus.transcribing),
       );
-      _logSink.log(
-        'Przetwarzanie zakończone · ${transcript.length} znaków',
-        recordingId: id,
-      );
-      // Deliberately last: the item is already `completed` and persisted, so a
-      // refusing clipboard cannot undo a successful capture.
-      await _copyToClipboard(recording.type, transcript, id);
-    } catch (exception) {
-      await _update(
-        id,
-        (Recording item) => item.copyWith(
-          status: RecordingStatus.failed,
-          error: exception.toString(),
-        ),
-      );
-      _logSink.log(
-        'Przetwarzanie nieudane: $exception',
-        level: LogLevel.error,
-        recordingId: id,
-      );
+      _logSink.log('Przetwarzanie uruchomione.', recordingId: id);
+
+      final Recording recording =
+          _recordings.firstWhere((Recording item) => item.id == id);
+      // Pin the processor for this job: a runtime swap (Models tab) during the
+      // await gaps above must not redirect a job that already started.
+      final Processor processor = _registry.forType(recording.type);
+      try {
+        final String transcript = await processor.process(recording);
+        await _update(
+          id,
+          (Recording item) => item.copyWith(
+            status: RecordingStatus.completed,
+            transcript: transcript,
+            clearError: true,
+          ),
+        );
+        _logSink.log(
+          'Przetwarzanie zakończone · ${transcript.length} znaków',
+          recordingId: id,
+        );
+        // Deliberately last: the item is already `completed` and persisted, so a
+        // refusing clipboard cannot undo a successful capture.
+        await _copyToClipboard(recording.type, transcript, id);
+      } catch (exception) {
+        await _update(
+          id,
+          (Recording item) => item.copyWith(
+            status: RecordingStatus.failed,
+            error: exception.toString(),
+          ),
+        );
+        _logSink.log(
+          'Przetwarzanie nieudane: $exception',
+          level: LogLevel.error,
+          recordingId: id,
+        );
+      }
+    } finally {
+      _processingId = null;
     }
   }
 
@@ -535,8 +545,25 @@ class RecordingsController extends ChangeNotifier {
     _recordings = _recordings
         .map((Recording item) => item.id == id ? transform(item) : item)
         .toList();
-    await _repository.saveAll(_recordings);
+    await _persistAll();
     notifyListeners();
+  }
+
+  /// Serialized write of the whole index. `RecordingsRepository.saveAll` writes
+  /// a single shared `.tmp` file, so two concurrent calls would corrupt it — and
+  /// with processing now off the `_isBusy` lock, a capture/retry save can race a
+  /// drain save. Wait for any in-flight write, then persist the latest state.
+  Future<void> _persistAll() async {
+    while (_saveInFlight != null) {
+      await _saveInFlight;
+    }
+    final Future<void> mine = _repository.saveAll(_recordings);
+    _saveInFlight = mine;
+    try {
+      await mine;
+    } finally {
+      if (identical(_saveInFlight, mine)) _saveInFlight = null;
+    }
   }
 
   @override

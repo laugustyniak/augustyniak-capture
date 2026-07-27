@@ -29,6 +29,21 @@ class _SeededRepo extends _FakeRepo {
   Future<List<Recording>> loadAll() async => seed;
 }
 
+/// Counts overlapping saveAll calls to prove the controller serializes writes
+/// (recordings.json uses a shared temp file, so overlap would corrupt it).
+class _ConcurrencyRepo extends _SeededRepo {
+  _ConcurrencyRepo(super.dir, super.seed);
+  int active = 0;
+  int maxActive = 0;
+  @override
+  Future<void> saveAll(List<Recording> recordings) async {
+    active++;
+    if (active > maxActive) maxActive = active;
+    await Future<void>.delayed(Duration.zero); // simulate async IO
+    active--;
+  }
+}
+
 /// Controllable processor: optionally gates each call on a fresh completer (so
 /// a test can hold a job "running"), tracks concurrency, and can fail the first
 /// N calls.
@@ -201,6 +216,54 @@ void main() {
     await c.waitForProcessing();
 
     expect(c.recordings.single.status, RecordingStatus.completed);
+  });
+
+  test('concurrent index writes are serialized (no shared-temp overlap)',
+      () async {
+    final Directory dir = await _tmp();
+    addTearDown(() => dir.delete(recursive: true));
+    final Recording seed = Recording(
+      id: 'r',
+      filePath: '${dir.path}/r.txt',
+      createdAt: DateTime.utc(2026, 7, 25),
+      durationMs: 0,
+      status: RecordingStatus.completed,
+      type: CaptureType.text,
+    );
+    final _ConcurrencyRepo repo = _ConcurrencyRepo(dir, <Recording>[seed]);
+    final RecordingsController c = _controller(repo, _TestProcessor());
+    addTearDown(c.dispose);
+    await c.initialize();
+    await c.waitForProcessing();
+
+    // Fire two persist-triggering mutations without awaiting between them.
+    final Future<void> f1 = c.toggleProcessed('r');
+    final Future<void> f2 = c.toggleProcessed('r');
+    await Future.wait(<Future<void>>[f1, f2]);
+
+    expect(repo.maxActive, 1); // never two saveAll in flight at once
+  });
+
+  test('re-enqueuing a running item does not process it twice', () async {
+    final Directory dir = await _tmp();
+    addTearDown(() => dir.delete(recursive: true));
+    final _TestProcessor proc = _TestProcessor(gated: true);
+    final RecordingsController c = _controller(_FakeRepo(dir), proc);
+    addTearDown(c.dispose);
+
+    await c.addTextNote('x');
+    await _pump();
+    expect(proc.gates.length, 1); // one job running, gated
+    final String id = c.recordings.single.id;
+
+    // Retry the item while it is still running — must be a no-op.
+    await c.retryTranscription(id);
+    await _pump();
+    expect(proc.gates.length, 1); // still just one process call
+
+    proc.gates[0].complete();
+    await _pump();
+    expect(proc.calls, 1); // processed exactly once
   });
 
   test('retry re-enqueues a failed item and it completes', () async {
