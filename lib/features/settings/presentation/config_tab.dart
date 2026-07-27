@@ -19,7 +19,11 @@ class ConfigTab extends StatelessWidget {
     required this.onOpenModels,
     this.showShortcuts = false,
     this.rejectedShortcuts = const <ShortcutAction>{},
+    this.runWithHotkeysSuspended = _runDirectly,
   });
+
+  /// Default for callers with no coordinator (mobile, tests): just run it.
+  static Future<void> _runDirectly(Future<void> Function() action) => action();
 
   final SettingsController controller;
   final String? storagePath;
@@ -31,6 +35,11 @@ class ConfigTab extends StatelessWidget {
   /// tab just renders what it is told — same split as the OCR/video services.
   final bool showShortcuts;
   final Set<ShortcutAction> rejectedShortcuts;
+
+  /// Releases the global registrations around the key-capture sheet — otherwise
+  /// the OS would swallow the very combination the user is trying to rebind.
+  final Future<void> Function(Future<void> Function() action)
+      runWithHotkeysSuspended;
 
   @override
   Widget build(BuildContext context) {
@@ -151,6 +160,7 @@ class ConfigTab extends StatelessWidget {
             ShortcutsSection(
               controller: controller,
               rejected: rejectedShortcuts,
+              runWithHotkeysSuspended: runWithHotkeysSuspended,
             ),
           ],
           const SizedBox(height: 22),

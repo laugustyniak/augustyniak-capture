@@ -9,15 +9,23 @@ import 'package:voice_notes_phase1/features/shortcuts/domain/hotkey_binding.dart
 import 'package:voice_notes_phase1/features/shortcuts/domain/shortcut_action.dart';
 
 /// Keeps `settings.json` in memory — no path_provider, no disk.
+///
+/// Stores the encoded JSON rather than the object: the whole point of the
+/// shortcut persistence rules is the difference between an *absent* key and a
+/// *present map with an entry missing*, and holding the object would let a
+/// reload assert nothing but identity.
 class _FakeSettingsRepository extends SettingsRepository {
-  AppSettings? stored;
+  Map<String, dynamic>? raw;
+
+  AppSettings? get storedSettings =>
+      raw == null ? null : AppSettings.fromJson(raw!);
 
   @override
-  Future<AppSettings?> load() async => stored;
+  Future<AppSettings?> load() async => storedSettings;
 
   @override
   Future<void> save(AppSettings settings) async {
-    stored = settings;
+    raw = jsonDecode(jsonEncode(settings.toJson())) as Map<String, dynamic>;
   }
 }
 
@@ -110,6 +118,39 @@ void main() {
       expect(HotkeyBinding.isModifierKey(LogicalKeyboardKey.altRight), isTrue);
       expect(HotkeyBinding.isModifierKey(LogicalKeyboardKey.keyR), isFalse);
     });
+
+    test('AltGr counts as a modifier, never as a trigger key', () {
+      // Avoiding AltGr is the entire reason the defaults are Alt+Shift, and on
+      // some platform/layout combinations Flutter reports it as its own logical
+      // key rather than as altRight.
+      expect(HotkeyBinding.isModifierKey(LogicalKeyboardKey.altGraph), isTrue);
+    });
+
+    test('non-printable keys get a readable label, not hex', () {
+      // `keyLabel` is blank for these and `debugName` is stripped in release
+      // builds, so without the explicit table a real user would see `0x20`.
+      expect(
+        _binding(PhysicalKeyboardKey.space, LogicalKeyboardKey.space).keyLabel,
+        'Space',
+      );
+      expect(
+        _binding(PhysicalKeyboardKey.f5, LogicalKeyboardKey.f5).keyLabel,
+        'F5',
+      );
+      expect(
+        _binding(PhysicalKeyboardKey.escape, LogicalKeyboardKey.escape).label,
+        'Alt + Shift + Esc',
+      );
+    });
+
+    test('an unrecognised key id degrades to hex instead of throwing', () {
+      const HotkeyBinding unknown = HotkeyBinding(
+        usbHidUsage: 0x00070099,
+        logicalKeyId: 0x7ffffffe,
+        modifiers: <HotkeyModifier>{HotkeyModifier.alt},
+      );
+      expect(unknown.keyLabel, startsWith('0x'));
+    });
   });
 
   group('AppSettings.shortcuts', () {
@@ -197,9 +238,9 @@ void main() {
 
       expect(controller.settings.shortcuts[ShortcutAction.uploadImage], binding);
       // The defaults it started from are now written down too, not implied.
-      expect(repository.stored!.hasCustomShortcuts, isTrue);
-      expect(repository.stored!.shortcuts[ShortcutAction.toggleRecording],
-          isNotNull);
+      final AppSettings persisted = repository.storedSettings!;
+      expect(persisted.hasCustomShortcuts, isTrue);
+      expect(persisted.shortcuts[ShortcutAction.toggleRecording], isNotNull);
     });
 
     test('binding a combination takes it away from the action that had it',
