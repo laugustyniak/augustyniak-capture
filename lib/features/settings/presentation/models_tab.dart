@@ -136,30 +136,14 @@ class ModelsTab extends StatelessWidget {
     BuildContext context,
     ProviderProfile profile,
   ) async {
-    final bool? confirmed = await showDialog<bool>(
-      context: context,
-      builder: (BuildContext dialogContext) => AlertDialog(
-        backgroundColor: Console.surface,
-        title: const Text('Usunąć profil?', style: TextStyle(fontSize: 16)),
-        content: Text(
-          '"${profile.name}" zostanie usunięty. Nagrania i transkrypcje '
+    final bool confirmed = await confirmDestructive(
+      context,
+      title: 'Usunąć profil?',
+      message: '"${profile.name}" zostanie usunięty. Nagrania i transkrypcje '
           'pozostaną nietknięte.',
-          style: const TextStyle(fontSize: 12, height: 1.45),
-        ),
-        actions: <Widget>[
-          TextButton(
-            onPressed: () => Navigator.of(dialogContext).pop(false),
-            child: const Text('ANULUJ'),
-          ),
-          TextButton(
-            onPressed: () => Navigator.of(dialogContext).pop(true),
-            style: TextButton.styleFrom(foregroundColor: Console.red),
-            child: const Text('USUŃ'),
-          ),
-        ],
-      ),
+      confirmLabel: 'USUŃ',
     );
-    if (confirmed == true) {
+    if (confirmed) {
       await controller.deleteProfile(profile.id);
     }
   }
@@ -180,17 +164,9 @@ class _ActiveProfileCard extends StatelessWidget {
         children: <Widget>[
           Row(
             children: <Widget>[
-              Container(
-                width: 40,
-                height: 40,
-                decoration: BoxDecoration(
-                  color: const Color(0xFF143C54),
-                  borderRadius: BorderRadius.circular(13),
-                ),
-                child: Icon(
-                  item == null ? Icons.cloud_off : Icons.memory,
-                  color: item == null ? Console.muted : Console.cyan,
-                ),
+              ConsoleIconTile(
+                icon: item == null ? Icons.cloud_off : Icons.memory,
+                color: item == null ? Console.muted : Console.cyan,
               ),
               const SizedBox(width: 11),
               Expanded(

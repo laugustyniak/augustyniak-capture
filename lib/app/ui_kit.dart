@@ -23,6 +23,177 @@ class Console {
   static const Color red = Color(0xFFFF6B81);
   static const Color redSoft = Color(0xFFFF8FA1);
   static const Color ink = Color(0xFF00131A);
+
+  /// Label colour on an unselected chip.
+  static const Color chipLabel = Color(0xFF9CB3C7);
+
+  /// Background of a square icon tile (the leading badge on a card).
+  static const Color iconTile = Color(0xFF143C54);
+
+  /// Background of a square icon *button* (play, edit, copy).
+  static const Color surfaceButton = Color(0xFF102434);
+
+  /// NavigationBar selection indicator.
+  static const Color navIndicator = Color(0xFF173D52);
+}
+
+/// Selectable pill used by every filter row (queue status, log level, audio
+/// parameters). [selectedColor] is overridable because the log levels colour
+/// their own chip.
+class ConsoleChip extends StatelessWidget {
+  const ConsoleChip({
+    super.key,
+    required this.label,
+    required this.selected,
+    required this.onSelected,
+    this.selectedColor = Console.cyan,
+  });
+
+  final String label;
+  final bool selected;
+  final VoidCallback onSelected;
+  final Color selectedColor;
+
+  @override
+  Widget build(BuildContext context) {
+    return ChoiceChip(
+      selected: selected,
+      onSelected: (_) => onSelected(),
+      label: Text(label),
+      labelStyle: TextStyle(
+        fontSize: 11,
+        fontWeight: FontWeight.w800,
+        color: selected ? Console.ink : Console.chipLabel,
+      ),
+      selectedColor: selectedColor,
+      backgroundColor: Console.surfaceRaised,
+      side: BorderSide.none,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(999)),
+    );
+  }
+}
+
+/// Non-interactive square badge — the leading icon on a card or summary row.
+class ConsoleIconTile extends StatelessWidget {
+  const ConsoleIconTile({
+    super.key,
+    required this.icon,
+    this.color = Console.cyan,
+    this.background = Console.iconTile,
+    this.size = 40,
+    this.animate = false,
+  });
+
+  final IconData icon;
+  final Color color;
+  final Color background;
+  final double size;
+
+  /// The queue card cross-fades its tile colour when an item is reviewed.
+  final bool animate;
+
+  @override
+  Widget build(BuildContext context) {
+    final BoxDecoration decoration = BoxDecoration(
+      color: background,
+      borderRadius: BorderRadius.circular(13),
+    );
+    final Widget child = Icon(icon, color: color);
+
+    if (!animate) {
+      return Container(
+        width: size,
+        height: size,
+        decoration: decoration,
+        child: child,
+      );
+    }
+    return AnimatedContainer(
+      duration: const Duration(milliseconds: 350),
+      width: size,
+      height: size,
+      decoration: decoration,
+      child: child,
+    );
+  }
+}
+
+/// Tappable square icon button with the console's border treatment.
+class ConsoleIconButton extends StatelessWidget {
+  const ConsoleIconButton({
+    super.key,
+    required this.icon,
+    required this.onTap,
+    required this.semanticLabel,
+    this.active = false,
+    this.size = 40,
+    this.iconSize = 24,
+  });
+
+  final IconData icon;
+  final VoidCallback onTap;
+  final String semanticLabel;
+
+  /// Highlights the border and background, e.g. while a clip is playing.
+  final bool active;
+  final double size;
+  final double iconSize;
+
+  @override
+  Widget build(BuildContext context) {
+    return Semantics(
+      button: true,
+      label: semanticLabel,
+      child: InkResponse(
+        onTap: onTap,
+        radius: 25,
+        child: Container(
+          width: size,
+          height: size,
+          alignment: Alignment.center,
+          decoration: BoxDecoration(
+            color: active ? Console.iconTile : Console.surfaceButton,
+            borderRadius: BorderRadius.circular(13),
+            border: Border.all(color: active ? Console.cyan : Console.border),
+          ),
+          child: Icon(icon, color: Console.cyan, size: iconSize),
+        ),
+      ),
+    );
+  }
+}
+
+/// Confirmation for an action the user cannot undo. Returns false on dismiss,
+/// so a barrier tap is never read as consent.
+Future<bool> confirmDestructive(
+  BuildContext context, {
+  required String title,
+  required String message,
+  required String confirmLabel,
+}) async {
+  final bool? confirmed = await showDialog<bool>(
+    context: context,
+    builder: (BuildContext dialogContext) => AlertDialog(
+      backgroundColor: Console.surface,
+      title: Text(title, style: const TextStyle(fontSize: 16)),
+      content: Text(
+        message,
+        style: const TextStyle(fontSize: 12, height: 1.45),
+      ),
+      actions: <Widget>[
+        TextButton(
+          onPressed: () => Navigator.of(dialogContext).pop(false),
+          child: const Text('ANULUJ'),
+        ),
+        TextButton(
+          onPressed: () => Navigator.of(dialogContext).pop(true),
+          style: TextButton.styleFrom(foregroundColor: Console.red),
+          child: Text(confirmLabel),
+        ),
+      ],
+    ),
+  );
+  return confirmed ?? false;
 }
 
 /// Copy-to-clipboard affordance, reusable by any tab that renders text worth
