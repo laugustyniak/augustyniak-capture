@@ -80,6 +80,8 @@ class RecordingsController extends ChangeNotifier {
   StreamSubscription<void>? _playerCompleteSub;
 
   final Stopwatch _stopwatch = Stopwatch();
+  final ValueNotifier<Duration> _elapsedTicker =
+      ValueNotifier<Duration>(Duration.zero);
   Timer? _timer;
   List<Recording> _recordings = <Recording>[];
   bool _isRecording = false;
@@ -114,6 +116,11 @@ class RecordingsController extends ChangeNotifier {
           item.status == RecordingStatus.transcribing)
       .length;
   Duration get elapsed => _stopwatch.elapsed;
+
+  /// Ticks every 250 ms while recording. Listen to this instead of the
+  /// controller when all you render is the running time — it repaints one label
+  /// rather than the whole page.
+  ValueListenable<Duration> get elapsedTicker => _elapsedTicker;
   String? get playingId => _playingId;
   String? get error => _error;
   AudioConfig get audioConfig => _audioConfig;
@@ -199,7 +206,18 @@ class RecordingsController extends ChangeNotifier {
     _stopwatch
       ..reset()
       ..start();
-    _timer = Timer.periodic(const Duration(milliseconds: 250), (_) => notifyListeners());
+    // Reset before the first tick lands, or the label shows the previous
+    // recording's duration for up to 250 ms.
+    _elapsedTicker.value = Duration.zero;
+    // Ticks into `elapsedTicker` rather than notifyListeners(): the elapsed time
+    // is read in exactly one place (the capture FAB's mm:ss label), but a
+    // controller-wide notification rebuilds the whole page — and the shell's
+    // IndexedStack builds all four tabs, so Logs would re-scan its 500-event
+    // buffer four times a second while nobody is looking at it.
+    _timer = Timer.periodic(
+      const Duration(milliseconds: 250),
+      (_) => _elapsedTicker.value = _stopwatch.elapsed,
+    );
     _isRecording = true;
     notifyListeners();
   }
@@ -603,6 +621,7 @@ class RecordingsController extends ChangeNotifier {
   void dispose() {
     _disposed = true; // lets an in-flight drain loop exit at the next boundary
     _timer?.cancel();
+    _elapsedTicker.dispose();
     _playerCompleteSub?.cancel();
     _player.dispose();
     _recorder.dispose();
