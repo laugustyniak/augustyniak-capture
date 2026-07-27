@@ -1,0 +1,56 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # Fast gate: the whole test suite is pure Dart (bar one testWidgets file), so
+  # it needs no platform toolchain and runs on Linux.
+  analyze-and-test:
+    name: Analyze + test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      - run: flutter --version
+
+      - run: flutter pub get
+
+      # analysis_options.yaml: flutter_lints + avoid_print + prefer_final_locals.
+      # Left at the default severity on purpose — the job's job right now is to
+      # catch compile errors, not to fail on a pre-existing lint info.
+      - name: Analyze
+        run: flutter analyze
+
+      - name: Test
+        run: flutter test
+
+  # Slow gate, and the one that actually matters for the desktop-only features
+  # (global hotkeys, OCR, video): it is the only step that compiles the native
+  # plugin registrations. Analyze alone would never catch a broken one.
+  build-windows:
+    name: Build Windows
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      - run: flutter pub get
+
+      - name: Build
+        run: flutter build windows --debug
