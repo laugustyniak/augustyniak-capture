@@ -86,7 +86,7 @@ void main() {
     final RecordingsController controller = buildController(repo, picked: null);
 
     await controller.addUpload(CaptureType.image);
-
+    await controller.waitForProcessing();
     expect(controller.recordings, isEmpty);
     expect(repo.saved, isEmpty);
     expect(controller.isBusy, isFalse);
@@ -104,7 +104,7 @@ void main() {
     );
 
     await controller.addUpload(CaptureType.image);
-
+    await controller.waitForProcessing();
     expect(controller.recordings, hasLength(1));
     final Recording item = controller.recordings.single;
     expect(item.type, CaptureType.image);
@@ -130,7 +130,7 @@ void main() {
     );
 
     await controller.addUpload(CaptureType.audioUpload);
-
+    await controller.waitForProcessing();
     final Recording item = controller.recordings.single;
     expect(item.type, CaptureType.audioUpload);
     expect(item.status, RecordingStatus.failed);

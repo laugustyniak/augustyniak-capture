@@ -126,6 +126,7 @@ void main() {
       addTearDown(controller.dispose);
 
       await controller.addUpload(CaptureType.image);
+      await controller.waitForProcessing();
 
       final Recording item = controller.recordings.single;
       expect(item.type, CaptureType.image);
@@ -152,6 +153,7 @@ void main() {
       addTearDown(controller.dispose);
 
       await controller.addUpload(CaptureType.image);
+      await controller.waitForProcessing();
 
       final Recording item = controller.recordings.single;
       expect(item.status, RecordingStatus.failed);
