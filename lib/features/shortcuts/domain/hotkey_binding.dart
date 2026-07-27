@@ -93,7 +93,7 @@ class HotkeyBinding {
   static bool isModifierKey(LogicalKeyboardKey key) =>
       _modifierKeys.contains(key);
 
-  static const Set<LogicalKeyboardKey> _modifierKeys = <LogicalKeyboardKey>{
+  static final Set<LogicalKeyboardKey> _modifierKeys = <LogicalKeyboardKey>{
     LogicalKeyboardKey.control,
     LogicalKeyboardKey.controlLeft,
     LogicalKeyboardKey.controlRight,
