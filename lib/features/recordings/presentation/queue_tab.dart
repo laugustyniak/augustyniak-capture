@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter/material.dart';
@@ -102,7 +103,11 @@ class _QueueTabState extends State<QueueTab> {
                             controller.retryTranscription(recording.id),
                         onEdit: () => _openEditSheet(context, recording),
                         onToggleProcessed: () async {
-                          await HapticFeedback.selectionClick();
+                          // Fire-and-forget: the haptic is cosmetic and must
+                          // not gate a durable state write. Awaiting it means
+                          // the review flag waits on the platform answering —
+                          // which, on a host that never does, is forever.
+                          unawaited(HapticFeedback.selectionClick());
                           await controller.toggleProcessed(recording.id);
                         },
                       ),
