@@ -96,7 +96,7 @@ class _RecordingsPageState extends State<RecordingsPage> {
   /// absent). Mobile has no OCR yet — ML Kit is a later slice — so it degrades
   /// to the disabled service, which reports "not configured" and stays retryable.
   static OcrService _buildOcrService() {
-    if (Platform.isLinux || Platform.isMacOS || Platform.isWindows) {
+    if (_isDesktop) {
       return const TesseractOcrService();
     }
     return const DisabledOcrService();
@@ -106,23 +106,24 @@ class _RecordingsPageState extends State<RecordingsPage> {
   /// cleanly if absent), then reuses the transcription pipeline. Mobile has no
   /// ffmpeg yet — ffmpeg_kit is a later add — so it degrades to "unavailable".
   static VideoAudioExtractor _buildVideoAudioExtractor() {
-    if (Platform.isLinux || Platform.isMacOS || Platform.isWindows) {
+    if (_isDesktop) {
       return const FfmpegVideoAudioExtractor();
     }
     return const UnavailableVideoAudioExtractor();
   }
 
-  /// System-wide hotkeys exist only on desktop. Mobile gets the no-op registrar,
-  /// so the whole feature costs nothing there and the Config tab hides it.
-  static bool get _supportsGlobalHotkeys =>
+  /// Desktop is where the system `tesseract`/`ffmpeg` binaries and OS-wide
+  /// hotkeys exist. Mobile gets the disabled/no-op seams instead, so those
+  /// features cost nothing there and the Config tab hides the shortcuts section.
+  static bool get _isDesktop =>
       Platform.isLinux || Platform.isMacOS || Platform.isWindows;
 
   static HotkeyRegistrar _buildHotkeyRegistrar() =>
-      _supportsGlobalHotkeys
+      _isDesktop
           ? const SystemHotkeyRegistrar()
           : const NoopHotkeyRegistrar();
 
-  static WindowPresenter _buildWindowPresenter() => _supportsGlobalHotkeys
+  static WindowPresenter _buildWindowPresenter() => _isDesktop
       ? const SystemWindowPresenter()
       : const NoopWindowPresenter();
 
@@ -286,7 +287,7 @@ class _RecordingsPageState extends State<RecordingsPage> {
                 logCount: logs.events.length,
                 onOpenModels: () =>
                     setState(() => navigationIndex = modelsIndex),
-                showShortcuts: _supportsGlobalHotkeys,
+                showShortcuts: _isDesktop,
                 rejectedShortcuts: rejectedShortcuts,
                 runWithHotkeysSuspended: _runWithHotkeysSuspended,
               ),

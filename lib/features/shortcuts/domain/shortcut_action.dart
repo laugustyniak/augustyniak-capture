@@ -26,12 +26,8 @@ enum ShortcutAction {
   /// Unlike `CaptureType.fromName` there is no sensible legacy value to fall
   /// back to — an action that no longer exists is dropped, and its binding with
   /// it.
-  static ShortcutAction? fromName(String? name) {
-    for (final ShortcutAction action in ShortcutAction.values) {
-      if (action.name == name) return action;
-    }
-    return null;
-  }
+  static ShortcutAction? fromName(String? name) =>
+      ShortcutAction.values.asNameMap()[name];
 
   String get label => switch (this) {
         ShortcutAction.showWindow => 'Pokaż okno',

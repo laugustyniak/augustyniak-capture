@@ -23,7 +23,6 @@ class SettingsController extends ChangeNotifier {
   final Uuid _uuid = const Uuid();
 
   AppSettings _settings = AppSettings.empty;
-  bool _isLoaded = false;
   String? _error;
 
   // Cached so that unrelated changes (audio params, profile reordering) don't
@@ -36,7 +35,6 @@ class SettingsController extends ChangeNotifier {
   List<ProviderProfile> get profiles => _settings.profiles;
   ProviderProfile? get activeProfile => _settings.activeProfile;
   AudioConfig get audio => _settings.audio;
-  bool get isLoaded => _isLoaded;
   String? get error => _error;
 
   /// The service the recordings controller should use right now. No active
@@ -80,7 +78,6 @@ class SettingsController extends ChangeNotifier {
     } catch (exception) {
       _error = exception.toString();
     } finally {
-      _isLoaded = true;
       notifyListeners();
     }
   }
@@ -91,7 +88,6 @@ class SettingsController extends ChangeNotifier {
     String? model,
     String? language,
     String? bearerToken,
-    bool activate = true,
   }) async {
     final ProviderProfile profile = ProviderProfile(
       id: _uuid.v4(),
@@ -105,8 +101,8 @@ class SettingsController extends ChangeNotifier {
     await _persist(
       _settings.copyWith(
         profiles: <ProviderProfile>[..._settings.profiles, profile],
-        activeProfileId:
-            activate || _settings.activeProfileId == null ? profile.id : null,
+        // A newly added profile always becomes the active one.
+        activeProfileId: profile.id,
       ),
     );
     return profile;
@@ -127,16 +123,23 @@ class SettingsController extends ChangeNotifier {
     final List<ProviderProfile> remaining = _settings.profiles
         .where((ProviderProfile item) => item.id != id)
         .toList();
-    final bool wasActive = _settings.activeProfileId == id;
+    // Resolve against what actually survives rather than only handling the
+    // "deleted the active one" case: an id that was already dangling (a
+    // hand-edited settings.json) would otherwise be carried forward untouched,
+    // which the comment below claimed could not happen.
+    final bool activeSurvives = remaining
+        .any((ProviderProfile item) => item.id == _settings.activeProfileId);
+    final String? nextActive = activeSurvives
+        ? _settings.activeProfileId
+        : (remaining.isEmpty ? null : remaining.first.id);
 
     await _persist(
       _settings.copyWith(
         profiles: remaining,
-        // Deleting the active profile falls back to the first one left, or to
-        // nothing at all — never to a dangling id.
-        activeProfileId:
-            wasActive ? (remaining.isEmpty ? null : remaining.first.id) : null,
-        clearActiveProfileId: wasActive && remaining.isEmpty,
+        // Falls back to the first profile left, or to nothing at all — never to
+        // a dangling id.
+        activeProfileId: nextActive,
+        clearActiveProfileId: nextActive == null,
       ),
     );
   }

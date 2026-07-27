@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 
 import 'package:audioplayers/audioplayers.dart';
@@ -50,6 +51,18 @@ class _StubTranscriptionService implements TranscriptionService {
 
   @override
   Future<String> transcribe(File audioFile) async => text;
+}
+
+/// Hangs until [gate] is completed, so a test can park a job mid-flight and
+/// dispose the controller underneath it.
+class _GatedTranscriptionService implements TranscriptionService {
+  final Completer<void> gate = Completer<void>();
+
+  @override
+  Future<String> transcribe(File audioFile) async {
+    await gate.future;
+    return 'LATE TRANSCRIPT';
+  }
 }
 
 class _FakePicker implements MediaPicker {
@@ -157,6 +170,32 @@ void main() {
     expect(item.status, RecordingStatus.failed);
     expect(File(item.filePath).existsSync(), isTrue);
     controller.dispose();
+  });
+
+  test('disposing mid-processing does not throw from the unawaited drain',
+      () async {
+    final File source = File(p.join(pickDir.path, 'original.mp3'))
+      ..writeAsStringSync('SOUND');
+    final _FakeRepository repo = _FakeRepository(appDir);
+    final _GatedTranscriptionService gated = _GatedTranscriptionService();
+    final RecordingsController controller = buildController(
+      repo,
+      picked: PickedMedia(file: source, mimeType: 'audio/mpeg'),
+      service: gated,
+    );
+
+    // Processing is enqueued and drained unawaited, so the job is parked inside
+    // the processor when the page tears the controller down.
+    await controller.addUpload(CaptureType.audioUpload);
+    controller.dispose();
+    gated.gate.complete();
+
+    // The drain now resumes against a disposed controller. Its status write
+    // must still land on disk without notifying a dead ChangeNotifier — an
+    // unhandled async error here fails the test.
+    await pumpEventQueue();
+
+    expect(repo.saved, isNotEmpty);
   });
 
   test('index write follows the copy — the ordering invariant', () async {

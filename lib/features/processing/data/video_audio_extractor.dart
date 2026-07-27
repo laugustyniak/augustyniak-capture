@@ -56,24 +56,33 @@ class FfmpegVideoAudioExtractor implements VideoAudioExtractor {
       outPath,
     ];
 
-    final ProcessResult result = await Process.run(
-      executable,
-      args,
-      stderrEncoding: SystemEncoding(),
-    );
-
-    final File out = File(outPath);
-    if (result.exitCode != 0 || !await out.exists() || await out.length() == 0) {
-      // Clean up the temp dir on failure so we don't leak it.
-      if (await tempDir.exists()) await tempDir.delete(recursive: true);
-      throw ProcessException(
+    // `Process.run` itself throws when the binary is absent — the documented
+    // clean-failure path on a machine without ffmpeg — so the cleanup has to
+    // cover the call, not just a non-zero exit. Otherwise every failed video
+    // leaves a temp directory behind.
+    try {
+      final ProcessResult result = await Process.run(
         executable,
         args,
-        (result.stderr as String).trim(),
-        result.exitCode,
+        stderrEncoding: SystemEncoding(),
       );
-    }
 
-    return out;
+      final File out = File(outPath);
+      if (result.exitCode != 0 ||
+          !await out.exists() ||
+          await out.length() == 0) {
+        throw ProcessException(
+          executable,
+          args,
+          (result.stderr as String).trim(),
+          result.exitCode,
+        );
+      }
+
+      return out;
+    } catch (_) {
+      if (await tempDir.exists()) await tempDir.delete(recursive: true);
+      rethrow;
+    }
   }
 }

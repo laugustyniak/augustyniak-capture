@@ -108,13 +108,11 @@ class ProviderPreset {
     required this.name,
     required this.endpoint,
     this.model,
-    this.needsToken = true,
   });
 
   final String name;
   final String endpoint;
   final String? model;
-  final bool needsToken;
 
   static const List<ProviderPreset> all = <ProviderPreset>[
     ProviderPreset(
@@ -135,12 +133,10 @@ class ProviderPreset {
     ProviderPreset(
       name: 'Lokalny whisper.cpp',
       endpoint: 'http://localhost:8080/inference',
-      needsToken: false,
     ),
     ProviderPreset(
       name: 'Własny endpoint',
       endpoint: '',
-      needsToken: false,
     ),
   ];
 }

@@ -23,23 +23,15 @@ enum CaptureType {
   /// Legacy/forward-compatible defaulting point: `null` (old JSON) and any
   /// unknown name (JSON from a newer build) both restore as [audioRecording],
   /// mirroring how `LogEvent` degrades an unknown level to `info`.
-  static CaptureType fromName(String? name) {
-    for (final CaptureType type in CaptureType.values) {
-      if (type.name == name) return type;
-    }
-    return CaptureType.audioRecording;
-  }
-
-  bool get isAudio =>
-      this == CaptureType.audioRecording || this == CaptureType.audioUpload;
+  // `asNameMap()`, not `byName()`: the latter throws on an unknown name, and an
+  // unrecognised value is exactly the case this has to absorb.
+  static CaptureType fromName(String? name) =>
+      CaptureType.values.asNameMap()[name] ?? CaptureType.audioRecording;
 
   /// Whether the item has a playable media track. Guards `togglePlayback`,
   /// which is audio-only (`audioplayers`).
-  bool get isPlayableAudio => isAudio;
-
-  /// Items with no media track render no duration — `durationMs` is `0` for
-  /// these and `00:00` would be noise.
-  bool get hasDuration => this != CaptureType.image && this != CaptureType.text;
+  bool get isPlayableAudio =>
+      this == CaptureType.audioRecording || this == CaptureType.audioUpload;
 }
 
 /// Storage extension policy: `<uuid>.<extensionFor(type)>` in the recordings

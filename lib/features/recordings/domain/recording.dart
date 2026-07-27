@@ -31,28 +31,6 @@ class Recording {
     this.processedAt,
   });
 
-  /// A typed note. The body has already been written to [filePath] and verified
-  /// by the caller, so there is nothing left to extract — the item starts
-  /// `completed` with the body as its text. It still goes through the normal
-  /// persist-then-index path; only the processing step is a passthrough.
-  factory Recording.textNote({
-    required String id,
-    required String filePath,
-    required String body,
-    required DateTime createdAt,
-  }) {
-    return Recording(
-      id: id,
-      filePath: filePath,
-      createdAt: createdAt,
-      durationMs: 0,
-      status: RecordingStatus.completed,
-      type: CaptureType.text,
-      sourceMimeType: 'text/plain',
-      transcript: body,
-    );
-  }
-
   final String id;
   final String filePath;
   final DateTime createdAt;

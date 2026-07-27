@@ -21,12 +21,8 @@ enum HotkeyModifier {
         HotkeyModifier.meta => 'Win',
       };
 
-  static HotkeyModifier? fromName(String? name) {
-    for (final HotkeyModifier modifier in HotkeyModifier.values) {
-      if (modifier.name == name) return modifier;
-    }
-    return null;
-  }
+  static HotkeyModifier? fromName(String? name) =>
+      HotkeyModifier.values.asNameMap()[name];
 }
 
 /// One key combination, stored as plain integers so it survives a JSON round
