@@ -84,30 +84,14 @@ class _LogsTabState extends State<LogsTab> {
   }
 
   Future<void> _confirmClear(BuildContext context) async {
-    final bool? confirmed = await showDialog<bool>(
-      context: context,
-      builder: (BuildContext dialogContext) => AlertDialog(
-        backgroundColor: Console.surface,
-        title: const Text('Wyczyścić logi?', style: TextStyle(fontSize: 16)),
-        content: const Text(
-          'Historia zdarzeń zostanie usunięta. Nagrania i transkrypcje '
+    final bool confirmed = await confirmDestructive(
+      context,
+      title: 'Wyczyścić logi?',
+      message: 'Historia zdarzeń zostanie usunięta. Nagrania i transkrypcje '
           'pozostaną nietknięte.',
-          style: TextStyle(fontSize: 12, height: 1.45),
-        ),
-        actions: <Widget>[
-          TextButton(
-            onPressed: () => Navigator.of(dialogContext).pop(false),
-            child: const Text('ANULUJ'),
-          ),
-          TextButton(
-            onPressed: () => Navigator.of(dialogContext).pop(true),
-            style: TextButton.styleFrom(foregroundColor: Console.red),
-            child: const Text('WYCZYŚĆ'),
-          ),
-        ],
-      ),
+      confirmLabel: 'WYCZYŚĆ',
     );
-    if (confirmed == true) {
+    if (confirmed) {
       await widget.store.clear();
     }
   }
@@ -140,21 +124,11 @@ class _LevelFilterRow extends StatelessWidget {
           final bool active = level == selected;
           return Padding(
             padding: const EdgeInsets.only(right: 8),
-            child: ChoiceChip(
+            child: ConsoleChip(
+              label: '${_levelLabel(level)} ${counts[level] ?? 0}',
               selected: active,
-              onSelected: (_) => onSelected(level),
-              label: Text('${_levelLabel(level)} ${counts[level] ?? 0}'),
-              labelStyle: TextStyle(
-                fontSize: 11,
-                fontWeight: FontWeight.w800,
-                color: active ? Console.ink : const Color(0xFF9CB3C7),
-              ),
+              onSelected: () => onSelected(level),
               selectedColor: level == null ? Console.cyan : levelColor(level),
-              backgroundColor: Console.surfaceRaised,
-              side: BorderSide.none,
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(999),
-              ),
             ),
           );
         }).toList(),
