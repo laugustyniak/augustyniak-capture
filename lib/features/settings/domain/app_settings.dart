@@ -1,3 +1,5 @@
+import '../../shortcuts/domain/hotkey_binding.dart';
+import '../../shortcuts/domain/shortcut_action.dart';
 import 'audio_config.dart';
 import 'provider_profile.dart';
 
@@ -11,13 +13,33 @@ class AppSettings {
     this.profiles = const <ProviderProfile>[],
     this.activeProfileId,
     this.audio = AudioConfig.defaults,
-  });
+    Map<ShortcutAction, HotkeyBinding>? shortcuts,
+  }) : _shortcuts = shortcuts;
 
   static const AppSettings empty = AppSettings();
 
   final List<ProviderProfile> profiles;
   final String? activeProfileId;
   final AudioConfig audio;
+
+  /// Null means "never configured". Kept private and nullable rather than
+  /// defaulted in the constructor because the default map reads
+  /// `PhysicalKeyboardKey` fields and so cannot be a `const` default value.
+  final Map<ShortcutAction, HotkeyBinding>? _shortcuts;
+
+  /// Global hotkey bindings.
+  ///
+  /// Absent from JSON — a fresh install, or a `settings.json` written before
+  /// this field existed — resolves to [ShortcutDefaults.bindings]. Once the user
+  /// touches anything the map is stored in full and becomes authoritative: an
+  /// action *missing* from a stored map is deliberately unbound, not defaulted
+  /// back. That is what makes "clear this shortcut" survive a restart.
+  Map<ShortcutAction, HotkeyBinding> get shortcuts =>
+      _shortcuts ?? ShortcutDefaults.bindings;
+
+  /// False while the defaults are still in force, so the UI can disable its
+  /// "restore defaults" button.
+  bool get hasCustomShortcuts => _shortcuts != null;
 
   /// Null when nothing is selected or the stored id no longer exists (profile
   /// deleted). Callers fall back to the disabled transcription service.
@@ -34,21 +56,35 @@ class AppSettings {
     String? activeProfileId,
     bool clearActiveProfileId = false,
     AudioConfig? audio,
+    Map<ShortcutAction, HotkeyBinding>? shortcuts,
+    bool resetShortcuts = false,
   }) {
     return AppSettings(
       profiles: profiles ?? this.profiles,
       activeProfileId:
           clearActiveProfileId ? null : (activeProfileId ?? this.activeProfileId),
       audio: audio ?? this.audio,
+      shortcuts: resetShortcuts ? null : (shortcuts ?? _shortcuts),
     );
   }
 
-  Map<String, dynamic> toJson() => <String, dynamic>{
-        'profiles':
-            profiles.map((ProviderProfile item) => item.toJson()).toList(),
-        'activeProfileId': activeProfileId,
-        'audio': audio.toJson(),
-      };
+  Map<String, dynamic> toJson() {
+    final Map<ShortcutAction, HotkeyBinding>? stored = _shortcuts;
+    return <String, dynamic>{
+      'profiles':
+          profiles.map((ProviderProfile item) => item.toJson()).toList(),
+      'activeProfileId': activeProfileId,
+      'audio': audio.toJson(),
+      // Omitted entirely while untouched, so a later build that adds a new
+      // action still ships its default to users who never edited a shortcut.
+      if (stored != null)
+        'shortcuts': <String, dynamic>{
+          for (final MapEntry<ShortcutAction, HotkeyBinding> entry
+              in stored.entries)
+            entry.key.name: entry.value.toJson(),
+        },
+    };
+  }
 
   factory AppSettings.fromJson(Map<String, dynamic> json) {
     final dynamic rawProfiles = json['profiles'];
@@ -59,6 +95,20 @@ class AppSettings {
             .toList()
         : <ProviderProfile>[];
 
+    final dynamic rawShortcuts = json['shortcuts'];
+    Map<ShortcutAction, HotkeyBinding>? shortcuts;
+    if (rawShortcuts is Map<String, dynamic>) {
+      // A present-but-empty map is meaningful: every shortcut cleared.
+      shortcuts = <ShortcutAction, HotkeyBinding>{};
+      for (final MapEntry<String, dynamic> entry in rawShortcuts.entries) {
+        final ShortcutAction? action = ShortcutAction.fromName(entry.key);
+        final dynamic value = entry.value;
+        if (action == null || value is! Map<String, dynamic>) continue;
+        final HotkeyBinding? binding = HotkeyBinding.fromJson(value);
+        if (binding != null) shortcuts[action] = binding;
+      }
+    }
+
     final dynamic rawAudio = json['audio'];
     return AppSettings(
       profiles: profiles,
@@ -66,6 +116,7 @@ class AppSettings {
       audio: rawAudio is Map<String, dynamic>
           ? AudioConfig.fromJson(rawAudio)
           : AudioConfig.defaults,
+      shortcuts: shortcuts,
     );
   }
 }

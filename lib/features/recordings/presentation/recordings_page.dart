@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter/material.dart';
@@ -10,6 +11,12 @@ import '../../processing/data/video_audio_extractor.dart';
 import '../../settings/presentation/config_tab.dart';
 import '../../settings/presentation/models_tab.dart';
 import '../../settings/presentation/settings_controller.dart';
+import '../../shortcuts/data/system_hotkey_registrar.dart';
+import '../../shortcuts/data/system_window_presenter.dart';
+import '../../shortcuts/domain/hotkey_registrar.dart';
+import '../../shortcuts/domain/shortcut_action.dart';
+import '../../shortcuts/domain/window_presenter.dart';
+import '../../shortcuts/presentation/shortcuts_coordinator.dart';
 import '../../transcription/data/transcription_service.dart';
 import '../data/recordings_repository.dart';
 import '../data/system_clipboard_sink.dart';
@@ -37,10 +44,15 @@ class _RecordingsPageState extends State<RecordingsPage> {
   late final SettingsController settings;
   late final LogStore logs;
   late final RecordingsController controller;
+  late final ShortcutsCoordinator shortcuts;
   late final Listenable listenable;
 
   int navigationIndex = queueIndex;
   String? storagePath;
+
+  /// Reported by the registrar so the Config tab can flag a combination the OS
+  /// refused instead of leaving it silently dead.
+  Set<ShortcutAction> rejectedShortcuts = const <ShortcutAction>{};
 
   @override
   void initState() {
@@ -58,6 +70,18 @@ class _RecordingsPageState extends State<RecordingsPage> {
       // Finished processor output lands on the system clipboard, so a clipboard
       // manager keeps it in history. Tests get the no-op default instead.
       clipboardSink: const SystemClipboardSink(),
+    );
+    shortcuts = ShortcutsCoordinator(
+      recordings: controller,
+      // Read lazily rather than capturing `context` here: a hotkey can fire long
+      // after initState, and the sheet must open against the live element.
+      composeTextNote: () async {
+        if (!mounted) return;
+        await _composeTextNote(context);
+      },
+      registrar: _buildHotkeyRegistrar(),
+      windowPresenter: _buildWindowPresenter(),
+      logSink: logs,
     );
 
     settings.addListener(_applySettings);
@@ -85,12 +109,29 @@ class _RecordingsPageState extends State<RecordingsPage> {
     return const UnavailableVideoAudioExtractor();
   }
 
+  /// System-wide hotkeys exist only on desktop. Mobile gets the no-op registrar,
+  /// so the whole feature costs nothing there and the Config tab hides it.
+  static bool get _supportsGlobalHotkeys =>
+      Platform.isLinux || Platform.isMacOS || Platform.isWindows;
+
+  static HotkeyRegistrar _buildHotkeyRegistrar() =>
+      _supportsGlobalHotkeys
+          ? const SystemHotkeyRegistrar()
+          : const NoopHotkeyRegistrar();
+
+  static WindowPresenter _buildWindowPresenter() => _supportsGlobalHotkeys
+      ? const SystemWindowPresenter()
+      : const NoopWindowPresenter();
+
   Future<void> _bootstrap() async {
     await logs.initialize();
     // Settings first so the very first recording already uses the saved
     // provider and capture parameters.
     await settings.initialize();
     await controller.initialize();
+    // Explicit rather than relying on the notification `initialize` emits, so
+    // the hotkeys are guaranteed live once bootstrap returns.
+    await _applyShortcuts();
 
     final Directory directory = await repository.recordingsDirectory();
     if (!mounted) return;
@@ -102,6 +143,17 @@ class _RecordingsPageState extends State<RecordingsPage> {
   void _applySettings() {
     controller.transcriptionService = settings.transcriptionService;
     controller.audioConfig = settings.audio;
+    // Fire-and-forget: an unchanged binding map short-circuits inside the
+    // coordinator, so this does not churn the OS hotkey table on every
+    // unrelated settings change.
+    unawaited(_applyShortcuts());
+  }
+
+  Future<void> _applyShortcuts() async {
+    final Set<ShortcutAction> rejected =
+        await shortcuts.apply(settings.settings.shortcuts);
+    if (!mounted || setEquals(rejected, rejectedShortcuts)) return;
+    setState(() => rejectedShortcuts = rejected);
   }
 
   Future<void> _composeTextNote(BuildContext context) async {
@@ -139,6 +191,9 @@ class _RecordingsPageState extends State<RecordingsPage> {
   @override
   void dispose() {
     settings.removeListener(_applySettings);
+    // The OS keeps a registration until it is told otherwise; leaving one behind
+    // would make the hotkey fire into a disposed controller.
+    unawaited(shortcuts.dispose());
     controller.dispose();
     settings.dispose();
     logs.dispose();
@@ -208,6 +263,8 @@ class _RecordingsPageState extends State<RecordingsPage> {
                 logCount: logs.events.length,
                 onOpenModels: () =>
                     setState(() => navigationIndex = modelsIndex),
+                showShortcuts: _supportsGlobalHotkeys,
+                rejectedShortcuts: rejectedShortcuts,
               ),
             ],
           ),

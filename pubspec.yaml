@@ -17,6 +17,10 @@ dependencies:
   uuid: ^4.5.1
   audioplayers: ^6.1.0
   file_picker: ^8.1.6
+  # Desktop-only global shortcuts. Both degrade to no-ops on mobile because the
+  # shell never builds their implementations there.
+  hotkey_manager: ^0.2.3
+  window_manager: ^0.4.3
 
 dev_dependencies:
   flutter_test:
