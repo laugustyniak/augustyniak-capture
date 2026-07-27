@@ -237,21 +237,10 @@ class _ChoiceRow<T> extends StatelessWidget {
           runSpacing: 8,
           children: options.map((T option) {
             final bool active = option == value;
-            return ChoiceChip(
+            return ConsoleChip(
+              label: labelFor(option),
               selected: active,
-              onSelected: (_) => onChanged(option),
-              label: Text(labelFor(option)),
-              labelStyle: TextStyle(
-                fontSize: 11,
-                fontWeight: FontWeight.w800,
-                color: active ? Console.ink : const Color(0xFF9CB3C7),
-              ),
-              selectedColor: Console.cyan,
-              backgroundColor: Console.surfaceRaised,
-              side: BorderSide.none,
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(999),
-              ),
+              onSelected: () => onChanged(option),
             );
           }).toList(),
         ),
