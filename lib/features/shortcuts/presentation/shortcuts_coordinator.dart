@@ -35,6 +35,7 @@ class ShortcutsCoordinator {
 
   Map<ShortcutAction, HotkeyBinding>? _applied;
   bool _composingNote = false;
+  bool _disposed = false;
 
   /// Bindings the OS refused, surfaced in the Config tab so an unavailable
   /// combination is visible rather than mysteriously dead.
@@ -65,6 +66,11 @@ class ShortcutsCoordinator {
   /// convenience layer and must never surface an exception into the capture
   /// pipeline, which does its own error handling and marks items `failed`.
   Future<void> handle(ShortcutAction action) async {
+    // The OS keeps a registration live until `unregisterAll` completes, which
+    // `dispose` only *starts*. A press landing in that window would otherwise
+    // drive an already-disposed controller — bail before touching anything.
+    if (_disposed) return;
+
     // Only the note sheet needs a re-entrancy guard: the controller's `_isBusy`
     // flag already serialises recording and uploads, but the compose sheet is
     // pure UI and a second press would stack a second sheet on top of it.
@@ -113,5 +119,8 @@ class ShortcutsCoordinator {
     }
   }
 
-  Future<void> dispose() => _registrar.unregisterAll();
+  Future<void> dispose() {
+    _disposed = true;
+    return _registrar.unregisterAll();
+  }
 }

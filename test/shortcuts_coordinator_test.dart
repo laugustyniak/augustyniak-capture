@@ -58,7 +58,7 @@ class _FakePlayer implements AudioPlayer {
 /// `startRecording` without needing a real capture device.
 class _DenyingRecorder implements AudioRecorder {
   @override
-  Future<bool> hasPermission() async => false;
+  Future<bool> hasPermission({bool request = true}) async => false;
   @override
   dynamic noSuchMethod(Invocation invocation) async => null;
 }
