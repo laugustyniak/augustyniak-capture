@@ -9,7 +9,6 @@ environment:
 dependencies:
   flutter:
     sdk: flutter
-  cupertino_icons: ^1.0.8
   record: ^7.1.1
   path_provider: ^2.1.6
   path: ^1.9.1

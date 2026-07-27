@@ -272,13 +272,21 @@ class RecordButton extends StatelessWidget {
               ? controller.stopRecording
               : controller.startRecording,
       icon: Icon(recording ? Icons.stop_rounded : Icons.mic_rounded),
-      label: Text(
-        recording
-            ? 'SAVE ${formatDuration(controller.elapsed)}'
-            : controller.isBusy
-                ? 'PROCESSING'
-                : 'CAPTURE',
-        style: const TextStyle(fontWeight: FontWeight.w900),
+      // Only this label changes on a tick, so only this label subscribes to the
+      // ticker. The surrounding page rebuilds on real state changes instead of
+      // four times a second.
+      label: ValueListenableBuilder<Duration>(
+        valueListenable: controller.elapsedTicker,
+        builder: (BuildContext context, Duration elapsed, Widget? child) {
+          return Text(
+            recording
+                ? 'SAVE ${formatDuration(elapsed)}'
+                : controller.isBusy
+                    ? 'PROCESSING'
+                    : 'CAPTURE',
+            style: const TextStyle(fontWeight: FontWeight.w900),
+          );
+        },
       ),
     );
   }
