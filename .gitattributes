@@ -1,0 +1,21 @@
+# Line endings are decided here, not by each developer's core.autocrlf.
+# The repository is LF-normalised (it was started on Linux); Windows clones
+# check out LF too, so generated files stop showing up as phantom "modified".
+* text=auto eol=lf
+
+# Windows toolchain files that the MSVC/PowerShell tooling expects as CRLF.
+*.bat        text eol=crlf
+*.cmd        text eol=crlf
+*.ps1        text eol=crlf
+*.sln        text eol=crlf
+*.vcxproj    text eol=crlf
+*.vcxproj.filters text eol=crlf
+
+# Binary — never touch these.
+*.png        binary
+*.jpg        binary
+*.ico        binary
+*.ttf        binary
+*.traineddata binary
+*.m4a        binary
+*.mp4        binary

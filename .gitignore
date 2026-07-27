@@ -11,5 +11,14 @@ android/.gradle/
 ios/Pods/
 ios/.symlinks/
 
+# Machine-specific paths written by `flutter pub get` / the platform builds.
+# These embed the absolute SDK + project path of whoever ran the tool last,
+# so tracking them makes every Linux<->Windows switch a spurious diff.
+# All of them are regenerated automatically — never commit them.
+android/local.properties
+ios/Flutter/Generated.xcconfig
+ios/Flutter/flutter_export_environment.sh
+ios/Flutter/ephemeral/
+
 # Superpowers brainstorm tooling state
 .superpowers/
