@@ -19,6 +19,12 @@ class _FakeRepository extends RecordingsRepository {
   final Directory directory;
   List<Recording> saved = <Recording>[];
 
+  /// One entry per `saveAll`: was the newest item's source file already on disk
+  /// when the index was written? This is what pins the ordering invariant —
+  /// asserting the end state alone cannot tell copy-then-index apart from
+  /// index-then-copy.
+  final List<bool> sourcePresentAtSave = <bool>[];
+
   @override
   Future<File> createSourceFile(String id, String extension) async =>
       File(p.join(directory.path, '$id.$extension'));
@@ -28,8 +34,22 @@ class _FakeRepository extends RecordingsRepository {
 
   @override
   Future<void> saveAll(List<Recording> recordings) async {
+    if (recordings.isNotEmpty) {
+      sourcePresentAtSave.add(File(recordings.first.filePath).existsSync());
+    }
     saved = List<Recording>.from(recordings);
   }
+}
+
+/// Returns a fixed transcript so the success path can be exercised without a
+/// network service. Every other test here uses the disabled service.
+class _StubTranscriptionService implements TranscriptionService {
+  const _StubTranscriptionService(this.text);
+
+  final String text;
+
+  @override
+  Future<String> transcribe(File audioFile) async => text;
 }
 
 class _FakePicker implements MediaPicker {
@@ -57,10 +77,11 @@ class _FakeRecorder implements AudioRecorder {
 RecordingsController buildController(
   RecordingsRepository repo, {
   PickedMedia? picked,
+  TranscriptionService service = const DisabledTranscriptionService(),
 }) {
   return RecordingsController(
     repository: repo,
-    transcriptionService: const DisabledTranscriptionService(),
+    transcriptionService: service,
     mediaPicker: _FakePicker(picked),
     recorder: _FakeRecorder(),
     player: _FakePlayer(),
@@ -135,6 +156,56 @@ void main() {
     expect(item.type, CaptureType.audioUpload);
     expect(item.status, RecordingStatus.failed);
     expect(File(item.filePath).existsSync(), isTrue);
+    controller.dispose();
+  });
+
+  test('index write follows the copy — the ordering invariant', () async {
+    final File source = File(p.join(pickDir.path, 'original.mp3'))
+      ..writeAsStringSync('SOUND');
+    final _FakeRepository repo = _FakeRepository(appDir);
+    final RecordingsController controller = buildController(
+      repo,
+      picked: PickedMedia(file: source, mimeType: 'audio/mpeg'),
+      service: const _StubTranscriptionService('UPLOADED TRANSCRIPT'),
+    );
+
+    await controller.addUpload(CaptureType.audioUpload);
+    // Processing is queued, so `addUpload` returns before the drain finishes;
+    // disposing without waiting would leave it writing to a dead controller.
+    await controller.waitForProcessing();
+
+    // The very first index write must already have seen the copied source on
+    // disk. Without this, copy-then-index and index-then-copy look identical.
+    expect(repo.sourcePresentAtSave, isNotEmpty);
+    expect(repo.sourcePresentAtSave.first, isTrue);
+    controller.dispose();
+  });
+
+  test('successful audio upload completes with a transcript', () async {
+    final File source = File(p.join(pickDir.path, 'original.mp3'))
+      ..writeAsStringSync('SOUND');
+    final _FakeRepository repo = _FakeRepository(appDir);
+    final RecordingsController controller = buildController(
+      repo,
+      picked: PickedMedia(file: source, mimeType: 'audio/mpeg'),
+      service: const _StubTranscriptionService('UPLOADED TRANSCRIPT'),
+    );
+
+    await controller.addUpload(CaptureType.audioUpload);
+    await controller.waitForProcessing();
+
+    final Recording item = controller.recordings.single;
+    expect(item.status, RecordingStatus.completed);
+    expect(item.transcript, 'UPLOADED TRANSCRIPT');
+    expect(item.error, isNull);
+    expect(item.type, CaptureType.audioUpload);
+    expect(item.sourceMimeType, 'audio/mpeg');
+    // Extension comes from the mime type, not the fixed mic-capture `.m4a`.
+    expect(p.extension(item.filePath), '.mp3');
+    expect(File(item.filePath).existsSync(), isTrue);
+    // The import is a copy: the picked file is never moved or deleted.
+    expect(source.existsSync(), isTrue);
+    expect(controller.isBusy, isFalse);
     controller.dispose();
   });
 }
