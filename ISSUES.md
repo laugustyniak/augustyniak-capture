@@ -24,11 +24,19 @@ Video items show a movie icon, not a poster. Extract a *derived*
 `<id>.thumb.jpg` (ffmpeg on desktop / `video_thumbnail` on mobile) — never
 confused with the source — and add an in-app or external video player.
 
-### Background transcription queue
+### Background transcription queue — job persistence across app suspension
 
-Transcription runs inline under the `_isBusy` lock, so a long job blocks the
-next capture. Needs a real job queue plus WorkManager (Android) /
-BGTaskScheduler (iOS) so jobs survive app suspension.
+The in-process decoupling is **done**: processing no longer runs inline under
+`_isBusy`. Capture enqueues an already-persisted item and returns; a background
+drain loop (`_drainProcessingQueue`) runs jobs one at a time off the capture
+lock, so a long job never blocks the next capture (`_enqueueProcessing` /
+`_isDraining`).
+
+Remaining (mobile-only, deferred): the queue lives only in memory, so jobs
+don't survive the app being killed/suspended. Add WorkManager (Android) /
+BGTaskScheduler (iOS) so a `pendingTranscription`/`transcribing` item resumes
+after suspension. On resume, re-enqueue any item left non-terminal in
+`recordings.json`.
 
 ### On-device models
 

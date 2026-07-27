@@ -102,6 +102,7 @@ class _QueueTabState extends State<QueueTab> {
                             controller.togglePlayback(recording.id),
                         onRetry: () =>
                             controller.retryTranscription(recording.id),
+                        onEdit: () => _openEditSheet(context, recording),
                         onToggleProcessed: () async {
                           await HapticFeedback.selectionClick();
                           await controller.toggleProcessed(recording.id);
@@ -140,11 +141,117 @@ class _QueueTabState extends State<QueueTab> {
     return byStatus.where((Recording item) {
       final String haystack = <String?>[
         item.transcript,
+        item.title,
         item.filePath.split(Platform.pathSeparator).last,
         item.id,
       ].whereType<String>().join(' ').toLowerCase();
       return haystack.contains(query);
     }).toList();
+  }
+
+  /// Inline editor for an item's title and processor-output text. Uses a bottom
+  /// sheet (like the note composer) — the app has no dialogs/snackbars.
+  Future<void> _openEditSheet(BuildContext context, Recording recording) async {
+    final _EditResult? result = await showModalBottomSheet<_EditResult>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Console.background,
+      builder: (BuildContext _) => _EditSheet(recording: recording),
+    );
+    if (result == null) return; // cancelled
+    await widget.controller.setTitle(recording.id, result.title);
+    await widget.controller.editTranscript(recording.id, result.transcript);
+  }
+}
+
+class _EditResult {
+  const _EditResult({required this.title, required this.transcript});
+  final String title;
+  final String transcript;
+}
+
+/// Two-field editor: title (optional) and the processor-output text. Prefilled
+/// from the item; returns the trimmed values on Save, null on cancel.
+class _EditSheet extends StatefulWidget {
+  const _EditSheet({required this.recording});
+
+  final Recording recording;
+
+  @override
+  State<_EditSheet> createState() => _EditSheetState();
+}
+
+class _EditSheetState extends State<_EditSheet> {
+  late final TextEditingController _title =
+      TextEditingController(text: widget.recording.title ?? '');
+  late final TextEditingController _text =
+      TextEditingController(text: widget.recording.transcript ?? '');
+
+  @override
+  void dispose() {
+    _title.dispose();
+    _text.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: EdgeInsets.only(
+        left: 18,
+        right: 18,
+        top: 18,
+        bottom: MediaQuery.of(context).viewInsets.bottom + 18,
+      ),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: <Widget>[
+          const SectionHeader(title: 'EDYTUJ'),
+          const SizedBox(height: 12),
+          TextField(
+            controller: _title,
+            textInputAction: TextInputAction.next,
+            style: const TextStyle(color: Console.text, fontSize: 14),
+            decoration: const InputDecoration(
+              labelText: 'Tytuł (opcjonalny)',
+              hintText: 'np. Spotkanie z klientem',
+            ),
+          ),
+          const SizedBox(height: 12),
+          TextField(
+            controller: _text,
+            maxLines: 6,
+            minLines: 3,
+            style: const TextStyle(color: Console.text, fontSize: 13),
+            decoration: const InputDecoration(
+              labelText: 'Tekst',
+              hintText: 'Transkrypcja / tekst OCR / notatka',
+            ),
+          ),
+          const SizedBox(height: 14),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.end,
+            children: <Widget>[
+              TextButton(
+                onPressed: () => Navigator.of(context).pop(),
+                child: const Text('ANULUJ'),
+              ),
+              const SizedBox(width: 8),
+              FilledButton(
+                onPressed: () => Navigator.of(context).pop(
+                  _EditResult(
+                    title: _title.text,
+                    transcript: _text.text,
+                  ),
+                ),
+                child: const Text('ZAPISZ'),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
   }
 }
 
@@ -394,6 +501,7 @@ class _RecordingCard extends StatelessWidget {
     required this.isPlaying,
     required this.onTogglePlay,
     required this.onRetry,
+    required this.onEdit,
     required this.onToggleProcessed,
   });
 
@@ -401,6 +509,7 @@ class _RecordingCard extends StatelessWidget {
   final bool isPlaying;
   final VoidCallback onTogglePlay;
   final VoidCallback onRetry;
+  final VoidCallback onEdit;
   final VoidCallback onToggleProcessed;
 
   @override
@@ -409,6 +518,9 @@ class _RecordingCard extends StatelessWidget {
     final bool reviewed = recording.isProcessedByUser;
     final _StatusVisual visual = _statusVisual(recording.status);
     final String filename = File(recording.filePath).uri.pathSegments.last;
+    final String? title = recording.title?.trim();
+    final bool hasTitle = title != null && title.isNotEmpty;
+    final String displayName = hasTitle ? title : filename;
     // Generic processor output: a transcription, OCR text or a note body.
     final String transcript = recording.transcript ?? '';
     final bool hasTranscript = transcript.trim().isNotEmpty;
@@ -462,7 +574,7 @@ class _RecordingCard extends StatelessWidget {
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: <Widget>[
                       Text(
-                        filename,
+                        displayName,
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
                         style: const TextStyle(
@@ -472,10 +584,16 @@ class _RecordingCard extends StatelessWidget {
                       ),
                       const SizedBox(height: 4),
                       Text(
-                        recording.durationMs > 0
-                            ? '${formatDateTime(recording.createdAt)} · '
+                        <String>[
+                          if (hasTitle) filename,
+                          if (recording.durationMs > 0)
+                            '${formatDateTime(recording.createdAt)} · '
                                 '${formatDuration(Duration(milliseconds: recording.durationMs))}'
-                            : formatDateTime(recording.createdAt),
+                          else
+                            formatDateTime(recording.createdAt),
+                        ].join(' · '),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
                         style: const TextStyle(
                           color: Console.mutedSoft,
                           fontSize: 10,
@@ -517,6 +635,30 @@ class _RecordingCard extends StatelessWidget {
                   ),
                   const SizedBox(width: 8),
                 ],
+                Semantics(
+                  button: true,
+                  label: 'Edit title and text',
+                  child: InkResponse(
+                    onTap: onEdit,
+                    radius: 25,
+                    child: Container(
+                      width: 40,
+                      height: 40,
+                      alignment: Alignment.center,
+                      decoration: BoxDecoration(
+                        color: const Color(0xFF102434),
+                        borderRadius: BorderRadius.circular(13),
+                        border: Border.all(color: Console.border),
+                      ),
+                      child: const Icon(
+                        Icons.edit_outlined,
+                        color: Console.cyan,
+                        size: 20,
+                      ),
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 8),
                 Semantics(
                   button: true,
                   checked: reviewed,

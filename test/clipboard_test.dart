@@ -118,7 +118,7 @@ void main() {
     );
 
     await controller.addUpload(CaptureType.audioUpload);
-
+    await controller.waitForProcessing();
     expect(controller.recordings.single.status, RecordingStatus.completed);
     expect(clipboard.copied, <String>['Dziękuję bardzo.']);
   });
@@ -132,7 +132,7 @@ void main() {
 
     // No provider configured -> the processor throws.
     await controller.addUpload(CaptureType.audioUpload);
-
+    await controller.waitForProcessing();
     expect(controller.recordings.single.status, RecordingStatus.failed);
     expect(clipboard.copied, isEmpty);
   });
@@ -142,7 +142,7 @@ void main() {
     final RecordingsController controller = build(clipboard: clipboard);
 
     await controller.addTextNote('notatka pisana ręcznie');
-
+    await controller.waitForProcessing();
     expect(controller.recordings.single.status, RecordingStatus.completed);
     expect(clipboard.copied, isEmpty);
   });
@@ -155,7 +155,7 @@ void main() {
     );
 
     await controller.addUpload(CaptureType.audioUpload);
-
+    await controller.waitForProcessing();
     final Recording item = controller.recordings.single;
     expect(item.status, RecordingStatus.completed);
     expect(item.transcript, 'tekst wynikowy');
@@ -171,12 +171,12 @@ void main() {
     );
 
     await controller.addUpload(CaptureType.audioUpload);
-    expect(clipboard.copied, isEmpty);
+    await controller.waitForProcessing();    expect(clipboard.copied, isEmpty);
 
     // Swapping the service mirrors the user fixing the profile in Models.
     controller.transcriptionService = _StubTranscription('po naprawie');
     await controller.retryTranscription(controller.recordings.single.id);
-
+    await controller.waitForProcessing();
     expect(controller.recordings.single.status, RecordingStatus.completed);
     expect(clipboard.copied, <String>['po naprawie']);
   });
