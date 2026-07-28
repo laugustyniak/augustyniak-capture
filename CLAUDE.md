@@ -26,6 +26,17 @@ runtime degradation, so nothing runs at all:
 sudo apt-get install keybinder-3.0   # resolves to libkeybinder-3.0-dev
 ```
 
+**There is no server-side CI.** GitHub Actions is metered on this private repo,
+so the workflow is parked at `.github/workflows/ci.yml.disabled`. A branch that
+does not compile has reached review before because of this. A `pre-push` hook
+runs `flutter analyze` + `flutter test` in its place — enable it once per clone:
+
+```bash
+git config core.hooksPath .githooks
+```
+
+`git push --no-verify` skips it when that is genuinely what you want.
+
 - Run: `flutter run`
 - Run with transcription token: `flutter run --dart-define=TRANSCRIPTION_TOKEN=secret`
 - All tests: `flutter test`
@@ -49,7 +60,7 @@ Feature-first layout under `lib/features/<feature>/{domain,data,presentation}`. 
 
 | Index | Tab | Body | Backed by |
 | --- | --- | --- | --- |
-| 0 | Queue | `recordings/presentation/queue_tab.dart` | `RecordingsController` |
+| 0 | Queue | `recordings/presentation/queue_tab.dart` (+ `recording_card.dart`, `edit_sheet.dart`, `queue_metrics.dart`) | `RecordingsController` |
 | 1 | Models | `settings/presentation/models_tab.dart` | `SettingsController` |
 | 2 | Logs | `logs/presentation/logs_tab.dart` | `LogStore` |
 | 3 | Config | `settings/presentation/config_tab.dart` | `SettingsController` |
@@ -116,7 +127,7 @@ The shell picks the desktop impls (`Tesseract`/`Ffmpeg`) on Linux/macOS/Windows 
 
 **Logs** (`features/logs/`): `LogStore` is a `ChangeNotifier` ring buffer implementing `LogSink`, newest-first, capacity 500. The `LogArchive` interface keeps the store pure-Dart testable; `FileLogArchive` is the platform impl. Read-only view — nothing in the Logs tab mutates recordings.
 
-**UI** — "Processing Console" dark theme (navy + cyan accent) in `lib/app/app.dart`; shared palette and widgets (`Console`, `StatusPill`, `ErrorBanner`, `SectionHeader`, `ConsoleCard`, `EmptyPanel`, `InfoRow`, `CopyButton`, formatters) in `lib/app/ui_kit.dart` — use these rather than re-declaring colors in a tab. `CopyButton` is the clipboard affordance: it copies the **full** string it is given even when the caller renders it truncated, and confirms inline by morphing its icon — the app uses no snackbars or dialogs anywhere, so keep new feedback inline too. Queue filters recordings by `RecordingFilter` (queue/ready/failed/raw) plus a separate reviewed counter.
+**UI** — "Processing Console" dark theme (navy + cyan accent) in `lib/app/app.dart`; shared palette and widgets (`Console`, `StatusPill`, `ErrorBanner`, `SectionHeader`, `ConsoleCard`, `EmptyPanel`, `InfoRow`, `CopyButton`, `ConsoleChip`, `ConsoleIconTile`, `ConsoleIconButton`, `confirmDestructive()`, formatters) in `lib/app/ui_kit.dart` — use these rather than re-declaring colors or re-writing a chip/tile/dialog in a tab. Every raw hex belongs in `Console`; `app.dart` included. `CopyButton` is the clipboard affordance: it copies the **full** string it is given even when the caller renders it truncated, and confirms inline by morphing its icon — the app uses **no snackbars**, and reserves dialogs for destructive confirmation only (`confirmDestructive()`), so keep new feedback inline too. Queue filters recordings by `RecordingFilter` (queue/ready/failed/raw) plus a separate reviewed counter.
 
 **Audio format**: AAC-LC `.m4a`, defaults 16 kHz mono 64 kbps. Sample rate, channels and bitrate are user-editable in the Config tab; the **encoder and container are deliberately fixed for mic capture**, so `extensionFor(audioRecording)` is always `m4a`. Uploads keep their own extension — that path does not re-encode.
 

@@ -3,6 +3,14 @@
 # now: `flutter pub get && flutter analyze && flutter test`, plus
 # `flutter build windows --debug` for the desktop-only features.
 #
+# Until then a `pre-push` hook stands in locally — see CLAUDE.md; enable with
+# `git config core.hooksPath .githooks`.
+#
+# NOTE for whoever re-enables this: the Linux job must install keybinder-3.0
+# before `flutter build linux`, or it fails at "Unable to generate build files"
+# because hotkey_manager links against it:
+#   - run: sudo apt-get update && sudo apt-get install -y keybinder-3.0
+#
 # To re-enable: rename this file back to `ci.yml` and uncomment the body.
 # The `.disabled` suffix is what actually keeps it inert — GitHub only reads
 # `.yml`/`.yaml` in this directory. A commented-out `ci.yml` would still be
