@@ -65,6 +65,16 @@ degradacja w czasie działania, więc aplikacja w ogóle się nie uruchomi:
 sudo apt-get install keybinder-3.0
 ```
 
+### Weryfikacja przed pushem
+
+Nie ma CI po stronie serwera (GitHub Actions jest płatne dla tego prywatnego
+repo, workflow leży w `.github/workflows/ci.yml.disabled`). Zamiast tego hook
+`pre-push` uruchamia `flutter analyze` i `flutter test`. Włącz go raz na klon:
+
+```bash
+git config core.hooksPath .githooks
+```
+
 ## Włączenie endpointu Whisper
 
 W `lib/features/recordings/presentation/recordings_page.dart` zamień:

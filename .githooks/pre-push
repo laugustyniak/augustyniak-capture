@@ -1,0 +1,26 @@
+#!/usr/bin/env bash
+# Local stand-in for CI.
+#
+# GitHub Actions is metered on this private repo and the workflow is parked at
+# .github/workflows/ci.yml.disabled, so nothing on the server gates a push.
+# PR #9 shipped a branch that did not compile because of exactly that gap.
+#
+# Enable once per clone:
+#   git config core.hooksPath .githooks
+# Skip a single push (e.g. pushing a WIP branch on purpose):
+#   git push --no-verify
+set -euo pipefail
+
+echo "pre-push: flutter analyze"
+if ! flutter analyze; then
+  echo "pre-push: analyze failed — push aborted (use --no-verify to override)" >&2
+  exit 1
+fi
+
+echo "pre-push: flutter test"
+if ! flutter test; then
+  echo "pre-push: tests failed — push aborted (use --no-verify to override)" >&2
+  exit 1
+fi
+
+echo "pre-push: OK"
