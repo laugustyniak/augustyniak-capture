@@ -11,6 +11,14 @@
 #   git push --no-verify
 set -euo pipefail
 
+# Git exports GIT_DIR (and friends) into every hook. Flutter reads its own
+# version by shelling out to git inside the SDK checkout, so with those set it
+# inspects *this* repo instead, reports "0.0.0-unknown", and pub then rejects
+# every plugin carrying a Flutter SDK constraint. The gate fails on a version
+# solve that has nothing to do with the branch being pushed — which is worse
+# than no gate, because the failure looks like the branch's fault.
+unset GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE GIT_PREFIX GIT_COMMON_DIR
+
 echo "pre-push: flutter analyze"
 if ! flutter analyze; then
   echo "pre-push: analyze failed — push aborted (use --no-verify to override)" >&2
