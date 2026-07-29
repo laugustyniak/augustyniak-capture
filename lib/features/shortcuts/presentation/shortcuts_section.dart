@@ -56,9 +56,12 @@ class ShortcutsSection extends StatelessWidget {
               const SizedBox(height: 12),
               const Text(
                 'Skróty działają w całym systemie, także gdy okno jest '
-                'zminimalizowane. Nagrywanie celowo nie przywołuje okna — '
-                'pozostałe akcje muszą je podnieść, bo otwierają panel lub '
-                'okno wyboru pliku.',
+                'zminimalizowane. Nagrywanie przywołuje okno dopiero po '
+                'starcie, żeby nie opóźniać mikrofonu; zatrzymanie nie '
+                'przywołuje go wcale. Na Linuksie kombinacje z Shiftem i '
+                'literą, cyfrą lub znakiem nie działają — Shift zmienia '
+                'klawisz, którego nasłuchuje system. Shift z klawiszami '
+                'F1–F12, spacją lub Enterem jest bezpieczny.',
                 style: TextStyle(
                   color: Console.mutedSoft,
                   fontSize: 10,
@@ -137,7 +140,8 @@ class _ShortcutRow extends StatelessWidget {
               if (isRejected) ...<Widget>[
                 const SizedBox(height: 3),
                 const Text(
-                  'Kombinacja zajęta przez inną aplikację.',
+                  'Ta kombinacja nie zadziała — zajęta lub nieobsługiwana '
+                  'w tym systemie. Wybierz inną.',
                   style: TextStyle(color: Console.amber, fontSize: 9.5),
                 ),
               ],
