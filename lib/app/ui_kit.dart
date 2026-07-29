@@ -173,7 +173,6 @@ class ConsoleHeader extends StatelessWidget {
     required this.title,
     this.trailing,
     this.eyebrow = 'AUDIVOA CORE',
-    this.action,
   });
 
   final String title;
@@ -181,10 +180,6 @@ class ConsoleHeader extends StatelessWidget {
   /// Small mono counter on the right, e.g. `12 captures`.
   final String? trailing;
   final String eyebrow;
-
-  /// Takes the place of [trailing] when a tab needs a control rather than a
-  /// count (the recording screen puts its REC pill here).
-  final Widget? action;
 
   @override
   Widget build(BuildContext context) {
@@ -197,9 +192,7 @@ class ConsoleHeader extends StatelessWidget {
           crossAxisAlignment: CrossAxisAlignment.end,
           children: <Widget>[
             Expanded(child: Text(title, style: ConsoleText.pageTitle)),
-            if (action != null)
-              action!
-            else if (trailing != null)
+            if (trailing != null)
               Padding(
                 padding: const EdgeInsets.only(bottom: 3),
                 child: Text(trailing!, style: ConsoleText.counter),
