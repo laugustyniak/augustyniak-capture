@@ -14,6 +14,7 @@ import '../../processing/data/video_audio_extractor.dart';
 import '../../settings/presentation/config_tab.dart';
 import '../../settings/presentation/models_tab.dart';
 import '../../settings/presentation/settings_controller.dart';
+import '../../shortcuts/data/linux_hotkey_registrar.dart';
 import '../../shortcuts/data/system_hotkey_registrar.dart';
 import '../../shortcuts/data/system_window_presenter.dart';
 import '../../shortcuts/domain/hotkey_registrar.dart';
@@ -82,6 +83,13 @@ class _RecordingsPageState extends State<RecordingsPage> {
         if (!mounted) return;
         await _composeTextNote(context);
       },
+      // A recording started from a global hotkey is otherwise invisible: the
+      // only running indicator is the red `SAVE mm:ss` FAB, and it lives on the
+      // Queue tab.
+      revealQueue: () async {
+        if (!mounted || navigationIndex == queueIndex) return;
+        setState(() => navigationIndex = queueIndex);
+      },
       registrar: _buildHotkeyRegistrar(),
       windowPresenter: _buildWindowPresenter(),
       logSink: logs,
@@ -118,10 +126,15 @@ class _RecordingsPageState extends State<RecordingsPage> {
   static bool get _isDesktop =>
       Platform.isLinux || Platform.isMacOS || Platform.isWindows;
 
-  static HotkeyRegistrar _buildHotkeyRegistrar() =>
-      _isDesktop
-          ? const SystemHotkeyRegistrar()
-          : const NoopHotkeyRegistrar();
+  /// Linux gets its own registrar rather than `hotkey_manager`'s Dart layer,
+  /// which resolves some keys to the wrong physical key on the way to GTK — see
+  /// [LinuxHotkeyRegistrar].
+  static HotkeyRegistrar _buildHotkeyRegistrar() {
+    if (Platform.isLinux) return LinuxHotkeyRegistrar();
+    return _isDesktop
+        ? const SystemHotkeyRegistrar()
+        : const NoopHotkeyRegistrar();
+  }
 
   static WindowPresenter _buildWindowPresenter() => _isDesktop
       ? const SystemWindowPresenter()
