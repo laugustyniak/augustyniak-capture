@@ -91,7 +91,7 @@ class SettingsController extends ChangeNotifier {
   }) async {
     final ProviderProfile profile = ProviderProfile(
       id: _uuid.v4(),
-      name: name.trim().isEmpty ? 'Profil' : name.trim(),
+      name: name.trim().isEmpty ? 'Profile' : name.trim(),
       endpoint: endpoint.trim(),
       model: model,
       language: language,
@@ -219,7 +219,7 @@ class SettingsController extends ChangeNotifier {
 
     const ProviderProfile seeded = ProviderProfile(
       id: 'build-define',
-      name: 'Z konfiguracji budowania',
+      name: 'From build config',
       endpoint: '',
     );
     final ProviderProfile profile = seeded.copyWith(

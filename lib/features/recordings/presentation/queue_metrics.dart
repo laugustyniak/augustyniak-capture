@@ -2,125 +2,92 @@ import 'package:flutter/material.dart';
 
 import '../../../app/ui_kit.dart';
 
-/// The reviewed/running/failed counters above the queue list.
-class MetricsRow extends StatelessWidget {
-  const MetricsRow({
+/// The review progress row above the queue list.
+///
+/// The design replaced three separate metric cards with this single strip: the
+/// per-status counts moved onto the filter chips, which is where they are
+/// actionable, leaving only the one number that is a goal rather than a fact —
+/// how much of the queue the user has actually read.
+class ReviewedStrip extends StatelessWidget {
+  const ReviewedStrip({
     super.key,
     required this.total,
     required this.reviewed,
-    required this.running,
-    required this.failed,
   });
 
   final int total;
   final int reviewed;
-  final int running;
-  final int failed;
 
   @override
   Widget build(BuildContext context) {
-    return Column(
-      children: <Widget>[
-        Row(
+    final double progress = total == 0 ? 0 : reviewed / total;
+    final bool allReviewed = total > 0 && reviewed == total;
+
+    return Semantics(
+      label: 'Reviewed $reviewed of $total captures',
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+        decoration: BoxDecoration(
+          color: Console.surface,
+          borderRadius: BorderRadius.circular(10),
+          border: Border.all(color: Console.border),
+        ),
+        child: Row(
           children: <Widget>[
-            Expanded(
-              child: _AnimatedMetricCard(
-                value: reviewed,
-                suffix: '/$total',
-                label: 'REVIEWED',
-                accent: Console.green,
-              ),
+            Icon(
+              Icons.check_rounded,
+              size: 18,
+              color: allReviewed ? Console.green : Console.cyan,
             ),
-            const SizedBox(width: 9),
+            const SizedBox(width: 12),
             Expanded(
-              child: _AnimatedMetricCard(value: running, label: 'RUNNING'),
-            ),
-            const SizedBox(width: 9),
-            Expanded(
-              child: _AnimatedMetricCard(
-                value: failed,
-                label: 'FAILED',
-                accent: failed == 0 ? Console.green : Console.red,
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: <Widget>[
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: <Widget>[
+                      Text(
+                        'REVIEWED',
+                        style: ConsoleText.cardMeta.copyWith(
+                          fontWeight: FontWeight.w500,
+                        ),
+                      ),
+                      Text(
+                        '$reviewed / $total',
+                        style: ConsoleText.cardMeta.copyWith(
+                          fontWeight: FontWeight.w500,
+                          color: Console.text,
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 7),
+                  ClipRRect(
+                    borderRadius: BorderRadius.circular(2),
+                    child: TweenAnimationBuilder<double>(
+                      tween: Tween<double>(end: progress),
+                      duration: const Duration(milliseconds: 550),
+                      curve: Curves.easeOutCubic,
+                      builder: (
+                        BuildContext context,
+                        double value,
+                        Widget? child,
+                      ) {
+                        return LinearProgressIndicator(
+                          value: value,
+                          minHeight: 4,
+                          color: allReviewed ? Console.green : Console.cyan,
+                          backgroundColor: Console.track,
+                        );
+                      },
+                    ),
+                  ),
+                ],
               ),
             ),
           ],
         ),
-        const SizedBox(height: 9),
-        ClipRRect(
-          borderRadius: BorderRadius.circular(99),
-          child: TweenAnimationBuilder<double>(
-            tween: Tween<double>(end: total == 0 ? 0 : reviewed / total),
-            duration: const Duration(milliseconds: 550),
-            curve: Curves.easeOutCubic,
-            builder: (BuildContext context, double value, Widget? child) {
-              return LinearProgressIndicator(
-                value: value,
-                minHeight: 5,
-                color: Console.green,
-                backgroundColor: const Color(0xFF17314B),
-              );
-            },
-          ),
-        ),
-      ],
-    );
-  }
-}
-
-class _AnimatedMetricCard extends StatelessWidget {
-  const _AnimatedMetricCard({
-    required this.value,
-    required this.label,
-    this.suffix = '',
-    this.accent = Console.cyan,
-  });
-
-  final int value;
-  final String suffix;
-  final String label;
-  final Color accent;
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.all(12),
-      decoration: BoxDecoration(
-        color: Console.surface,
-        borderRadius: BorderRadius.circular(15),
-        border: Border.all(color: Console.border),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: <Widget>[
-          AnimatedSwitcher(
-            duration: const Duration(milliseconds: 320),
-            transitionBuilder: (Widget child, Animation<double> animation) {
-              return ScaleTransition(
-                scale: CurvedAnimation(
-                    parent: animation, curve: Curves.easeOutBack),
-                child: FadeTransition(opacity: animation, child: child),
-              );
-            },
-            child: Text(
-              '$value$suffix',
-              key: ValueKey<String>('$value$suffix'),
-              style: TextStyle(
-                color: accent,
-                fontSize: 19,
-                fontWeight: FontWeight.w900,
-              ),
-            ),
-          ),
-          const SizedBox(height: 3),
-          Text(
-            label,
-            style: const TextStyle(
-              color: Console.muted,
-              fontSize: 8,
-              fontWeight: FontWeight.w800,
-            ),
-          ),
-        ],
       ),
     );
   }

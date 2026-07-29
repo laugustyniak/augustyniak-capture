@@ -32,6 +32,12 @@ enum CaptureType {
   /// which is audio-only (`audioplayers`).
   bool get isPlayableAudio =>
       this == CaptureType.audioRecording || this == CaptureType.audioUpload;
+
+  /// Whether a duration is meaningful for this type. Images and notes store
+  /// `durationMs: 0`, and the card omits the segment rather than claiming a
+  /// `00:00` runtime that no artifact actually has.
+  bool get hasDuration =>
+      this != CaptureType.image && this != CaptureType.text;
 }
 
 /// Storage extension policy: `<uuid>.<extensionFor(type)>` in the recordings

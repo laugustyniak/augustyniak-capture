@@ -24,8 +24,11 @@ import '../../transcription/data/transcription_service.dart';
 import '../data/recordings_repository.dart';
 import '../data/system_clipboard_sink.dart';
 import '../domain/capture_type.dart';
+import 'capture_dock.dart';
 import 'queue_tab.dart';
+import 'recording_view.dart';
 import 'recordings_controller.dart';
+import 'text_note_sheet.dart';
 
 /// Shell for the four navigation tabs. Owns the controllers and keeps the
 /// recordings controller in sync with settings; every tab body lives in its own
@@ -184,7 +187,7 @@ class _RecordingsPageState extends State<RecordingsPage> {
       context: context,
       isScrollControlled: true,
       backgroundColor: Console.background,
-      builder: (BuildContext context) => const _TextNoteSheet(),
+      builder: (BuildContext context) => const TextNoteSheet(),
     );
     if (body != null && body.trim().isNotEmpty) {
       await controller.addTextNote(body);
@@ -229,126 +232,92 @@ class _RecordingsPageState extends State<RecordingsPage> {
     return AnimatedBuilder(
       animation: listenable,
       builder: (BuildContext context, Widget? child) {
+        final bool recording = controller.isRecording;
+
         return Scaffold(
-          appBar: AppBar(
-            titleSpacing: 20,
-            title: const Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: <Widget>[
-                Text(
-                  'Audivoa Core',
-                  style: TextStyle(fontWeight: FontWeight.w800, fontSize: 21),
-                ),
-                Text(
-                  'LOCAL-FIRST PROCESSING CONSOLE',
-                  style: TextStyle(
-                    color: Console.muted,
-                    fontSize: 9,
-                    letterSpacing: 1.2,
-                    fontWeight: FontWeight.w700,
-                  ),
-                ),
-              ],
-            ),
-            actions: <Widget>[
-              Padding(
-                padding: const EdgeInsets.only(right: 18),
-                child: Container(
-                  width: 38,
-                  height: 38,
-                  decoration: BoxDecoration(
-                    color: Console.cyan,
-                    borderRadius: BorderRadius.circular(13),
-                  ),
-                  alignment: Alignment.center,
-                  child: const Text(
-                    'AI',
-                    style: TextStyle(
-                      color: Console.ink,
-                      fontWeight: FontWeight.w900,
-                    ),
-                  ),
-                ),
-              ),
-            ],
-          ),
-          // IndexedStack so the Queue tab keeps its search text and filter
-          // while the user visits Models/Logs/Config.
-          body: IndexedStack(
-            index: navigationIndex,
+          // No AppBar: each tab draws the design's own header (cyan eyebrow +
+          // large title) inside its scroll area, so the title scrolls with the
+          // content instead of sitting in a separate bar above it.
+          body: Stack(
             children: <Widget>[
-              QueueTab(controller: controller),
-              ModelsTab(controller: settings),
-              LogsTab(store: logs),
-              ConfigTab(
-                controller: settings,
-                storagePath: storagePath,
-                recordingsCount: controller.recordings.length,
-                logCount: logs.events.length,
-                onOpenModels: () =>
-                    setState(() => navigationIndex = modelsIndex),
-                showShortcuts: _isDesktop,
-                rejectedShortcuts: rejectedShortcuts,
-                runWithHotkeysSuspended: _runWithHotkeysSuspended,
+              // IndexedStack so the Queue tab keeps its search text and filter
+              // while the user visits Models/Logs/Config.
+              IndexedStack(
+                index: navigationIndex,
+                children: <Widget>[
+                  QueueTab(controller: controller),
+                  ModelsTab(controller: settings),
+                  LogsTab(store: logs),
+                  ConfigTab(
+                    controller: settings,
+                    storagePath: storagePath,
+                    recordingsCount: controller.recordings.length,
+                    logCount: logs.events.length,
+                    onOpenModels: () =>
+                        setState(() => navigationIndex = modelsIndex),
+                    showShortcuts: _isDesktop,
+                    rejectedShortcuts: rejectedShortcuts,
+                    runWithHotkeysSuspended: _runWithHotkeysSuspended,
+                  ),
+                ],
               ),
+              if (navigationIndex == queueIndex && !recording)
+                Positioned(
+                  left: 0,
+                  right: 0,
+                  bottom: 0,
+                  child: CaptureDock(
+                    controller: controller,
+                    onOpenCaptureMenu: () => _openCaptureMenu(context),
+                  ),
+                ),
+              // Overlaid rather than swapped into the IndexedStack: the Queue
+              // underneath keeps its search text and scroll position for when
+              // the capture finishes.
+              if (recording)
+                Positioned.fill(
+                  child: ColoredBox(
+                    color: Console.background,
+                    child: RecordingView(controller: controller),
+                  ),
+                ),
             ],
           ),
-          floatingActionButtonLocation: FloatingActionButtonLocation.endFloat,
-          floatingActionButton: navigationIndex == queueIndex
-              ? Column(
-                  mainAxisSize: MainAxisSize.min,
-                  crossAxisAlignment: CrossAxisAlignment.end,
-                  children: <Widget>[
-                    // Non-audio capture. Hidden while recording so the stop
-                    // action stands alone.
-                    if (!controller.isRecording && !controller.isBusy) ...<Widget>[
-                      FloatingActionButton.small(
-                        heroTag: 'add',
-                        backgroundColor: Console.surfaceRaised,
-                        foregroundColor: Console.cyan,
-                        onPressed: () => _openCaptureMenu(context),
-                        child: const Icon(Icons.add),
+          // Hidden while recording — the capture screen is a single-purpose
+          // view, and switching tabs mid-take is not a thing to invite.
+          bottomNavigationBar: recording
+              ? null
+              : DecoratedBox(
+                  decoration: const BoxDecoration(
+                    border: Border(top: BorderSide(color: Console.border)),
+                  ),
+                  child: NavigationBar(
+                    selectedIndex: navigationIndex,
+                    onDestinationSelected: (int value) {
+                      setState(() => navigationIndex = value);
+                    },
+                    destinations: <NavigationDestination>[
+                      const NavigationDestination(
+                        icon: Icon(Icons.format_list_bulleted_rounded),
+                        label: 'QUEUE',
                       ),
-                      const SizedBox(height: 12),
+                      NavigationDestination(
+                        icon: _ProfileBadge(
+                          hasActiveProfile: settings.activeProfile != null,
+                        ),
+                        label: 'MODELS',
+                      ),
+                      const NavigationDestination(
+                        icon: Icon(Icons.chevron_right_rounded),
+                        label: 'LOGS',
+                      ),
+                      const NavigationDestination(
+                        icon: Icon(Icons.tune_rounded),
+                        label: 'CONFIG',
+                      ),
                     ],
-                    RecordButton(controller: controller),
-                  ],
-                )
-              : null,
-          bottomNavigationBar: NavigationBar(
-            selectedIndex: navigationIndex,
-            onDestinationSelected: (int value) {
-              setState(() => navigationIndex = value);
-            },
-            destinations: <NavigationDestination>[
-              const NavigationDestination(
-                icon: Icon(Icons.inbox_outlined),
-                selectedIcon: Icon(Icons.inbox),
-                label: 'Queue',
-              ),
-              NavigationDestination(
-                icon: _ProfileBadge(
-                  hasActiveProfile: settings.activeProfile != null,
-                  selected: false,
+                  ),
                 ),
-                selectedIcon: _ProfileBadge(
-                  hasActiveProfile: settings.activeProfile != null,
-                  selected: true,
-                ),
-                label: 'Models',
-              ),
-              const NavigationDestination(
-                icon: Icon(Icons.terminal_outlined),
-                selectedIcon: Icon(Icons.terminal),
-                label: 'Logs',
-              ),
-              const NavigationDestination(
-                icon: Icon(Icons.tune_outlined),
-                selectedIcon: Icon(Icons.tune),
-                label: 'Config',
-              ),
-            ],
-          ),
         );
       },
     );
@@ -357,20 +326,20 @@ class _RecordingsPageState extends State<RecordingsPage> {
 
 /// Amber dot on the Models tab while no provider profile is active, so the
 /// "transcription is off" state is visible without opening the tab.
+///
+/// One icon for both states: the navigation theme already tints it cyan when
+/// selected and dim when not, which is how the design marks the active tab.
 class _ProfileBadge extends StatelessWidget {
-  const _ProfileBadge({required this.hasActiveProfile, required this.selected});
+  const _ProfileBadge({required this.hasActiveProfile});
 
   final bool hasActiveProfile;
-  final bool selected;
 
   @override
   Widget build(BuildContext context) {
-    final Icon icon = selected
-        ? const Icon(Icons.memory)
-        : const Icon(Icons.memory_outlined);
+    const Icon icon = Icon(Icons.memory_rounded);
     if (hasActiveProfile) return icon;
 
-    return Badge(
+    return const Badge(
       backgroundColor: Console.amber,
       smallSize: 7,
       child: icon,
@@ -378,126 +347,67 @@ class _ProfileBadge extends StatelessWidget {
   }
 }
 
-/// Compose sheet for a text note. Returns the typed body via `Navigator.pop`;
-/// the page persists it through `RecordingsController.addTextNote`.
-class _TextNoteSheet extends StatefulWidget {
-  const _TextNoteSheet();
-
-  @override
-  State<_TextNoteSheet> createState() => _TextNoteSheetState();
-}
-
-class _TextNoteSheetState extends State<_TextNoteSheet> {
-  final TextEditingController _controller = TextEditingController();
-  bool _canSave = false;
-
-  @override
-  void initState() {
-    super.initState();
-    _controller.addListener(() {
-      final bool next = _controller.text.trim().isNotEmpty;
-      if (next != _canSave) setState(() => _canSave = next);
-    });
-  }
-
-  @override
-  void dispose() {
-    _controller.dispose();
-    super.dispose();
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final double bottomInset = MediaQuery.of(context).viewInsets.bottom;
-    return Padding(
-      padding: EdgeInsets.fromLTRB(18, 18, 18, bottomInset + 18),
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: <Widget>[
-          const Text(
-            'Nowa notatka',
-            style: TextStyle(fontWeight: FontWeight.w800, fontSize: 16),
-          ),
-          const SizedBox(height: 14),
-          TextField(
-            controller: _controller,
-            autofocus: true,
-            maxLines: 6,
-            minLines: 3,
-            style: const TextStyle(color: Console.text, fontSize: 14),
-            decoration: InputDecoration(
-              hintText: 'Wpisz treść notatki…',
-              hintStyle: const TextStyle(color: Console.muted, fontSize: 13),
-              filled: true,
-              fillColor: Console.surfaceDeep,
-              border: OutlineInputBorder(
-                borderRadius: BorderRadius.circular(14),
-                borderSide: const BorderSide(color: Console.border),
-              ),
-              enabledBorder: OutlineInputBorder(
-                borderRadius: BorderRadius.circular(14),
-                borderSide: const BorderSide(color: Console.border),
-              ),
-            ),
-          ),
-          const SizedBox(height: 16),
-          SizedBox(
-            width: double.infinity,
-            child: FilledButton(
-              onPressed: _canSave
-                  ? () => Navigator.pop(context, _controller.text)
-                  : null,
-              style: FilledButton.styleFrom(
-                backgroundColor: Console.cyan,
-                foregroundColor: Console.ink,
-                disabledBackgroundColor: Console.surfaceRaised,
-                padding: const EdgeInsets.symmetric(vertical: 14),
-              ),
-              child: const Text('Zapisz notatkę'),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
 enum _CaptureAction { textNote, audioUpload, imageUpload, videoUpload }
 
-/// Menu of non-recording capture options, opened from the "+" FAB. Recording
-/// audio stays on its own dedicated button.
+/// Menu of non-recording capture options, opened from the note button on the
+/// capture dock. Recording audio stays on its own dedicated button.
 class _CaptureMenuSheet extends StatelessWidget {
   const _CaptureMenuSheet();
 
   @override
   Widget build(BuildContext context) {
-    return SafeArea(
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: <Widget>[
-          const SizedBox(height: 8),
-          _row(context, Icons.sticky_note_2_outlined, 'Nowa notatka',
-              _CaptureAction.textNote),
-          _row(context, Icons.audio_file_outlined, 'Wgraj plik audio',
-              _CaptureAction.audioUpload),
-          _row(context, Icons.image_outlined, 'Wgraj obraz',
-              _CaptureAction.imageUpload),
-          _row(context, Icons.movie_outlined, 'Wgraj wideo',
-              _CaptureAction.videoUpload),
-          const SizedBox(height: 8),
-        ],
+    return Container(
+      decoration: const BoxDecoration(
+        color: Console.surface,
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+        border: Border(
+          top: BorderSide(color: Console.borderStrong),
+          left: BorderSide(color: Console.borderStrong),
+          right: BorderSide(color: Console.borderStrong),
+        ),
+      ),
+      child: SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: <Widget>[
+            const SizedBox(height: 12),
+            Container(
+              width: 40,
+              height: 4,
+              decoration: BoxDecoration(
+                color: Console.borderStrong,
+                borderRadius: BorderRadius.circular(2),
+              ),
+            ),
+            const SizedBox(height: 8),
+            _row(context, Icons.description_outlined, 'New text note',
+                'typed · passthrough', _CaptureAction.textNote),
+            _row(context, Icons.audio_file_outlined, 'Upload audio',
+                'transcribed', _CaptureAction.audioUpload),
+            _row(context, Icons.image_outlined, 'Upload image', 'OCR',
+                _CaptureAction.imageUpload),
+            _row(context, Icons.movie_outlined, 'Upload video',
+                'audio track · transcribed', _CaptureAction.videoUpload),
+            const SizedBox(height: 8),
+          ],
+        ),
       ),
     );
   }
 
-  Widget _row(BuildContext context, IconData icon, String label,
-      _CaptureAction action) {
+  Widget _row(
+    BuildContext context,
+    IconData icon,
+    String label,
+    String hint,
+    _CaptureAction action,
+  ) {
     return ListTile(
-      leading: Icon(icon, color: Console.cyan),
-      title: Text(label,
-          style: const TextStyle(
-              color: Console.text, fontWeight: FontWeight.w700, fontSize: 14)),
+      leading: ConsoleIconTile(icon: icon, size: 36),
+      title: Text(label, style: ConsoleText.cardTitle),
+      // States which processor the item will land in — the same fact the card
+      // will show afterwards, so the choice is not a guess.
+      subtitle: Text(hint, style: ConsoleText.micro),
       onTap: () => Navigator.pop(context, action),
     );
   }

@@ -37,8 +37,8 @@ void main() {
     await controller.initialize();
     await pumpModels(tester, controller);
 
-    expect(find.text('Brak profili transkrypcji.'), findsOneWidget);
-    expect(find.text('Transkrypcja wyłączona'), findsOneWidget);
+    expect(find.text('No transcription profiles.'), findsOneWidget);
+    expect(find.text('Transcription disabled'), findsOneWidget);
     expect(find.text('NOT CONFIGURED'), findsOneWidget);
   });
 
@@ -84,9 +84,9 @@ void main() {
 
     await tester.tap(find.byIcon(Icons.delete_outline));
     await tester.pumpAndSettle();
-    expect(find.text('Usunąć profil?'), findsOneWidget);
+    expect(find.text('Delete profile?'), findsOneWidget);
 
-    await tester.tap(find.text('ANULUJ'));
+    await tester.tap(find.text('CANCEL'));
     await tester.pumpAndSettle();
 
     expect(controller.profiles, hasLength(1));
@@ -100,12 +100,12 @@ void main() {
 
     await tester.tap(find.byIcon(Icons.delete_outline));
     await tester.pumpAndSettle();
-    await tester.tap(find.text('USUŃ'));
+    await tester.tap(find.text('DELETE'));
     await tester.pumpAndSettle();
 
     expect(controller.profiles, isEmpty);
     expect(controller.activeProfile, isNull);
-    expect(find.text('Brak profili transkrypcji.'), findsOneWidget);
+    expect(find.text('No transcription profiles.'), findsOneWidget);
   });
 
   testWidgets('the plaintext-token warning is always visible', (
@@ -115,6 +115,6 @@ void main() {
     await controller.initialize();
     await pumpModels(tester, controller);
 
-    expect(find.textContaining('jawnym tekstem'), findsOneWidget);
+    expect(find.textContaining('plaintext'), findsOneWidget);
   });
 }

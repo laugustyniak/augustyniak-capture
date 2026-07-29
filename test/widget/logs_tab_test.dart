@@ -20,8 +20,8 @@ void main() {
   ) async {
     await pumpLogs(tester, buildLogStore());
 
-    expect(find.text('Brak zdarzeń.'), findsOneWidget);
-    expect(find.text('WYCZYŚĆ LOGI'), findsNothing);
+    expect(find.text('No events.'), findsOneWidget);
+    expect(find.text('CLEAR LOGS'), findsNothing);
   });
 
   testWidgets('level chips show per-level counts', (WidgetTester tester) async {
@@ -72,11 +72,11 @@ void main() {
     store.log('zostaw mnie');
     await pumpLogs(tester, store);
 
-    await tester.tap(find.text('WYCZYŚĆ LOGI'));
+    await tester.tap(find.text('CLEAR LOGS'));
     await tester.pumpAndSettle();
-    expect(find.text('Wyczyścić logi?'), findsOneWidget);
+    expect(find.text('Clear logs?'), findsOneWidget);
 
-    await tester.tap(find.text('ANULUJ'));
+    await tester.tap(find.text('CANCEL'));
     await tester.pumpAndSettle();
 
     expect(store.events, hasLength(1));
@@ -90,12 +90,12 @@ void main() {
     store.log('do usunięcia');
     await pumpLogs(tester, store);
 
-    await tester.tap(find.text('WYCZYŚĆ LOGI'));
+    await tester.tap(find.text('CLEAR LOGS'));
     await tester.pumpAndSettle();
-    await tester.tap(find.text('WYCZYŚĆ'));
+    await tester.tap(find.text('CLEAR'));
     await tester.pumpAndSettle();
 
     expect(store.events, isEmpty);
-    expect(find.text('Brak zdarzeń.'), findsOneWidget);
+    expect(find.text('No events.'), findsOneWidget);
   });
 }

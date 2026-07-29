@@ -30,12 +30,12 @@ enum ShortcutAction {
       ShortcutAction.values.asNameMap()[name];
 
   String get label => switch (this) {
-        ShortcutAction.showWindow => 'Pokaż okno',
-        ShortcutAction.toggleRecording => 'Nagrywanie start/stop',
-        ShortcutAction.newTextNote => 'Nowa notatka',
-        ShortcutAction.uploadAudio => 'Wgraj plik audio',
-        ShortcutAction.uploadImage => 'Wgraj obraz',
-        ShortcutAction.uploadVideo => 'Wgraj wideo',
+        ShortcutAction.showWindow => 'Show window',
+        ShortcutAction.toggleRecording => 'Start/stop recording',
+        ShortcutAction.newTextNote => 'New note',
+        ShortcutAction.uploadAudio => 'Upload audio file',
+        ShortcutAction.uploadImage => 'Upload image',
+        ShortcutAction.uploadVideo => 'Upload video',
       };
 
   /// Whether the action opens UI (a sheet or a file dialog) and therefore needs
