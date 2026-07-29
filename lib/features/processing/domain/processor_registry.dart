@@ -49,5 +49,5 @@ class ProcessorRegistry {
 
   Processor forType(CaptureType type) =>
       _processors[type] ??
-      UnavailableProcessor('Brak procesora dla typu ${type.name}.');
+      UnavailableProcessor('No processor for type ${type.name}.');
 }

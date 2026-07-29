@@ -18,8 +18,14 @@ class ModelsTab extends StatelessWidget {
 
     return SafeArea(
       child: ListView(
-        padding: const EdgeInsets.fromLTRB(18, 8, 18, 40),
+        padding: const EdgeInsets.fromLTRB(18, 14, 18, 40),
         children: <Widget>[
+          ConsoleHeader(
+            title: 'Models',
+            trailing:
+                '${profiles.length} ${profiles.length == 1 ? 'profile' : 'profiles'}',
+          ),
+          const SizedBox(height: 18),
           if (controller.error != null) ErrorBanner(message: controller.error!),
           _ActiveProfileCard(profile: active),
           const SizedBox(height: 18),
@@ -31,9 +37,9 @@ class ModelsTab extends StatelessWidget {
           if (profiles.isEmpty)
             const EmptyPanel(
               icon: Icons.memory_outlined,
-              title: 'Brak profili transkrypcji.',
-              blurb: 'Dodaj profil, aby włączyć transkrypcję. '
-                  'Nagrywanie działa również bez niego — audio zawsze zapisuje się lokalnie.',
+              title: 'No transcription profiles.',
+              blurb: 'Add a profile to enable transcription. '
+                  'Recording works without one — audio is always saved locally.',
             )
           else
             ...profiles.map(
@@ -61,7 +67,7 @@ class ModelsTab extends StatelessWidget {
             ),
             icon: const Icon(Icons.add),
             label: const Text(
-              'DODAJ PROFIL',
+              'ADD PROFILE',
               style: TextStyle(fontWeight: FontWeight.w900, letterSpacing: .5),
             ),
           ),
@@ -74,9 +80,9 @@ class ModelsTab extends StatelessWidget {
                 SizedBox(width: 10),
                 Expanded(
                   child: Text(
-                    'Tokeny są zapisywane jawnym tekstem w katalogu dokumentów '
-                    'aplikacji (settings.json). Szyfrowanie zaplanowano na '
-                    'kolejną fazę.',
+                    'Tokens are stored as plaintext in the app documents '
+                    'directory (settings.json). Encryption is planned for a '
+                    'later phase.',
                     style: TextStyle(
                       color: Console.mutedSoft,
                       fontSize: 11,
@@ -138,10 +144,10 @@ class ModelsTab extends StatelessWidget {
   ) async {
     final bool confirmed = await confirmDestructive(
       context,
-      title: 'Usunąć profil?',
-      message: '"${profile.name}" zostanie usunięty. Nagrania i transkrypcje '
-          'pozostaną nietknięte.',
-      confirmLabel: 'USUŃ',
+      title: 'Delete profile?',
+      message: '"${profile.name}" will be removed. Recordings and transcripts '
+          'stay untouched.',
+      confirmLabel: 'DELETE',
     );
     if (confirmed) {
       await controller.deleteProfile(profile.id);
@@ -174,7 +180,7 @@ class _ActiveProfileCard extends StatelessWidget {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: <Widget>[
                     Text(
-                      item?.name ?? 'Transkrypcja wyłączona',
+                      item?.name ?? 'Transcription disabled',
                       style: const TextStyle(
                         fontSize: 14,
                         fontWeight: FontWeight.w800,
@@ -182,7 +188,7 @@ class _ActiveProfileCard extends StatelessWidget {
                     ),
                     const SizedBox(height: 4),
                     Text(
-                      item?.host ?? 'Brak aktywnego profilu',
+                      item?.host ?? 'No active profile',
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                       style: const TextStyle(
@@ -245,7 +251,7 @@ class _ProfileCard extends StatelessWidget {
           Semantics(
             button: true,
             selected: isActive,
-            label: 'Ustaw profil jako aktywny',
+            label: 'Set profile as active',
             child: InkResponse(
               onTap: onActivate,
               radius: 24,
@@ -273,7 +279,7 @@ class _ProfileCard extends StatelessWidget {
                 ),
                 const SizedBox(height: 3),
                 Text(
-                  profile.hasEndpoint ? profile.endpoint : 'Brak adresu',
+                  profile.hasEndpoint ? profile.endpoint : 'No endpoint',
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                   style: TextStyle(
@@ -295,13 +301,13 @@ class _ProfileCard extends StatelessWidget {
             onPressed: onEdit,
             icon: const Icon(Icons.edit_outlined, size: 19),
             color: Console.muted,
-            tooltip: 'Edytuj',
+            tooltip: 'Edit',
           ),
           IconButton(
             onPressed: onDelete,
             icon: const Icon(Icons.delete_outline, size: 19),
             color: Console.redSoft,
-            tooltip: 'Usuń',
+            tooltip: 'Delete',
           ),
         ],
       ),
@@ -409,7 +415,7 @@ class _ProfileEditorSheetState extends State<_ProfileEditorSheet> {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: <Widget>[
               Text(
-                isEdit ? 'EDYCJA PROFILU' : 'NOWY PROFIL',
+                isEdit ? 'EDIT PROFILE' : 'NEW PROFILE',
                 style: const TextStyle(
                   fontSize: 12,
                   fontWeight: FontWeight.w900,
@@ -448,11 +454,11 @@ class _ProfileEditorSheetState extends State<_ProfileEditorSheet> {
               ],
               _SheetField(
                 controller: _name,
-                label: 'Nazwa',
-                hint: 'np. OpenAI Whisper',
+                label: 'Name',
+                hint: 'e.g. OpenAI Whisper',
                 validator: (String? value) =>
                     (value == null || value.trim().isEmpty)
-                        ? 'Podaj nazwę profilu.'
+                        ? 'Enter a profile name.'
                         : null,
               ),
               _SheetField(
@@ -462,10 +468,10 @@ class _ProfileEditorSheetState extends State<_ProfileEditorSheet> {
                 keyboardType: TextInputType.url,
                 validator: (String? value) {
                   final String text = (value ?? '').trim();
-                  if (text.isEmpty) return 'Podaj adres endpointu.';
+                  if (text.isEmpty) return 'Enter an endpoint URL.';
                   final Uri? uri = Uri.tryParse(text);
                   if (uri == null || !uri.hasScheme || uri.host.isEmpty) {
-                    return 'Adres musi zawierać schemat, np. https://host/ścieżka';
+                    return 'The URL needs a scheme, e.g. https://host/path';
                   }
                   return null;
                 },
@@ -473,17 +479,17 @@ class _ProfileEditorSheetState extends State<_ProfileEditorSheet> {
               _SheetField(
                 controller: _model,
                 label: 'Model',
-                hint: 'whisper-1 (opcjonalnie)',
+                hint: 'whisper-1 (optional)',
               ),
               _SheetField(
                 controller: _language,
-                label: 'Język',
-                hint: 'pl (opcjonalnie, ISO-639-1)',
+                label: 'Language',
+                hint: 'pl (optional, ISO-639-1)',
               ),
               _SheetField(
                 controller: _token,
                 label: 'Token',
-                hint: 'Bearer token (opcjonalnie)',
+                hint: 'Bearer token (optional)',
                 obscure: _obscureToken,
                 suffix: IconButton(
                   icon: Icon(
@@ -503,7 +509,7 @@ class _ProfileEditorSheetState extends State<_ProfileEditorSheet> {
                   Expanded(
                     child: TextButton(
                       onPressed: () => Navigator.of(context).pop(),
-                      child: const Text('ANULUJ'),
+                      child: const Text('CANCEL'),
                     ),
                   ),
                   const SizedBox(width: 10),
@@ -519,7 +525,7 @@ class _ProfileEditorSheetState extends State<_ProfileEditorSheet> {
                         ),
                       ),
                       child: Text(
-                        isEdit ? 'ZAPISZ' : 'DODAJ',
+                        isEdit ? 'SAVE' : 'ADD',
                         style: const TextStyle(fontWeight: FontWeight.w900),
                       ),
                     ),

@@ -22,6 +22,7 @@ class Recording {
     required this.createdAt,
     required this.durationMs,
     required this.status,
+    this.sizeBytes = 0,
     this.type = CaptureType.audioRecording,
     this.sourceMimeType,
     this.transcript,
@@ -39,6 +40,11 @@ class Recording {
   /// suppresses rather than rendering `00:00`.
   final int durationMs;
   final RecordingStatus status;
+
+  /// Size of the source artifact, measured during the same `length()` check
+  /// that verifies the file is non-empty at capture time. `0` on legacy rows,
+  /// where the card simply omits the size from its verification footer.
+  final int sizeBytes;
 
   /// Immutable identity, set at construction and never changed by the pipeline.
   final CaptureType type;
@@ -78,6 +84,7 @@ class Recording {
       filePath: filePath,
       createdAt: createdAt,
       durationMs: durationMs,
+      sizeBytes: sizeBytes,
       type: type,
       sourceMimeType: sourceMimeType,
       status: status ?? this.status,
@@ -94,6 +101,7 @@ class Recording {
         'filePath': filePath,
         'createdAt': createdAt.toIso8601String(),
         'durationMs': durationMs,
+        'sizeBytes': sizeBytes,
         'status': status.name,
         'type': type.name,
         'sourceMimeType': sourceMimeType,
@@ -110,6 +118,8 @@ class Recording {
       filePath: json['filePath'] as String,
       createdAt: DateTime.parse(json['createdAt'] as String),
       durationMs: json['durationMs'] as int,
+      // Absent on every row written before the card showed a size.
+      sizeBytes: json['sizeBytes'] as int? ?? 0,
       status: RecordingStatus.values.byName(json['status'] as String),
       // Legacy rows have no `type`; unknown names from a newer build degrade
       // the same way rather than throwing.

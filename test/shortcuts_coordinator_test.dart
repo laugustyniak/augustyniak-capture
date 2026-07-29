@@ -178,7 +178,7 @@ void main() {
       // out of whatever they were working in.
       expect(presenter.presents, 0);
       // The denied microphone proves `startRecording` actually ran.
-      expect(recordings.error, 'Brak uprawnienia do mikrofonu.');
+      expect(recordings.error, 'Microphone permission denied.');
     });
 
     test('newTextNote raises the window before opening the sheet', () async {

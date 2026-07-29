@@ -19,7 +19,7 @@ class DisabledOcrService implements OcrService {
   @override
   Future<String> extractText(File image) async {
     throw const ProcessorNotConfiguredException(
-      'OCR obrazów nie jest skonfigurowane na tej platformie.',
+      'Image OCR is not configured on this platform.',
     );
   }
 }
@@ -42,7 +42,7 @@ class TesseractOcrService implements OcrService {
   @override
   Future<String> extractText(File image) async {
     if (!await image.exists()) {
-      throw FileSystemException('Plik obrazu nie istnieje.', image.path);
+      throw FileSystemException('Image file is missing.', image.path);
     }
 
     // `tesseract <image> stdout -l <langs>` prints recognized text to stdout.

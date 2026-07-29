@@ -23,13 +23,19 @@ class VoiceNotesApp extends StatelessWidget {
           error: Console.red,
         ),
         useMaterial3: true,
-        fontFamily: 'Roboto',
+        // Space Grotesk is the default face; anything factual opts into
+        // JetBrains Mono explicitly through `ConsoleText`.
+        fontFamily: ConsoleFont.display,
+        textTheme: const TextTheme().apply(
+          bodyColor: Console.text,
+          displayColor: Console.text,
+        ),
         cardTheme: const CardThemeData(
           color: Console.surface,
           elevation: 0,
           margin: EdgeInsets.zero,
           shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.all(Radius.circular(18)),
+            borderRadius: BorderRadius.all(Radius.circular(12)),
             side: BorderSide(color: Console.border),
           ),
         ),
@@ -38,12 +44,35 @@ class VoiceNotesApp extends StatelessWidget {
           surfaceTintColor: Colors.transparent,
           elevation: 0,
         ),
-        navigationBarTheme: const NavigationBarThemeData(
+        navigationBarTheme: NavigationBarThemeData(
           backgroundColor: Console.surfaceDeep,
           indicatorColor: Console.navIndicator,
-          labelTextStyle: WidgetStatePropertyAll(
-            TextStyle(fontSize: 11, fontWeight: FontWeight.w700),
+          // The design's nav is a flat strip: no elevation tint, no pill
+          // behind the selected icon — selection is carried by colour alone.
+          elevation: 0,
+          surfaceTintColor: Colors.transparent,
+          labelBehavior: NavigationDestinationLabelBehavior.alwaysShow,
+          height: 66,
+          labelTextStyle: WidgetStateProperty.resolveWith<TextStyle>(
+            (Set<WidgetState> states) => ConsoleText.navLabel.copyWith(
+              color: states.contains(WidgetState.selected)
+                  ? Console.cyan
+                  : Console.dim,
+            ),
           ),
+          iconTheme: WidgetStateProperty.resolveWith<IconThemeData>(
+            (Set<WidgetState> states) => IconThemeData(
+              size: 20,
+              color: states.contains(WidgetState.selected)
+                  ? Console.cyan
+                  : Console.dim,
+            ),
+          ),
+        ),
+        dialogTheme: const DialogThemeData(backgroundColor: Console.surface),
+        bottomSheetTheme: const BottomSheetThemeData(
+          backgroundColor: Console.background,
+          surfaceTintColor: Colors.transparent,
         ),
       ),
       home: const RecordingsPage(),

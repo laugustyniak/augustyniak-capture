@@ -87,7 +87,7 @@ class ProviderProfile {
   factory ProviderProfile.fromJson(Map<String, dynamic> json) {
     return ProviderProfile(
       id: json['id'] as String,
-      name: json['name'] as String? ?? 'Profil',
+      name: json['name'] as String? ?? 'Profile',
       endpoint: json['endpoint'] as String? ?? '',
       model: json['model'] as String?,
       language: json['language'] as String?,
@@ -131,11 +131,11 @@ class ProviderPreset {
       model: 'whisper-large-v3-turbo',
     ),
     ProviderPreset(
-      name: 'Lokalny whisper.cpp',
+      name: 'Local whisper.cpp',
       endpoint: 'http://localhost:8080/inference',
     ),
     ProviderPreset(
-      name: 'Własny endpoint',
+      name: 'Custom endpoint',
       endpoint: '',
     ),
   ];

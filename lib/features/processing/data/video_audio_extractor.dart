@@ -16,7 +16,7 @@ abstract interface class VideoAudioExtractor {
 /// impl lands). Fails the item cleanly and retryably.
 class UnavailableVideoAudioExtractor implements VideoAudioExtractor {
   const UnavailableVideoAudioExtractor([
-    this.reason = 'Ekstrakcja audio z wideo nie jest dostępna na tej platformie.',
+    this.reason = 'Video audio extraction is not available on this platform.',
   ]);
 
   final String reason;
@@ -39,7 +39,7 @@ class FfmpegVideoAudioExtractor implements VideoAudioExtractor {
   @override
   Future<File> extractAudio(File video) async {
     if (!await video.exists()) {
-      throw FileSystemException('Plik wideo nie istnieje.', video.path);
+      throw FileSystemException('Video file is missing.', video.path);
     }
 
     final Directory tempDir =

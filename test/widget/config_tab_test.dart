@@ -37,7 +37,7 @@ void main() {
     await pumpConfig(tester, controller);
 
     expect(find.text('AUDIO CAPTURE'), findsOneWidget);
-    expect(find.text('AAC-LC · .m4a (stały)'), findsOneWidget);
+    expect(find.text('AAC-LC · .m4a (fixed)'), findsOneWidget);
     expect(find.text('16 kHz'), findsOneWidget);
     expect(find.text('64 kbps'), findsOneWidget);
     expect(find.text('Mono'), findsOneWidget);
@@ -78,7 +78,7 @@ void main() {
 
     TextButton resetButton() => tester.widget<TextButton>(
           find.ancestor(
-            of: find.text('PRZYWRÓĆ DOMYŚLNE'),
+            of: find.text('RESTORE DEFAULTS'),
             matching: find.byType(TextButton),
           ),
         );
@@ -89,7 +89,7 @@ void main() {
     await tester.pumpAndSettle();
     expect(resetButton().onPressed, isNotNull);
 
-    await tester.tap(find.text('PRZYWRÓĆ DOMYŚLNE'));
+    await tester.tap(find.text('RESTORE DEFAULTS'));
     await tester.pumpAndSettle();
     expect(controller.audio, AudioConfig.defaults);
   });
@@ -101,8 +101,8 @@ void main() {
     await controller.initialize();
     await pumpConfig(tester, controller);
 
-    expect(find.text('Brak — transkrypcja wyłączona'), findsOneWidget);
-    expect(find.text('brak'), findsOneWidget); // token
+    expect(find.text('None — transcription off'), findsOneWidget);
+    expect(find.text('none'), findsOneWidget); // token
   });
 
   testWidgets('an active profile is summarised without leaking the token', (
@@ -122,7 +122,7 @@ void main() {
     expect(find.text('whisper-1'), findsOneWidget);
     // The token value itself must never be rendered.
     expect(find.textContaining('sk-super-secret'), findsNothing);
-    expect(find.textContaining('ustawiony'), findsOneWidget);
+    expect(find.textContaining('•••• set'), findsOneWidget);
   });
 
   testWidgets('storage section reports the paths and counts it was given', (
@@ -142,8 +142,8 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.text('/tmp/recordings'), findsOneWidget);
-    expect(find.textContaining('3 plików'), findsOneWidget);
-    expect(find.textContaining('7 zdarzeń'), findsOneWidget);
+    expect(find.textContaining('3 .m4a files'), findsOneWidget);
+    expect(find.textContaining('7 events'), findsOneWidget);
   });
 
   testWidgets('the shortcuts section is hidden unless the shell enables it', (
