@@ -19,17 +19,23 @@ class ShortcutsCoordinator {
   ShortcutsCoordinator({
     required RecordingsController recordings,
     required Future<void> Function() composeTextNote,
+    Future<void> Function()? revealQueue,
     HotkeyRegistrar registrar = const NoopHotkeyRegistrar(),
     WindowPresenter windowPresenter = const NoopWindowPresenter(),
     LogSink logSink = const NoopLogSink(),
   })  : _recordings = recordings,
         _composeTextNote = composeTextNote,
+        _revealQueue = revealQueue,
         _registrar = registrar,
         _windowPresenter = windowPresenter,
         _logSink = logSink;
 
   final RecordingsController _recordings;
   final Future<void> Function() _composeTextNote;
+
+  /// Switches the shell to the Queue tab. Optional so the pure-Dart tests can
+  /// build a coordinator without a navigation shell behind it.
+  final Future<void> Function()? _revealQueue;
   final HotkeyRegistrar _registrar;
   final WindowPresenter _windowPresenter;
   final LogSink _logSink;
@@ -165,9 +171,20 @@ class ShortcutsCoordinator {
           break; // Presenting the window *was* the action.
         case ShortcutAction.toggleRecording:
           if (_recordings.isRecording) {
+            // Stopping stays silent on purpose: the capture is already persisted
+            // and yanking the window forward would interrupt whatever the user
+            // went back to.
             await _recordings.stopRecording();
           } else {
+            // Capture first, surface second. Raising the window costs a
+            // window-manager round trip, and a record hotkey that spends it
+            // before opening the mic loses the first word.
             await _recordings.startRecording();
+            // Unconditional, including the microphone-denied path: the Queue tab
+            // is where both the running `SAVE mm:ss` timer and the error banner
+            // are drawn, so it is the answer either way.
+            await _windowPresenter.present();
+            await _revealQueue?.call();
           }
         case ShortcutAction.newTextNote:
           await _composeTextNote();

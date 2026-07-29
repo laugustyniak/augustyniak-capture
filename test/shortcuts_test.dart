@@ -5,6 +5,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:voice_notes_phase1/features/settings/data/settings_repository.dart';
 import 'package:voice_notes_phase1/features/settings/domain/app_settings.dart';
 import 'package:voice_notes_phase1/features/settings/presentation/settings_controller.dart';
+import 'package:voice_notes_phase1/features/shortcuts/data/linux_hotkey_registrar.dart';
 import 'package:voice_notes_phase1/features/shortcuts/domain/hotkey_binding.dart';
 import 'package:voice_notes_phase1/features/shortcuts/domain/shortcut_action.dart';
 
@@ -120,7 +121,8 @@ void main() {
     });
 
     test('AltGr counts as a modifier, never as a trigger key', () {
-      // Avoiding AltGr is the entire reason the defaults are Alt+Shift, and on
+      // The defaults no longer avoid Ctrl+Alt, but AltGr still must not be
+      // captured as the triggering key of a binding, and on
       // some platform/layout combinations Flutter reports it as its own logical
       // key rather than as altRight.
       expect(HotkeyBinding.isModifierKey(LogicalKeyboardKey.altGraph), isTrue);
@@ -143,6 +145,60 @@ void main() {
       );
     });
 
+    test('Shift plus a printable key is unusable on Linux', () {
+      // keybinder grabs the unshifted keyval, so Shift makes the X server hand
+      // it a keysym it is not listening for. It binds, the grab is taken, the
+      // callback never arrives — the press vanishes with no error anywhere.
+      expect(
+        _binding(PhysicalKeyboardKey.keyA, LogicalKeyboardKey.keyA)
+            .isUnsupportedOnLinux,
+        isTrue,
+      );
+      expect(
+        _binding(PhysicalKeyboardKey.digit1, LogicalKeyboardKey.digit1)
+            .isUnsupportedOnLinux,
+        isTrue,
+      );
+
+      // No shifted keysym, so these survive Shift — all verified firing against
+      // keybinder 0.3.2.
+      expect(
+        _binding(PhysicalKeyboardKey.space, LogicalKeyboardKey.space)
+            .isUnsupportedOnLinux,
+        isFalse,
+      );
+      expect(
+        _binding(PhysicalKeyboardKey.f9, LogicalKeyboardKey.f9)
+            .isUnsupportedOnLinux,
+        isFalse,
+      );
+
+      // Without Shift the whole class of failures does not exist.
+      expect(
+        _binding(
+          PhysicalKeyboardKey.keyA,
+          LogicalKeyboardKey.keyA,
+          modifiers: const <HotkeyModifier>{
+            HotkeyModifier.control,
+            HotkeyModifier.alt,
+          },
+        ).isUnsupportedOnLinux,
+        isFalse,
+      );
+    });
+
+    test('every shipped default can actually fire on Linux', () {
+      // The regression this whole change exists for: the previous defaults were
+      // Alt+Shift+A/R/N, every one of them in the dead class above, so the
+      // feature shipped silently broken on the platform it runs on.
+      for (final MapEntry<ShortcutAction, HotkeyBinding> entry
+          in ShortcutDefaults.bindings.entries) {
+        expect(entry.value.isValid, isTrue, reason: entry.key.name);
+        expect(entry.value.isUnsupportedOnLinux, isFalse,
+            reason: entry.key.name);
+      }
+    });
+
     test('an unrecognised key id degrades to hex instead of throwing', () {
       const HotkeyBinding unknown = HotkeyBinding(
         usbHidUsage: 0x00070099,
@@ -163,7 +219,7 @@ void main() {
       expect(settings.hasCustomShortcuts, isFalse);
       expect(settings.shortcuts, ShortcutDefaults.bindings);
       expect(settings.shortcuts[ShortcutAction.toggleRecording]?.label,
-          'Alt + Shift + R');
+          'Ctrl + Alt + R');
       // Untouched defaults are not written back, so a later build can still ship
       // a default for an action that does not exist yet.
       expect(settings.toJson().containsKey('shortcuts'), isFalse);
@@ -283,6 +339,34 @@ void main() {
       await controller.resetShortcuts();
       expect(controller.settings.hasCustomShortcuts, isFalse);
       expect(controller.settings.shortcuts, ShortcutDefaults.bindings);
+    });
+  });
+
+  group('LinuxHotkeyRegistrar.gdkKeyval', () {
+    test('Space resolves to the space bar, not the keypad', () {
+      // `hotkey_manager` reverse-scans its GTK table and returns the first hit,
+      // which for Space is `KP_Space` (0xff80). The user asked for the space bar
+      // and got keypad-space, which then failed to bind outright.
+      expect(
+        LinuxHotkeyRegistrar.gdkKeyval(LogicalKeyboardKey.space.keyId),
+        0x20,
+      );
+    });
+
+    test('printable ASCII passes through, non-printables use the table', () {
+      // GDK keyvals are ASCII in this range, so `a` is 0x61 on both sides.
+      expect(LinuxHotkeyRegistrar.gdkKeyval(LogicalKeyboardKey.keyA.keyId), 0x61);
+      expect(LinuxHotkeyRegistrar.gdkKeyval(LogicalKeyboardKey.digit1.keyId), 0x31);
+      expect(LinuxHotkeyRegistrar.gdkKeyval(LogicalKeyboardKey.f1.keyId), 0xffbe);
+      expect(LinuxHotkeyRegistrar.gdkKeyval(LogicalKeyboardKey.f12.keyId), 0xffc9);
+      expect(LinuxHotkeyRegistrar.gdkKeyval(LogicalKeyboardKey.enter.keyId), 0xff0d);
+      expect(LinuxHotkeyRegistrar.gdkKeyval(LogicalKeyboardKey.delete.keyId), 0xffff);
+    });
+
+    test('an unmapped key is null so it can be rejected, not guessed', () {
+      // Registering a wrong keyval is worse than refusing: it binds a key the
+      // user never chose and swallows it system-wide.
+      expect(LinuxHotkeyRegistrar.gdkKeyval(0x7ffffffe), isNull);
     });
   });
 }
