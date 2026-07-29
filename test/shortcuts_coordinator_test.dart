@@ -63,6 +63,31 @@ class _DenyingRecorder implements AudioRecorder {
   dynamic noSuchMethod(Invocation invocation) async => null;
 }
 
+/// Grants the microphone, so `startRecording` runs to completion and leaves the
+/// controller in the recording state a second press has to toggle back off.
+///
+/// [start]/[stop] are written out rather than left to `noSuchMethod`: the stop
+/// path has to hand back a file that exists with length > 0, or the capture
+/// fails on the persistence invariant and the toggle never completes.
+class _GrantingRecorder implements AudioRecorder {
+  String? path;
+
+  @override
+  Future<bool> hasPermission({bool request = true}) async => true;
+
+  @override
+  Future<void> start(RecordConfig config, {required String path}) async {
+    this.path = path;
+    File(path).writeAsBytesSync(<int>[0, 1, 2, 3]);
+  }
+
+  @override
+  Future<String?> stop() async => path;
+
+  @override
+  dynamic noSuchMethod(Invocation invocation) async => null;
+}
+
 class _FakeRegistrar implements HotkeyRegistrar {
   int applyCount = 0;
   int unregisterCount = 0;
@@ -111,6 +136,7 @@ void main() {
   late _FakeRegistrar registrar;
   late _CountingPresenter presenter;
   late int noteCalls;
+  late int queueReveals;
   late Completer<void>? noteGate;
   late bool noteThrows;
 
@@ -121,6 +147,12 @@ void main() {
           final Completer<void>? gate = noteGate;
           if (gate != null) await gate.future;
           if (noteThrows) throw StateError('sheet blew up');
+        },
+        revealQueue: () async {
+          // A real suspension point, like the presenter: the shell's version
+          // calls setState behind an await.
+          await Future<void>.delayed(Duration.zero);
+          queueReveals++;
         },
         registrar: registrar,
         windowPresenter: presenter,
@@ -148,6 +180,7 @@ void main() {
     registrar = _FakeRegistrar();
     presenter = _CountingPresenter();
     noteCalls = 0;
+    queueReveals = 0;
     noteGate = null;
     noteThrows = false;
   });
@@ -168,17 +201,46 @@ void main() {
       expect(noteCalls, 0);
     });
 
-    test('toggleRecording reaches the controller without raising the window',
+    test('toggleRecording captures first, then surfaces the Queue tab',
         () async {
       final ShortcutsCoordinator coordinator = build();
 
       await coordinator.handle(ShortcutAction.toggleRecording);
 
-      // The whole point of a global record hotkey: it must not pull the user
-      // out of whatever they were working in.
-      expect(presenter.presents, 0);
       // The denied microphone proves `startRecording` actually ran.
       expect(recordings.error, 'Microphone permission denied.');
+      // A recording started from a global hotkey is invisible otherwise: both
+      // the running timer and this error are drawn on the Queue tab only.
+      expect(presenter.presents, 1);
+      expect(queueReveals, 1);
+    });
+
+    test('stopping a recording leaves the window where it was', () async {
+      // Not symmetry for its own sake: the capture is already persisted by then,
+      // and raising the window would yank the user out of whatever they went
+      // back to — which is the reason a global record hotkey exists.
+      recordings.dispose();
+      recordings = RecordingsController(
+        repository: repository,
+        transcriptionService: const DisabledTranscriptionService(),
+        mediaPicker: picker,
+        recorder: _GrantingRecorder(),
+        player: _FakePlayer(),
+      );
+      final ShortcutsCoordinator coordinator = build();
+
+      await coordinator.handle(ShortcutAction.toggleRecording);
+      // Asserted rather than merely recorded: without it this test would still
+      // pass if the start branch had silently stopped raising the window too.
+      expect(recordings.isRecording, isTrue);
+      expect(presenter.presents, 1);
+      expect(queueReveals, 1);
+
+      await coordinator.handle(ShortcutAction.toggleRecording);
+
+      expect(recordings.isRecording, isFalse);
+      expect(presenter.presents, 1);
+      expect(queueReveals, 1);
     });
 
     test('newTextNote raises the window before opening the sheet', () async {

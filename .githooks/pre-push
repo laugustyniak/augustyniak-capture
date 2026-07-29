@@ -11,13 +11,14 @@
 #   git push --no-verify
 set -euo pipefail
 
-# Git exports GIT_DIR (and friends) into every hook. Flutter reads its own
-# version by shelling out to git inside the SDK checkout, so with those set it
-# inspects *this* repo instead, reports "0.0.0-unknown", and pub then rejects
-# every plugin carrying a Flutter SDK constraint. The gate fails on a version
-# solve that has nothing to do with the branch being pushed — which is worse
-# than no gate, because the failure looks like the branch's fault.
-unset GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE GIT_PREFIX GIT_COMMON_DIR
+# git exports GIT_DIR (and friends) into its hooks. Flutter derives its own SDK
+# version by running git inside its install directory, and an inherited GIT_DIR
+# sends that lookup here instead — the SDK reports itself as `0.0.0-unknown`,
+# every `sdk: flutter` constraint fails to solve, and the hook aborts the push
+# with a version-solving error that has nothing to do with the branch. Clearing
+# them is the documented fix and leaves the hook's own git usage unaffected: it
+# runs in the worktree it was invoked from.
+unset $(git rev-parse --local-env-vars)
 
 echo "pre-push: flutter analyze"
 if ! flutter analyze; then

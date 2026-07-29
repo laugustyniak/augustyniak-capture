@@ -56,9 +56,12 @@ class ShortcutsSection extends StatelessWidget {
               const SizedBox(height: 12),
               const Text(
                 'Shortcuts work system-wide, even when the window is '
-                'minimised. Recording deliberately does not raise the window — '
-                'every other action has to, because it opens a sheet or a '
-                'file dialog.',
+                'minimised. Recording raises the window only after the capture '
+                'has started, so the microphone is never kept waiting; '
+                'stopping does not raise it at all. On Linux a Shift '
+                'combination with a letter, digit or symbol does not work — '
+                'Shift changes which key the system listens for. Shift with '
+                'F1–F12, space or Enter is safe.',
                 style: TextStyle(
                   color: Console.mutedSoft,
                   fontSize: 10,
@@ -137,7 +140,8 @@ class _ShortcutRow extends StatelessWidget {
               if (isRejected) ...<Widget>[
                 const SizedBox(height: 3),
                 const Text(
-                  'Combination taken by another app.',
+                  'This combination will not work — taken by another app, '
+                  'or unsupported on this system. Pick another.',
                   style: TextStyle(color: Console.amber, fontSize: 9.5),
                 ),
               ],

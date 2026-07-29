@@ -39,10 +39,11 @@ enum ShortcutAction {
       };
 
   /// Whether the action opens UI (a sheet or a file dialog) and therefore needs
-  /// the window raised first.
+  /// the window raised *before* it runs.
   ///
-  /// [toggleRecording] is deliberately excluded: the entire value of a global
-  /// record hotkey is that it does *not* pull the user out of whatever they are
-  /// working in.
+  /// [toggleRecording] is excluded because it is the one action that must not
+  /// pay for the window before capturing — not because it never shows the
+  /// window. The coordinator raises it *after* a successful start, so the user
+  /// sees the running timer, and leaves it alone on stop.
   bool get needsWindow => this != ShortcutAction.toggleRecording;
 }
