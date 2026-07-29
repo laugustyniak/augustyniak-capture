@@ -148,6 +148,7 @@ Recording makeRecording({
   String? title,
   String? error,
   int durationMs = 1500,
+  int sizeBytes = 0,
   bool isProcessedByUser = false,
   String? filePath,
 }) {
@@ -156,6 +157,7 @@ Recording makeRecording({
     filePath: filePath ?? '/tmp/$id.m4a',
     createdAt: DateTime.utc(2026, 7, 27, 12),
     durationMs: durationMs,
+    sizeBytes: sizeBytes,
     status: status,
     type: type,
     transcript: transcript,
