@@ -66,6 +66,25 @@ class HotkeyBinding {
   /// one, and never restore one from disk.
   bool get isValid => modifiers.isNotEmpty;
 
+  /// Whether this combination can never fire under `keybinder-3.0`, the library
+  /// `hotkey_manager_linux` binds through.
+  ///
+  /// keybinder grabs the *unshifted* keyval. Holding Shift makes the X server
+  /// resolve the keycode to the shifted keysym (`a` → `A`, `1` → `!`), the
+  /// comparison in keybinder's handler misses, and the callback never arrives —
+  /// while `keybinder_bind` still reports success and the X grab is genuinely
+  /// taken, so the keypress is swallowed and *nothing happens anywhere*. That
+  /// silence is why the shipped `Alt+Shift+<letter>` defaults looked fine and
+  /// were dead.
+  ///
+  /// Only printable ASCII except space is affected: Space, Enter, Backspace and
+  /// the F-keys have no shifted keysym and were all verified firing with Shift
+  /// held.
+  bool get isUnsupportedOnLinux =>
+      modifiers.contains(HotkeyModifier.shift) &&
+      logicalKeyId > 0x20 &&
+      logicalKeyId < 0x7f;
+
   /// e.g. `Alt + Shift + R`.
   String get label => <String>[
         for (final HotkeyModifier modifier in HotkeyModifier.values)
@@ -209,10 +228,17 @@ class HotkeyBinding {
 class ShortcutDefaults {
   const ShortcutDefaults._();
 
-  /// `Alt + Shift` is deliberate. Windows reports AltGr as `Ctrl + Alt`, and on
-  /// the Polish programmers' layout AltGr is how you type ą/ć/ę/ł/ń/ó/ś/ź/ż — so
-  /// any `Ctrl + Alt + <letter>` default would globally swallow a letter this
-  /// app's own users need while writing notes.
+  /// `Ctrl + Alt`, and the letter that names the action.
+  ///
+  /// This used to be `Alt + Shift` precisely to *avoid* `Ctrl + Alt`: Windows
+  /// reports AltGr as `Ctrl + Alt`, and on the Polish programmers' layout AltGr
+  /// is how you type ą/ć/ę/ł/ń/ó/ś/ź/ż. That reasoning still holds — but it was
+  /// traded away because `Alt + Shift + <letter>` cannot fire at all on Linux
+  /// (see [HotkeyBinding.isUnsupportedOnLinux]), and a default that is dead on
+  /// the platform the app actually ships on beats one that is merely awkward on
+  /// a platform with no target directory in this repo yet. Revisit when Windows
+  /// is real: X11 exposes AltGr as `ISO_Level3_Shift` (Mod5), so on Linux these
+  /// three do not touch Polish diacritics.
   ///
   /// Only the three capture-critical actions ship bound. The upload shortcuts
   /// stay unbound because every plausible default (`Ctrl+Shift+V`, `Ctrl+Shift+I`)
@@ -224,23 +250,23 @@ class ShortcutDefaults {
       ShortcutAction.showWindow: HotkeyBinding.fromKeys(
         physical: PhysicalKeyboardKey.keyA,
         logical: LogicalKeyboardKey.keyA,
-        modifiers: _altShift,
+        modifiers: _controlAlt,
       ),
       ShortcutAction.toggleRecording: HotkeyBinding.fromKeys(
         physical: PhysicalKeyboardKey.keyR,
         logical: LogicalKeyboardKey.keyR,
-        modifiers: _altShift,
+        modifiers: _controlAlt,
       ),
       ShortcutAction.newTextNote: HotkeyBinding.fromKeys(
         physical: PhysicalKeyboardKey.keyN,
         logical: LogicalKeyboardKey.keyN,
-        modifiers: _altShift,
+        modifiers: _controlAlt,
       ),
     },
   );
 
-  static const Set<HotkeyModifier> _altShift = <HotkeyModifier>{
+  static const Set<HotkeyModifier> _controlAlt = <HotkeyModifier>{
+    HotkeyModifier.control,
     HotkeyModifier.alt,
-    HotkeyModifier.shift,
   };
 }
