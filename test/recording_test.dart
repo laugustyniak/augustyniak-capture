@@ -26,6 +26,33 @@ void main() {
     expect(restored.processedAt, processedAt);
   });
 
+  test('sizeBytes round-trips, and legacy rows default it to zero', () {
+    final Recording original = Recording(
+      id: 'sized',
+      filePath: '/tmp/sized.m4a',
+      createdAt: DateTime.utc(2026, 7, 20),
+      durationMs: 1500,
+      sizeBytes: 7_123_456,
+      status: RecordingStatus.completed,
+    );
+
+    expect(Recording.fromJson(original.toJson()).sizeBytes, 7_123_456);
+    // Survives a status transition — the size is measured once, at capture.
+    expect(
+      original.copyWith(status: RecordingStatus.failed).sizeBytes,
+      7_123_456,
+    );
+
+    final Recording legacy = Recording.fromJson(<String, dynamic>{
+      'id': 'legacy',
+      'filePath': '/tmp/legacy.m4a',
+      'createdAt': DateTime.utc(2026, 7, 20).toIso8601String(),
+      'durationMs': 900,
+      'status': RecordingStatus.saved.name,
+    });
+    expect(legacy.sizeBytes, 0);
+  });
+
   test('copyWith edits transcript and title, and clears the title', () {
     final Recording original = Recording(
       id: 'x',

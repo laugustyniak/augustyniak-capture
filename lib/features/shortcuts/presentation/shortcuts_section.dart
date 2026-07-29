@@ -34,7 +34,7 @@ class ShortcutsSection extends StatelessWidget {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: <Widget>[
-        const SectionHeader(title: 'SKRÓTY GLOBALNE'),
+        const SectionHeader(title: 'GLOBAL SHORTCUTS'),
         const SizedBox(height: 12),
         ConsoleCard(
           child: Column(
@@ -55,13 +55,13 @@ class ShortcutsSection extends StatelessWidget {
               ],
               const SizedBox(height: 12),
               const Text(
-                'Skróty działają w całym systemie, także gdy okno jest '
-                'zminimalizowane. Nagrywanie przywołuje okno dopiero po '
-                'starcie, żeby nie opóźniać mikrofonu; zatrzymanie nie '
-                'przywołuje go wcale. Na Linuksie kombinacje z Shiftem i '
-                'literą, cyfrą lub znakiem nie działają — Shift zmienia '
-                'klawisz, którego nasłuchuje system. Shift z klawiszami '
-                'F1–F12, spacją lub Enterem jest bezpieczny.',
+                'Shortcuts work system-wide, even when the window is '
+                'minimised. Recording raises the window only after the capture '
+                'has started, so the microphone is never kept waiting; '
+                'stopping does not raise it at all. On Linux a Shift '
+                'combination with a letter, digit or symbol does not work — '
+                'Shift changes which key the system listens for. Shift with '
+                'F1–F12, space or Enter is safe.',
                 style: TextStyle(
                   color: Console.mutedSoft,
                   fontSize: 10,
@@ -76,7 +76,7 @@ class ShortcutsSection extends StatelessWidget {
                       ? controller.resetShortcuts
                       : null,
                   icon: const Icon(Icons.restart_alt, size: 17),
-                  label: const Text('PRZYWRÓĆ DOMYŚLNE'),
+                  label: const Text('RESTORE DEFAULTS'),
                 ),
               ),
             ],
@@ -140,8 +140,8 @@ class _ShortcutRow extends StatelessWidget {
               if (isRejected) ...<Widget>[
                 const SizedBox(height: 3),
                 const Text(
-                  'Ta kombinacja nie zadziała — zajęta lub nieobsługiwana '
-                  'w tym systemie. Wybierz inną.',
+                  'This combination will not work — taken by another app, '
+                  'or unsupported on this system. Pick another.',
                   style: TextStyle(color: Console.amber, fontSize: 9.5),
                 ),
               ],
@@ -153,13 +153,13 @@ class _ShortcutRow extends StatelessWidget {
           onPressed: onCapture,
           icon: const Icon(Icons.edit_outlined, size: 17),
           color: Console.cyan,
-          tooltip: 'Zmień skrót',
+          tooltip: 'Change shortcut',
         ),
         IconButton(
           onPressed: onClear,
           icon: const Icon(Icons.backspace_outlined, size: 16),
           color: Console.muted,
-          tooltip: 'Usuń skrót',
+          tooltip: 'Clear shortcut',
         ),
       ],
     );
@@ -187,7 +187,7 @@ class _BindingChip extends StatelessWidget {
         border: Border.all(color: current == null ? Console.border : color),
       ),
       child: Text(
-        current?.label ?? 'brak',
+        current?.label ?? 'none',
         style: TextStyle(
           color: color,
           fontSize: 10,
@@ -242,8 +242,8 @@ class _HotkeyCaptureSheetState extends State<_HotkeyCaptureSheet> {
     final Set<HotkeyModifier> modifiers = _pressedModifiers();
     if (modifiers.isEmpty) {
       setState(() {
-        _hint = 'Skrót globalny musi mieć modyfikator — inaczej przejąłby '
-            'ten klawisz w całym systemie.';
+        _hint = 'A global shortcut needs a modifier — otherwise it would '
+            'swallow this key system-wide.';
       });
       return KeyEventResult.handled;
     }
@@ -275,7 +275,7 @@ class _HotkeyCaptureSheetState extends State<_HotkeyCaptureSheet> {
     if (captured != null) return captured.label;
 
     final Set<HotkeyModifier> held = _pressedModifiers();
-    if (held.isEmpty) return 'Naciśnij kombinację…';
+    if (held.isEmpty) return 'Press a combination…';
     return <String>[
       for (final HotkeyModifier modifier in HotkeyModifier.values)
         if (held.contains(modifier)) modifier.label,
@@ -305,7 +305,7 @@ class _HotkeyCaptureSheetState extends State<_HotkeyCaptureSheet> {
               ),
               const SizedBox(height: 4),
               const Text(
-                'Escape anuluje.',
+                'Escape cancels.',
                 style: TextStyle(color: Console.mutedSoft, fontSize: 10),
               ),
               const SizedBox(height: 16),
@@ -354,7 +354,7 @@ class _HotkeyCaptureSheetState extends State<_HotkeyCaptureSheet> {
                     disabledBackgroundColor: Console.surfaceRaised,
                     padding: const EdgeInsets.symmetric(vertical: 14),
                   ),
-                  child: const Text('Zapisz skrót'),
+                  child: const Text('Save shortcut'),
                 ),
               ),
             ],

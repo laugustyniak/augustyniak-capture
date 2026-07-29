@@ -51,7 +51,7 @@ void main() {
           ProviderProfile.fromJson(<String, dynamic>{'id': 'x'});
 
       expect(restored.id, 'x');
-      expect(restored.name, 'Profil');
+      expect(restored.name, 'Profile');
       expect(restored.endpoint, '');
       expect(restored.hasEndpoint, isFalse);
     });

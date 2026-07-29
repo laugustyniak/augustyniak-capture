@@ -82,6 +82,8 @@ class RecordingsController extends ChangeNotifier {
   final Stopwatch _stopwatch = Stopwatch();
   final ValueNotifier<Duration> _elapsedTicker =
       ValueNotifier<Duration>(Duration.zero);
+  final ValueNotifier<double> _levelTicker = ValueNotifier<double>(0);
+  StreamSubscription<Amplitude>? _amplitudeSub;
   Timer? _timer;
   List<Recording> _recordings = <Recording>[];
   bool _isRecording = false;
@@ -121,6 +123,14 @@ class RecordingsController extends ChangeNotifier {
   /// controller when all you render is the running time — it repaints one label
   /// rather than the whole page.
   ValueListenable<Duration> get elapsedTicker => _elapsedTicker;
+
+  /// Input level, `0`–`1`, while recording. Same reasoning as [elapsedTicker]:
+  /// the waveform is the only thing that repaints at this rate, so it listens
+  /// on its own rather than dragging the whole page along.
+  ///
+  /// Stays at `0` on a platform that reports no amplitude — the meter then just
+  /// sits flat, which is honest, rather than animating invented values.
+  ValueListenable<double> get levelTicker => _levelTicker;
   String? get playingId => _playingId;
   String? get error => _error;
   AudioConfig get audioConfig => _audioConfig;
@@ -154,7 +164,7 @@ class RecordingsController extends ChangeNotifier {
 
   Future<void> initialize() async {
     _recordings = await _repository.loadAll();
-    _logSink.log('Wczytano ${_recordings.length} nagrań z dysku.');
+    _logSink.log('Loaded ${_recordings.length} captures from disk.');
     notifyListeners();
 
     // Resume jobs left non-terminal by a previous session (the app was killed
@@ -177,8 +187,8 @@ class RecordingsController extends ChangeNotifier {
 
     final bool allowed = await _recorder.hasPermission();
     if (!allowed) {
-      _error = 'Brak uprawnienia do mikrofonu.';
-      _logSink.log('Odmowa dostępu do mikrofonu.', level: LogLevel.error);
+      _error = 'Microphone permission denied.';
+      _logSink.log('Microphone access refused.', level: LogLevel.error);
       notifyListeners();
       return;
     }
@@ -198,8 +208,8 @@ class RecordingsController extends ChangeNotifier {
       path: audioFile.path,
     );
     _logSink.log(
-      'Start nagrywania · ${_audioConfig.sampleRate} Hz · '
-      '${_audioConfig.numChannels} kanał(y) · ${_audioConfig.bitRate ~/ 1000} kbps',
+      'Recording started · ${_audioConfig.sampleRate} Hz · '
+      '${_audioConfig.numChannels} channel(s) · ${_audioConfig.bitRate ~/ 1000} kbps',
       recordingId: id,
     );
 
@@ -218,8 +228,37 @@ class RecordingsController extends ChangeNotifier {
       const Duration(milliseconds: 250),
       (_) => _elapsedTicker.value = _stopwatch.elapsed,
     );
+    _listenToLevel();
     _isRecording = true;
     notifyListeners();
+  }
+
+  /// Feed the capture screen's meter from the recorder's own amplitude stream.
+  ///
+  /// Wrapped because amplitude reporting is optional: a platform (or a test
+  /// double) that does not implement it throws here, and a missing meter must
+  /// never be the reason a recording fails to start.
+  void _listenToLevel() {
+    _levelTicker.value = 0;
+    try {
+      _amplitudeSub = _recorder
+          .onAmplitudeChanged(const Duration(milliseconds: 120))
+          .listen(
+            (Amplitude amplitude) =>
+                _levelTicker.value = _normalizeLevel(amplitude.current),
+            onError: (Object _) => _levelTicker.value = 0,
+          );
+    } catch (_) {
+      _amplitudeSub = null;
+    }
+  }
+
+  /// dBFS → `0`–`1`. Everything below −45 dB is silence for meter purposes;
+  /// the floor the platforms report varies (−160, −120, −60), so clamping to a
+  /// fixed window is what keeps the bars comparable across them.
+  static double _normalizeLevel(double dbfs) {
+    if (dbfs.isNaN || dbfs.isInfinite) return 0;
+    return ((dbfs + 45) / 45).clamp(0, 1).toDouble();
   }
 
   Future<void> stopRecording() async {
@@ -230,6 +269,9 @@ class RecordingsController extends ChangeNotifier {
     try {
       final String? stoppedPath = await _recorder.stop();
       _timer?.cancel();
+      unawaited(_amplitudeSub?.cancel());
+      _amplitudeSub = null;
+      _levelTicker.value = 0;
       _stopwatch.stop();
       _isRecording = false;
 
@@ -239,7 +281,10 @@ class RecordingsController extends ChangeNotifier {
       }
 
       final File file = File(path);
-      if (!await file.exists() || await file.length() == 0) {
+      // One `length()` call serves both jobs: it is the emptiness check that
+      // gates persistence, and it is the size the card reports afterwards.
+      final int sizeBytes = await file.exists() ? await file.length() : 0;
+      if (sizeBytes == 0) {
         throw FileSystemException('Recording file was not persisted correctly.', path);
       }
 
@@ -252,6 +297,7 @@ class RecordingsController extends ChangeNotifier {
         filePath: path,
         createdAt: DateTime.now(),
         durationMs: _stopwatch.elapsedMilliseconds,
+        sizeBytes: sizeBytes,
         status: RecordingStatus.saved,
         type: CaptureType.audioRecording,
       );
@@ -260,7 +306,7 @@ class RecordingsController extends ChangeNotifier {
       _recordings = <Recording>[saved, ..._recordings];
       await _persistAll();
       _logSink.log(
-        'Plik zweryfikowany i zapisany · ${await file.length()} B',
+        'File verified and saved · $sizeBytes B',
         recordingId: saved.id,
       );
 
@@ -270,7 +316,7 @@ class RecordingsController extends ChangeNotifier {
       await _enqueueProcessing(saved.id);
     } catch (exception) {
       _error = exception.toString();
-      _logSink.log('Błąd zapisu nagrania: $exception', level: LogLevel.error);
+      _logSink.log('Failed to save recording: $exception', level: LogLevel.error);
     } finally {
       _isBusy = false;
       _activeFilePath = null;
@@ -298,7 +344,8 @@ class RecordingsController extends ChangeNotifier {
       final String id = const Uuid().v4();
       final File file = await _repository.createSourceFile(id, 'txt');
       await file.writeAsString(trimmed, flush: true);
-      if (!await file.exists() || await file.length() == 0) {
+      final int sizeBytes = await file.exists() ? await file.length() : 0;
+      if (sizeBytes == 0) {
         throw FileSystemException('Note file was not persisted correctly.', file.path);
       }
 
@@ -307,6 +354,7 @@ class RecordingsController extends ChangeNotifier {
         filePath: file.path,
         createdAt: DateTime.now(),
         durationMs: 0,
+        sizeBytes: sizeBytes,
         status: RecordingStatus.saved,
         type: CaptureType.text,
         sourceMimeType: 'text/plain',
@@ -315,17 +363,14 @@ class RecordingsController extends ChangeNotifier {
       // Critical invariant: index the note only after the .txt exists on disk.
       _recordings = <Recording>[saved, ..._recordings];
       await _persistAll();
-      _logSink.log(
-        'Notatka zapisana · ${await file.length()} B',
-        recordingId: saved.id,
-      );
+      _logSink.log('Note saved · $sizeBytes B', recordingId: saved.id);
 
       // Enqueue for background processing and return; the drain loop runs the
       // job off the capture lock so it never blocks the next capture.
       await _enqueueProcessing(saved.id);
     } catch (exception) {
       _error = exception.toString();
-      _logSink.log('Błąd zapisu notatki: $exception', level: LogLevel.error);
+      _logSink.log('Failed to save note: $exception', level: LogLevel.error);
     } finally {
       _isBusy = false;
       notifyListeners();
@@ -360,7 +405,7 @@ class RecordingsController extends ChangeNotifier {
       _recordings = <Recording>[saved, ..._recordings];
       await _persistAll();
       _logSink.log(
-        'Zaimportowano plik · ${type.name} · ${await File(saved.filePath).length()} B',
+        'File imported · ${type.name} · ${await File(saved.filePath).length()} B',
         recordingId: saved.id,
       );
 
@@ -369,7 +414,7 @@ class RecordingsController extends ChangeNotifier {
       await _enqueueProcessing(saved.id);
     } catch (exception) {
       _error = exception.toString();
-      _logSink.log('Błąd importu pliku: $exception', level: LogLevel.error);
+      _logSink.log('Failed to import file: $exception', level: LogLevel.error);
     } finally {
       _isBusy = false;
       notifyListeners();
@@ -392,7 +437,7 @@ class RecordingsController extends ChangeNotifier {
           _recordings.firstWhere((Recording item) => item.id == id);
       final File file = File(recording.filePath);
       if (!await file.exists()) {
-        throw FileSystemException('Plik nagrania nie istnieje.', recording.filePath);
+        throw FileSystemException('Source file is missing.', recording.filePath);
       }
 
       await _player.stop();
@@ -403,7 +448,7 @@ class RecordingsController extends ChangeNotifier {
       _playingId = null;
       _error = exception.toString();
       _logSink.log(
-        'Odtwarzanie nieudane: $exception',
+        'Playback failed: $exception',
         level: LogLevel.error,
         recordingId: id,
       );
@@ -418,7 +463,7 @@ class RecordingsController extends ChangeNotifier {
     final String trimmed = text.trim();
     if (trimmed.isEmpty) return;
     await _update(id, (Recording item) => item.copyWith(transcript: trimmed));
-    _logSink.log('Zaktualizowano tekst.', recordingId: id);
+    _logSink.log('Text updated.', recordingId: id);
   }
 
   /// Set or clear an item's display title. An empty value clears it (the card
@@ -433,7 +478,7 @@ class RecordingsController extends ChangeNotifier {
       ),
     );
     _logSink.log(
-      trimmed.isEmpty ? 'Usunięto tytuł.' : 'Ustawiono tytuł.',
+      trimmed.isEmpty ? 'Title cleared.' : 'Title set.',
       recordingId: id,
     );
   }
@@ -457,7 +502,7 @@ class RecordingsController extends ChangeNotifier {
   /// enqueues — it does not hold the `_isBusy` capture lock, so a retry never
   /// blocks starting a new recording.
   Future<void> retryTranscription(String id) async {
-    _logSink.log('Ponowna próba przetwarzania.', level: LogLevel.warn, recordingId: id);
+    _logSink.log('Retrying processing.', level: LogLevel.warn, recordingId: id);
     await _enqueueProcessing(id);
   }
 
@@ -478,7 +523,7 @@ class RecordingsController extends ChangeNotifier {
         clearError: true,
       ),
     );
-    _logSink.log('W kolejce do przetwarzania.', recordingId: id);
+    _logSink.log('Queued for processing.', recordingId: id);
     unawaited(_drainProcessingQueue());
   }
 
@@ -523,7 +568,7 @@ class RecordingsController extends ChangeNotifier {
         id,
         (Recording item) => item.copyWith(status: RecordingStatus.transcribing),
       );
-      _logSink.log('Przetwarzanie uruchomione.', recordingId: id);
+      _logSink.log('Processing started.', recordingId: id);
 
       final Recording recording =
           _recordings.firstWhere((Recording item) => item.id == id);
@@ -541,7 +586,7 @@ class RecordingsController extends ChangeNotifier {
           ),
         );
         _logSink.log(
-          'Przetwarzanie zakończone · ${transcript.length} znaków',
+          'Processing finished · ${transcript.length} characters',
           recordingId: id,
         );
         // Deliberately last: the item is already `completed` and persisted, so a
@@ -556,7 +601,7 @@ class RecordingsController extends ChangeNotifier {
           ),
         );
         _logSink.log(
-          'Przetwarzanie nieudane: $exception',
+          'Processing failed: $exception',
           level: LogLevel.error,
           recordingId: id,
         );
@@ -576,10 +621,10 @@ class RecordingsController extends ChangeNotifier {
     if (type == CaptureType.text || text.trim().isEmpty) return;
     try {
       await _clipboardSink.copy(text);
-      _logSink.log('Wynik skopiowany do schowka.', recordingId: id);
+      _logSink.log('Result copied to clipboard.', recordingId: id);
     } catch (exception) {
       _logSink.log(
-        'Kopiowanie do schowka nieudane: $exception',
+        'Clipboard copy failed: $exception',
         level: LogLevel.warn,
         recordingId: id,
       );
@@ -621,7 +666,9 @@ class RecordingsController extends ChangeNotifier {
   void dispose() {
     _disposed = true; // lets an in-flight drain loop exit at the next boundary
     _timer?.cancel();
+    unawaited(_amplitudeSub?.cancel());
     _elapsedTicker.dispose();
+    _levelTicker.dispose();
     _playerCompleteSub?.cancel();
     _player.dispose();
     _recorder.dispose();

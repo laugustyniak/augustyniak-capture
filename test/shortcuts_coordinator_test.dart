@@ -208,7 +208,7 @@ void main() {
       await coordinator.handle(ShortcutAction.toggleRecording);
 
       // The denied microphone proves `startRecording` actually ran.
-      expect(recordings.error, 'Brak uprawnienia do mikrofonu.');
+      expect(recordings.error, 'Microphone permission denied.');
       // A recording started from a global hotkey is invisible otherwise: both
       // the running timer and this error are drawn on the Queue tab only.
       expect(presenter.presents, 1);

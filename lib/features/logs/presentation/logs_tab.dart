@@ -26,8 +26,14 @@ class _LogsTabState extends State<LogsTab> {
 
     return SafeArea(
       child: ListView(
-        padding: const EdgeInsets.fromLTRB(18, 8, 18, 40),
+        padding: const EdgeInsets.fromLTRB(18, 14, 18, 40),
         children: <Widget>[
+          ConsoleHeader(
+            title: 'Logs',
+            trailing: '${store.events.length} '
+                '${store.events.length == 1 ? 'event' : 'events'}',
+          ),
+          const SizedBox(height: 18),
           _LevelFilterRow(
             selected: levelFilter,
             counts: <LogLevel?, int>{
@@ -48,9 +54,9 @@ class _LogsTabState extends State<LogsTab> {
           if (visible.isEmpty)
             const EmptyPanel(
               icon: Icons.terminal_outlined,
-              title: 'Brak zdarzeń.',
-              blurb: 'Nagraj notatkę — każdy krok potoku (zapis, kolejka, '
-                  'transkrypcja, błędy) pojawi się tutaj.',
+              title: 'No events.',
+              blurb: 'Record a note — every pipeline step (save, queue, '
+                  'transcription, errors) shows up here.',
             )
           else
             ...visible.map(
@@ -73,7 +79,7 @@ class _LogsTabState extends State<LogsTab> {
               ),
               icon: const Icon(Icons.delete_sweep_outlined, size: 18),
               label: const Text(
-                'WYCZYŚĆ LOGI',
+                'CLEAR LOGS',
                 style: TextStyle(fontWeight: FontWeight.w900, fontSize: 12),
               ),
             ),
@@ -86,10 +92,10 @@ class _LogsTabState extends State<LogsTab> {
   Future<void> _confirmClear(BuildContext context) async {
     final bool confirmed = await confirmDestructive(
       context,
-      title: 'Wyczyścić logi?',
-      message: 'Historia zdarzeń zostanie usunięta. Nagrania i transkrypcje '
-          'pozostaną nietknięte.',
-      confirmLabel: 'WYCZYŚĆ',
+      title: 'Clear logs?',
+      message: 'The event history will be deleted. Recordings and transcripts '
+          'stay untouched.',
+      confirmLabel: 'CLEAR',
     );
     if (confirmed) {
       await widget.store.clear();
@@ -147,7 +153,7 @@ class _LogRow extends StatelessWidget {
     final Color color = levelColor(event.level);
     return Semantics(
       button: true,
-      label: 'Skopiuj wpis logu',
+      label: 'Copy log entry',
       child: InkWell(
         borderRadius: BorderRadius.circular(14),
         onLongPress: () async {

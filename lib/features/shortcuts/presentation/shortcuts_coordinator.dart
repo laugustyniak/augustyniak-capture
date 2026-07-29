@@ -97,7 +97,7 @@ class ShortcutsCoordinator {
           await _registrar.unregisterAll();
         } catch (exception) {
           _logSink.log(
-            'Nie udało się zwolnić skrótów: $exception',
+            'Failed to release shortcuts: $exception',
             level: LogLevel.error,
           );
         }
@@ -116,7 +116,7 @@ class ShortcutsCoordinator {
       _rejected = await _registrar.apply(bindings, handle);
       for (final ShortcutAction action in _rejected) {
         _logSink.log(
-          'Skrót zajęty przez inną aplikację: ${action.label}.',
+          'Shortcut taken by another app: ${action.label}.',
           level: LogLevel.warn,
         );
       }
@@ -127,7 +127,7 @@ class ShortcutsCoordinator {
       _applied = null;
       _rejected = const <ShortcutAction>{};
       _logSink.log(
-        'Rejestracja skrótów nieudana: $exception',
+        'Shortcut registration failed: $exception',
         level: LogLevel.error,
       );
     }
@@ -159,7 +159,7 @@ class ShortcutsCoordinator {
     // Logged before dispatch, not after: a cancelled file dialog and a capture
     // that failed inside the controller both return normally, so a trailing
     // "done" line would claim a success that never happened.
-    _logSink.log('Skrót globalny: ${action.label}.');
+    _logSink.log('Global shortcut: ${action.label}.');
 
     try {
       if (action.needsWindow) {
@@ -197,7 +197,7 @@ class ShortcutsCoordinator {
       }
     } catch (exception) {
       _logSink.log(
-        'Skrót nieudany (${action.label}): $exception',
+        'Shortcut failed (${action.label}): $exception',
         level: LogLevel.error,
       );
     } finally {

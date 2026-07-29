@@ -48,8 +48,10 @@ class ConfigTab extends StatelessWidget {
 
     return SafeArea(
       child: ListView(
-        padding: const EdgeInsets.fromLTRB(18, 8, 18, 40),
+        padding: const EdgeInsets.fromLTRB(18, 14, 18, 40),
         children: <Widget>[
+          const ConsoleHeader(title: 'Config', trailing: 'local only'),
+          const SizedBox(height: 18),
           if (controller.error != null) ErrorBanner(message: controller.error!),
           const SectionHeader(title: 'AUDIO CAPTURE'),
           const SizedBox(height: 12),
@@ -57,7 +59,7 @@ class ConfigTab extends StatelessWidget {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: <Widget>[
-                const InfoRow(label: 'KODEK', value: 'AAC-LC · .m4a (stały)'),
+                const InfoRow(label: 'CODEC', value: 'AAC-LC · .m4a (fixed)'),
                 const Divider(color: Console.border, height: 22),
                 _ChoiceRow<int>(
                   label: 'SAMPLE RATE',
@@ -78,7 +80,7 @@ class ConfigTab extends StatelessWidget {
                 ),
                 const SizedBox(height: 10),
                 _ChoiceRow<int>(
-                  label: 'KANAŁY',
+                  label: 'CHANNELS',
                   value: audio.numChannels,
                   options: const <int>[1, 2],
                   labelFor: (int value) => value == 1 ? 'Mono' : 'Stereo',
@@ -87,14 +89,14 @@ class ConfigTab extends StatelessWidget {
                 ),
                 const Divider(color: Console.border, height: 22),
                 InfoRow(
-                  label: 'ROZMIAR',
+                  label: 'SIZE',
                   value: '~${_megabytesPerHour(audio).toStringAsFixed(0)} MB '
-                      'na godzinę nagrania',
+                      'per hour of recording',
                 ),
                 const SizedBox(height: 6),
                 const Text(
-                  'Zmiana dotyczy kolejnych nagrań. Pliki już zapisane '
-                  'pozostają bez zmian.',
+                  'Changes apply to later recordings. Files already saved '
+                  'stay as they are.',
                   style: TextStyle(
                     color: Console.mutedSoft,
                     fontSize: 10,
@@ -109,7 +111,7 @@ class ConfigTab extends StatelessWidget {
                         ? null
                         : controller.resetAudio,
                     icon: const Icon(Icons.restart_alt, size: 17),
-                    label: const Text('PRZYWRÓĆ DOMYŚLNE'),
+                    label: const Text('RESTORE DEFAULTS'),
                   ),
                 ),
               ],
@@ -124,8 +126,8 @@ class ConfigTab extends StatelessWidget {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: <Widget>[
                 InfoRow(
-                  label: 'AKTYWNY PROFIL',
-                  value: active?.name ?? 'Brak — transkrypcja wyłączona',
+                  label: 'ACTIVE PROFILE',
+                  value: active?.name ?? 'None — transcription off',
                   valueColor: active == null ? Console.amber : Console.text,
                 ),
                 InfoRow(
@@ -134,12 +136,12 @@ class ConfigTab extends StatelessWidget {
                   monospace: true,
                 ),
                 InfoRow(label: 'MODEL', value: active?.model ?? '—'),
-                InfoRow(label: 'JĘZYK', value: active?.language ?? 'auto'),
+                InfoRow(label: 'LANGUAGE', value: active?.language ?? 'auto'),
                 InfoRow(
                   label: 'TOKEN',
                   value: active?.bearerToken == null
-                      ? 'brak'
-                      : '•••• ustawiony (jawny tekst na dysku)',
+                      ? 'none'
+                      : '•••• set (plaintext on disk)',
                   valueColor:
                       active?.bearerToken == null ? Console.mutedSoft : Console.amber,
                 ),
@@ -149,7 +151,7 @@ class ConfigTab extends StatelessWidget {
                   child: TextButton.icon(
                     onPressed: onOpenModels,
                     icon: const Icon(Icons.memory_outlined, size: 17),
-                    label: const Text('ZARZĄDZAJ PROFILAMI'),
+                    label: const Text('MANAGE PROFILES'),
                   ),
                 ),
               ],
@@ -171,18 +173,18 @@ class ConfigTab extends StatelessWidget {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: <Widget>[
                 InfoRow(
-                  label: 'KATALOG',
-                  value: storagePath ?? 'ustalanie…',
+                  label: 'DIRECTORY',
+                  value: storagePath ?? 'resolving…',
                   monospace: true,
                 ),
-                InfoRow(label: 'NAGRANIA', value: '$recordingsCount plików .m4a'),
-                InfoRow(label: 'INDEKS', value: 'recordings.json'),
-                InfoRow(label: 'USTAWIENIA', value: 'settings.json'),
-                InfoRow(label: 'LOGI', value: 'logs.json · $logCount zdarzeń'),
+                InfoRow(label: 'RECORDINGS', value: '$recordingsCount .m4a files'),
+                InfoRow(label: 'INDEX', value: 'recordings.json'),
+                InfoRow(label: 'SETTINGS', value: 'settings.json'),
+                InfoRow(label: 'LOGS', value: 'logs.json · $logCount events'),
                 const SizedBox(height: 10),
                 const Text(
-                  'Wszystkie zapisy są atomowe: plik .tmp, potem rename. '
-                  'Aplikacja nigdy nie usuwa nagrań.',
+                  'Every write is atomic: a .tmp file, then rename. '
+                  'The app never deletes recordings.',
                   style: TextStyle(
                     color: Console.mutedSoft,
                     fontSize: 10,
