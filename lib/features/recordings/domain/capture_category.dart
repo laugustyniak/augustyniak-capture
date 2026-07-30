@@ -35,14 +35,14 @@ enum CaptureCategory {
   static CaptureCategory fromName(String? name) =>
       CaptureCategory.values.asNameMap()[name] ?? CaptureCategory.capture;
 
-  /// Polish, for the card chip and the edit sheet dropdown.
+  /// The card chip and the edit-sheet dropdown label.
   String get label => switch (this) {
-        CaptureCategory.note => 'NOTATKA',
-        CaptureCategory.task => 'ZADANIE',
-        CaptureCategory.agentTask => 'ZADANIE AI',
-        CaptureCategory.idea => 'POMYSŁ',
-        CaptureCategory.meetingNote => 'SPOTKANIE',
+        CaptureCategory.note => 'NOTE',
+        CaptureCategory.task => 'TASK',
+        CaptureCategory.agentTask => 'AGENT TASK',
+        CaptureCategory.idea => 'IDEA',
+        CaptureCategory.meetingNote => 'MEETING',
         CaptureCategory.researchLead => 'RESEARCH',
-        CaptureCategory.capture => 'ZRZUT',
+        CaptureCategory.capture => 'CAPTURE',
       };
 }

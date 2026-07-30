@@ -17,10 +17,10 @@ enum ProfileKind {
   static ProfileKind fromName(String? name) =>
       ProfileKind.values.asNameMap()[name] ?? ProfileKind.transcription;
 
-  /// Polish, for the section headers in the Models tab.
+  /// Section header in the Models tab.
   String get label => switch (this) {
-        ProfileKind.transcription => 'TRANSKRYPCJA',
-        ProfileKind.enrichment => 'OPIS I KATEGORIA',
+        ProfileKind.transcription => 'TRANSCRIPTION PROFILES',
+        ProfileKind.enrichment => 'ENRICHMENT PROFILES',
       };
 }
 
