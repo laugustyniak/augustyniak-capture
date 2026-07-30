@@ -174,6 +174,7 @@ class _QueueTabState extends State<QueueTab> {
     if (result == null) return; // cancelled
     await widget.controller.setTitle(recording.id, result.title);
     await widget.controller.editTranscript(recording.id, result.transcript);
+    await widget.controller.setCategory(recording.id, result.category);
   }
 }
 

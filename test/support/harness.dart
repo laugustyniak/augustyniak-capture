@@ -8,6 +8,7 @@ import 'package:record/record.dart';
 import 'package:voice_notes_phase1/features/logs/data/log_store.dart';
 import 'package:voice_notes_phase1/features/recordings/data/media_picker.dart';
 import 'package:voice_notes_phase1/features/recordings/data/recordings_repository.dart';
+import 'package:voice_notes_phase1/features/recordings/domain/capture_category.dart';
 import 'package:voice_notes_phase1/features/recordings/domain/capture_type.dart';
 import 'package:voice_notes_phase1/features/recordings/domain/recording.dart';
 import 'package:voice_notes_phase1/features/recordings/presentation/recordings_controller.dart';
@@ -146,6 +147,9 @@ Recording makeRecording({
   RecordingStatus status = RecordingStatus.completed,
   String? transcript,
   String? title,
+  CaptureCategory? category,
+  String? summary,
+  List<String> tags = const <String>[],
   String? error,
   int durationMs = 1500,
   int sizeBytes = 0,
@@ -162,6 +166,9 @@ Recording makeRecording({
     type: type,
     transcript: transcript,
     title: title,
+    category: category,
+    summary: summary,
+    tags: tags,
     error: error,
     isProcessedByUser: isProcessedByUser,
   );
