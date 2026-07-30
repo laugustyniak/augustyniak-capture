@@ -5,6 +5,6 @@
   <key>CFBundleDisplayName</key>
   <string>Audivoa Core</string>
   <key>NSMicrophoneUsageDescription</key>
-  <string>Aplikacja potrzebuje mikrofonu do zapisywania notatek głosowych.</string>
+  <string>Audivoa Core needs the microphone to record voice notes.</string>
 </dict>
 </plist>

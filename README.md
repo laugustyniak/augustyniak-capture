@@ -173,7 +173,7 @@ Technical design: `docs/superpowers/specs/2026-07-25-multimodal-capture-design.m
 
 ## Processing Console UI
 
-The Phase 1 interface now uses the **Processing Console** design direction:
+The interface uses the **Processing Console** design direction:
 
 - dark navy interface with cyan system accent,
 - processing filters: Queue, Ready, Failed, Raw,
