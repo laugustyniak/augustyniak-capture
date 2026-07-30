@@ -1,6 +1,7 @@
 import 'package:flutter/foundation.dart';
 import 'package:uuid/uuid.dart';
 
+import '../../enrichment/domain/enrichment_service.dart';
 import '../../shortcuts/domain/hotkey_binding.dart';
 import '../../shortcuts/domain/shortcut_action.dart';
 import '../../transcription/data/transcription_service.dart';
@@ -30,10 +31,19 @@ class SettingsController extends ChangeNotifier {
   // http.Client — on every notification.
   TranscriptionService? _service;
   String? _serviceSignature;
+  EnrichmentService? _enrichment;
+  String? _enrichmentSignature;
 
   AppSettings get settings => _settings;
   List<ProviderProfile> get profiles => _settings.profiles;
   ProviderProfile? get activeProfile => _settings.activeProfile;
+  ProviderProfile? get activeEnrichmentProfile =>
+      _settings.activeEnrichmentProfile;
+
+  /// The profiles of one kind, for the two Models-tab sections.
+  List<ProviderProfile> profilesOfKind(ProfileKind kind) => _settings.profiles
+      .where((ProviderProfile item) => item.kind == kind)
+      .toList();
   AudioConfig get audio => _settings.audio;
   String? get error => _error;
 
@@ -62,6 +72,31 @@ class SettingsController extends ChangeNotifier {
     return _service!;
   }
 
+  /// The enrichment service the recordings controller should use right now.
+  ///
+  /// Same caching rule as [transcriptionService]: the same instance — and so the
+  /// same `http.Client` — until the active profile's connection details actually
+  /// change. No `language` in the signature, because the enrichment request does
+  /// not send one.
+  EnrichmentService get enrichmentService {
+    final ProviderProfile? active = _settings.activeEnrichmentProfile;
+    final String signature = active == null
+        ? 'disabled'
+        : <String?>[
+            active.id,
+            active.endpoint,
+            active.model,
+            active.bearerToken,
+          ].join('|');
+
+    if (_enrichment == null || _enrichmentSignature != signature) {
+      _enrichment =
+          active?.toEnrichmentService() ?? const DisabledEnrichmentService();
+      _enrichmentSignature = signature;
+    }
+    return _enrichment!;
+  }
+
   Future<void> initialize() async {
     try {
       final AppSettings? stored = await _repository.load();
@@ -85,6 +120,7 @@ class SettingsController extends ChangeNotifier {
   Future<ProviderProfile> addProfile({
     required String name,
     required String endpoint,
+    ProfileKind kind = ProfileKind.transcription,
     String? model,
     String? language,
     String? bearerToken,
@@ -93,6 +129,7 @@ class SettingsController extends ChangeNotifier {
       id: _uuid.v4(),
       name: name.trim().isEmpty ? 'Profile' : name.trim(),
       endpoint: endpoint.trim(),
+      kind: kind,
       model: model,
       language: language,
       bearerToken: bearerToken,
@@ -101,8 +138,14 @@ class SettingsController extends ChangeNotifier {
     await _persist(
       _settings.copyWith(
         profiles: <ProviderProfile>[..._settings.profiles, profile],
-        // A newly added profile always becomes the active one.
-        activeProfileId: profile.id,
+        // A newly added profile becomes the active one *of its own kind*:
+        // adding an enrichment profile must not silently repoint transcription.
+        activeProfileId: kind == ProfileKind.transcription
+            ? profile.id
+            : _settings.activeProfileId,
+        activeEnrichmentProfileId: kind == ProfileKind.enrichment
+            ? profile.id
+            : _settings.activeEnrichmentProfileId,
       ),
     );
     return profile;
@@ -123,23 +166,36 @@ class SettingsController extends ChangeNotifier {
     final List<ProviderProfile> remaining = _settings.profiles
         .where((ProviderProfile item) => item.id != id)
         .toList();
+
     // Resolve against what actually survives rather than only handling the
     // "deleted the active one" case: an id that was already dangling (a
-    // hand-edited settings.json) would otherwise be carried forward untouched,
-    // which the comment below claimed could not happen.
-    final bool activeSurvives = remaining
-        .any((ProviderProfile item) => item.id == _settings.activeProfileId);
-    final String? nextActive = activeSurvives
-        ? _settings.activeProfileId
-        : (remaining.isEmpty ? null : remaining.first.id);
+    // hand-edited settings.json) would otherwise be carried forward untouched.
+    // Each kind falls back to the first profile left *of that kind* — never to
+    // a profile that speaks the wrong protocol.
+    String? resolve(String? current, ProfileKind kind) {
+      if (remaining.any((ProviderProfile item) => item.id == current)) {
+        return current;
+      }
+      for (final ProviderProfile item in remaining) {
+        if (item.kind == kind) return item.id;
+      }
+      return null;
+    }
+
+    final String? nextActive =
+        resolve(_settings.activeProfileId, ProfileKind.transcription);
+    final String? nextEnrichment = resolve(
+      _settings.activeEnrichmentProfileId,
+      ProfileKind.enrichment,
+    );
 
     await _persist(
       _settings.copyWith(
         profiles: remaining,
-        // Falls back to the first profile left, or to nothing at all — never to
-        // a dangling id.
         activeProfileId: nextActive,
         clearActiveProfileId: nextActive == null,
+        activeEnrichmentProfileId: nextEnrichment,
+        clearActiveEnrichmentProfileId: nextEnrichment == null,
       ),
     );
   }
@@ -149,6 +205,15 @@ class SettingsController extends ChangeNotifier {
       _settings.copyWith(
         activeProfileId: id,
         clearActiveProfileId: id == null,
+      ),
+    );
+  }
+
+  Future<void> setActiveEnrichmentProfile(String? id) async {
+    await _persist(
+      _settings.copyWith(
+        activeEnrichmentProfileId: id,
+        clearActiveEnrichmentProfileId: id == null,
       ),
     );
   }
