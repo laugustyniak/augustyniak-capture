@@ -4,8 +4,8 @@ import 'ui_kit.dart';
 
 import '../features/recordings/presentation/recordings_page.dart';
 
-class VoiceNotesApp extends StatelessWidget {
-  const VoiceNotesApp({super.key});
+class AudivoaCoreApp extends StatelessWidget {
+  const AudivoaCoreApp({super.key});
 
   @override
   Widget build(BuildContext context) {

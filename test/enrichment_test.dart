@@ -4,11 +4,11 @@ import 'dart:io';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
-import 'package:voice_notes_phase1/features/enrichment/data/http_chat_enrichment_service.dart';
-import 'package:voice_notes_phase1/features/enrichment/domain/enrichment_prompt.dart';
-import 'package:voice_notes_phase1/features/enrichment/domain/enrichment_result.dart';
-import 'package:voice_notes_phase1/features/enrichment/domain/enrichment_service.dart';
-import 'package:voice_notes_phase1/features/recordings/domain/capture_category.dart';
+import 'package:audivoa_core/features/enrichment/data/http_chat_enrichment_service.dart';
+import 'package:audivoa_core/features/enrichment/domain/enrichment_prompt.dart';
+import 'package:audivoa_core/features/enrichment/domain/enrichment_result.dart';
+import 'package:audivoa_core/features/enrichment/domain/enrichment_service.dart';
+import 'package:audivoa_core/features/recordings/domain/capture_category.dart';
 
 void main() {
   group('CaptureCategory', () {
