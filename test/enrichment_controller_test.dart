@@ -152,6 +152,48 @@ void main() {
     expect(c.recordings.single.category, CaptureCategory.meetingNote);
   });
 
+  test('never overwrites a user-corrected category', () async {
+    final Directory dir = await _tmp();
+    addTearDown(() => dir.delete(recursive: true));
+    final _FakeEnrichment enrichment = _FakeEnrichment(verdict);
+    final RecordingsController c =
+        _controller(_FakeRepo(dir), enrichment: enrichment);
+    addTearDown(c.dispose);
+
+    await c.addTextNote('spotkanie z klientem');
+    await c.waitForProcessing();
+
+    final String id = c.recordings.single.id;
+    await c.setCategory(id, CaptureCategory.idea);
+    await c.retryTranscription(id);
+    await c.waitForProcessing();
+
+    // The correction is what an export will read, so a re-run must not undo it.
+    expect(c.recordings.single.category, CaptureCategory.idea);
+    // Summary and tags have no editor, so they are refreshed.
+    expect(c.recordings.single.summary, 'Ustalenia ze spotkania.');
+    expect(c.recordings.single.tags, <String>['klient', 'oferta']);
+  });
+
+  test('a cleared category is filled again by the next run', () async {
+    final Directory dir = await _tmp();
+    addTearDown(() => dir.delete(recursive: true));
+    final RecordingsController c =
+        _controller(_FakeRepo(dir), enrichment: _FakeEnrichment(verdict));
+    addTearDown(c.dispose);
+
+    await c.addTextNote('spotkanie z klientem');
+    await c.waitForProcessing();
+
+    final String id = c.recordings.single.id;
+    // Clearing is how the user asks for a re-classification.
+    await c.setCategory(id, null);
+    await c.retryTranscription(id);
+    await c.waitForProcessing();
+
+    expect(c.recordings.single.category, CaptureCategory.meetingNote);
+  });
+
   test('a throwing enrichment service leaves the item completed', () async {
     final Directory dir = await _tmp();
     addTearDown(() => dir.delete(recursive: true));

@@ -681,10 +681,12 @@ class RecordingsController extends ChangeNotifier {
       await _update(
         id,
         (Recording item) => item.copyWith(
-          // Only when empty. A user-set title is permanent: a retry must never
-          // silently destroy a name someone typed.
+          // Title and category are the two fields the user can correct by hand,
+          // so enrichment only ever *fills* them: an already-set value survives
+          // a retry. Summary and tags have no editor, so they are pure derived
+          // output and a re-run refreshes them.
           title: (item.title ?? '').trim().isEmpty ? result.title : null,
-          category: result.category,
+          category: item.category ?? result.category,
           summary: result.summary,
           tags: result.tags,
         ),

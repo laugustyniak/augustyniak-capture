@@ -162,10 +162,13 @@ class Recording {
       // Absent on every row written before enrichment existed. A missing value
       // stays null — "never enriched" — while a *present* unknown name degrades
       // to `capture`, the same forward-compatibility rule as `type`.
-      category: json['category'] == null
-          ? null
-          : CaptureCategory.fromName(json['category'] as String?),
-      summary: json['summary'] as String?,
+      // Type-checked, not cast, for the same reason as `tags` below: a
+      // hand-edited recordings.json holding a number here would otherwise throw
+      // out of the whole load and take every other recording with it.
+      category: json['category'] is String
+          ? CaptureCategory.fromName(json['category'] as String)
+          : null,
+      summary: json['summary'] is String ? json['summary'] as String : null,
       // Type-filtered rather than cast: a hand-edited recordings.json holding a
       // non-list, or a list with a stray number in it, would otherwise throw out
       // of the whole load and take every other recording with it.

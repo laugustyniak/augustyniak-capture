@@ -128,10 +128,13 @@ the `ClipboardSink` contract. `_disposed` is checked at the await boundary.
 `enrichmentService` is a runtime-settable field like `transcriptionService`; a
 swap from the Models tab affects only jobs started afterwards.
 
-**The title is filled only when it is null or blank.** A user-set title is
-permanent, and a retry must never overwrite it. This keeps the existing
+**Enrichment only ever fills the user-editable fields.** `title` is written only
+when it is null or blank, and `category` only when it is null, so a name someone
+typed or a category someone corrected survives a retry. This keeps the existing
 invariant — "processing never overwrites a user title" — literally true rather
-than qualified.
+than qualified, and extends it to the one other field with an editor.
+`summary` and `tags` have no editor and are refreshed on every run. Clearing the
+category is how the user asks for a re-classification.
 
 Enrichment runs for **every** capture type, text notes included. A note is where
 an auto-title helps most.
