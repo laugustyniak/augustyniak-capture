@@ -15,7 +15,7 @@
 - Work happens in the worktree `.worktrees/feat-21-llm-enrichment` on branch `feat/21-llm-enrichment` (issue #21).
 - `flutter analyze && flutter test` must pass before every commit. There is no server-side CI; this is the only gate.
 - Tests are **pure Dart** unless the code under test crosses a platform channel. Widget tests live in `test/widget/`.
-- User-facing strings are **Polish**; code identifiers, comments and `LogSink` messages are **English**.
+- User-facing strings are **English** (CLAUDE.md: the design pass translated them; do not reintroduce Polish), and so are identifiers, comments and `LogSink` messages.
 - Every raw hex colour belongs in `Console` (`lib/app/ui_kit.dart`). Reuse `StatusPill`, `ConsoleChip`, `SectionHeader`, `ConsoleCard`, `InfoRow` rather than re-declaring them.
 - No snackbars; no dialogs except `confirmDestructive()`.
 - Every `fromJson` stays backward compatible: a new field defaults when absent, and every task that adds one also adds a legacy-JSON test.
