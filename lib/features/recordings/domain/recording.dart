@@ -1,3 +1,4 @@
+import 'capture_category.dart';
 import 'capture_type.dart';
 
 /// Generic processing state, not transcription-specific: `pendingTranscription`
@@ -27,6 +28,9 @@ class Recording {
     this.sourceMimeType,
     this.transcript,
     this.title,
+    this.category,
+    this.summary,
+    this.tags = const <String>[],
     this.error,
     this.isProcessedByUser = false,
     this.processedAt,
@@ -62,6 +66,23 @@ class Recording {
   /// Optional user-set display name. Null on legacy rows and until named; the
   /// card falls back to the filename. Never set by processing.
   final String? title;
+
+  /// What the item *is*, assigned by the enrichment stage and correctable by
+  /// the user.
+  ///
+  /// **Null and [CaptureCategory.capture] are different states.** Null means
+  /// enrichment never ran — no profile configured, or the call failed.
+  /// `capture` means it ran and could not place the item. Collapsing them would
+  /// make an unconfigured install indistinguishable from a failing model.
+  final CaptureCategory? category;
+
+  /// One-line gist from the enrichment stage. Null until enriched.
+  final String? summary;
+
+  /// Up to five lowercase tags from the enrichment stage. Empty until enriched,
+  /// and on every legacy row.
+  final List<String> tags;
+
   final String? error;
 
   /// User-level state. This is intentionally separate from AI processing.
@@ -73,6 +94,11 @@ class Recording {
     String? transcript,
     String? title,
     bool clearTitle = false,
+    CaptureCategory? category,
+    bool clearCategory = false,
+    String? summary,
+    bool clearSummary = false,
+    List<String>? tags,
     String? error,
     bool clearError = false,
     bool? isProcessedByUser,
@@ -90,6 +116,9 @@ class Recording {
       status: status ?? this.status,
       transcript: transcript ?? this.transcript,
       title: clearTitle ? null : (title ?? this.title),
+      category: clearCategory ? null : (category ?? this.category),
+      summary: clearSummary ? null : (summary ?? this.summary),
+      tags: tags ?? this.tags,
       error: clearError ? null : (error ?? this.error),
       isProcessedByUser: isProcessedByUser ?? this.isProcessedByUser,
       processedAt: clearProcessedAt ? null : (processedAt ?? this.processedAt),
@@ -107,6 +136,9 @@ class Recording {
         'sourceMimeType': sourceMimeType,
         'transcript': transcript,
         'title': title,
+        'category': category?.name,
+        'summary': summary,
+        'tags': tags,
         'error': error,
         'isProcessedByUser': isProcessedByUser,
         'processedAt': processedAt?.toIso8601String(),
@@ -127,6 +159,22 @@ class Recording {
       sourceMimeType: json['sourceMimeType'] as String?,
       transcript: json['transcript'] as String?,
       title: json['title'] as String?,
+      // Absent on every row written before enrichment existed. A missing value
+      // stays null — "never enriched" — while a *present* unknown name degrades
+      // to `capture`, the same forward-compatibility rule as `type`.
+      // Type-checked, not cast, for the same reason as `tags` below: a
+      // hand-edited recordings.json holding a number here would otherwise throw
+      // out of the whole load and take every other recording with it.
+      category: json['category'] is String
+          ? CaptureCategory.fromName(json['category'] as String)
+          : null,
+      summary: json['summary'] is String ? json['summary'] as String : null,
+      // Type-filtered rather than cast: a hand-edited recordings.json holding a
+      // non-list, or a list with a stray number in it, would otherwise throw out
+      // of the whole load and take every other recording with it.
+      tags: json['tags'] is List<dynamic>
+          ? (json['tags'] as List<dynamic>).whereType<String>().toList()
+          : const <String>[],
       error: json['error'] as String?,
       isProcessedByUser: json['isProcessedByUser'] as bool? ?? false,
       processedAt: json['processedAt'] == null

@@ -12,6 +12,7 @@ class AppSettings {
   const AppSettings({
     this.profiles = const <ProviderProfile>[],
     this.activeProfileId,
+    this.activeEnrichmentProfileId,
     this.audio = AudioConfig.defaults,
     Map<ShortcutAction, HotkeyBinding>? shortcuts,
   }) : _shortcuts = shortcuts;
@@ -20,6 +21,10 @@ class AppSettings {
 
   final List<ProviderProfile> profiles;
   final String? activeProfileId;
+
+  /// The enrichment profile in force. Independent of [activeProfileId] because
+  /// one profile of each kind has to be active at the same time.
+  final String? activeEnrichmentProfileId;
   final AudioConfig audio;
 
   /// Null means "never configured". Kept private and nullable rather than
@@ -57,10 +62,23 @@ class AppSettings {
     return null;
   }
 
+  /// Null when nothing is selected or the stored id no longer exists (profile
+  /// deleted). Callers fall back to the disabled enrichment service, which is
+  /// what makes an unconfigured install simply leave items un-enriched.
+  ProviderProfile? get activeEnrichmentProfile {
+    if (activeEnrichmentProfileId == null) return null;
+    for (final ProviderProfile profile in profiles) {
+      if (profile.id == activeEnrichmentProfileId) return profile;
+    }
+    return null;
+  }
+
   AppSettings copyWith({
     List<ProviderProfile>? profiles,
     String? activeProfileId,
     bool clearActiveProfileId = false,
+    String? activeEnrichmentProfileId,
+    bool clearActiveEnrichmentProfileId = false,
     AudioConfig? audio,
     Map<ShortcutAction, HotkeyBinding>? shortcuts,
     bool resetShortcuts = false,
@@ -69,6 +87,9 @@ class AppSettings {
       profiles: profiles ?? this.profiles,
       activeProfileId:
           clearActiveProfileId ? null : (activeProfileId ?? this.activeProfileId),
+      activeEnrichmentProfileId: clearActiveEnrichmentProfileId
+          ? null
+          : (activeEnrichmentProfileId ?? this.activeEnrichmentProfileId),
       audio: audio ?? this.audio,
       shortcuts: resetShortcuts ? null : (shortcuts ?? _shortcuts),
     );
@@ -80,6 +101,7 @@ class AppSettings {
       'profiles':
           profiles.map((ProviderProfile item) => item.toJson()).toList(),
       'activeProfileId': activeProfileId,
+      'activeEnrichmentProfileId': activeEnrichmentProfileId,
       'audio': audio.toJson(),
       // Omitted entirely while untouched, so a later build that adds a new
       // action still ships its default to users who never edited a shortcut.
@@ -124,6 +146,10 @@ class AppSettings {
       // and `audio` above.
       activeProfileId:
           json['activeProfileId'] is String ? json['activeProfileId'] as String : null,
+      activeEnrichmentProfileId:
+          json['activeEnrichmentProfileId'] is String
+              ? json['activeEnrichmentProfileId'] as String
+              : null,
       audio: rawAudio is Map<String, dynamic>
           ? AudioConfig.fromJson(rawAudio)
           : AudioConfig.defaults,

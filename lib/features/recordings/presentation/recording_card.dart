@@ -112,13 +112,39 @@ class RecordingCard extends StatelessWidget {
                   ),
                 ),
                 const SizedBox(width: 8),
-                StatusPill(
-                  label: visual.label,
-                  color: visual.color,
-                  pulse: visual.pulse,
+                // Two pills, one row: what the item *is* and where it is in the
+                // pipeline. Reuses StatusPill rather than adding a widget — the
+                // colour is what tells them apart. The category is absent until
+                // enrichment has run, so an install with no enrichment profile
+                // renders exactly the card it rendered before.
+                Wrap(
+                  spacing: 6,
+                  runSpacing: 6,
+                  crossAxisAlignment: WrapCrossAlignment.center,
+                  children: <Widget>[
+                    if (recording.category != null)
+                      StatusPill(
+                        label: recording.category!.label,
+                        color: Console.mutedSoft,
+                      ),
+                    StatusPill(
+                      label: visual.label,
+                      color: visual.color,
+                      pulse: visual.pulse,
+                    ),
+                  ],
                 ),
               ],
             ),
+            if ((recording.summary ?? '').trim().isNotEmpty) ...<Widget>[
+              const SizedBox(height: 9),
+              Text(
+                recording.summary!.trim(),
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+                style: ConsoleText.cardMeta.copyWith(color: Console.textSoft),
+              ),
+            ],
             if (recording.status == RecordingStatus.transcribing) ...<Widget>[
               const SizedBox(height: 12),
               const ClipRRect(
