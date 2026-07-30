@@ -48,15 +48,15 @@ class EditSheetState extends State<EditSheet> {
         mainAxisSize: MainAxisSize.min,
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: <Widget>[
-          const SectionHeader(title: 'EDYTUJ'),
+          const SectionHeader(title: 'EDIT'),
           const SizedBox(height: 12),
           TextField(
             controller: _title,
             textInputAction: TextInputAction.next,
             style: const TextStyle(color: Console.text, fontSize: 14),
             decoration: const InputDecoration(
-              labelText: 'Tytuł (opcjonalny)',
-              hintText: 'np. Spotkanie z klientem',
+              labelText: 'Title (optional)',
+              hintText: 'e.g. Client meeting',
             ),
           ),
           const SizedBox(height: 12),
@@ -66,8 +66,8 @@ class EditSheetState extends State<EditSheet> {
             minLines: 3,
             style: const TextStyle(color: Console.text, fontSize: 13),
             decoration: const InputDecoration(
-              labelText: 'Tekst',
-              hintText: 'Transkrypcja / tekst OCR / notatka',
+              labelText: 'Text',
+              hintText: 'Transcript / OCR text / note',
             ),
           ),
           const SizedBox(height: 14),
@@ -76,7 +76,7 @@ class EditSheetState extends State<EditSheet> {
             children: <Widget>[
               TextButton(
                 onPressed: () => Navigator.of(context).pop(),
-                child: const Text('ANULUJ'),
+                child: const Text('CANCEL'),
               ),
               const SizedBox(width: 8),
               FilledButton(
@@ -86,7 +86,7 @@ class EditSheetState extends State<EditSheet> {
                     transcript: _text.text,
                   ),
                 ),
-                child: const Text('ZAPISZ'),
+                child: const Text('SAVE'),
               ),
             ],
           ),
