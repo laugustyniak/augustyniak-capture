@@ -4,6 +4,8 @@ import 'package:voice_notes_phase1/features/settings/domain/app_settings.dart';
 import 'package:voice_notes_phase1/features/settings/domain/audio_config.dart';
 import 'package:voice_notes_phase1/features/settings/domain/provider_profile.dart';
 import 'package:voice_notes_phase1/features/settings/presentation/settings_controller.dart';
+import 'package:voice_notes_phase1/features/enrichment/data/http_chat_enrichment_service.dart';
+import 'package:voice_notes_phase1/features/enrichment/domain/enrichment_service.dart';
 import 'package:voice_notes_phase1/features/transcription/data/transcription_service.dart';
 
 /// In-memory stand-in so controller tests need no path_provider bindings.
@@ -270,6 +272,197 @@ void main() {
       expect(controller.activeProfile, isNull);
       expect(controller.transcriptionService,
           isA<DisabledTranscriptionService>());
+    });
+  });
+
+  group('enrichment profiles', () {
+    test('a legacy profile row defaults to the transcription kind', () {
+      final ProviderProfile restored =
+          ProviderProfile.fromJson(<String, dynamic>{
+        'id': 'p1',
+        'name': 'Whisper',
+        'endpoint': 'https://api.openai.com/v1/audio/transcriptions',
+      });
+
+      expect(restored.kind, ProfileKind.transcription);
+    });
+
+    test('kind round-trips, and an unknown kind degrades to transcription', () {
+      const ProviderProfile profile = ProviderProfile(
+        id: 'p2',
+        name: 'GPT',
+        endpoint: 'https://api.openai.com/v1/chat/completions',
+        kind: ProfileKind.enrichment,
+      );
+
+      expect(
+        ProviderProfile.fromJson(profile.toJson()).kind,
+        ProfileKind.enrichment,
+      );
+      expect(ProfileKind.fromName('embedding'), ProfileKind.transcription);
+      expect(ProfileKind.fromName(null), ProfileKind.transcription);
+    });
+
+    test('toEnrichmentService degrades on a blank or schemeless endpoint', () {
+      const ProviderProfile blank =
+          ProviderProfile(id: 'x', name: 'x', endpoint: '  ');
+      const ProviderProfile schemeless =
+          ProviderProfile(id: 'y', name: 'y', endpoint: 'api.example.com/v1');
+      const ProviderProfile usable = ProviderProfile(
+        id: 'z',
+        name: 'z',
+        endpoint: 'https://api.example.com/v1/chat/completions',
+      );
+
+      expect(blank.toEnrichmentService(), isA<DisabledEnrichmentService>());
+      expect(schemeless.toEnrichmentService(), isA<DisabledEnrichmentService>());
+      expect(usable.toEnrichmentService(), isA<HttpChatEnrichmentService>());
+    });
+
+    test('activeEnrichmentProfile is null for a dangling id', () {
+      const AppSettings settings = AppSettings(
+        profiles: <ProviderProfile>[],
+        activeEnrichmentProfileId: 'gone',
+      );
+
+      expect(settings.activeEnrichmentProfile, isNull);
+    });
+
+    test('activeEnrichmentProfileId survives a JSON round-trip and is absent '
+        'from legacy files', () {
+      const AppSettings settings = AppSettings(
+        profiles: <ProviderProfile>[
+          ProviderProfile(
+            id: 'e1',
+            name: 'GPT',
+            endpoint: 'https://api.openai.com/v1/chat/completions',
+            kind: ProfileKind.enrichment,
+          ),
+        ],
+        activeEnrichmentProfileId: 'e1',
+      );
+
+      expect(
+        AppSettings.fromJson(settings.toJson()).activeEnrichmentProfile?.id,
+        'e1',
+      );
+      expect(
+        AppSettings.fromJson(<String, dynamic>{}).activeEnrichmentProfileId,
+        isNull,
+      );
+    });
+
+    test('the two active ids are independent', () async {
+      final SettingsController controller =
+          SettingsController(repository: _FakeSettingsRepository());
+
+      final ProviderProfile whisper = await controller.addProfile(
+        name: 'Whisper',
+        endpoint: 'https://api.openai.com/v1/audio/transcriptions',
+      );
+      final ProviderProfile gpt = await controller.addProfile(
+        name: 'GPT',
+        endpoint: 'https://api.openai.com/v1/chat/completions',
+        kind: ProfileKind.enrichment,
+        model: 'gpt-4o-mini',
+      );
+
+      // Adding the enrichment profile must not repoint transcription.
+      expect(controller.settings.activeProfileId, whisper.id);
+      expect(controller.settings.activeEnrichmentProfileId, gpt.id);
+      expect(
+        controller.transcriptionService,
+        isA<HttpWhisperTranscriptionService>(),
+      );
+      expect(controller.enrichmentService, isA<HttpChatEnrichmentService>());
+      expect(
+        controller.profilesOfKind(ProfileKind.enrichment).single.id,
+        gpt.id,
+      );
+    });
+
+    test('deleting the active enrichment profile falls back, never dangles',
+        () async {
+      final SettingsController controller =
+          SettingsController(repository: _FakeSettingsRepository());
+
+      final ProviderProfile first = await controller.addProfile(
+        name: 'GPT',
+        endpoint: 'https://api.openai.com/v1/chat/completions',
+        kind: ProfileKind.enrichment,
+      );
+      final ProviderProfile second = await controller.addProfile(
+        name: 'Groq',
+        endpoint: 'https://api.groq.com/openai/v1/chat/completions',
+        kind: ProfileKind.enrichment,
+      );
+
+      await controller.deleteProfile(second.id);
+      expect(controller.settings.activeEnrichmentProfileId, first.id);
+
+      await controller.deleteProfile(first.id);
+      expect(controller.settings.activeEnrichmentProfileId, isNull);
+      expect(controller.enrichmentService, isA<DisabledEnrichmentService>());
+    });
+
+    test('deleting a transcription profile never falls back to an enrichment '
+        'one', () async {
+      final SettingsController controller =
+          SettingsController(repository: _FakeSettingsRepository());
+
+      final ProviderProfile whisper = await controller.addProfile(
+        name: 'Whisper',
+        endpoint: 'https://api.openai.com/v1/audio/transcriptions',
+      );
+      final ProviderProfile gpt = await controller.addProfile(
+        name: 'GPT',
+        endpoint: 'https://api.openai.com/v1/chat/completions',
+        kind: ProfileKind.enrichment,
+      );
+
+      await controller.deleteProfile(whisper.id);
+
+      // The chat endpoint cannot transcribe; no active profile beats a wrong one.
+      expect(controller.settings.activeProfileId, isNull);
+      expect(controller.settings.activeEnrichmentProfileId, gpt.id);
+      expect(
+        controller.transcriptionService,
+        isA<DisabledTranscriptionService>(),
+      );
+    });
+
+    test('enrichmentService is cached until the connection details change',
+        () async {
+      final SettingsController controller =
+          SettingsController(repository: _FakeSettingsRepository());
+
+      final ProviderProfile gpt = await controller.addProfile(
+        name: 'GPT',
+        endpoint: 'https://api.openai.com/v1/chat/completions',
+        kind: ProfileKind.enrichment,
+        model: 'gpt-4o-mini',
+      );
+
+      final EnrichmentService first = controller.enrichmentService;
+      expect(identical(controller.enrichmentService, first), isTrue);
+
+      await controller.updateProfile(gpt.copyWith(model: 'gpt-4.1-mini'));
+      expect(identical(controller.enrichmentService, first), isFalse);
+    });
+
+    test('setActiveEnrichmentProfile(null) disables enrichment', () async {
+      final SettingsController controller =
+          SettingsController(repository: _FakeSettingsRepository());
+
+      await controller.addProfile(
+        name: 'GPT',
+        endpoint: 'https://api.openai.com/v1/chat/completions',
+        kind: ProfileKind.enrichment,
+      );
+      await controller.setActiveEnrichmentProfile(null);
+
+      expect(controller.settings.activeEnrichmentProfileId, isNull);
+      expect(controller.enrichmentService, isA<DisabledEnrichmentService>());
     });
   });
 }
