@@ -1,9 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:voice_notes_phase1/app/ui_kit.dart';
-import 'package:voice_notes_phase1/features/settings/domain/provider_profile.dart';
-import 'package:voice_notes_phase1/features/settings/presentation/models_tab.dart';
-import 'package:voice_notes_phase1/features/settings/presentation/settings_controller.dart';
+import 'package:audivoa_core/app/ui_kit.dart';
+import 'package:audivoa_core/features/settings/domain/provider_profile.dart';
+import 'package:audivoa_core/features/settings/presentation/models_tab.dart';
+import 'package:audivoa_core/features/settings/presentation/settings_controller.dart';
 
 import '../support/harness.dart';
 

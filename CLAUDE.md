@@ -4,9 +4,9 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project
 
-Offline-first Flutter voice recorder ("Voice Notes — Phase 1"). Core guarantee: audio is durably persisted to disk **before** transcription is ever attempted, and a transcription failure never deletes a recording. This ordering invariant is the reason the app exists — preserve it in any change.
+Offline-first Flutter voice recorder ("Audivoa Core"). Core guarantee: audio is durably persisted to disk **before** transcription is ever attempted, and a transcription failure never deletes a recording. This ordering invariant is the reason the app exists — preserve it in any change.
 
-The `pubspec.yaml` name is `voice_notes_phase1`; the runtime app title is `Audivoa Core`. README is in Polish; **user-facing strings in code are English** (they were Polish until the design pass — do not reintroduce Polish), and so are identifiers and comments. Strings already stored on disk (a provider profile the user named) keep whatever they were saved as; only code literals were translated.
+The `pubspec.yaml` name, the runtime app title and the platform display names are all `audivoa_core` / `Audivoa Core`. README is in English; **user-facing strings in code are English** (they were Polish until the design pass — do not reintroduce Polish), and so are identifiers and comments. Strings already stored on disk (a provider profile the user named) keep whatever they were saved as; only code literals were translated.
 
 ## Commands
 

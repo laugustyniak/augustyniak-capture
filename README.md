@@ -1,4 +1,4 @@
-# Voice Notes — Phase 1
+# Audivoa Core
 
 A minimal **offline-first** Flutter app for recording voice notes.
 

@@ -1,6 +1,6 @@
 import 'package:flutter_test/flutter_test.dart';
-import 'package:voice_notes_phase1/features/logs/data/log_store.dart';
-import 'package:voice_notes_phase1/features/logs/domain/log_event.dart';
+import 'package:audivoa_core/features/logs/data/log_store.dart';
+import 'package:audivoa_core/features/logs/domain/log_event.dart';
 
 void main() {
   group('LogEvent', () {

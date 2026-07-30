@@ -3,7 +3,7 @@
 <plist version="1.0">
 <dict>
   <key>CFBundleDisplayName</key>
-  <string>Voice Notes</string>
+  <string>Audivoa Core</string>
   <key>NSMicrophoneUsageDescription</key>
   <string>Aplikacja potrzebuje mikrofonu do zapisywania notatek głosowych.</string>
 </dict>

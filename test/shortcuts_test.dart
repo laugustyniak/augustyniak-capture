@@ -2,12 +2,12 @@ import 'dart:convert';
 
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:voice_notes_phase1/features/settings/data/settings_repository.dart';
-import 'package:voice_notes_phase1/features/settings/domain/app_settings.dart';
-import 'package:voice_notes_phase1/features/settings/presentation/settings_controller.dart';
-import 'package:voice_notes_phase1/features/shortcuts/data/linux_hotkey_registrar.dart';
-import 'package:voice_notes_phase1/features/shortcuts/domain/hotkey_binding.dart';
-import 'package:voice_notes_phase1/features/shortcuts/domain/shortcut_action.dart';
+import 'package:audivoa_core/features/settings/data/settings_repository.dart';
+import 'package:audivoa_core/features/settings/domain/app_settings.dart';
+import 'package:audivoa_core/features/settings/presentation/settings_controller.dart';
+import 'package:audivoa_core/features/shortcuts/data/linux_hotkey_registrar.dart';
+import 'package:audivoa_core/features/shortcuts/domain/hotkey_binding.dart';
+import 'package:audivoa_core/features/shortcuts/domain/shortcut_action.dart';
 
 /// Keeps `settings.json` in memory — no path_provider, no disk.
 ///
