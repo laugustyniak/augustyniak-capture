@@ -2,6 +2,7 @@ import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:voice_notes_phase1/features/recordings/domain/capture_category.dart';
 import 'package:voice_notes_phase1/features/recordings/domain/capture_type.dart';
 import 'package:voice_notes_phase1/features/recordings/domain/recording.dart';
 import 'package:voice_notes_phase1/features/recordings/presentation/queue_tab.dart';
@@ -233,5 +234,110 @@ void main() {
 
     expect(find.text('REVIEWED'), findsOneWidget);
     expect(find.text('1 / 3'), findsOneWidget);
+  });
+
+  testWidgets('a card shows its category and summary', (
+    WidgetTester tester,
+  ) async {
+    final RecordingsController controller = await buildRecordingsController(
+      appDir,
+      seed: <Recording>[
+        makeRecording(
+          id: 'enriched',
+          status: RecordingStatus.completed,
+          transcript: 'zadzwonić do klienta w piątek',
+          category: CaptureCategory.task,
+          summary: 'Call the client on Friday.',
+          tags: <String>['client', 'call'],
+        ),
+      ],
+    );
+    await pumpQueue(tester, controller);
+
+    expect(find.text('TASK'), findsOneWidget);
+    expect(find.text('Call the client on Friday.'), findsOneWidget);
+    // The pipeline pill is still there beside it.
+    expect(find.text('READY'), findsOneWidget);
+  });
+
+  testWidgets('an un-enriched card shows no category and no summary', (
+    WidgetTester tester,
+  ) async {
+    final RecordingsController controller = await buildRecordingsController(
+      appDir,
+      seed: <Recording>[
+        makeRecording(
+          id: 'plain',
+          status: RecordingStatus.completed,
+          transcript: 'jakiś tekst',
+        ),
+      ],
+    );
+    await pumpQueue(tester, controller);
+
+    // An install with no enrichment profile renders the card it always did.
+    for (final CaptureCategory value in CaptureCategory.values) {
+      expect(find.text(value.label), findsNothing);
+    }
+  });
+
+  testWidgets('the edit sheet corrects a wrong category', (
+    WidgetTester tester,
+  ) async {
+    final RecordingsController controller = await buildRecordingsController(
+      appDir,
+      seed: <Recording>[
+        makeRecording(
+          id: 'wrong',
+          status: RecordingStatus.completed,
+          transcript: 'pomysł na nową funkcję',
+          category: CaptureCategory.task,
+          tags: <String>['idea'],
+        ),
+      ],
+    );
+    await pumpQueue(tester, controller);
+
+    await tester.tap(find.byIcon(Icons.edit_outlined));
+    await tester.pumpAndSettle();
+    // The model's verdict is what the dropdown opens on.
+    expect(find.text('Category'), findsOneWidget);
+
+    await tester.tap(find.byType(DropdownButtonFormField<CaptureCategory?>));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('IDEA').last);
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('SAVE'));
+    await tester.pumpAndSettle();
+
+    expect(controller.recordings.single.category, CaptureCategory.idea);
+  });
+
+  testWidgets('the edit sheet clears a category back to unclassified', (
+    WidgetTester tester,
+  ) async {
+    final RecordingsController controller = await buildRecordingsController(
+      appDir,
+      seed: <Recording>[
+        makeRecording(
+          id: 'clearable',
+          status: RecordingStatus.completed,
+          transcript: 'cokolwiek',
+          category: CaptureCategory.note,
+        ),
+      ],
+    );
+    await pumpQueue(tester, controller);
+
+    await tester.tap(find.byIcon(Icons.edit_outlined));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byType(DropdownButtonFormField<CaptureCategory?>));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('—').last);
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('SAVE'));
+    await tester.pumpAndSettle();
+
+    expect(controller.recordings.single.category, isNull);
   });
 }
