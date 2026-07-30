@@ -20,14 +20,28 @@ class RecordingCard extends StatelessWidget {
     required this.recording,
     required this.isPlaying,
     required this.onTogglePlay,
+    required this.onOpen,
     required this.onRetry,
     required this.onEdit,
     required this.onToggleProcessed,
   });
 
+  /// Said in both places the action is offered — the poster and the button —
+  /// so a screen reader announces one action, not two different-sounding ones.
+  /// It names the *destination* deliberately: unlike audio, this leaves the
+  /// app. Public so a test cannot drift from the string it asserts on.
+  static const String openVideoLabel = 'Open video externally';
+
   final Recording recording;
   final bool isPlaying;
   final VoidCallback onTogglePlay;
+
+  /// Hands the source to the platform's own player/viewer. Deliberately not
+  /// folded into [onTogglePlay]: audio plays *in* the app and is stateful
+  /// ([isPlaying] drives the stop icon), while a video is an external launch
+  /// with no state to come back to. One callback would have to lie about one
+  /// of the two.
+  final VoidCallback onOpen;
   final VoidCallback onRetry;
   final VoidCallback onEdit;
   final VoidCallback onToggleProcessed;
@@ -44,6 +58,7 @@ class RecordingCard extends StatelessWidget {
     // Generic processor output: a transcription, OCR text or a note body.
     final String transcript = recording.transcript ?? '';
     final bool hasTranscript = transcript.trim().isNotEmpty;
+    final bool openable = recording.type == CaptureType.video;
 
     return AnimatedContainer(
       duration: const Duration(milliseconds: 420),
@@ -68,13 +83,10 @@ class RecordingCard extends StatelessWidget {
           children: <Widget>[
             Row(
               children: <Widget>[
-                ConsoleIconTile(
-                  animate: true,
-                  icon: _typeIcon(recording.type),
-                  color: failed ? Console.red : Console.cyan,
-                  background: failed
-                      ? Console.red.withValues(alpha: .1)
-                      : Console.iconTile,
+                _LeadingTile(
+                  recording: recording,
+                  failed: failed,
+                  onOpen: openable ? onOpen : null,
                 ),
                 const SizedBox(width: 12),
                 Expanded(
@@ -201,7 +213,8 @@ class RecordingCard extends StatelessWidget {
                   ),
                   const SizedBox(width: 8),
                 ],
-                // Playback is audio-only; text/image/video items have no track.
+                // In-app playback is audio-only; text and image items have no
+                // track at all.
                 if (recording.type.isPlayableAudio) ...<Widget>[
                   ConsoleIconButton(
                     icon: isPlaying
@@ -211,6 +224,20 @@ class RecordingCard extends StatelessWidget {
                     semanticLabel:
                         isPlaying ? 'Stop playback' : 'Play recording',
                     active: isPlaying,
+                    size: 30,
+                    iconSize: 18,
+                  ),
+                  const SizedBox(width: 7),
+                ]
+                // A video leaves the app to play: there is no in-process video
+                // widget on the desktop targets, so this hands the file to
+                // whatever the user already has. Nothing to stop afterwards,
+                // hence no `active` state and a fixed icon.
+                else if (openable) ...<Widget>[
+                  ConsoleIconButton(
+                    icon: Icons.play_arrow_rounded,
+                    onTap: onOpen,
+                    semanticLabel: RecordingCard.openVideoLabel,
                     size: 30,
                     iconSize: 18,
                   ),
@@ -230,6 +257,58 @@ class RecordingCard extends StatelessWidget {
           ],
         ),
       ),
+    );
+  }
+}
+
+/// The card's leading badge: the video's own poster frame when one was
+/// extracted, the capture-type icon otherwise.
+///
+/// [onOpen] is non-null only for a type the app can hand to the system, which
+/// makes the poster a second tap target for the same action the play button
+/// runs. The tap target stops here on purpose — the card body stays
+/// non-tappable, because "tap anywhere" would make the edit and review
+/// controls inside it ambiguous.
+class _LeadingTile extends StatelessWidget {
+  const _LeadingTile({
+    required this.recording,
+    required this.failed,
+    required this.onOpen,
+  });
+
+  final Recording recording;
+  final bool failed;
+  final VoidCallback? onOpen;
+
+  @override
+  Widget build(BuildContext context) {
+    final Color color = failed ? Console.red : Console.cyan;
+    final Color background =
+        failed ? Console.red.withValues(alpha: .1) : Console.iconTile;
+    final String? poster = recording.thumbPath;
+
+    final Widget tile = poster == null
+        ? ConsoleIconTile(
+            animate: true,
+            icon: _typeIcon(recording.type),
+            color: color,
+            background: background,
+          )
+        // A poster path is only ever a *claim* that a frame was extracted; the
+        // file may since have been cleaned up, so the tile falls back to the
+        // icon above rather than trusting it.
+        : ConsolePosterTile(
+            poster: File(poster),
+            fallbackIcon: _typeIcon(recording.type),
+            color: color,
+            background: background,
+          );
+
+    if (onOpen == null) return tile;
+    return Semantics(
+      button: true,
+      label: RecordingCard.openVideoLabel,
+      child: InkResponse(onTap: onOpen, radius: 25, child: tile),
     );
   }
 }
