@@ -1,4 +1,5 @@
 import 'package:flutter_test/flutter_test.dart';
+import 'package:voice_notes_phase1/features/recordings/domain/capture_category.dart';
 import 'package:voice_notes_phase1/features/recordings/domain/recording.dart';
 
 void main() {
@@ -88,5 +89,96 @@ void main() {
     expect(restored.isProcessedByUser, isFalse);
     expect(restored.processedAt, isNull);
     expect(restored.title, isNull); // no title key on legacy rows
+  });
+
+  test('category, summary and tags round-trip through JSON', () {
+    final Recording item = Recording(
+      id: 'id-1',
+      filePath: '/tmp/id-1.m4a',
+      createdAt: DateTime.utc(2026, 7, 30, 10),
+      durationMs: 4200,
+      status: RecordingStatus.completed,
+      category: CaptureCategory.meetingNote,
+      summary: 'Ustalenia ze spotkania.',
+      tags: <String>['klient', 'oferta'],
+    );
+
+    final Recording restored = Recording.fromJson(item.toJson());
+
+    expect(restored.category, CaptureCategory.meetingNote);
+    expect(restored.summary, 'Ustalenia ze spotkania.');
+    expect(restored.tags, <String>['klient', 'oferta']);
+  });
+
+  test('legacy JSON has no category, summary or tags', () {
+    final Recording restored = Recording.fromJson(<String, dynamic>{
+      'id': 'legacy',
+      'filePath': '/tmp/legacy.m4a',
+      'createdAt': '2026-01-01T00:00:00.000',
+      'durationMs': 1000,
+      'status': 'completed',
+    });
+
+    // Null, not `capture`: "never enriched" and "the model could not classify
+    // it" are different states and the card renders them differently.
+    expect(restored.category, isNull);
+    expect(restored.summary, isNull);
+    expect(restored.tags, isEmpty);
+  });
+
+  test('a category name from a newer build degrades to capture', () {
+    final Recording restored = Recording.fromJson(<String, dynamic>{
+      'id': 'future',
+      'filePath': '/tmp/future.m4a',
+      'createdAt': '2026-01-01T00:00:00.000',
+      'durationMs': 1000,
+      'status': 'completed',
+      'category': 'journal',
+    });
+
+    expect(restored.category, CaptureCategory.capture);
+  });
+
+  test('tags survive a non-list or mixed-type JSON value', () {
+    final Recording broken = Recording.fromJson(<String, dynamic>{
+      'id': 'broken',
+      'filePath': '/tmp/broken.m4a',
+      'createdAt': '2026-01-01T00:00:00.000',
+      'durationMs': 1000,
+      'status': 'completed',
+      'tags': <dynamic>['ok', 7, null],
+    });
+    final Recording wrongType = Recording.fromJson(<String, dynamic>{
+      'id': 'wrong',
+      'filePath': '/tmp/wrong.m4a',
+      'createdAt': '2026-01-01T00:00:00.000',
+      'durationMs': 1000,
+      'status': 'completed',
+      'tags': 'klient',
+    });
+
+    expect(broken.tags, <String>['ok']);
+    expect(wrongType.tags, isEmpty);
+  });
+
+  test('copyWith clears category and summary explicitly', () {
+    final Recording item = Recording(
+      id: 'id-2',
+      filePath: '/tmp/id-2.m4a',
+      createdAt: DateTime.utc(2026, 7, 30, 10),
+      durationMs: 0,
+      status: RecordingStatus.completed,
+      category: CaptureCategory.task,
+      summary: 'coś',
+      tags: <String>['a'],
+    );
+
+    final Recording cleared =
+        item.copyWith(clearCategory: true, clearSummary: true);
+
+    expect(cleared.category, isNull);
+    expect(cleared.summary, isNull);
+    // Tags are not cleared by those flags — they have their own replacement.
+    expect(cleared.tags, <String>['a']);
   });
 }
