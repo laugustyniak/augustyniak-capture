@@ -139,6 +139,21 @@ void main() {
     expect(restored.category, CaptureCategory.capture);
   });
 
+  test('a non-string category or summary does not take the load down', () {
+    final Recording restored = Recording.fromJson(<String, dynamic>{
+      'id': 'corrupt',
+      'filePath': '/tmp/corrupt.m4a',
+      'createdAt': '2026-01-01T00:00:00.000',
+      'durationMs': 1000,
+      'status': 'completed',
+      'category': 7,
+      'summary': <String>['nope'],
+    });
+
+    expect(restored.category, isNull);
+    expect(restored.summary, isNull);
+  });
+
   test('tags survive a non-list or mixed-type JSON value', () {
     final Recording broken = Recording.fromJson(<String, dynamic>{
       'id': 'broken',
