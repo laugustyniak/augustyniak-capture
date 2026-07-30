@@ -1,50 +1,52 @@
 # Voice Notes — Phase 1
 
-Minimalna aplikacja Flutter do nagrywania notatek głosowych w modelu **offline-first**.
+A minimal **offline-first** Flutter app for recording voice notes.
 
-## Gwarancja kolejności
+## Ordering guarantee
 
-Każdy sposób dodania pozycji — nagranie z mikrofonu, notatka tekstowa i (w
-kolejnych fazach) plik audio, zdjęcie, wideo — wykonuje dokładnie tę samą
-kolejność:
+Every way of adding an item — a microphone recording, a text note and (in
+later phases) an audio file, image or video — follows exactly the same
+order:
 
-1. tworzy materiał źródłowy (nagranie do `.m4a`, treść notatki do `.txt`),
-2. zatrzymuje recorder / kończy zapis pliku,
-3. sprawdza, czy plik istnieje i ma niezerowy rozmiar,
-4. zapisuje metadane atomowo do `recordings.json`,
-5. dopiero wtedy ustawia status „w kolejce”,
-6. uruchamia przetwarzanie właściwe dla typu (transkrypcja, przepisanie treści),
-7. błąd przetwarzania nigdy nie usuwa materiału źródłowego.
+1. creates the source material (recording to `.m4a`, note body to `.txt`),
+2. stops the recorder / finishes writing the file,
+3. checks that the file exists and has a non-zero size,
+4. persists the metadata atomically to `recordings.json`,
+5. only then sets the status to "queued",
+6. runs the processing appropriate for the type (transcription, text passthrough),
+7. a processing failure never deletes the source material.
 
-Procesor **wyłącznie czyta** plik źródłowy — nigdy go nie zmienia ani nie kasuje.
+The processor **only reads** the source file — it never modifies or deletes it.
 
-## Funkcje
+## Features
 
-- nagrywanie AAC/M4A, mono, 16 kHz (parametry edytowalne w zakładce Config),
-- notatki tekstowe zapisywane jako `.txt` w tym samym potoku co nagrania,
-- lokalny zapis w katalogu dokumentów aplikacji,
-- wspólna lista wszystkich pozycji z ikoną i kartą zależną od typu,
-- trwałe statusy przetwarzania,
-- ponawianie nieudanego przetwarzania,
-- adapter HTTP gotowy pod Whisper/OpenAI/Hugging Face,
-- brak funkcji usuwania w MVP, aby ograniczyć ryzyko utraty danych.
+- AAC/M4A recording, mono, 16 kHz (parameters editable in the Config tab),
+- text notes saved as `.txt` through the same pipeline as recordings,
+- local storage in the app documents directory,
+- one shared list of all items, with a type-dependent icon and card,
+- durable processing statuses,
+- retry for failed processing,
+- HTTP adapter ready for Whisper/OpenAI/Hugging Face,
+- no delete function in the MVP, to limit the risk of data loss.
 
-### Typy pozycji
+### Item types
 
-| Typ | Rozszerzenie | Przetwarzanie | Status |
+| Type | Extension | Processing | Status |
 | --- | --- | --- | --- |
-| nagranie z mikrofonu | `.m4a` | transkrypcja przez aktywny profil | działa |
-| notatka tekstowa | `.txt` | przepisanie treści (bez sieci) | działa |
-| plik audio | oryginalne | transkrypcja przez aktywny profil | zaplanowane |
-| obraz | `.jpg`/`.png` | OCR offline | zaplanowane |
-| wideo | `.mp4`/`.mov` | ścieżka audio → transkrypcja | zaplanowane |
+| microphone recording | `.m4a` | transcription via the active profile | works |
+| text note | `.txt` | text passthrough (no network) | works |
+| audio file | original | transcription via the active profile | planned |
+| image | `.jpg`/`.png` | offline OCR | planned |
+| video | `.mp4`/`.mov` | audio track → transcription | planned |
 
-Typy zaplanowane mają już model i zapis na dysku; ich procesory zgłaszają na
-razie „niedostępne”, więc pozycja kończy się czytelnym błędem, nigdy awarią.
+Planned types already have their model and on-disk persistence; their
+processors report "unavailable" for now, so an item ends with a readable error,
+never a crash.
 
-## Start
+## Getting started
 
-Repo zawiera kod aplikacji, ale katalogi platformowe najlepiej uzupełnić lokalnym Flutter SDK:
+The repo contains the application code, but the platform directories are best
+filled in with a local Flutter SDK:
 
 ```bash
 flutter create --platforms=android,ios .
@@ -52,122 +54,122 @@ flutter pub get
 flutter run
 ```
 
-Polecenie `flutter create .` zachowa pliki w `lib/`, a wygeneruje pełne pliki Gradle/Xcode wymagane przez lokalną wersję Fluttera.
+`flutter create .` keeps the files under `lib/` intact while generating the full
+Gradle/Xcode files required by your local Flutter version.
 
-### Linux: wymagany `keybinder-3.0`
+### Linux: `keybinder-3.0` required
 
-Skróty globalne (`hotkey_manager`) linkują się z `keybinder-3.0`. Bez tej
-biblioteki `flutter build linux` **przerywa się na etapie generowania plików
-budowania** („Unable to generate build files") — to błąd kompilacji, nie
-degradacja w czasie działania, więc aplikacja w ogóle się nie uruchomi:
+Global shortcuts (`hotkey_manager`) link against `keybinder-3.0`. Without that
+library `flutter build linux` **aborts while generating build files**
+("Unable to generate build files") — that is a build error, not a runtime
+degradation, so the app will not start at all:
 
 ```bash
 sudo apt-get install keybinder-3.0
 ```
 
-### Weryfikacja przed pushem
+### Verification before pushing
 
-Nie ma CI po stronie serwera (GitHub Actions jest płatne dla tego prywatnego
-repo, workflow leży w `.github/workflows/ci.yml.disabled`). Zamiast tego hook
-`pre-push` uruchamia `flutter analyze` i `flutter test`. Włącz go raz na klon:
+There is no server-side CI (GitHub Actions is metered for this private repo, so
+the workflow sits at `.github/workflows/ci.yml.disabled`). Instead, a `pre-push`
+hook runs `flutter analyze` and `flutter test`. Enable it once per clone:
 
 ```bash
 git config core.hooksPath .githooks
 ```
 
-## Włączenie endpointu Whisper
+## Enabling a Whisper endpoint
 
-W `lib/features/recordings/presentation/recordings_page.dart` zamień:
+In `lib/features/recordings/presentation/recordings_page.dart`, replace:
 
 ```dart
 transcriptionService: const DisabledTranscriptionService(),
 ```
 
-na przykład na:
+with, for example:
 
 ```dart
 transcriptionService: HttpWhisperTranscriptionService(
-  endpoint: Uri.parse('https://twoj-endpoint.example/transcribe'),
+  endpoint: Uri.parse('https://your-endpoint.example/transcribe'),
   bearerToken: const String.fromEnvironment('TRANSCRIPTION_TOKEN'),
 ),
 ```
 
-Uruchomienie z tokenem:
+Running with a token:
 
 ```bash
-flutter run --dart-define=TRANSCRIPTION_TOKEN=sekret
+flutter run --dart-define=TRANSCRIPTION_TOKEN=secret
 ```
 
-Oczekiwana odpowiedź endpointu:
+Expected endpoint response:
 
 ```json
-{"text": "Treść transkrypcji"}
+{"text": "Transcript body"}
 ```
 
-Endpoint powinien przyjmować `multipart/form-data` z polem `file`.
+The endpoint should accept `multipart/form-data` with a `file` field.
 
-## Zakładki
+## Tabs
 
-Aplikacja ma cztery zakładki w dolnej nawigacji:
+The app has four tabs in the bottom navigation:
 
-| Zakładka | Do czego służy |
+| Tab | What it is for |
 | --- | --- |
-| **Queue** | lista wszystkich pozycji, filtry statusu, wyszukiwarka, przyciski nagrywania i notatki, odtwarzanie |
-| **Models** | profile providerów transkrypcji: dodawanie, edycja, usuwanie, wybór aktywnego |
-| **Logs** | strumień zdarzeń potoku (zapis, kolejka, transkrypcja, błędy), filtr poziomu |
-| **Config** | parametry nagrywania, podsumowanie aktywnego providera, informacje o plikach |
+| **Queue** | list of all items, status filters, search, record and note buttons, playback |
+| **Models** | transcription provider profiles: add, edit, delete, pick the active one |
+| **Logs** | stream of pipeline events (persist, queue, transcription, errors), level filter |
+| **Config** | recording parameters, active provider summary, file information |
 
-### Models — profile providerów
+### Models — provider profiles
 
-Zamiast edycji kodu wystarczy dodać profil w zakładce Models. Gotowe presety:
-OpenAI Whisper, OpenAI GPT-4o transcribe, Groq, lokalny whisper.cpp
-(`http://localhost:8080/inference`) oraz własny endpoint.
+Instead of editing code, just add a profile in the Models tab. Ready-made
+presets: OpenAI Whisper, OpenAI GPT-4o transcribe, Groq, local whisper.cpp
+(`http://localhost:8080/inference`) and a custom endpoint.
 
-Aktywny jest zawsze jeden profil. Brak profilu = transkrypcja wyłączona
-(nagrywanie i zapis lokalny działają bez zmian). Wartości z `--dart-define`
-zasilają pierwszy profil przy pierwszym uruchomieniu; potem obowiązuje
-`settings.json`.
+Exactly one profile is active at a time. No profile = transcription disabled
+(recording and local persistence work unchanged). `--dart-define` values seed
+the first profile on the first run; after that `settings.json` wins.
 
-> Tokeny są zapisywane jawnym tekstem w `settings.json` w katalogu dokumentów
-> aplikacji. Szyfrowanie zaplanowano na kolejną fazę.
+> Tokens are stored in plaintext in `settings.json` in the app documents
+> directory. Encryption is planned for a later phase.
 
-### Queue — dodawanie pozycji
+### Queue — adding items
 
-Nad przyciskiem nagrywania jest mniejszy przycisk notatki. Otwiera arkusz z
-polem tekstowym; zapis tworzy plik `.txt`, weryfikuje go, indeksuje i dopiero
-wtedy przetwarza (przepisanie treści, bez sieci). Przycisk notatki znika na
-czas nagrywania, żeby akcja „SAVE” była jednoznaczna.
+Above the record button there is a smaller note button. It opens a sheet with a
+text field; saving creates a `.txt` file, verifies it, indexes it and only then
+processes it (text passthrough, no network). The note button disappears while
+recording, so that the "SAVE" action stays unambiguous.
 
-Karta pozycji zależy od typu: ikona, przycisk odtwarzania tylko dla audio,
-czas trwania ukryty dla notatek i obrazów.
+The item card depends on the type: icon, playback button for audio only,
+duration hidden for notes and images.
 
-### Config — parametry nagrywania
+### Config — recording parameters
 
-Edytowalne: sample rate (8/16/22.05/44.1 kHz), bitrate (32–128 kbps), kanały
-(mono/stereo). Kodek AAC-LC i kontener `.m4a` są stałe. Zmiana dotyczy wyłącznie
-kolejnych nagrań — pliki już zapisane pozostają nietknięte.
+Editable: sample rate (8/16/22.05/44.1 kHz), bitrate (32–128 kbps), channels
+(mono/stereo). The AAC-LC codec and the `.m4a` container are fixed. A change
+applies only to subsequent recordings — files already saved stay untouched.
 
-## Pliki na dysku
+## Files on disk
 
-Wszystko w podkatalogu `recordings/` katalogu dokumentów aplikacji, każdy zapis
-atomowy (`.tmp` → `rename`):
+Everything lives in the `recordings/` subdirectory of the app documents
+directory, and every write is atomic (`.tmp` → `rename`):
 
-- `<uuid>.<ext>` — materiał źródłowy pozycji (`.m4a` nagranie, `.txt` notatka),
-- `recordings.json` — indeks wszystkich pozycji,
-- `settings.json` — profile providerów i parametry audio,
-- `logs.json` — historia zdarzeń (bufor cykliczny, maks. 500 wpisów).
+- `<uuid>.<ext>` — the item's source material (`.m4a` recording, `.txt` note),
+- `recordings.json` — the index of all items,
+- `settings.json` — provider profiles and audio parameters,
+- `logs.json` — event history (ring buffer, max. 500 entries).
 
-## Kolejna faza
+## Next phase
 
-- pozostałe typy pozycji: wgrywanie plików audio, obrazy z OCR offline, wideo,
-- kolejka background jobs,
-- WorkManager na Androidzie i BGTaskScheduler na iOS,
-- edycja tytułu i transkrypcji,
-- lokalne modele na urządzeniu (whisper.cpp przez FFI),
-- szyfrowanie tokenów,
-- synchronizacja z Obsidian/Notion.
+- the remaining item types: audio file upload, images with offline OCR, video,
+- a background job queue,
+- WorkManager on Android and BGTaskScheduler on iOS,
+- editing the title and the transcript,
+- local on-device models (whisper.cpp via FFI),
+- token encryption,
+- synchronization with Obsidian/Notion.
 
-Projekt techniczny: `docs/superpowers/specs/2026-07-25-multimodal-capture-design.md`.
+Technical design: `docs/superpowers/specs/2026-07-25-multimodal-capture-design.md`.
 
 ## Processing Console UI
 
