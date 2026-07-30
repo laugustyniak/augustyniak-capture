@@ -1,4 +1,28 @@
+import '../../enrichment/data/http_chat_enrichment_service.dart';
+import '../../enrichment/domain/enrichment_service.dart';
 import '../../transcription/data/transcription_service.dart';
+
+/// What a profile is *for*.
+///
+/// One list holds both kinds because everything else about them — name,
+/// endpoint, model, token, editor UI — is identical; only the request body
+/// differs, and that difference lives entirely in the two `to…Service()`
+/// methods below.
+enum ProfileKind {
+  transcription,
+  enrichment;
+
+  /// Legacy rows have no `kind`, and every profile written before enrichment
+  /// existed was a transcription profile.
+  static ProfileKind fromName(String? name) =>
+      ProfileKind.values.asNameMap()[name] ?? ProfileKind.transcription;
+
+  /// Section header in the Models tab.
+  String get label => switch (this) {
+        ProfileKind.transcription => 'TRANSCRIPTION PROFILES',
+        ProfileKind.enrichment => 'ENRICHMENT PROFILES',
+      };
+}
 
 /// A named transcription endpoint the user can switch between.
 ///
@@ -9,6 +33,7 @@ class ProviderProfile {
     required this.id,
     required this.name,
     required this.endpoint,
+    this.kind = ProfileKind.transcription,
     this.model,
     this.language,
     this.bearerToken,
@@ -16,6 +41,11 @@ class ProviderProfile {
 
   final String id;
   final String name;
+
+  /// Which pipeline stage this profile configures. Defaults to
+  /// [ProfileKind.transcription] so every row written before enrichment existed
+  /// keeps its meaning.
+  final ProfileKind kind;
 
   /// Full transcription URL, e.g. `https://api.openai.com/v1/audio/transcriptions`.
   final String endpoint;
@@ -42,6 +72,7 @@ class ProviderProfile {
   ProviderProfile copyWith({
     String? name,
     String? endpoint,
+    ProfileKind? kind,
     String? model,
     String? language,
     String? bearerToken,
@@ -53,6 +84,7 @@ class ProviderProfile {
       id: id,
       name: name ?? this.name,
       endpoint: endpoint ?? this.endpoint,
+      kind: kind ?? this.kind,
       model: clearModel ? null : (model ?? this.model),
       language: clearLanguage ? null : (language ?? this.language),
       bearerToken: clearBearerToken ? null : (bearerToken ?? this.bearerToken),
@@ -75,10 +107,29 @@ class ProviderProfile {
     );
   }
 
+  /// Build the enrichment service for this profile. Same
+  /// blank-or-schemeless guard as [toService]: a half-filled profile degrades
+  /// to the disabled service rather than throwing mid-pipeline.
+  ///
+  /// No `language` — the chat request asks the model to answer in the language
+  /// of the input, so a per-profile hint would only fight it.
+  EnrichmentService toEnrichmentService() {
+    final Uri? uri = hasEndpoint ? Uri.tryParse(endpoint.trim()) : null;
+    if (uri == null || !uri.hasScheme) {
+      return const DisabledEnrichmentService();
+    }
+    return HttpChatEnrichmentService(
+      endpoint: uri,
+      bearerToken: _blankToNull(bearerToken),
+      model: _blankToNull(model),
+    );
+  }
+
   Map<String, dynamic> toJson() => <String, dynamic>{
         'id': id,
         'name': name,
         'endpoint': endpoint,
+        'kind': kind.name,
         'model': model,
         'language': language,
         'bearerToken': bearerToken,
@@ -89,6 +140,7 @@ class ProviderProfile {
       id: json['id'] as String,
       name: json['name'] as String? ?? 'Profile',
       endpoint: json['endpoint'] as String? ?? '',
+      kind: ProfileKind.fromName(json['kind'] as String?),
       model: json['model'] as String?,
       language: json['language'] as String?,
       bearerToken: json['bearerToken'] as String?,
@@ -107,11 +159,15 @@ class ProviderPreset {
   const ProviderPreset({
     required this.name,
     required this.endpoint,
+    this.kind = ProfileKind.transcription,
     this.model,
   });
 
   final String name;
   final String endpoint;
+
+  /// Which section of the Models tab offers this preset.
+  final ProfileKind kind;
   final String? model;
 
   static const List<ProviderPreset> all = <ProviderPreset>[

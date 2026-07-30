@@ -69,7 +69,10 @@ class _RecordingsPageState extends State<RecordingsPage> {
     controller = RecordingsController(
       repository: repository,
       // Replaced as soon as settings load; a fresh install with no profile
-      // keeps this disabled service, which is the pre-existing behaviour.
+      // keeps this disabled service, which is the pre-existing behaviour. The
+      // enrichment service is left at its disabled default here for the same
+      // reason — `_applySettings` pushes both once `settings.initialize()` has
+      // notified.
       transcriptionService: const DisabledTranscriptionService(),
       ocrService: _buildOcrService(),
       videoAudioExtractor: _buildVideoAudioExtractor(),
@@ -163,6 +166,7 @@ class _RecordingsPageState extends State<RecordingsPage> {
   /// work started after the swap.
   void _applySettings() {
     controller.transcriptionService = settings.transcriptionService;
+    controller.enrichmentService = settings.enrichmentService;
     controller.audioConfig = settings.audio;
     // Fire-and-forget: an unchanged binding map short-circuits inside the
     // coordinator, so this does not churn the OS hotkey table on every
