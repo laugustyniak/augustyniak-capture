@@ -1,4 +1,4 @@
-name: voice_notes_phase1
+name: audivoa_core
 description: Offline-first Flutter voice recorder. Audio is persisted before transcription starts.
 publish_to: "none"
 version: 0.1.0+1

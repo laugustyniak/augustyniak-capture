@@ -5,17 +5,17 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:path/path.dart' as p;
 import 'package:record/record.dart';
-import 'package:voice_notes_phase1/features/logs/data/log_store.dart';
-import 'package:voice_notes_phase1/features/recordings/data/media_picker.dart';
-import 'package:voice_notes_phase1/features/recordings/data/recordings_repository.dart';
-import 'package:voice_notes_phase1/features/recordings/domain/capture_category.dart';
-import 'package:voice_notes_phase1/features/recordings/domain/capture_type.dart';
-import 'package:voice_notes_phase1/features/recordings/domain/recording.dart';
-import 'package:voice_notes_phase1/features/recordings/presentation/recordings_controller.dart';
-import 'package:voice_notes_phase1/features/settings/data/settings_repository.dart';
-import 'package:voice_notes_phase1/features/settings/domain/app_settings.dart';
-import 'package:voice_notes_phase1/features/settings/presentation/settings_controller.dart';
-import 'package:voice_notes_phase1/features/transcription/data/transcription_service.dart';
+import 'package:audivoa_core/features/logs/data/log_store.dart';
+import 'package:audivoa_core/features/recordings/data/media_picker.dart';
+import 'package:audivoa_core/features/recordings/data/recordings_repository.dart';
+import 'package:audivoa_core/features/recordings/domain/capture_category.dart';
+import 'package:audivoa_core/features/recordings/domain/capture_type.dart';
+import 'package:audivoa_core/features/recordings/domain/recording.dart';
+import 'package:audivoa_core/features/recordings/presentation/recordings_controller.dart';
+import 'package:audivoa_core/features/settings/data/settings_repository.dart';
+import 'package:audivoa_core/features/settings/domain/app_settings.dart';
+import 'package:audivoa_core/features/settings/presentation/settings_controller.dart';
+import 'package:audivoa_core/features/transcription/data/transcription_service.dart';
 
 /// Shared fakes and builders for the widget tests.
 ///

@@ -2,11 +2,11 @@ import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:path/path.dart' as p;
-import 'package:voice_notes_phase1/features/recordings/data/media_importer.dart';
-import 'package:voice_notes_phase1/features/recordings/data/media_picker.dart';
-import 'package:voice_notes_phase1/features/recordings/data/recordings_repository.dart';
-import 'package:voice_notes_phase1/features/recordings/domain/capture_type.dart';
-import 'package:voice_notes_phase1/features/recordings/domain/recording.dart';
+import 'package:audivoa_core/features/recordings/data/media_importer.dart';
+import 'package:audivoa_core/features/recordings/data/media_picker.dart';
+import 'package:audivoa_core/features/recordings/data/recordings_repository.dart';
+import 'package:audivoa_core/features/recordings/domain/capture_type.dart';
+import 'package:audivoa_core/features/recordings/domain/recording.dart';
 
 /// Points `createSourceFile` at a temp dir so the importer runs without
 /// path_provider — the same "extend and override only IO" trick as the

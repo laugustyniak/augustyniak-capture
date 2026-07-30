@@ -1,6 +1,6 @@
 import 'package:flutter_test/flutter_test.dart';
-import 'package:voice_notes_phase1/features/recordings/domain/capture_category.dart';
-import 'package:voice_notes_phase1/features/recordings/domain/recording.dart';
+import 'package:audivoa_core/features/recordings/domain/capture_category.dart';
+import 'package:audivoa_core/features/recordings/domain/recording.dart';
 
 void main() {
   test('recording JSON round-trip preserves AI and user processing state', () {

@@ -2,16 +2,16 @@ import 'dart:io';
 
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:voice_notes_phase1/features/enrichment/domain/enrichment_result.dart';
-import 'package:voice_notes_phase1/features/enrichment/domain/enrichment_service.dart';
-import 'package:voice_notes_phase1/features/processing/domain/processor.dart';
-import 'package:voice_notes_phase1/features/processing/domain/processor_registry.dart';
-import 'package:voice_notes_phase1/features/recordings/data/recordings_repository.dart';
-import 'package:voice_notes_phase1/features/recordings/domain/capture_category.dart';
-import 'package:voice_notes_phase1/features/recordings/domain/capture_type.dart';
-import 'package:voice_notes_phase1/features/recordings/domain/recording.dart';
-import 'package:voice_notes_phase1/features/recordings/presentation/recordings_controller.dart';
-import 'package:voice_notes_phase1/features/transcription/data/transcription_service.dart';
+import 'package:audivoa_core/features/enrichment/domain/enrichment_result.dart';
+import 'package:audivoa_core/features/enrichment/domain/enrichment_service.dart';
+import 'package:audivoa_core/features/processing/domain/processor.dart';
+import 'package:audivoa_core/features/processing/domain/processor_registry.dart';
+import 'package:audivoa_core/features/recordings/data/recordings_repository.dart';
+import 'package:audivoa_core/features/recordings/domain/capture_category.dart';
+import 'package:audivoa_core/features/recordings/domain/capture_type.dart';
+import 'package:audivoa_core/features/recordings/domain/recording.dart';
+import 'package:audivoa_core/features/recordings/presentation/recordings_controller.dart';
+import 'package:audivoa_core/features/transcription/data/transcription_service.dart';
 
 /// Keeps what was written, so a test can assert that a correction survived the
 /// round trip to disk rather than only living in memory.
