@@ -24,7 +24,7 @@ void main() {
       }
     });
 
-    test('every category has a non-empty Polish label', () {
+    test('every category has a non-empty label', () {
       for (final CaptureCategory value in CaptureCategory.values) {
         expect(value.label.trim(), isNotEmpty);
       }
