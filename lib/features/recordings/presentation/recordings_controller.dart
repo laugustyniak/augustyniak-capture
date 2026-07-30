@@ -7,6 +7,8 @@ import 'package:path/path.dart' as p;
 import 'package:record/record.dart';
 import 'package:uuid/uuid.dart';
 
+import '../../enrichment/domain/enrichment_result.dart';
+import '../../enrichment/domain/enrichment_service.dart';
 import '../../logs/domain/log_event.dart';
 import '../../processing/data/ocr_service.dart';
 import '../../processing/data/video_audio_extractor.dart';
@@ -17,6 +19,7 @@ import '../../transcription/data/transcription_service.dart';
 import '../data/media_importer.dart';
 import '../data/media_picker.dart';
 import '../data/recordings_repository.dart';
+import '../domain/capture_category.dart';
 import '../domain/capture_type.dart';
 import '../domain/clipboard_sink.dart';
 import '../domain/recording.dart';
@@ -25,6 +28,7 @@ class RecordingsController extends ChangeNotifier {
   RecordingsController({
     required RecordingsRepository repository,
     required TranscriptionService transcriptionService,
+    EnrichmentService enrichmentService = const DisabledEnrichmentService(),
     OcrService ocrService = const DisabledOcrService(),
     VideoAudioExtractor videoAudioExtractor =
         const UnavailableVideoAudioExtractor(),
@@ -37,6 +41,7 @@ class RecordingsController extends ChangeNotifier {
     AudioPlayer? player,
   })  : _repository = repository,
         _transcriptionService = transcriptionService,
+        _enrichmentService = enrichmentService,
         _ocrService = ocrService,
         _videoAudioExtractor = videoAudioExtractor,
         _audioConfig = audioConfig,
@@ -71,6 +76,7 @@ class RecordingsController extends ChangeNotifier {
   // All swappable at runtime from the Models/Config tabs. A swap only affects
   // work started afterwards; it never touches an in-flight pipeline.
   TranscriptionService _transcriptionService;
+  EnrichmentService _enrichmentService;
   OcrService _ocrService;
   VideoAudioExtractor _videoAudioExtractor;
   AudioConfig _audioConfig;
@@ -140,6 +146,13 @@ class RecordingsController extends ChangeNotifier {
   set transcriptionService(TranscriptionService value) {
     if (identical(_transcriptionService, value)) return;
     _transcriptionService = value;
+  }
+
+  /// Applied to the next enrichment attempt. A job already running keeps the
+  /// service it started with.
+  set enrichmentService(EnrichmentService value) {
+    if (identical(_enrichmentService, value)) return;
+    _enrichmentService = value;
   }
 
   /// Applied to the next image OCR attempt. A job already running keeps the
@@ -483,6 +496,24 @@ class RecordingsController extends ChangeNotifier {
     );
   }
 
+  /// Overwrite the model's verdict. Null clears it back to "unclassified" — a
+  /// wrong category is worse than none, because an export will read this field.
+  Future<void> setCategory(String id, CaptureCategory? category) async {
+    await _update(
+      id,
+      (Recording item) => item.copyWith(
+        category: category,
+        clearCategory: category == null,
+      ),
+    );
+    _logSink.log(
+      category == null
+          ? 'Category cleared.'
+          : 'Category set \u00b7 ${category.name}',
+      recordingId: id,
+    );
+  }
+
   Future<void> toggleProcessed(String id) async {
     final Recording recording =
         _recordings.firstWhere((Recording item) => item.id == id);
@@ -592,6 +623,10 @@ class RecordingsController extends ChangeNotifier {
         // Deliberately last: the item is already `completed` and persisted, so a
         // refusing clipboard cannot undo a successful capture.
         await _copyToClipboard(recording.type, transcript, id);
+        // Deliberately after the `completed` write as well: the item is already
+        // durable, so a model outage, a malformed response or a kill in this
+        // window costs a title, never a capture.
+        await _enrich(id, transcript);
       } catch (exception) {
         await _update(
           id,
@@ -625,6 +660,46 @@ class RecordingsController extends ChangeNotifier {
     } catch (exception) {
       _logSink.log(
         'Clipboard copy failed: $exception',
+        level: LogLevel.warn,
+        recordingId: id,
+      );
+    }
+  }
+
+  /// Ask the enrichment model to name and classify freshly derived text.
+  ///
+  /// Best-effort by construction: it runs after the item is `completed` on
+  /// disk, it never touches `status`, and it swallows every error into the log
+  /// — the same contract as [_copyToClipboard]. An unconfigured install throws
+  /// `EnrichmentNotConfiguredException` here on every item, which is why that
+  /// case is logged at `warn` rather than `error`.
+  Future<void> _enrich(String id, String text) async {
+    if (text.trim().isEmpty) return;
+    try {
+      final EnrichmentResult result = await _enrichmentService.enrich(text);
+      if (_disposed) return;
+      await _update(
+        id,
+        (Recording item) => item.copyWith(
+          // Only when empty. A user-set title is permanent: a retry must never
+          // silently destroy a name someone typed.
+          title: (item.title ?? '').trim().isEmpty ? result.title : null,
+          category: result.category,
+          summary: result.summary,
+          tags: result.tags,
+        ),
+      );
+      _logSink.log('Enriched \u00b7 ${result.category.name}', recordingId: id);
+    } on EnrichmentNotConfiguredException {
+      // Expected on every item until a profile is configured; not an error.
+      _logSink.log(
+        'Enrichment skipped \u2014 no profile configured.',
+        level: LogLevel.warn,
+        recordingId: id,
+      );
+    } catch (exception) {
+      _logSink.log(
+        'Enrichment failed: $exception',
         level: LogLevel.warn,
         recordingId: id,
       );
