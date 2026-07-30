@@ -4,16 +4,18 @@ A minimal **offline-first** Flutter app for recording voice notes.
 
 ## Ordering guarantee
 
-Every way of adding an item — a microphone recording, a text note and (in
-later phases) an audio file, image or video — follows exactly the same
-order:
+Every way of adding an item — a microphone recording, a text note, or an
+uploaded audio file, image or video — follows exactly the same order:
 
-1. creates the source material (recording to `.m4a`, note body to `.txt`),
+1. creates the source material (recording to `.m4a`, note body to `.txt`, an
+   upload copied into the app's own directory),
 2. stops the recorder / finishes writing the file,
 3. checks that the file exists and has a non-zero size,
 4. persists the metadata atomically to `recordings.json`,
-5. only then sets the status to "queued",
-6. runs the processing appropriate for the type (transcription, text passthrough),
+5. only then sets the status to "queued" and returns — capture never waits on
+   processing,
+6. a background queue runs one job at a time, with the processor the item's
+   type resolves to (transcription, text passthrough, OCR, video),
 7. a processing failure never deletes the source material.
 
 The processor **only reads** the source file — it never modifies or deletes it.
@@ -22,10 +24,17 @@ The processor **only reads** the source file — it never modifies or deletes it
 
 - AAC/M4A recording, mono, 16 kHz (parameters editable in the Config tab),
 - text notes saved as `.txt` through the same pipeline as recordings,
+- upload of an existing audio file, image or video through that same pipeline,
 - local storage in the app documents directory,
 - one shared list of all items, with a type-dependent icon and card,
-- durable processing statuses,
+- search across titles, output text and filenames, plus status filters,
+- durable processing statuses and a background job queue — capture returns
+  immediately, a long job never blocks the next one,
 - retry for failed processing,
+- editing an item's title and its output text,
+- finished output is handed to the system clipboard, so a clipboard manager
+  keeps it in history,
+- system-wide global shortcuts on desktop,
 - HTTP adapter ready for Whisper/OpenAI/Hugging Face,
 - no delete function in the MVP, to limit the risk of data loss.
 
@@ -35,13 +44,21 @@ The processor **only reads** the source file — it never modifies or deletes it
 | --- | --- | --- | --- |
 | microphone recording | `.m4a` | transcription via the active profile | works |
 | text note | `.txt` | text passthrough (no network) | works |
-| audio file | original | transcription via the active profile | planned |
-| image | `.jpg`/`.png` | offline OCR | planned |
-| video | `.mp4`/`.mov` | audio track → transcription | planned |
+| audio upload | original | transcription via the active profile | works |
+| image | `.jpg`/`.png` | OCR via system `tesseract` (`pol+eng`) | works on desktop |
+| video | `.mp4`/`.mov` | audio track via system `ffmpeg` → transcription | works on desktop |
 
-Planned types already have their model and on-disk persistence; their
-processors report "unavailable" for now, so an item ends with a readable error,
-never a crash.
+Image and video processing shells out to system binaries, the same way
+`record_linux` shells out to `parecord`/`ffmpeg`. Install them for those two
+types to work:
+
+```bash
+sudo apt-get install tesseract-ocr tesseract-ocr-pol ffmpeg
+```
+
+On mobile — and on a desktop missing those binaries — the item is still
+ingested, verified and listed; only its processing ends `failed`, with a
+readable error and a retry button. The source file is untouched either way.
 
 ## Getting started
 
@@ -80,26 +97,19 @@ git config core.hooksPath .githooks
 
 ## Enabling a Whisper endpoint
 
-In `lib/features/recordings/presentation/recordings_page.dart`, replace:
-
-```dart
-transcriptionService: const DisabledTranscriptionService(),
-```
-
-with, for example:
-
-```dart
-transcriptionService: HttpWhisperTranscriptionService(
-  endpoint: Uri.parse('https://your-endpoint.example/transcribe'),
-  bearerToken: const String.fromEnvironment('TRANSCRIPTION_TOKEN'),
-),
-```
-
-Running with a token:
+Add a profile in the **Models** tab — no code change needed. To seed the first
+profile on a fresh install instead, pass the values at build time:
 
 ```bash
-flutter run --dart-define=TRANSCRIPTION_TOKEN=secret
+flutter run \
+  --dart-define=TRANSCRIPTION_ENDPOINT=https://your-endpoint.example/transcribe \
+  --dart-define=TRANSCRIPTION_TOKEN=secret \
+  --dart-define=TRANSCRIPTION_MODEL=whisper-1 \
+  --dart-define=TRANSCRIPTION_LANGUAGE=en
 ```
+
+These are read **only on the first run**, when there is no `settings.json` yet;
+after that the stored profiles win and the defines are ignored.
 
 Expected endpoint response:
 
@@ -115,10 +125,10 @@ The app has four tabs in the bottom navigation:
 
 | Tab | What it is for |
 | --- | --- |
-| **Queue** | list of all items, status filters, search, record and note buttons, playback |
+| **Queue** | list of all items, review progress, search, status filters, capture buttons, playback, editing |
 | **Models** | transcription provider profiles: add, edit, delete, pick the active one |
 | **Logs** | stream of pipeline events (persist, queue, transcription, errors), level filter |
-| **Config** | recording parameters, active provider summary, file information |
+| **Config** | recording parameters, global shortcuts, active provider summary, file information |
 
 ### Models — provider profiles
 
@@ -135,13 +145,41 @@ the first profile on the first run; after that `settings.json` wins.
 
 ### Queue — adding items
 
-Above the record button there is a smaller note button. It opens a sheet with a
-text field; saving creates a `.txt` file, verifies it, indexes it and only then
-processes it (text passthrough, no network). The note button disappears while
-recording, so that the "SAVE" action stays unambiguous.
+Two buttons float over the bottom of the list. The large cyan one starts a
+microphone recording. The smaller one above it opens the capture menu: a text
+note, or an upload of an audio file, image or video. Each menu row states which
+processor the item will land in, so the choice is not a guess.
 
-The item card depends on the type: icon, playback button for audio only,
-duration hidden for notes and images.
+Starting a recording replaces the screen with the capture view: the running
+time, a live input meter, the ordered pipeline with the current step lit, and a
+single full-width **SAVE**. There is deliberately no discard button — no path
+in this app throws a capture away. The Queue underneath keeps its search text
+and scroll position for when the capture finishes.
+
+A text note opens a sheet with a character counter and a `NO NETWORK` badge:
+saving writes a `.txt`, verifies it, indexes it, and only then processes it
+(text passthrough, entirely on-device).
+
+The item card depends on the type — icon, playback button for audio only,
+duration hidden for notes and images — and every card carries the durability
+line underneath: `file verified · 6.8 MB · persisted`. That size is measured by
+the same check that proved the file was non-empty at capture time, so it is
+never an estimate. Items saved before the size was recorded simply omit it.
+
+### Queue — filters
+
+The five chips **partition** the list, and each carries a live count:
+
+| Chip | What it holds |
+| --- | --- |
+| **All** | everything — the union of the four below |
+| **Queue** | queued plus the one currently running |
+| **Ready** | processing finished |
+| **Failed** | processing failed; source intact, retry offered |
+| **Raw** | persisted and verified, not yet handed to a processor |
+
+The counts describe the queue, not the search box — typing in the search field
+narrows the list without changing them.
 
 ### Config — recording parameters
 
@@ -149,22 +187,49 @@ Editable: sample rate (8/16/22.05/44.1 kHz), bitrate (32–128 kbps), channels
 (mono/stereo). The AAC-LC codec and the `.m4a` container are fixed. A change
 applies only to subsequent recordings — files already saved stay untouched.
 
+### Config — global shortcuts (desktop)
+
+System-wide hotkeys that fire while the window is minimised or unfocused.
+Bindings are editable in the Config tab and stored in `settings.json`. Three
+ship bound:
+
+| Shortcut | Action |
+| --- | --- |
+| `Ctrl+Alt+A` | show the window |
+| `Ctrl+Alt+R` | start / stop recording |
+| `Ctrl+Alt+N` | new note |
+
+Uploading audio, an image or a video can be bound too, but ships unbound —
+every plausible default already means something in a browser or an editor, and
+a global hotkey wins system-wide.
+
+Recording is the one action that does **not** raise the window first: the point
+of a global record hotkey is not leaving whatever you are in. It raises the
+window after the capture has started, so the microphone is never kept waiting,
+and leaves it alone on stop. Every other action raises it first, because it
+opens a sheet or a file dialog.
+
+On Linux a Shift combination with a letter, digit or symbol does not work —
+Shift changes which key the system listens for. Shift with `F1`–`F12`, space or
+Enter is safe.
+
 ## Files on disk
 
 Everything lives in the `recordings/` subdirectory of the app documents
 directory, and every write is atomic (`.tmp` → `rename`):
 
-- `<uuid>.<ext>` — the item's source material (`.m4a` recording, `.txt` note),
+- `<uuid>.<ext>` — the item's source material; the extension follows the type
+  (`.m4a` recording, `.txt` note, the original extension for an upload),
 - `recordings.json` — the index of all items,
-- `settings.json` — provider profiles and audio parameters,
+- `settings.json` — provider profiles, audio parameters and shortcut bindings,
 - `logs.json` — event history (ring buffer, max. 500 entries).
 
 ## Next phase
 
-- the remaining item types: audio file upload, images with offline OCR, video,
-- a background job queue,
-- WorkManager on Android and BGTaskScheduler on iOS,
-- editing the title and the transcript,
+- OCR and video processing on mobile (ML Kit / ffmpeg_kit), which today are
+  desktop-only,
+- WorkManager on Android and BGTaskScheduler on iOS, so jobs survive the app
+  being backgrounded,
 - local on-device models (whisper.cpp via FFI),
 - token encryption,
 - synchronization with Obsidian/Notion.
@@ -173,23 +238,37 @@ Technical design: `docs/superpowers/specs/2026-07-25-multimodal-capture-design.m
 
 ## Processing Console UI
 
-The interface uses the **Processing Console** design direction:
+The interface implements the **console cards** design direction:
 
-- dark navy interface with cyan system accent,
-- processing filters: Queue, Ready, Failed, Raw,
-- visible local-file verification status,
-- processing metrics and transcription state,
-- retry action for failed transcription,
-- recording remains local-first: stop -> verify file -> persist metadata -> transcribe.
+- dark navy surfaces with a cyan system accent, and translucent hairlines so
+  one border value reads correctly on the page, on a card and in a sheet,
+- **Space Grotesk** for names and headings, **JetBrains Mono** for everything
+  factual — statuses, counters, timers, file facts. Both are vendored under
+  `assets/fonts` (SIL OFL) rather than fetched at runtime, because an
+  offline-first app must not need the network to render its own text,
+- no app bar: each tab draws its own header inside its scroll area, so the
+  title scrolls with the content,
+- a review-progress strip above the list; the per-status counts live on the
+  filter chips, where they are actionable,
+- the local-file verification line on every card, including failed ones,
+- a dedicated capture screen while recording,
+- retry on any failed item,
+- feedback stays inline — no snackbars, and dialogs only to confirm something
+  destructive.
 
-## Reviewed state and micro-animations
+Capture remains local-first throughout: stop → verify the file → persist the
+metadata → queue → process.
 
-Each capture has a durable `isProcessedByUser` flag and optional `processedAt` timestamp. This state is independent from transcription status and persists in `recordings.json`.
+## Reviewed state
 
-The Processing Console includes:
+Each capture has a durable `isProcessedByUser` flag and an optional
+`processedAt` timestamp. This axis is entirely independent of processing
+status: nothing in the pipeline ever sets or clears it, and marking an item
+reviewed never touches its transcript. Both persist in `recordings.json`.
 
-- animated reviewed checkmark, card highlight and status pill,
-- selection haptic feedback,
-- animated reviewed counter and progress bar,
+- the toggle animates, the card border picks up the accent and a check appears
+  next to the name,
+- selection haptic feedback on toggle,
+- the reviewed counter and its progress bar animate to the new value,
 - full history retention: reviewed items stay visible,
 - no "Inbox Zero" celebration or empty-inbox pressure.
