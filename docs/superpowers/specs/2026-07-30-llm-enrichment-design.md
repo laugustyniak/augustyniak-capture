@@ -55,7 +55,7 @@ New file `lib/features/recordings/domain/capture_category.dart`:
 enum CaptureCategory { note, task, agentTask, idea, meetingNote, researchLead, capture }
 ```
 
-with a Polish `label` per value and a static `fromName`.
+with a `label` per value (English — the design pass moved every UI string off Polish) and a static `fromName`.
 
 `Recording` gains three persisted fields:
 
