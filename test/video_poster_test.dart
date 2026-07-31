@@ -497,5 +497,44 @@ void main() {
       expect(opener.opened, isEmpty);
       expect(controller.error, contains('Source file is missing'));
     });
+
+    test('a successful open clears a previous error and rebuilds the view',
+        () async {
+      final Directory tmp = await Directory.systemTemp.createTemp('open_clear');
+      final File src = File(p.join(tmp.path, 'clip.mp4'));
+      await src.writeAsBytes(<int>[0, 0, 0, 0x18, 1, 2, 3]);
+      final _FakeOpener opener = _FakeOpener();
+
+      final RecordingsController controller = RecordingsController(
+        repository: _FakeRepo(tmp),
+        transcriptionService: const _StubService('x'),
+        videoAudioExtractor: const _ThrowingAudioExtractor(),
+        mediaPicker: _FakePicker(PickedMedia(file: src, mimeType: 'video/mp4')),
+        mediaOpener: opener,
+      );
+      addTearDown(controller.dispose);
+
+      await controller.addUpload(CaptureType.video);
+      await controller.waitForProcessing();
+
+      final Recording item = controller.recordings.single;
+      final File source = File(item.filePath);
+      final List<int> bytes = await source.readAsBytes();
+
+      // Fail once, so there is a banner on screen to clear.
+      await source.delete();
+      await controller.openSource(item.id);
+      expect(controller.error, isNotNull);
+
+      // Then succeed. Clearing `_error` is worthless on its own: the banner is
+      // drawn from a build, so the notify is what actually takes it down.
+      await source.writeAsBytes(bytes);
+      int notifications = 0;
+      controller.addListener(() => notifications++);
+      await controller.openSource(item.id);
+
+      expect(controller.error, isNull);
+      expect(notifications, greaterThan(0));
+    });
   });
 }

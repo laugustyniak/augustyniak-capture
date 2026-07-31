@@ -782,6 +782,11 @@ class RecordingsController extends ChangeNotifier {
 
       await _mediaOpener.open(recording.filePath);
       _logSink.log('Opened source externally.', recordingId: id);
+      // The `_error = null` above only reaches the banner if something tells
+      // the view to rebuild. `togglePlayback` gets that for free from the
+      // `_playingId` notify; an external open has no state of its own, so
+      // without this a failed open stays on screen after the retry that worked.
+      notifyListeners();
     } catch (exception) {
       _error = exception.toString();
       _logSink.log(
