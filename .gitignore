@@ -20,5 +20,15 @@ ios/Flutter/Generated.xcconfig
 ios/Flutter/flutter_export_environment.sh
 ios/Flutter/ephemeral/
 
+# Release signing. `key.properties` holds the keystore passwords in plaintext
+# and the keystore itself is the one artifact that cannot be regenerated — lose
+# it and no future build can ever update an app already on Play. Keep both out
+# of the repo (see `android/key.properties.example`); the patterns are broad on
+# purpose, so a keystore dropped anywhere in the tree is still ignored.
+android/key.properties
+*.jks
+*.p12
+*.keystore
+
 # Superpowers brainstorm tooling state
 .superpowers/

@@ -57,6 +57,15 @@ mic is the whole app) and the `UIApplicationSceneManifest` that wires up
 `SceneDelegate.swift` — drop the latter and Flutter warns about the UIScene
 migration on every build.
 
+**Android release signing is opt-in and lives out of the tree.** `android/app/build.gradle.kts` reads `android/key.properties` (untracked; template in `android/key.properties.example`) and, **only if that file exists**, signs release builds with the named keystore. Absent it, release falls back to the debug key exactly as the Flutter template did — deliberate, because there is no CI here and a contributor without the keystore must still be able to run `flutter build apk --release` to check a build. The corollary is the trap: **a release artifact is debug-signed unless you verify otherwise**, and nothing in the build output says so. Check before uploading anything:
+
+```bash
+apksigner verify --print-certs build/app/outputs/flutter-apk/app-release.apk
+# `CN=Android Debug` means the fallback ran — key.properties was missing.
+```
+
+A `key.properties` that exists but is incomplete, or that points at a keystore that is not there, fails the build with a written explanation rather than a null-pointer from inside AGP. The keystore is the one artifact in this project that cannot be regenerated: once a build is on Play under `com.audivoa.core`, losing the key means no future build can ever update it.
+
 **Linux builds need `keybinder-3.0` installed first.** `hotkey_manager` (global
 shortcuts) links against it, and without it `flutter build linux` aborts at
 *"Unable to generate build files"* — this is a **build-time** failure, not a
