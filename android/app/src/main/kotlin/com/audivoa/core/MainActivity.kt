@@ -1,4 +1,4 @@
-package com.example.audivoa_core
+package com.audivoa.core
 
 import io.flutter.embedding.android.FlutterActivity
 
