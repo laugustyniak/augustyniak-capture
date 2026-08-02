@@ -17,6 +17,46 @@ flutter create --platforms=android,ios .
 flutter pub get
 ```
 
+It leaves every existing file alone (`AndroidManifest.xml` with `RECORD_AUDIO` /
+`INTERNET`, `ios/Runner/Info.plist`) but **adds `test/widget_test.dart`** — the
+counter-app template, which imports a `MyApp` this project does not have. Delete
+it, or `flutter analyze` and `flutter test` both fail on a file nobody wrote.
+
+**The mobile toolchain has two pins that are not optional.** Both were found by
+building on a clean machine; neither is discoverable from the code.
+
+- **AGP must stay on 8.x** (`android/settings.gradle.kts`), even though
+  `flutter create` generates 9.0.1. Under AGP 9 the plugin set deadlocks:
+  `file_picker` 11 deliberately skips applying KGP (it expects AGP 9's
+  `android.builtInKotlin`, which the Flutter template sets to `false`), while
+  `audioplayers_android` 5.3.0 applies `kotlin-android` unconditionally, which
+  AGP 9 rejects outright. No value of the flag satisfies both. The first half
+  fails **silently**: Gradle reports `BUILD SUCCESSFUL` and emits an AAR whose
+  `classes.jar` is 22 bytes, and the failure only surfaces later as
+  `cannot find symbol: class FilePickerPlugin` from `GeneratedPluginRegistrant`.
+  Revisit when `audioplayers_android` ships an AGP 9 build — it is the only
+  blocker, and 5.3.0 is currently its newest release.
+- **Gradle must run on JDK 21, not on Android Studio's bundled JBR.** Current
+  Android Studio ships Java 25, and the older KGP versions the plugins pull in
+  (`audioplayers` declares Kotlin 1.7.10) cannot parse a two-digit Java version —
+  the build dies on `IllegalArgumentException: 25.0.2` inside the Kotlin
+  compiler, with no mention of Java in the message. Install Temurin 21 and point
+  Flutter at it once per machine:
+
+```bash
+brew install --cask temurin@21
+flutter config --jdk-dir "/Library/Java/JavaVirtualMachines/temurin-21.jdk/Contents/Home"
+```
+
+**`ios/Runner/Info.plist` is hand-maintained and must stay complete.** It is not
+regenerated, so a missing key is invisible until deploy time: without
+`CFBundleIdentifier` the app still builds and `flutter build ios` reports
+success, but the product has no bundle identity and `simctl install` refuses it
+with *"Missing bundle ID"*. It also carries `NSMicrophoneUsageDescription` (the
+mic is the whole app) and the `UIApplicationSceneManifest` that wires up
+`SceneDelegate.swift` — drop the latter and Flutter warns about the UIScene
+migration on every build.
+
 **Linux builds need `keybinder-3.0` installed first.** `hotkey_manager` (global
 shortcuts) links against it, and without it `flutter build linux` aborts at
 *"Unable to generate build files"* — this is a **build-time** failure, not a
