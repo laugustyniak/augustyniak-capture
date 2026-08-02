@@ -29,7 +29,7 @@ class FilePickerMediaPicker implements MediaPicker {
 
   @override
   Future<PickedMedia?> pick(CaptureType type) async {
-    final FilePickerResult? result = await FilePicker.platform.pickFiles(
+    final FilePickerResult? result = await FilePicker.pickFiles(
       type: _filterFor(type),
     );
     final List<PlatformFile>? files = result?.files;

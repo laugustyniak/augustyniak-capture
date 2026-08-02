@@ -477,7 +477,7 @@ class _ProfileEditorSheetState extends State<_ProfileEditorSheet> {
                   child: ListView.separated(
                     scrollDirection: Axis.horizontal,
                     itemCount: presets.length,
-                    separatorBuilder: (_, __) => const SizedBox(width: 8),
+                    separatorBuilder: (_, _) => const SizedBox(width: 8),
                     itemBuilder: (BuildContext context, int index) {
                       final ProviderPreset preset = presets[index];
                       return ActionChip(
