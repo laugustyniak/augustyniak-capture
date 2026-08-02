@@ -247,7 +247,7 @@ class _VerificationLine extends StatelessWidget {
     final String? size = formatBytes(recording.sizeBytes);
     final String text = <String>[
       'file verified',
-      if (size != null) size,
+      ?size,
       'persisted',
     ].join(' · ');
 
