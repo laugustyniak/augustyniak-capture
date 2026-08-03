@@ -54,6 +54,31 @@ static void my_application_activate(GApplication* application) {
 
   gtk_window_set_default_size(window, 1280, 720);
 
+  // Window icon (_NET_WM_ICON on X11: alt-tab, title bars, taskbars outside
+  // GNOME Shell). Load the bundled asset so a dev build gets the icon without
+  // an installed hicolor entry; fall back to the themed name, which Wayland
+  // compositors resolve via the desktop file anyway.
+  g_autofree gchar* exe_path = g_file_read_link("/proc/self/exe", nullptr);
+  gboolean icon_set = FALSE;
+  if (exe_path != nullptr) {
+    g_autofree gchar* exe_dir = g_path_get_dirname(exe_path);
+    g_autofree gchar* icon_path =
+        g_build_filename(exe_dir, "data", "flutter_assets", "assets", "icon",
+                         "app_icon_1024.png", nullptr);
+    // Scale down at load: GDK drops any icon whose _NET_WM_ICON X property
+    // would be too large (256² ARGB already trips it, publishing an empty
+    // property), so only the legacy WM_HINTS pixmap survives. 128 px fits.
+    g_autoptr(GdkPixbuf) icon =
+        gdk_pixbuf_new_from_file_at_size(icon_path, 128, 128, nullptr);
+    if (icon != nullptr) {
+      gtk_window_set_icon(window, icon);
+      icon_set = TRUE;
+    }
+  }
+  if (!icon_set) {
+    gtk_window_set_icon_name(window, "com.audivoa.core");
+  }
+
   g_autoptr(FlDartProject) project = fl_dart_project_new();
   fl_dart_project_set_dart_entrypoint_arguments(
       project, self->dart_entrypoint_arguments);
