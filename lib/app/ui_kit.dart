@@ -431,7 +431,7 @@ class ConsolePosterTile extends StatelessWidget {
             // Keeps the previous frame while a re-extracted poster decodes,
             // instead of blinking back to the background.
             gaplessPlayback: true,
-            errorBuilder: (BuildContext _, Object __, StackTrace? ___) =>
+            errorBuilder: (BuildContext _, Object _, StackTrace? _) =>
                 fallback,
           ),
         ),
