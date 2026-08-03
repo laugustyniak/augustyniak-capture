@@ -29,6 +29,11 @@ dev_dependencies:
 flutter:
   uses-material-design: true
 
+  # The Linux runner loads the window icon from this bundled asset
+  # (linux/runner/my_application.cc), so it must ship in flutter_assets.
+  assets:
+    - assets/icon/
+
   # Vendored rather than fetched at runtime: the app is offline-first, so a
   # font that only renders once the device has network would be a regression.
   # Both families are SIL OFL 1.1 (licences alongside the files).
