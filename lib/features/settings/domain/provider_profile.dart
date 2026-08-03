@@ -1,5 +1,7 @@
 import '../../enrichment/data/http_chat_enrichment_service.dart';
 import '../../enrichment/domain/enrichment_service.dart';
+import '../../processing/data/http_vision_ocr_service.dart';
+import '../../processing/data/ocr_service.dart';
 import '../../transcription/data/transcription_service.dart';
 
 /// What a profile is *for*.
@@ -125,6 +127,23 @@ class ProviderProfile {
     );
   }
 
+  /// Build the image-OCR service for this profile. OCR deliberately has no
+  /// profile kind of its own: it rides the **enrichment** profile, because a
+  /// vision-capable chat endpoint is exactly what enrichment already talks to,
+  /// and one profile configuring both stages beats a third Models-tab section.
+  /// Same blank-or-schemeless guard as [toService].
+  OcrService toOcrService() {
+    final Uri? uri = hasEndpoint ? Uri.tryParse(endpoint.trim()) : null;
+    if (uri == null || !uri.hasScheme) {
+      return const DisabledOcrService();
+    }
+    return HttpVisionOcrService(
+      endpoint: uri,
+      bearerToken: _blankToNull(bearerToken),
+      model: _blankToNull(model),
+    );
+  }
+
   Map<String, dynamic> toJson() => <String, dynamic>{
         'id': id,
         'name': name,
@@ -161,6 +180,8 @@ class ProviderPreset {
     required this.endpoint,
     this.kind = ProfileKind.transcription,
     this.model,
+    this.models = const <String>[],
+    this.tokenHint,
   });
 
   final String name;
@@ -168,23 +189,39 @@ class ProviderPreset {
 
   /// Which section of the Models tab offers this preset.
   final ProfileKind kind;
+
+  /// The model pre-filled when the preset is picked.
   final String? model;
+
+  /// Known-good models for this provider, offered as suggestion chips in the
+  /// editor. A static list, not a `/models` fetch: it degrades to nothing when
+  /// stale, and the field stays free-text either way.
+  final List<String> models;
+
+  /// Shown under the token field so the user knows what kind of key to paste.
+  final String? tokenHint;
 
   static const List<ProviderPreset> all = <ProviderPreset>[
     ProviderPreset(
       name: 'OpenAI Whisper',
       endpoint: 'https://api.openai.com/v1/audio/transcriptions',
       model: 'whisper-1',
+      models: <String>['whisper-1', 'gpt-4o-transcribe', 'gpt-4o-mini-transcribe'],
+      tokenHint: 'OpenAI API key (sk-…)',
     ),
     ProviderPreset(
       name: 'OpenAI GPT-4o transcribe',
       endpoint: 'https://api.openai.com/v1/audio/transcriptions',
       model: 'gpt-4o-transcribe',
+      models: <String>['gpt-4o-transcribe', 'gpt-4o-mini-transcribe', 'whisper-1'],
+      tokenHint: 'OpenAI API key (sk-…)',
     ),
     ProviderPreset(
       name: 'Groq',
       endpoint: 'https://api.groq.com/openai/v1/audio/transcriptions',
       model: 'whisper-large-v3-turbo',
+      models: <String>['whisper-large-v3-turbo', 'whisper-large-v3'],
+      tokenHint: 'Groq API key (gsk_…)',
     ),
     ProviderPreset(
       name: 'Local whisper.cpp',
@@ -192,6 +229,50 @@ class ProviderPreset {
     ),
     ProviderPreset(
       name: 'Custom endpoint',
+      endpoint: '',
+    ),
+    // Enrichment presets double as OCR providers: the active enrichment
+    // profile also powers image OCR, so every model listed here should be
+    // vision-capable (or the provider ignores images gracefully).
+    ProviderPreset(
+      name: 'OpenAI',
+      kind: ProfileKind.enrichment,
+      endpoint: 'https://api.openai.com/v1/chat/completions',
+      model: 'gpt-4o-mini',
+      models: <String>['gpt-4o-mini', 'gpt-4o', 'gpt-4.1-mini', 'gpt-4.1'],
+      tokenHint: 'OpenAI API key (sk-…)',
+    ),
+    ProviderPreset(
+      name: 'Anthropic',
+      kind: ProfileKind.enrichment,
+      // Anthropic's OpenAI-compatible endpoint — same request shape as the
+      // rest, so no dedicated adapter is needed.
+      endpoint: 'https://api.anthropic.com/v1/chat/completions',
+      model: 'claude-haiku-4-5',
+      models: <String>['claude-haiku-4-5', 'claude-sonnet-5', 'claude-opus-5'],
+      tokenHint: 'Anthropic API key (sk-ant-…)',
+    ),
+    ProviderPreset(
+      name: 'Groq chat',
+      kind: ProfileKind.enrichment,
+      endpoint: 'https://api.groq.com/openai/v1/chat/completions',
+      model: 'llama-3.3-70b-versatile',
+      models: <String>[
+        'llama-3.3-70b-versatile',
+        'meta-llama/llama-4-scout-17b-16e-instruct',
+      ],
+      tokenHint: 'Groq API key (gsk_…)',
+    ),
+    ProviderPreset(
+      name: 'Local Ollama',
+      kind: ProfileKind.enrichment,
+      endpoint: 'http://localhost:11434/v1/chat/completions',
+      model: 'qwen2.5vl',
+      models: <String>['qwen2.5vl', 'llama3.2-vision', 'gemma3', 'llava'],
+    ),
+    ProviderPreset(
+      name: 'Custom endpoint',
+      kind: ProfileKind.enrichment,
       endpoint: '',
     ),
   ];
