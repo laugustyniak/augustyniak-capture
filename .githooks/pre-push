@@ -11,6 +11,22 @@
 #   git push --no-verify
 set -euo pipefail
 
+# git feeds one "<local ref> <local sha> <remote ref> <remote sha>" line per
+# ref being pushed. A branch deletion has an all-zero local sha and pushes no
+# code, so there is nothing to analyze or test — skip unless at least one ref
+# actually carries commits.
+zero=0000000000000000000000000000000000000000
+pushes_code=0
+while read -r _local_ref local_sha _remote_ref _remote_sha; do
+  if [ "$local_sha" != "$zero" ]; then
+    pushes_code=1
+  fi
+done
+if [ "$pushes_code" = 0 ]; then
+  echo "pre-push: only deletions — skipping checks"
+  exit 0
+fi
+
 # git exports GIT_DIR (and friends) into its hooks. Flutter derives its own SDK
 # version by running git inside its install directory, and an inherited GIT_DIR
 # sends that lookup here instead — the SDK reports itself as `0.0.0-unknown`,
