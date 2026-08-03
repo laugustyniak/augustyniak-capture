@@ -12,6 +12,7 @@ import '../../enrichment/domain/enrichment_service.dart';
 import '../../logs/domain/log_event.dart';
 import '../../processing/data/ocr_service.dart';
 import '../../processing/data/video_audio_extractor.dart';
+import '../../processing/data/video_poster_extractor.dart';
 import '../../processing/domain/processor.dart';
 import '../../processing/domain/processor_registry.dart';
 import '../../settings/domain/audio_config.dart';
@@ -22,6 +23,7 @@ import '../data/recordings_repository.dart';
 import '../domain/capture_category.dart';
 import '../domain/capture_type.dart';
 import '../domain/clipboard_sink.dart';
+import '../domain/media_opener.dart';
 import '../domain/recording.dart';
 
 class RecordingsController extends ChangeNotifier {
@@ -32,9 +34,12 @@ class RecordingsController extends ChangeNotifier {
     OcrService ocrService = const DisabledOcrService(),
     VideoAudioExtractor videoAudioExtractor =
         const UnavailableVideoAudioExtractor(),
+    VideoPosterExtractor videoPosterExtractor =
+        const UnavailableVideoPosterExtractor(),
     AudioConfig audioConfig = AudioConfig.defaults,
     LogSink logSink = const NoopLogSink(),
     ClipboardSink clipboardSink = const NoopClipboardSink(),
+    MediaOpener mediaOpener = const NoopMediaOpener(),
     ProcessorRegistry? processorRegistry,
     MediaPicker? mediaPicker,
     AudioRecorder? recorder,
@@ -44,9 +49,11 @@ class RecordingsController extends ChangeNotifier {
         _enrichmentService = enrichmentService,
         _ocrService = ocrService,
         _videoAudioExtractor = videoAudioExtractor,
+        _videoPosterExtractor = videoPosterExtractor,
         _audioConfig = audioConfig,
         _logSink = logSink,
         _clipboardSink = clipboardSink,
+        _mediaOpener = mediaOpener,
         _mediaPicker = mediaPicker ?? const FilePickerMediaPicker(),
         _importer = MediaImporter(repository),
         _recorder = recorder ?? AudioRecorder(),
@@ -69,6 +76,7 @@ class RecordingsController extends ChangeNotifier {
   final RecordingsRepository _repository;
   final LogSink _logSink;
   final ClipboardSink _clipboardSink;
+  final MediaOpener _mediaOpener;
   final MediaPicker _mediaPicker;
   final MediaImporter _importer;
   late final ProcessorRegistry _registry;
@@ -79,6 +87,7 @@ class RecordingsController extends ChangeNotifier {
   EnrichmentService _enrichmentService;
   OcrService _ocrService;
   VideoAudioExtractor _videoAudioExtractor;
+  VideoPosterExtractor _videoPosterExtractor;
   AudioConfig _audioConfig;
 
   final AudioRecorder _recorder;
@@ -107,6 +116,16 @@ class RecordingsController extends ChangeNotifier {
   bool _disposed = false;
   String? _processingId; // the id currently running in the drain loop, if any
   Future<void>? _saveInFlight; // serializes saveAll (shared temp file)
+
+  /// Ids whose poster is being extracted right now. Poster extraction has two
+  /// callers (the drain loop and the startup backfill) that both write the same
+  /// `<id>.thumb.jpg`, so this is the mutex that stops two ffmpeg runs from
+  /// racing onto one destination file.
+  final Set<String> _postersInFlight = <String>{};
+
+  /// The startup backfill, kept so [waitForProcessing] can await it. Null until
+  /// [initialize] runs.
+  Future<void>? _posterBackfill;
 
   List<Recording> get recordings => List<Recording>.unmodifiable(_recordings);
   bool get isRecording => _isRecording;
@@ -169,6 +188,13 @@ class RecordingsController extends ChangeNotifier {
     _videoAudioExtractor = value;
   }
 
+  /// Applied to the next poster extraction. A job already running keeps the
+  /// extractor it started with.
+  set videoPosterExtractor(VideoPosterExtractor value) {
+    if (identical(_videoPosterExtractor, value)) return;
+    _videoPosterExtractor = value;
+  }
+
   /// Applied to the next capture. Never changes a recording already on disk.
   set audioConfig(AudioConfig value) {
     if (_audioConfig == value) return;
@@ -191,6 +217,33 @@ class RecordingsController extends ChangeNotifier {
         .toList();
     for (final String id in stuck) {
       await _enqueueProcessing(id);
+    }
+
+    // Deliberately not awaited: posters are cosmetic, and shelling ffmpeg once
+    // per video must never be something the first frame of the app waits for.
+    _posterBackfill = _backfillPosters();
+    unawaited(_posterBackfill!);
+  }
+
+  /// Give every video on disk a poster, whether or not it is ever processed
+  /// again.
+  ///
+  /// Without this the frame is only ever pulled from `_processOne`, so a clip
+  /// ingested before posters existed — or one whose poster file was cleaned up
+  /// — keeps the generic movie glyph until the user happens to hit retry, which
+  /// there is no reason to do on an item that already succeeded.
+  ///
+  /// Best-effort like everything else on this path: [_extractPoster] swallows
+  /// its own errors, an item that already has its frame on disk costs one
+  /// `stat`, and the in-flight mutex keeps this off the drain loop's toes.
+  Future<void> _backfillPosters() async {
+    final List<String> videos = _recordings
+        .where((Recording item) => item.type == CaptureType.video)
+        .map((Recording item) => item.id)
+        .toList();
+    for (final String id in videos) {
+      if (_disposed) return;
+      await _extractPoster(id);
     }
   }
 
@@ -563,8 +616,14 @@ class RecordingsController extends ChangeNotifier {
   /// assert a `completed` status must await this first.
   @visibleForTesting
   Future<void> waitForProcessing() async {
+    // The startup poster backfill runs unawaited off `initialize`, so it is part
+    // of "the background work has settled" for a test's purposes.
+    await _posterBackfill;
     int guard = 0;
-    while ((_isDraining || pendingProcessingCount > 0) && guard++ < 10000) {
+    while ((_isDraining ||
+            pendingProcessingCount > 0 ||
+            _postersInFlight.isNotEmpty) &&
+        guard++ < 10000) {
       await Future<void>.delayed(Duration.zero);
     }
   }
@@ -606,6 +665,15 @@ class RecordingsController extends ChangeNotifier {
       // Pin the processor for this job: a runtime swap (Models tab) during the
       // await gaps above must not redirect a job that already started.
       final Processor processor = _registry.forType(recording.type);
+
+      // Deliberately outside the try below, and before the processor runs. A
+      // video whose transcription fails — no active profile, an audio codec
+      // ffmpeg cannot read — is exactly the item the user most needs to
+      // recognise in the queue, so the poster must not be collateral damage of
+      // that failure. The reverse holds too: `_extractPoster` swallows
+      // everything, so a missing ffmpeg costs a thumbnail and never a status.
+      await _extractPoster(recording.id);
+
       try {
         final String transcript = await processor.process(recording);
         await _update(
@@ -643,6 +711,90 @@ class RecordingsController extends ChangeNotifier {
       }
     } finally {
       _processingId = null;
+    }
+  }
+
+  /// Pull a poster frame off a video so the queue can show what the clip is.
+  ///
+  /// Best-effort by construction, the same contract as [_enrich] and
+  /// [_copyToClipboard]: it never touches `status`, it swallows every error
+  /// into the log, and the poster it writes is a derived artifact the app is
+  /// free to lose. Non-video items are a no-op, and so is a video that already
+  /// has a poster still on disk — a retry must not re-shell ffmpeg for a frame
+  /// that has not changed. A `thumbPath` whose file has since gone *does*
+  /// re-extract: the path is only ever a claim that a frame was written.
+  ///
+  /// Takes an id rather than a [Recording] because both callers hold a snapshot
+  /// the other one can invalidate, and the guards below are only worth anything
+  /// when they read the item as it is now.
+  Future<void> _extractPoster(String id) async {
+    final int index = _recordings.indexWhere((Recording item) => item.id == id);
+    if (index < 0) return;
+    final Recording item = _recordings[index];
+    if (item.type != CaptureType.video) return;
+
+    final String? existing = item.thumbPath;
+    if (existing != null && await File(existing).exists()) return;
+
+    // Claimed synchronously, before the first await below, so this is a real
+    // mutex between the drain loop and the startup backfill rather than a
+    // narrower race onto the same `<id>.thumb.jpg`.
+    if (!_postersInFlight.add(id)) return;
+    try {
+      final File destination =
+          await _repository.createSourceFile(item.id, 'thumb.jpg');
+      final File poster = await _videoPosterExtractor.extractPoster(
+        File(item.filePath),
+        destination,
+      );
+      if (_disposed) return;
+      await _update(
+        item.id,
+        (Recording current) => current.copyWith(thumbPath: poster.path),
+      );
+      _logSink.log('Poster frame extracted.', recordingId: item.id);
+    } catch (exception) {
+      _logSink.log(
+        'Poster extraction failed: $exception',
+        level: LogLevel.warn,
+        recordingId: item.id,
+      );
+    } finally {
+      _postersInFlight.remove(id);
+    }
+  }
+
+  /// Hand the item's source file to the platform's own player/viewer. Used for
+  /// video, which has no in-app player on the desktop targets this ships on.
+  ///
+  /// Deliberately not gated on [CaptureType] here — the card decides what is
+  /// openable, exactly as it does for [togglePlayback] — but a missing source
+  /// is refused, because handing a dead path to `xdg-open` would either do
+  /// nothing or raise someone else's error dialog.
+  Future<void> openSource(String id) async {
+    _error = null;
+    try {
+      final Recording recording =
+          _recordings.firstWhere((Recording item) => item.id == id);
+      if (!await File(recording.filePath).exists()) {
+        throw FileSystemException('Source file is missing.', recording.filePath);
+      }
+
+      await _mediaOpener.open(recording.filePath);
+      _logSink.log('Opened source externally.', recordingId: id);
+      // The `_error = null` above only reaches the banner if something tells
+      // the view to rebuild. `togglePlayback` gets that for free from the
+      // `_playingId` notify; an external open has no state of its own, so
+      // without this a failed open stays on screen after the retry that worked.
+      notifyListeners();
+    } catch (exception) {
+      _error = exception.toString();
+      _logSink.log(
+        'Opening the source failed: $exception',
+        level: LogLevel.error,
+        recordingId: id,
+      );
+      notifyListeners();
     }
   }
 

@@ -176,6 +176,59 @@ void main() {
     expect(wrongType.tags, isEmpty);
   });
 
+  test('thumbPath round-trips, and legacy rows have none', () {
+    final Recording item = Recording(
+      id: 'vid',
+      filePath: '/tmp/vid.mp4',
+      createdAt: DateTime.utc(2026, 7, 30, 10),
+      durationMs: 12000,
+      status: RecordingStatus.completed,
+      thumbPath: '/tmp/vid.thumb.jpg',
+    );
+
+    expect(Recording.fromJson(item.toJson()).thumbPath, '/tmp/vid.thumb.jpg');
+
+    final Recording legacy = Recording.fromJson(<String, dynamic>{
+      'id': 'legacy',
+      'filePath': '/tmp/legacy.mp4',
+      'createdAt': '2026-01-01T00:00:00.000',
+      'durationMs': 1000,
+      'status': 'completed',
+    });
+    expect(legacy.thumbPath, isNull);
+  });
+
+  test('a non-string thumbPath degrades to null instead of throwing', () {
+    final Recording restored = Recording.fromJson(<String, dynamic>{
+      'id': 'corrupt-thumb',
+      'filePath': '/tmp/corrupt.mp4',
+      'createdAt': '2026-01-01T00:00:00.000',
+      'durationMs': 1000,
+      'status': 'completed',
+      'thumbPath': 42,
+    });
+
+    expect(restored.thumbPath, isNull);
+  });
+
+  test('copyWith clears thumbPath explicitly', () {
+    final Recording item = Recording(
+      id: 'vid-2',
+      filePath: '/tmp/vid-2.mp4',
+      createdAt: DateTime.utc(2026, 7, 30, 10),
+      durationMs: 12000,
+      status: RecordingStatus.completed,
+      thumbPath: '/tmp/vid-2.thumb.jpg',
+    );
+
+    // Survives an unrelated transition — the poster is derived once and kept.
+    expect(
+      item.copyWith(status: RecordingStatus.failed).thumbPath,
+      '/tmp/vid-2.thumb.jpg',
+    );
+    expect(item.copyWith(clearThumbPath: true).thumbPath, isNull);
+  });
+
   test('copyWith clears category and summary explicitly', () {
     final Recording item = Recording(
       id: 'id-2',

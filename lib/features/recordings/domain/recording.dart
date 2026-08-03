@@ -27,6 +27,7 @@ class Recording {
     this.type = CaptureType.audioRecording,
     this.sourceMimeType,
     this.transcript,
+    this.thumbPath,
     this.title,
     this.category,
     this.summary,
@@ -63,6 +64,13 @@ class Recording {
   /// the user — edits and re-processing are distinct paths).
   final String? transcript;
 
+  /// Path to a poster frame extracted from a video source. **Derived**, never
+  /// the source: it is generated after the item is already persisted, it plays
+  /// no part in the persist-before-process guarantee, and it is safe to lose —
+  /// a missing or deleted poster costs a thumbnail, never a capture. Null on
+  /// every non-video item, on legacy rows, and whenever the extraction failed.
+  final String? thumbPath;
+
   /// Optional user-set display name. Null on legacy rows and until named; the
   /// card falls back to the filename. Never set by processing.
   final String? title;
@@ -92,6 +100,8 @@ class Recording {
   Recording copyWith({
     RecordingStatus? status,
     String? transcript,
+    String? thumbPath,
+    bool clearThumbPath = false,
     String? title,
     bool clearTitle = false,
     CaptureCategory? category,
@@ -115,6 +125,7 @@ class Recording {
       sourceMimeType: sourceMimeType,
       status: status ?? this.status,
       transcript: transcript ?? this.transcript,
+      thumbPath: clearThumbPath ? null : (thumbPath ?? this.thumbPath),
       title: clearTitle ? null : (title ?? this.title),
       category: clearCategory ? null : (category ?? this.category),
       summary: clearSummary ? null : (summary ?? this.summary),
@@ -135,6 +146,7 @@ class Recording {
         'type': type.name,
         'sourceMimeType': sourceMimeType,
         'transcript': transcript,
+        'thumbPath': thumbPath,
         'title': title,
         'category': category?.name,
         'summary': summary,
@@ -158,6 +170,11 @@ class Recording {
       type: CaptureType.fromName(json['type'] as String?),
       sourceMimeType: json['sourceMimeType'] as String?,
       transcript: json['transcript'] as String?,
+      // Absent on every row written before posters existed, and type-checked
+      // rather than cast for the same reason as `summary`: a hand-edited
+      // recordings.json holding a non-string here would otherwise throw out of
+      // the whole load. A null poster is simply "no thumbnail".
+      thumbPath: json['thumbPath'] is String ? json['thumbPath'] as String : null,
       title: json['title'] as String?,
       // Absent on every row written before enrichment existed. A missing value
       // stays null — "never enriched" — while a *present* unknown name degrades
