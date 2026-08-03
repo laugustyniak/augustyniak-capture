@@ -121,6 +121,7 @@ class _QueueTabState extends State<QueueTab> {
                         isPlaying: controller.playingId == recording.id,
                         onTogglePlay: () =>
                             controller.togglePlayback(recording.id),
+                        onOpen: () => controller.openSource(recording.id),
                         onRetry: () =>
                             controller.retryTranscription(recording.id),
                         onEdit: () => _openEditSheet(context, recording),

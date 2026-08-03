@@ -1,14 +1,31 @@
+import 'dart:convert';
 import 'dart:io';
+import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:path/path.dart' as p;
+import 'package:audivoa_core/app/ui_kit.dart';
 import 'package:audivoa_core/features/recordings/domain/capture_category.dart';
 import 'package:audivoa_core/features/recordings/domain/capture_type.dart';
 import 'package:audivoa_core/features/recordings/domain/recording.dart';
 import 'package:audivoa_core/features/recordings/presentation/queue_tab.dart';
+import 'package:audivoa_core/features/recordings/presentation/recording_card.dart';
 import 'package:audivoa_core/features/recordings/presentation/recordings_controller.dart';
 
 import '../support/harness.dart';
+
+/// Taken from the widget rather than retyped, so renaming the label cannot
+/// leave a test asserting a string nothing renders any more.
+const String openLabel = RecordingCard.openVideoLabel;
+
+/// A 1×1 PNG. The decoder goes by content, not by the `.thumb.jpg` name, and a
+/// real image is what makes the difference between "poster rendered" and
+/// "poster fell back" observable.
+final Uint8List _pixel = base64Decode(
+  'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8'
+  'BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==',
+);
 
 /// Guards the queue list: which items a filter shows, what a card renders per
 /// capture type, what the search matches on, and — since the design put counts
@@ -28,6 +45,19 @@ void main() {
       hostTab(() => QueueTab(controller: controller), listenable: controller),
     );
     await tester.pump();
+  }
+
+  /// Lets real filesystem work finish: opening a source stats the file, and
+  /// `Image.file` reads and decodes one — neither of which the fake-async zone
+  /// a tap runs in will ever advance. `runAsync` hands the isolate back to the
+  /// real event loop; the following `pump` renders what completion produced.
+  Future<void> settleIo(WidgetTester tester) async {
+    for (int i = 0; i < 4; i++) {
+      await tester.runAsync(
+        () => Future<void>.delayed(const Duration(milliseconds: 20)),
+      );
+      await tester.pump();
+    }
   }
 
   testWidgets('empty index shows the empty panel, not a list', (
@@ -172,20 +202,23 @@ void main() {
     expect(find.text('file verified · persisted'), findsOneWidget);
   });
 
-  testWidgets('only audio items get a play button', (
+  testWidgets('text and image items get neither play nor open', (
     WidgetTester tester,
   ) async {
     final RecordingsController controller = await buildRecordingsController(
       appDir,
       seed: <Recording>[
         makeRecording(id: 'note', type: CaptureType.text, durationMs: 0),
+        makeRecording(id: 'scan', type: CaptureType.image, durationMs: 0),
       ],
     );
     await pumpQueue(tester, controller);
 
-    // A text note has no media track, so playback must not be offered.
+    // Neither has a media track: no in-app playback, and nothing the system
+    // player would be handed either.
     expect(find.bySemanticsLabel('Play recording'), findsNothing);
     expect(find.byIcon(Icons.play_arrow_rounded), findsNothing);
+    expect(find.bySemanticsLabel(openLabel), findsNothing);
   });
 
   testWidgets('an audio item does get a play button', (
@@ -198,6 +231,119 @@ void main() {
     await pumpQueue(tester, controller);
 
     expect(find.byIcon(Icons.play_arrow_rounded), findsOneWidget);
+    // Audio plays *in* the app, so it is the stateful control, not the
+    // external-launch one.
+    expect(find.bySemanticsLabel('Play recording'), findsOneWidget);
+    expect(find.bySemanticsLabel(openLabel), findsNothing);
+  });
+
+  testWidgets('a video item offers the external open control', (
+    WidgetTester tester,
+  ) async {
+    final RecordingsController controller = await buildRecordingsController(
+      appDir,
+      seed: <Recording>[
+        makeRecording(id: 'clip', type: CaptureType.video),
+      ],
+    );
+    await pumpQueue(tester, controller);
+
+    // Same glyph as audio, different affordance: there is nothing to stop
+    // afterwards, so it never becomes the in-app stop button.
+    expect(find.byIcon(Icons.play_arrow_rounded), findsOneWidget);
+    expect(find.bySemanticsLabel('Play recording'), findsNothing);
+    // Two targets, one action: the leading tile is tappable for a video even
+    // before a poster has been extracted for it.
+    expect(find.bySemanticsLabel(openLabel), findsNWidgets(2));
+  });
+
+  testWidgets('tapping open hands the video source to the platform', (
+    WidgetTester tester,
+  ) async {
+    final File source = File(p.join(appDir.path, 'clip.mp4'))
+      ..writeAsBytesSync(<int>[0, 1, 2]);
+    final FakeMediaOpener opener = FakeMediaOpener();
+    final RecordingsController controller = await buildRecordingsController(
+      appDir,
+      mediaOpener: opener,
+      seed: <Recording>[
+        makeRecording(
+          id: 'clip',
+          type: CaptureType.video,
+          filePath: source.path,
+        ),
+      ],
+    );
+    await pumpQueue(tester, controller);
+
+    // `.last` is the row's play control; `.first` is the leading tile, covered
+    // by the poster test below.
+    await tester.tap(find.bySemanticsLabel(openLabel).last);
+    await settleIo(tester);
+
+    expect(opener.opened, <String>[source.path]);
+    // Nothing failed on the way out, so no banner.
+    expect(controller.error, isNull);
+  });
+
+  testWidgets('a poster replaces the type icon, and is itself a play target', (
+    WidgetTester tester,
+  ) async {
+    final File source = File(p.join(appDir.path, 'clip.mp4'))
+      ..writeAsBytesSync(<int>[0, 1, 2]);
+    final File poster = File(p.join(appDir.path, 'clip.thumb.jpg'))
+      ..writeAsBytesSync(_pixel);
+    final FakeMediaOpener opener = FakeMediaOpener();
+    final RecordingsController controller = await buildRecordingsController(
+      appDir,
+      mediaOpener: opener,
+      seed: <Recording>[
+        makeRecording(
+          id: 'clip',
+          type: CaptureType.video,
+          filePath: source.path,
+          thumbPath: poster.path,
+        ),
+      ],
+    );
+    await pumpQueue(tester, controller);
+    await settleIo(tester);
+
+    expect(find.byType(ConsolePosterTile), findsOneWidget);
+    // The fallback is only built when the decode fails, so a live poster means
+    // no movie glyph anywhere on the card.
+    expect(find.byIcon(Icons.movie_outlined), findsNothing);
+
+    // Poster and button are the same action, so both carry the same label.
+    expect(find.bySemanticsLabel(openLabel), findsNWidgets(2));
+    await tester.tap(find.bySemanticsLabel(openLabel).first);
+    await settleIo(tester);
+
+    expect(opener.opened, <String>[source.path]);
+  });
+
+  testWidgets('a missing poster file degrades to the type icon', (
+    WidgetTester tester,
+  ) async {
+    // The path is a *claim*: the poster is derived, so it can be cleaned up,
+    // truncated or never written while the row still names it.
+    final RecordingsController controller = await buildRecordingsController(
+      appDir,
+      seed: <Recording>[
+        makeRecording(
+          id: 'clip',
+          type: CaptureType.video,
+          thumbPath: p.join(appDir.path, 'gone.thumb.jpg'),
+        ),
+      ],
+    );
+    await pumpQueue(tester, controller);
+    await settleIo(tester);
+
+    expect(find.byIcon(Icons.movie_outlined), findsOneWidget);
+    // A dead poster costs a thumbnail, never the card or the action on it.
+    expect(find.bySemanticsLabel(openLabel), findsNWidgets(2));
+    expect(tester.takeException(), isNull);
   });
 
   testWidgets('the reviewed toggle flips the card state through the controller',

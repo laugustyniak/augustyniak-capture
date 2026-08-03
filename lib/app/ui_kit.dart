@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -353,6 +354,88 @@ class ConsoleIconTile extends StatelessWidget {
       height: size,
       decoration: decoration,
       child: child,
+    );
+  }
+}
+
+/// [ConsoleIconTile]'s sibling for an item that has a picture of itself — the
+/// poster frame pulled off a video. Same square, same 10 px radius, same size
+/// contract, so a queue row is the identical shape whether or not a poster
+/// exists.
+///
+/// The poster is a **derived** artifact: it can be absent, stale or truncated
+/// (an ffmpeg that was killed mid-write), and none of that is an error worth
+/// showing. So [errorBuilder] falls straight back to the plain icon tile and
+/// the card degrades to exactly what it rendered before posters existed. The
+/// widget stays stateless and synchronous on purpose — an `exists()` probe in
+/// `build` would be an async gap on every scroll frame, and `Image.file`
+/// already reports a missing file through the very same callback.
+class ConsolePosterTile extends StatelessWidget {
+  const ConsolePosterTile({
+    super.key,
+    required this.poster,
+    required this.fallbackIcon,
+    this.color = Console.cyan,
+    this.background = Console.iconTile,
+    this.size = 38,
+  });
+
+  /// The image to draw. Not required to exist — see [errorBuilder] above.
+  final File poster;
+
+  /// Drawn instead of the image whenever the file cannot be decoded.
+  final IconData fallbackIcon;
+
+  /// Fallback tint, so a failed item keeps its red icon when the poster is
+  /// missing too.
+  final Color color;
+  final Color background;
+  final double size;
+
+  @override
+  Widget build(BuildContext context) {
+    final Widget fallback = ConsoleIconTile(
+      icon: fallbackIcon,
+      color: color,
+      background: background,
+      size: size,
+    );
+    // A 320 px JPEG in a 38 px slot: decode at the size actually painted
+    // rather than holding the full bitmap in the image cache for every row.
+    // The aspect-scoped lookup, not `maybeOf(...)?.devicePixelRatio`: the wide
+    // form subscribes the tile to *every* metric, so raising the keyboard over
+    // the Queue's search field would rebuild every poster in the list. The
+    // `?? 1` is unreachable under the app's MaterialApp and exists only so the
+    // widget can be pumped bare in a test.
+    final double ratio = MediaQuery.maybeDevicePixelRatioOf(context) ?? 1;
+
+    return SizedBox(
+      width: size,
+      height: size,
+      child: DecoratedBox(
+        // Behind the image, so the tile is never a hole in the row during the
+        // frame or two the decode takes.
+        decoration: BoxDecoration(
+          color: background,
+          borderRadius: BorderRadius.circular(10),
+        ),
+        child: ClipRRect(
+          borderRadius: BorderRadius.circular(10),
+          child: Image.file(
+            poster,
+            width: size,
+            height: size,
+            fit: BoxFit.cover,
+            filterQuality: FilterQuality.medium,
+            cacheWidth: (size * ratio).round(),
+            // Keeps the previous frame while a re-extracted poster decodes,
+            // instead of blinking back to the background.
+            gaplessPlayback: true,
+            errorBuilder: (BuildContext _, Object __, StackTrace? ___) =>
+                fallback,
+          ),
+        ),
+      ),
     );
   }
 }

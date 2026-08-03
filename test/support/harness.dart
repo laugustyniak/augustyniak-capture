@@ -10,6 +10,7 @@ import 'package:audivoa_core/features/recordings/data/media_picker.dart';
 import 'package:audivoa_core/features/recordings/data/recordings_repository.dart';
 import 'package:audivoa_core/features/recordings/domain/capture_category.dart';
 import 'package:audivoa_core/features/recordings/domain/capture_type.dart';
+import 'package:audivoa_core/features/recordings/domain/media_opener.dart';
 import 'package:audivoa_core/features/recordings/domain/recording.dart';
 import 'package:audivoa_core/features/recordings/presentation/recordings_controller.dart';
 import 'package:audivoa_core/features/settings/data/settings_repository.dart';
@@ -80,6 +81,16 @@ class FakePicker implements MediaPicker {
   Future<PickedMedia?> pick(CaptureType type) async => result;
 }
 
+/// Records what the card asked the platform to open instead of shelling out.
+/// Keeps the "tapping play on a video hands the source to the system" test
+/// free of `xdg-open`.
+class FakeMediaOpener implements MediaOpener {
+  final List<String> opened = <String>[];
+
+  @override
+  Future<void> open(String path) async => opened.add(path);
+}
+
 /// A controller wired entirely to fakes, already `initialize()`d so [seed] is
 /// loaded. `dispose` is registered with the test so a forgotten teardown cannot
 /// leak a timer into the next case.
@@ -88,11 +99,13 @@ Future<RecordingsController> buildRecordingsController(
   List<Recording> seed = const <Recording>[],
   PickedMedia? picked,
   TranscriptionService service = const DisabledTranscriptionService(),
+  MediaOpener mediaOpener = const NoopMediaOpener(),
 }) async {
   final RecordingsController controller = RecordingsController(
     repository: FakeRecordingsRepository(appDir, seed: seed),
     transcriptionService: service,
     mediaPicker: FakePicker(picked),
+    mediaOpener: mediaOpener,
     recorder: FakeRecorder(),
     player: FakePlayer(),
   );
@@ -155,6 +168,7 @@ Recording makeRecording({
   int sizeBytes = 0,
   bool isProcessedByUser = false,
   String? filePath,
+  String? thumbPath,
 }) {
   return Recording(
     id: id,
@@ -165,6 +179,7 @@ Recording makeRecording({
     status: status,
     type: type,
     transcript: transcript,
+    thumbPath: thumbPath,
     title: title,
     category: category,
     summary: summary,

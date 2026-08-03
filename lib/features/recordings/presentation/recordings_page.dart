@@ -11,6 +11,7 @@ import '../../logs/data/log_store.dart';
 import '../../logs/presentation/logs_tab.dart';
 import '../../processing/data/ocr_service.dart';
 import '../../processing/data/video_audio_extractor.dart';
+import '../../processing/data/video_poster_extractor.dart';
 import '../../settings/presentation/config_tab.dart';
 import '../../settings/presentation/models_tab.dart';
 import '../../settings/presentation/settings_controller.dart';
@@ -24,6 +25,7 @@ import '../../shortcuts/presentation/shortcuts_coordinator.dart';
 import '../../transcription/data/transcription_service.dart';
 import '../data/recordings_repository.dart';
 import '../data/system_clipboard_sink.dart';
+import '../data/system_media_opener.dart';
 import '../domain/capture_type.dart';
 import 'capture_dock.dart';
 import 'queue_tab.dart';
@@ -76,10 +78,14 @@ class _RecordingsPageState extends State<RecordingsPage> {
       transcriptionService: const DisabledTranscriptionService(),
       ocrService: _buildOcrService(),
       videoAudioExtractor: _buildVideoAudioExtractor(),
+      videoPosterExtractor: _buildVideoPosterExtractor(),
       logSink: logs,
       // Finished processor output lands on the system clipboard, so a clipboard
       // manager keeps it in history. Tests get the no-op default instead.
       clipboardSink: const SystemClipboardSink(),
+      // Video plays in whatever the platform already uses for it; tests get the
+      // no-op default.
+      mediaOpener: const SystemMediaOpener(),
     );
     shortcuts = ShortcutsCoordinator(
       recordings: controller,
@@ -125,6 +131,16 @@ class _RecordingsPageState extends State<RecordingsPage> {
       return const FfmpegVideoAudioExtractor();
     }
     return const UnavailableVideoAudioExtractor();
+  }
+
+  /// Same story for the poster frame: desktop pulls one still with the system
+  /// `ffmpeg` (fails cleanly if absent, costing only the thumbnail), mobile has
+  /// no ffmpeg yet and degrades to "unavailable".
+  static VideoPosterExtractor _buildVideoPosterExtractor() {
+    if (_isDesktop) {
+      return const FfmpegVideoPosterExtractor();
+    }
+    return const UnavailableVideoPosterExtractor();
   }
 
   /// Desktop is where the system `tesseract`/`ffmpeg` binaries and OS-wide
