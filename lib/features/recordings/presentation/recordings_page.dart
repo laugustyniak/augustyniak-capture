@@ -183,6 +183,11 @@ class _RecordingsPageState extends State<RecordingsPage> {
   void _applySettings() {
     controller.transcriptionService = settings.transcriptionService;
     controller.enrichmentService = settings.enrichmentService;
+    // OCR rides the enrichment profile (vision-capable chat endpoint). With no
+    // profile active it falls back to the platform default — tesseract on
+    // desktop, disabled on mobile — so a fresh install behaves as before.
+    final OcrService ocr = settings.ocrService;
+    controller.ocrService = ocr is DisabledOcrService ? _buildOcrService() : ocr;
     controller.audioConfig = settings.audio;
     // Fire-and-forget: an unchanged binding map short-circuits inside the
     // coordinator, so this does not churn the OS hotkey table on every

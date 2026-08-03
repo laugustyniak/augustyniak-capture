@@ -2,6 +2,7 @@ import 'package:flutter/foundation.dart';
 import 'package:uuid/uuid.dart';
 
 import '../../enrichment/domain/enrichment_service.dart';
+import '../../processing/data/ocr_service.dart';
 import '../../shortcuts/domain/hotkey_binding.dart';
 import '../../shortcuts/domain/shortcut_action.dart';
 import '../../transcription/data/transcription_service.dart';
@@ -33,6 +34,8 @@ class SettingsController extends ChangeNotifier {
   String? _serviceSignature;
   EnrichmentService? _enrichment;
   String? _enrichmentSignature;
+  OcrService? _ocr;
+  String? _ocrSignature;
 
   AppSettings get settings => _settings;
   List<ProviderProfile> get profiles => _settings.profiles;
@@ -95,6 +98,31 @@ class SettingsController extends ChangeNotifier {
       _enrichmentSignature = signature;
     }
     return _enrichment!;
+  }
+
+  /// The image-OCR service, derived from the **enrichment** profile — OCR has
+  /// no profile kind of its own (see [ProviderProfile.toOcrService]). Returns
+  /// the disabled service when no enrichment profile is active; the shell
+  /// decides what to fall back to (tesseract on desktop, nothing on mobile).
+  ///
+  /// Same caching rule and the same signature fields as [enrichmentService]:
+  /// the two services share one profile, so they invalidate together.
+  OcrService get ocrService {
+    final ProviderProfile? active = _settings.activeEnrichmentProfile;
+    final String signature = active == null
+        ? 'disabled'
+        : <String?>[
+            active.id,
+            active.endpoint,
+            active.model,
+            active.bearerToken,
+          ].join('|');
+
+    if (_ocr == null || _ocrSignature != signature) {
+      _ocr = active?.toOcrService() ?? const DisabledOcrService();
+      _ocrSignature = signature;
+    }
+    return _ocr!;
   }
 
   Future<void> initialize() async {

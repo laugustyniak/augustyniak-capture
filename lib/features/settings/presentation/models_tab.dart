@@ -90,9 +90,10 @@ class ModelsTab extends StatelessWidget {
           blurb: isTranscription
               ? 'Add a profile to enable transcription. Recording works '
                   'without one — audio is always saved locally.'
-              : 'Add a profile to have finished items named and categorised. '
-                  'Without one they are captured and processed as usual, just '
-                  'left untitled.',
+              : 'Add a profile to have finished items named and categorised — '
+                  'it also powers image OCR, so pick a vision-capable model. '
+                  'Without one, items are captured as usual, just left '
+                  'untitled, and images fall back to local OCR on desktop.',
         )
       else
         ...profiles.map(
@@ -389,6 +390,7 @@ class _ProfileEditorSheetState extends State<_ProfileEditorSheet> {
   late final TextEditingController _language;
   late final TextEditingController _token;
   bool _obscureToken = true;
+  ProviderPreset? _selectedPreset;
 
   @override
   void initState() {
@@ -399,10 +401,18 @@ class _ProfileEditorSheetState extends State<_ProfileEditorSheet> {
     _model = TextEditingController(text: existing?.model ?? '');
     _language = TextEditingController(text: existing?.language ?? '');
     _token = TextEditingController(text: existing?.bearerToken ?? '');
+    // Model suggestions and the token hint follow the endpoint's host, so a
+    // hand-typed endpoint updates them too, not just a preset tap.
+    _endpoint.addListener(_onEndpointChanged);
+  }
+
+  void _onEndpointChanged() {
+    if (mounted) setState(() {});
   }
 
   @override
   void dispose() {
+    _endpoint.removeListener(_onEndpointChanged);
     _name.dispose();
     _endpoint.dispose();
     _model.dispose();
@@ -413,10 +423,27 @@ class _ProfileEditorSheetState extends State<_ProfileEditorSheet> {
 
   void _applyPreset(ProviderPreset preset) {
     setState(() {
+      _selectedPreset = preset;
       if (_name.text.trim().isEmpty) _name.text = preset.name;
       _endpoint.text = preset.endpoint;
       _model.text = preset.model ?? '';
     });
+  }
+
+  /// The preset whose model suggestions and token hint apply right now: the
+  /// one explicitly picked, else — so that *editing* a profile still offers
+  /// them — the first same-kind preset whose endpoint host matches what is in
+  /// the endpoint field.
+  ProviderPreset? get _matchedPreset {
+    if (_selectedPreset != null) return _selectedPreset;
+    final Uri? uri = Uri.tryParse(_endpoint.text.trim());
+    final String host = uri?.host ?? '';
+    if (host.isEmpty) return null;
+    for (final ProviderPreset preset in ProviderPreset.all) {
+      if (preset.kind != widget.kind) continue;
+      if (Uri.tryParse(preset.endpoint)?.host == host) return preset;
+    }
+    return null;
   }
 
   void _submit() {
@@ -532,6 +559,37 @@ class _ProfileEditorSheetState extends State<_ProfileEditorSheet> {
                     ? 'whisper-1 (optional)'
                     : 'gpt-4o-mini (optional)',
               ),
+              // Known-good models for the matched provider, as one-tap fills.
+              // The field above stays free-text — the list is a suggestion,
+              // not a constraint.
+              if (_matchedPreset case final ProviderPreset preset
+                  when preset.models.isNotEmpty) ...<Widget>[
+                Wrap(
+                  spacing: 8,
+                  runSpacing: 8,
+                  children: <Widget>[
+                    for (final String suggestion in preset.models)
+                      ActionChip(
+                        onPressed: () =>
+                            setState(() => _model.text = suggestion),
+                        label: Text(suggestion),
+                        labelStyle: TextStyle(
+                          fontSize: 10,
+                          fontWeight: FontWeight.w800,
+                          color: _model.text.trim() == suggestion
+                              ? Console.cyan
+                              : Console.textSoft,
+                        ),
+                        backgroundColor: Console.surfaceRaised,
+                        side: BorderSide.none,
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(999),
+                        ),
+                      ),
+                  ],
+                ),
+                const SizedBox(height: 12),
+              ],
               // Transcription only: the enrichment prompt already asks the
               // model to answer in the language of the input text.
               if (isTranscription)
@@ -543,7 +601,7 @@ class _ProfileEditorSheetState extends State<_ProfileEditorSheet> {
               _SheetField(
                 controller: _token,
                 label: 'Token',
-                hint: 'Bearer token (optional)',
+                hint: _matchedPreset?.tokenHint ?? 'Bearer token (optional)',
                 obscure: _obscureToken,
                 suffix: IconButton(
                   icon: Icon(
