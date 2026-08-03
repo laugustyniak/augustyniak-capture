@@ -6,6 +6,8 @@ import 'package:audivoa_core/features/settings/domain/provider_profile.dart';
 import 'package:audivoa_core/features/settings/presentation/settings_controller.dart';
 import 'package:audivoa_core/features/enrichment/data/http_chat_enrichment_service.dart';
 import 'package:audivoa_core/features/enrichment/domain/enrichment_service.dart';
+import 'package:audivoa_core/features/processing/data/http_vision_ocr_service.dart';
+import 'package:audivoa_core/features/processing/data/ocr_service.dart';
 import 'package:audivoa_core/features/transcription/data/transcription_service.dart';
 
 /// In-memory stand-in so controller tests need no path_provider bindings.
@@ -463,6 +465,79 @@ void main() {
 
       expect(controller.settings.activeEnrichmentProfileId, isNull);
       expect(controller.enrichmentService, isA<DisabledEnrichmentService>());
+    });
+  });
+
+  group('OCR service off the enrichment profile', () {
+    test('active enrichment profile powers OCR; none means disabled',
+        () async {
+      final SettingsController controller =
+          SettingsController(repository: _FakeSettingsRepository());
+
+      expect(controller.ocrService, isA<DisabledOcrService>());
+
+      await controller.addProfile(
+        name: 'GPT',
+        endpoint: 'https://api.openai.com/v1/chat/completions',
+        kind: ProfileKind.enrichment,
+        model: 'gpt-4o-mini',
+      );
+
+      expect(controller.ocrService, isA<HttpVisionOcrService>());
+    });
+
+    test('cached until the shared connection details change', () async {
+      final SettingsController controller =
+          SettingsController(repository: _FakeSettingsRepository());
+
+      final ProviderProfile gpt = await controller.addProfile(
+        name: 'GPT',
+        endpoint: 'https://api.openai.com/v1/chat/completions',
+        kind: ProfileKind.enrichment,
+        model: 'gpt-4o-mini',
+      );
+
+      final OcrService first = controller.ocrService;
+      expect(identical(controller.ocrService, first), isTrue);
+
+      await controller.updateProfile(gpt.copyWith(model: 'gpt-4.1-mini'));
+      expect(identical(controller.ocrService, first), isFalse);
+    });
+
+    test('a transcription profile never powers OCR', () async {
+      final SettingsController controller =
+          SettingsController(repository: _FakeSettingsRepository());
+
+      await controller.addProfile(
+        name: 'Whisper',
+        endpoint: 'https://api.openai.com/v1/audio/transcriptions',
+        kind: ProfileKind.transcription,
+      );
+
+      expect(controller.ocrService, isA<DisabledOcrService>());
+    });
+  });
+
+  group('ProviderPreset', () {
+    test('the enrichment section has presets with model suggestions', () {
+      final List<ProviderPreset> enrichment = ProviderPreset.all
+          .where((ProviderPreset p) => p.kind == ProfileKind.enrichment)
+          .toList();
+      expect(enrichment, isNotEmpty);
+      expect(
+        enrichment.where((ProviderPreset p) => p.models.isNotEmpty),
+        isNotEmpty,
+      );
+    });
+
+    test('every non-custom preset endpoint parses with a scheme and host', () {
+      for (final ProviderPreset preset in ProviderPreset.all) {
+        if (preset.endpoint.isEmpty) continue;
+        final Uri? uri = Uri.tryParse(preset.endpoint);
+        expect(uri, isNotNull, reason: preset.name);
+        expect(uri!.hasScheme && uri.host.isNotEmpty, isTrue,
+            reason: preset.name);
+      }
     });
   });
 }

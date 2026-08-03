@@ -160,5 +160,33 @@ void main() {
       expect(item.error, isNotNull);
       expect(File(item.filePath).existsSync(), isTrue);
     });
+
+    test('a swapped OCR service only affects the next job', () async {
+      final Directory tmp = await Directory.systemTemp.createTemp('ocr_swap');
+      final File src = File(p.join(tmp.path, 'photo.png'));
+      await src.writeAsBytes(<int>[0x89, 0x50, 0x4e, 0x47, 1, 2, 3]);
+
+      final RecordingsController controller = RecordingsController(
+        repository: _FakeRepo(tmp),
+        transcriptionService: const DisabledTranscriptionService(),
+        ocrService: const _StubOcr('first engine'),
+        mediaPicker: _FakePicker(
+          PickedMedia(file: src, mimeType: 'image/png'),
+        ),
+      );
+      addTearDown(controller.dispose);
+
+      await controller.addUpload(CaptureType.image);
+      await controller.waitForProcessing();
+      expect(controller.recordings.single.transcript, 'first engine');
+
+      // Models-tab change: the resolver picks the new service up for the
+      // retry without rebuilding the registry.
+      controller.ocrService = const _StubOcr('second engine');
+      await controller.retryTranscription(controller.recordings.single.id);
+      await controller.waitForProcessing();
+
+      expect(controller.recordings.single.transcript, 'second engine');
+    });
   });
 }
