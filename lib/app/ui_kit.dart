@@ -709,6 +709,8 @@ class ConsoleField extends StatelessWidget {
     this.onChanged,
     this.fontSize = 13,
     this.monospace = false,
+    this.prefixIcon,
+    this.suffixIcon,
   });
 
   final TextEditingController controller;
@@ -725,6 +727,13 @@ class ConsoleField extends StatelessWidget {
   /// Machine-ish content (a tag, an endpoint) reads in JetBrains Mono; prose
   /// and names stay in the display face, like everywhere else in the app.
   final bool monospace;
+
+  /// Optional leading/trailing affordances — the queue's magnifier and its
+  /// clear button. Here rather than at the call site so a field with icons is
+  /// still the same object as one without, which is what the search box stopped
+  /// being when it grew its own `OutlineInputBorder`.
+  final Widget? prefixIcon;
+  final Widget? suffixIcon;
 
   @override
   Widget build(BuildContext context) {
@@ -751,6 +760,9 @@ class ConsoleField extends StatelessWidget {
         fillColor: Console.surfaceDeep,
         hintText: hintText,
         hintStyle: TextStyle(color: Console.dimText, fontSize: fontSize),
+        prefixIcon: prefixIcon,
+        prefixIconConstraints: const BoxConstraints(minWidth: 40),
+        suffixIcon: suffixIcon,
         contentPadding: const EdgeInsets.symmetric(
           horizontal: 11,
           vertical: 10,
@@ -919,6 +931,7 @@ class StatusPill extends StatelessWidget {
     required this.label,
     required this.color,
     this.pulse = false,
+    this.outlined = false,
   });
 
   final String label;
@@ -928,12 +941,25 @@ class StatusPill extends StatelessWidget {
   /// (transcribing, recording), never for a resting one.
   final bool pulse;
 
+  /// Draws the pill as an outline instead of a fill.
+  ///
+  /// The card can carry three of these at once — project, category and pipeline
+  /// status — and only the last is a *state*. Given identical form they had
+  /// identical weight, so colour alone had to carry the difference between
+  /// "this belongs to Acme" and "this is still running", at 10 px. The fill is
+  /// now reserved for the one that changes on its own; the other two are
+  /// labels, and read as labels.
+  final bool outlined;
+
   @override
   Widget build(BuildContext context) {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
       decoration: BoxDecoration(
-        color: color.withValues(alpha: .1),
+        color: outlined ? null : color.withValues(alpha: .1),
+        border: outlined
+            ? Border.all(color: color.withValues(alpha: .45))
+            : null,
         borderRadius: BorderRadius.circular(999),
       ),
       child: Row(

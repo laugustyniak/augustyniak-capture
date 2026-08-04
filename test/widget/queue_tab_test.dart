@@ -1,8 +1,8 @@
 import 'dart:convert';
 import 'dart:io';
-import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:path/path.dart' as p;
 import 'package:augustyniak_capture/app/ui_kit.dart';
@@ -136,6 +136,53 @@ void main() {
     expect(
       find.text('zobaczmy czy nadal działa ładowanie'),
       findsOneWidget,
+    );
+  });
+
+  testWidgets('arrow keys move a selection and D closes the selected row', (
+    WidgetTester tester,
+  ) async {
+    // The app ships system-wide global hotkeys, and until this existed the
+    // window itself had one key binding in it. Reaching the third card meant
+    // roughly fifteen presses of Tab.
+    final RecordingsController controller = await buildRecordingsController(
+      appDir,
+      seed: <Recording>[
+        makeRecording(id: 'first', title: 'first'),
+        makeRecording(id: 'second', title: 'second'),
+      ],
+    );
+    await pumpQueue(tester, controller);
+
+    // Nothing is selected until the user asks: a selection they did not make
+    // would put the first keystroke on an arbitrary capture.
+    RecordingCard cardFor(String title) => tester.widget<RecordingCard>(
+      find.ancestor(of: find.text(title), matching: find.byType(RecordingCard)),
+    );
+    expect(cardFor('first').focused, isFalse);
+
+    await tester.sendKeyEvent(LogicalKeyboardKey.arrowDown);
+    await tester.pumpAndSettle();
+    expect(cardFor('first').focused, isTrue);
+
+    await tester.sendKeyEvent(LogicalKeyboardKey.arrowDown);
+    await tester.pumpAndSettle();
+    expect(cardFor('second').focused, isTrue);
+    expect(cardFor('first').focused, isFalse);
+
+    // Clamped, not wrapped: arrowing past the end should stop, not jump back
+    // to the top of a list the user has just walked down.
+    await tester.sendKeyEvent(LogicalKeyboardKey.arrowDown);
+    await tester.pumpAndSettle();
+    expect(cardFor('second').focused, isTrue);
+
+    await tester.sendKeyEvent(LogicalKeyboardKey.keyD);
+    await tester.pumpAndSettle();
+    expect(
+      controller.recordings
+          .firstWhere((Recording item) => item.id == 'second')
+          .isProcessedByUser,
+      isTrue,
     );
   });
 
@@ -398,7 +445,9 @@ void main() {
     await pumpQueue(tester, controller);
 
     expect(find.text('RETRY'), findsNothing);
-    expect(find.text('READY'), findsOneWidget);
+    // The resting state draws no badge at all: a pill is a claim that something
+    // is different, and READY was on almost every row.
+    expect(find.text('READY'), findsNothing);
   });
 
   testWidgets('every card states the durability guarantee', (
@@ -633,8 +682,9 @@ void main() {
     expect(find.text('Call the client on Friday.'), findsOneWidget);
     expect(find.text('#client'), findsOneWidget);
     expect(find.text('#call'), findsOneWidget);
-    // The pipeline pill is still there beside it.
-    expect(find.text('READY'), findsOneWidget);
+    // …and the resting pipeline state adds no pill beside it, so the category
+    // is the only badge on a finished row.
+    expect(find.text('READY'), findsNothing);
   });
 
   testWidgets('an un-enriched card shows no category and no summary', (
@@ -717,7 +767,8 @@ void main() {
   ) async {
     await pumpCard(tester, isEnriching: false);
 
-    expect(find.text('READY'), findsOneWidget);
+    // Resting means silent: no ANALYZING, and no READY either.
+    expect(find.text('READY'), findsNothing);
     expect(find.byType(ScanLine), findsNothing);
     expect(find.text(RecordingCard.analyzingLabel), findsNothing);
   });
