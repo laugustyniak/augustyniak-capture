@@ -171,14 +171,75 @@ void main() {
       expect(find.text('AAC-LC · 16 kHz · mono · 64 kbps'), findsOneWidget);
       expect(find.text('recording → .m4a'), findsOneWidget);
       expect(find.text('persist recordings.json (atomic)'), findsOneWidget);
-      // The guarantee is stated on the screen where it matters most.
+      // The guarantee is stated on the screen where it matters most — and now
+      // names the one action that is exempt from it.
       expect(
-        find.textContaining('source file is never deleted'),
+        find.textContaining('a processing failure never deletes it'),
         findsOneWidget,
       );
 
       await tester.runAsync(controller.stopRecording);
       await settleIo(tester);
+    });
+
+    testWidgets('DISCARD asks first, and cancelling keeps recording', (
+      WidgetTester tester,
+    ) async {
+      final _GrantingRecorder recorder = _GrantingRecorder();
+      final RecordingsController controller = buildController(
+        recorder: recorder,
+      );
+      await tester.runAsync(controller.startRecording);
+
+      await tester.pumpWidget(
+        hostTab(
+          () => RecordingView(controller: controller),
+          listenable: controller,
+        ),
+      );
+      await tester.pump();
+
+      await tester.tap(find.bySemanticsLabel(RecordingView.discardLabel));
+      await tester.pump();
+      expect(find.text('Discard this recording?'), findsOneWidget);
+
+      await tester.tap(find.text('CANCEL'));
+      await settleIo(tester);
+
+      // Backing out of the dialog is not a decision about the take.
+      expect(controller.isRecording, isTrue);
+      expect(File(recorder._path!).existsSync(), isTrue);
+
+      await tester.runAsync(controller.stopRecording);
+      await settleIo(tester);
+    });
+
+    testWidgets('confirming DISCARD deletes the take and indexes nothing', (
+      WidgetTester tester,
+    ) async {
+      final _GrantingRecorder recorder = _GrantingRecorder();
+      final RecordingsController controller = buildController(
+        recorder: recorder,
+      );
+      await tester.runAsync(controller.startRecording);
+      final String path = recorder._path!;
+
+      await tester.pumpWidget(
+        hostTab(
+          () => RecordingView(controller: controller),
+          listenable: controller,
+        ),
+      );
+      await tester.pump();
+
+      await tester.tap(find.bySemanticsLabel(RecordingView.discardLabel));
+      await tester.pump();
+      await tester.tap(find.text('DISCARD'));
+      await settleIo(tester);
+
+      expect(controller.isRecording, isFalse);
+      expect(controller.recordings, isEmpty);
+      expect(File(path).existsSync(), isFalse);
     });
 
     testWidgets('SAVE stops the recorder and persists the capture', (

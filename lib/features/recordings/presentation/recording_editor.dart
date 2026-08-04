@@ -47,12 +47,14 @@ class RecordingEditor extends StatefulWidget {
     required this.onCategoryChanged,
     required this.onTagsChanged,
     required this.onDone,
+    this.onDelete,
     this.projects = const <Project>[],
     this.onProjectChanged,
   });
 
   /// Public so a test asserts on the same string the widget renders.
   static const String doneLabel = 'Finish editing';
+  static const String deleteLabel = 'Delete this capture and its source file';
   static const String revertTitleLabel = 'Revert title to the saved value';
   static const String revertTextLabel = 'Revert text to the saved value';
 
@@ -67,6 +69,16 @@ class RecordingEditor extends StatefulWidget {
   final ValueChanged<CaptureCategory?> onCategoryChanged;
   final ValueChanged<List<String>> onTagsChanged;
   final VoidCallback onDone;
+
+  /// Removes the capture for good. It lives here rather than on the card
+  /// because the action strip there is play / edit / done — all cheap, all
+  /// reversible — and an irreversible control a few pixels from `play` is the
+  /// one mis-tap this app cannot undo.
+  ///
+  /// Reaching it costs one extra tap on the pencil, which is the whole idea.
+  /// Null hides it entirely, so a host that has no deletion to offer renders
+  /// the editor exactly as before.
+  final VoidCallback? onDelete;
 
   /// Assignable projects. Empty hides the row entirely — an install that never
   /// defined one should not be shown a control with a single `—` in it.
@@ -343,6 +355,10 @@ class _RecordingEditorState extends State<RecordingEditor> {
               children: <Widget>[
                 Expanded(child: VerificationLine(recording: recording)),
                 const SizedBox(width: 8),
+                if (widget.onDelete != null) ...<Widget>[
+                  _DeleteButton(onTap: widget.onDelete!),
+                  const SizedBox(width: 7),
+                ],
                 _DoneButton(onTap: _finish),
               ],
             ),
@@ -459,6 +475,55 @@ class _RevertButton extends StatelessWidget {
         child: const Padding(
           padding: EdgeInsets.all(3),
           child: Icon(Icons.undo_rounded, size: 14, color: Console.amber),
+        ),
+      ),
+    );
+  }
+}
+
+/// Removes the capture for good. Shaped like [_DoneButton] so the strip stays
+/// one row of controls, and coloured red so the difference is the colour rather
+/// than the position — the confirmation dialog behind it is what actually
+/// guards the action.
+class _DeleteButton extends StatelessWidget {
+  const _DeleteButton({required this.onTap});
+
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return Semantics(
+      button: true,
+      label: RecordingEditor.deleteLabel,
+      // The word inside the button is "DELETE", which on its own says neither
+      // what is deleted nor that the file goes with it. Excluding the children
+      // makes the node announce the full sentence instead of appending the
+      // shorthand to it.
+      excludeSemantics: true,
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(8),
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 11, vertical: 7),
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(8),
+            border: Border.all(color: Console.red.withValues(alpha: .4)),
+          ),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: <Widget>[
+              const Icon(
+                Icons.delete_outline_rounded,
+                size: 13,
+                color: Console.redSoft,
+              ),
+              const SizedBox(width: 6),
+              Text(
+                'DELETE',
+                style: ConsoleText.chip.copyWith(color: Console.redSoft),
+              ),
+            ],
+          ),
         ),
       ),
     );

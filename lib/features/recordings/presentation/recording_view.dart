@@ -14,8 +14,13 @@ import 'recordings_controller.dart';
 /// needs to know exactly what the app is doing with their audio: the format it
 /// is being written in, how far the pipeline has got, and — the line at the
 /// bottom — that stopping saves the file no matter what happens afterwards.
-/// The single full-width `SAVE` is deliberate: there is no discard button,
-/// because there is no path in this app that throws a capture away.
+///
+/// `SAVE` keeps the whole width and the accent colour; `DISCARD` is a narrow
+/// outline beside it and asks for confirmation first. The asymmetry is the
+/// design: throwing a take away is the only irreversible thing this screen can
+/// do, so it must be reachable — a mistimed start otherwise leaves rubbish that
+/// can only be cleaned up after it has been transcribed — but it must never be
+/// the button a thumb finds by accident while reaching for stop.
 class RecordingView extends StatelessWidget {
   const RecordingView({
     super.key,
@@ -23,7 +28,25 @@ class RecordingView extends StatelessWidget {
     this.projects = const <Project>[],
   });
 
+  /// Public so the confirmation test asserts on the string that is rendered.
+  static const String discardLabel = 'Discard recording without saving';
+
   final RecordingsController controller;
+
+  /// Confirmed because it is unrecoverable: the partial `.m4a` is deleted and
+  /// was never indexed, so unlike every other file in this app there is no
+  /// orphan sweep that could bring it back.
+  Future<void> _confirmDiscard(BuildContext context) async {
+    final bool confirmed = await confirmDestructive(
+      context,
+      title: 'Discard this recording?',
+      message:
+          'The audio recorded so far is deleted and nothing is written to '
+          'the queue. This cannot be undone.',
+      confirmLabel: 'DISCARD',
+    );
+    if (confirmed) await controller.discardRecording();
+  }
 
   /// Offered as a row of chips so the capture can be re-filed while it runs.
   /// Empty by default — and then the picker is not drawn at all, so an install
@@ -91,15 +114,26 @@ class RecordingView extends StatelessWidget {
               const SizedBox(height: 14),
             ],
             Text(
-              'the source file is never deleted — a processing failure '
-              'keeps the audio',
+              'saving is the only way out that keeps the audio — a processing '
+              'failure never deletes it, only DISCARD does',
               textAlign: TextAlign.center,
               style: ConsoleText.micro,
             ),
             const SizedBox(height: 14),
-            _SaveButton(
-              onTap: controller.stopRecording,
-              busy: controller.isBusy,
+            Row(
+              children: <Widget>[
+                _DiscardButton(
+                  onTap: () => _confirmDiscard(context),
+                  busy: controller.isBusy,
+                ),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: _SaveButton(
+                    onTap: controller.stopRecording,
+                    busy: controller.isBusy,
+                  ),
+                ),
+              ],
             ),
           ],
         ),
@@ -435,6 +469,43 @@ class _ProjectPicker extends StatelessWidget {
           ],
         ),
       ],
+    );
+  }
+}
+
+/// The escape hatch, deliberately undersized. Matches [_SaveButton]'s height so
+/// the pair reads as one control strip, and carries no fill of its own — the
+/// red only appears once the confirmation dialog is on screen.
+class _DiscardButton extends StatelessWidget {
+  const _DiscardButton({required this.onTap, required this.busy});
+
+  final VoidCallback onTap;
+  final bool busy;
+
+  @override
+  Widget build(BuildContext context) {
+    return Semantics(
+      button: true,
+      label: RecordingView.discardLabel,
+      child: InkWell(
+        onTap: busy ? null : onTap,
+        borderRadius: BorderRadius.circular(14),
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 18),
+          alignment: Alignment.center,
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(14),
+            border: Border.all(
+              color: busy ? Console.border : Console.red.withValues(alpha: .45),
+            ),
+          ),
+          child: Icon(
+            Icons.delete_outline_rounded,
+            size: 19,
+            color: busy ? Console.muted : Console.redSoft,
+          ),
+        ),
+      ),
     );
   }
 }
