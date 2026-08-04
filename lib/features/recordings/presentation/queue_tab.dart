@@ -177,7 +177,10 @@ class _QueueTabState extends State<QueueTab> {
       context: context,
       isScrollControlled: true,
       backgroundColor: Console.background,
-      builder: (BuildContext _) => EditSheet(recording: recording),
+      builder: (BuildContext _) => EditSheet(
+        recording: recording,
+        revisions: widget.controller.revisionsFor(recording.id),
+      ),
     );
     if (result == null) return; // cancelled
     await widget.controller.setTitle(recording.id, result.title);

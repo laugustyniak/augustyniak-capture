@@ -25,6 +25,7 @@ import '../../shortcuts/presentation/shortcuts_coordinator.dart';
 import '../../transcription/data/transcription_service.dart';
 import '../data/recordings_repository.dart';
 import '../data/system_clipboard_sink.dart';
+import '../data/revisions_repository.dart';
 import '../data/system_media_opener.dart';
 import '../domain/capture_type.dart';
 import 'capture_dock.dart';
@@ -70,6 +71,10 @@ class _RecordingsPageState extends State<RecordingsPage> {
     logs = LogStore(archive: FileLogArchive());
     controller = RecordingsController(
       repository: repository,
+      // Records what the enrichment model and hand edits overwrite. Left null
+      // in tests, like the clipboard and media-opener seams, so the pure-Dart
+      // suites never reach a platform channel.
+      revisionsRepository: RevisionsRepository(),
       // Replaced as soon as settings load; a fresh install with no profile
       // keeps this disabled service, which is the pre-existing behaviour. The
       // enrichment service is left at its disabled default here for the same
@@ -169,6 +174,10 @@ class _RecordingsPageState extends State<RecordingsPage> {
     // provider and capture parameters.
     await settings.initialize();
     await controller.initialize();
+    // After loading, never inside it: this reads the recordings *directory*, so
+    // it belongs to the shell that knows the directory is the real one. On a
+    // healthy install it costs one listing and finds nothing.
+    await controller.recoverOrphans();
     // Explicit rather than relying on the notification `initialize` emits, so
     // the hotkeys are guaranteed live once bootstrap returns.
     await _applyShortcuts();

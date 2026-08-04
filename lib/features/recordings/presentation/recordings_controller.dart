@@ -20,11 +20,13 @@ import '../../transcription/data/transcription_service.dart';
 import '../data/media_importer.dart';
 import '../data/media_picker.dart';
 import '../data/recordings_repository.dart';
+import '../data/revisions_repository.dart';
 import '../domain/capture_category.dart';
 import '../domain/capture_type.dart';
 import '../domain/clipboard_sink.dart';
 import '../domain/media_opener.dart';
 import '../domain/recording.dart';
+import '../domain/recording_revision.dart';
 
 class RecordingsController extends ChangeNotifier {
   RecordingsController({
@@ -40,11 +42,13 @@ class RecordingsController extends ChangeNotifier {
     LogSink logSink = const NoopLogSink(),
     ClipboardSink clipboardSink = const NoopClipboardSink(),
     MediaOpener mediaOpener = const NoopMediaOpener(),
+    RevisionsRepository? revisionsRepository,
     ProcessorRegistry? processorRegistry,
     MediaPicker? mediaPicker,
     AudioRecorder? recorder,
     AudioPlayer? player,
   }) : _repository = repository,
+       _revisionsRepository = revisionsRepository,
        _transcriptionService = transcriptionService,
        _enrichmentService = enrichmentService,
        _ocrService = ocrService,
@@ -75,6 +79,19 @@ class RecordingsController extends ChangeNotifier {
   }
 
   final RecordingsRepository _repository;
+
+  /// Where the change history is appended. Null disables history entirely — the
+  /// same optional-seam shape as [ClipboardSink] and [MediaOpener], so the
+  /// pure-Dart tests that never touch a platform channel keep working unchanged
+  /// and the shell is the one place that opts in.
+  final RevisionsRepository? _revisionsRepository;
+
+  /// Change history by capture id, newest first. Loaded once at [initialize]
+  /// and kept in step by [_recordRevisions]; the file is append-only, so memory
+  /// and disk can only ever diverge by a write that failed and was logged.
+  Map<String, List<RecordingRevision>> _revisions =
+      <String, List<RecordingRevision>>{};
+
   final LogSink _logSink;
   final ClipboardSink _clipboardSink;
   final MediaOpener _mediaOpener;
@@ -119,6 +136,19 @@ class RecordingsController extends ChangeNotifier {
   String? _processingId; // the id currently running in the drain loop, if any
   Future<void>? _saveInFlight; // serializes saveAll (shared temp file)
 
+  /// Set only when [initialize] found an index it could not read. While true
+  /// every write is refused, because `_recordings` is then empty for a reason
+  /// that has nothing to do with the queue being empty — and `saveAll` rewrites
+  /// the *whole* index, so a single write in that state destroys the history it
+  /// failed to load, leaving the source files orphaned.
+  ///
+  /// Deliberately defaults to false rather than "true until a load succeeds": a
+  /// controller that was never initialized (every capture test, and the very
+  /// first run before `recordings.json` exists) must still be able to persist.
+  /// The flag encodes *"I know there is history I cannot see"*, which is a
+  /// strictly narrower claim than *"I have not loaded"*.
+  bool _indexUnreadable = false;
+
   /// Ids whose poster is being extracted right now. Poster extraction has two
   /// callers (the drain loop and the startup backfill) that both write the same
   /// `<id>.thumb.jpg`, so this is the mutex that stops two ffmpeg runs from
@@ -140,6 +170,20 @@ class RecordingsController extends ChangeNotifier {
   final Set<String> _enrichingIds = <String>{};
 
   List<Recording> get recordings => List<Recording>.unmodifiable(_recordings);
+
+  /// What has been overwritten on this capture, newest first — the previous
+  /// title a model replaced, the transcript a re-run threw away. Empty when
+  /// nothing has ever been overwritten, which is the normal state of a capture
+  /// that was processed once and left alone.
+  List<RecordingRevision> revisionsFor(String id) =>
+      List<RecordingRevision>.unmodifiable(
+        _revisions[id] ?? const <RecordingRevision>[],
+      );
+
+  /// Whether the index could not be read at start-up. While true the controller
+  /// refuses every write, so the queue is showing nothing rather than nothing
+  /// being there — the UI must say so instead of looking empty.
+  bool get isIndexUnreadable => _indexUnreadable;
   bool get isRecording => _isRecording;
   bool get isBusy => _isBusy;
 
@@ -226,8 +270,34 @@ class RecordingsController extends ChangeNotifier {
   }
 
   Future<void> initialize() async {
-    _recordings = await _repository.loadAll();
+    try {
+      _recordings = await _repository.loadAll();
+    } on IndexUnreadableException catch (exception) {
+      // The index is there and cannot be read. Everything downstream — the
+      // resume sweep, the poster backfill, any capture — would run against an
+      // empty list, and the first `_update` would then persist that emptiness
+      // over the history it failed to load. So: refuse to write, say so, stop.
+      _indexUnreadable = true;
+      _error = 'Could not read the recordings index — writes are disabled to '
+          'protect it. $exception';
+      _logSink.log(_error!, level: LogLevel.error);
+      notifyListeners();
+      return;
+    }
     _logSink.log('Loaded ${_recordings.length} captures from disk.');
+
+    // Supporting evidence, never a precondition: a history that will not load
+    // costs the edit sheet's HISTORY section, not the queue.
+    try {
+      _revisions = await _revisionsRepository?.load() ??
+          <String, List<RecordingRevision>>{};
+    } catch (exception) {
+      _logSink.log(
+        'Change history could not be read: $exception',
+        level: LogLevel.warn,
+      );
+    }
+
     notifyListeners();
 
     // Resume jobs left non-terminal by a previous session (the app was killed
@@ -249,6 +319,46 @@ class RecordingsController extends ChangeNotifier {
     // per video must never be something the first frame of the app waits for.
     _posterBackfill = _backfillPosters();
     unawaited(_posterBackfill!);
+  }
+
+  /// Bring source files with no index row back into the queue.
+  ///
+  /// The counterpart to the write guard: that stops history from being lost
+  /// going forward, this recovers what an earlier build already lost. A capture
+  /// is only ever *indexed* after its source file is written and verified, so a
+  /// source with no row can only mean the row went missing — never that the
+  /// capture was incomplete.
+  ///
+  /// **Called by the shell after [initialize], deliberately not from inside
+  /// it.** It is the one operation here that reads the recordings *directory*
+  /// rather than the index, so it is the one operation an in-memory repository
+  /// fake cannot stand in for — leaving it in `initialize` made every widget
+  /// test scan the developer's real capture folder. Keeping it a separate,
+  /// explicit call also matches what it is: a repair, not part of loading.
+  ///
+  /// Best-effort, on the [_copyToClipboard] contract: it never touches an
+  /// existing item, and it swallows its own errors into the log, so a failed
+  /// scan costs a recovery rather than a start-up.
+  Future<void> recoverOrphans() async {
+    if (_indexUnreadable || _disposed) return;
+    try {
+      final List<Recording> orphans = await _repository.findOrphans(_recordings);
+      if (orphans.isEmpty || _disposed) return;
+
+      _recordings = <Recording>[..._recordings, ...orphans]
+        ..sort((Recording a, Recording b) => b.createdAt.compareTo(a.createdAt));
+      await _persistAll();
+      _logSink.log(
+        'Recovered ${orphans.length} capture(s) with no index entry — '
+        'restored as raw, re-run processing to get their text back.',
+        level: LogLevel.warn,
+      );
+    } catch (exception) {
+      _logSink.log(
+        'Orphan recovery failed: $exception',
+        level: LogLevel.warn,
+      );
+    }
   }
 
   /// Give every video on disk a poster, whether or not it is ever processed
@@ -567,7 +677,11 @@ class RecordingsController extends ChangeNotifier {
   Future<void> editTranscript(String id, String text) async {
     final String trimmed = text.trim();
     if (trimmed.isEmpty) return;
-    await _update(id, (Recording item) => item.copyWith(transcript: trimmed));
+    await _update(
+      id,
+      (Recording item) => item.copyWith(transcript: trimmed),
+      source: RevisionSource.user,
+    );
     _logSink.log('Text updated.', recordingId: id);
   }
 
@@ -581,6 +695,7 @@ class RecordingsController extends ChangeNotifier {
         title: trimmed.isEmpty ? null : trimmed,
         clearTitle: trimmed.isEmpty,
       ),
+      source: RevisionSource.user,
     );
     _logSink.log(
       trimmed.isEmpty ? 'Title cleared.' : 'Title set.',
@@ -595,6 +710,7 @@ class RecordingsController extends ChangeNotifier {
       id,
       (Recording item) =>
           item.copyWith(category: category, clearCategory: category == null),
+      source: RevisionSource.user,
     );
     _logSink.log(
       category == null
@@ -614,7 +730,11 @@ class RecordingsController extends ChangeNotifier {
       final String tag = value.trim().toLowerCase();
       if (tag.isNotEmpty && seen.add(tag)) normalized.add(tag);
     }
-    await _update(id, (Recording item) => item.copyWith(tags: normalized));
+    await _update(
+      id,
+      (Recording item) => item.copyWith(tags: normalized),
+      source: RevisionSource.user,
+    );
     _logSink.log(
       normalized.isEmpty ? 'Tags cleared.' : 'Tags updated.',
       recordingId: id,
@@ -911,6 +1031,10 @@ class RecordingsController extends ChangeNotifier {
           summary: result.summary,
           tags: item.tags.isEmpty ? result.tags : null,
         ),
+        // The reason this feature exists: `summary` has no editor and is
+        // refreshed wholesale on every re-run, so without a record the previous
+        // one is simply gone.
+        source: RevisionSource.enrichment,
       );
       _logSink.log('Enriched \u00b7 ${result.category.name}', recordingId: id);
     } on EnrichmentNotConfiguredException {
@@ -932,13 +1056,91 @@ class RecordingsController extends ChangeNotifier {
     }
   }
 
+  /// Diff the five user-meaningful fields and append what actually changed.
+  ///
+  /// Only these five: `status`, `error` and `thumbPath` are pipeline mechanics
+  /// that already have the Logs tab, and recording them here would bury the two
+  /// questions this feature exists to answer — *what did the model rename this
+  /// to, and what did the transcript say before the re-run* — under a wall of
+  /// `saved → transcribing → completed`.
+  ///
+  /// **A change out of an empty value is not recorded.** Filling a blank title
+  /// or writing a transcript for the first time overwrites nothing, so there is
+  /// nothing to preserve; the current value already lives in `recordings.json`.
+  /// This is also what keeps the file small: the common case — every capture's
+  /// first transcript — never reaches it, and only a re-run that genuinely
+  /// replaces text pays for a copy.
+  ///
+  /// Best-effort on the [_copyToClipboard] contract: a failed history write is
+  /// logged and swallowed, never allowed to fail the capture it describes.
+  Future<void> _recordRevisions(
+    Recording before,
+    Recording after,
+    RevisionSource source,
+  ) async {
+    final RevisionsRepository? repository = _revisionsRepository;
+    if (repository == null) return;
+
+    final List<RecordingRevision> changes = <RecordingRevision>[];
+    void diff(String field, String? from, String? to) {
+      if (from == to) return;
+      // Nothing was overwritten — see the doc comment above.
+      if (from == null || from.isEmpty) return;
+      changes.add(
+        RecordingRevision(
+          recordingId: after.id,
+          at: DateTime.now(),
+          field: field,
+          from: RecordingRevision.truncate(from),
+          to: RecordingRevision.truncate(to),
+          source: source,
+        ),
+      );
+    }
+
+    diff('title', before.title, after.title);
+    diff('category', before.category?.name, after.category?.name);
+    diff('summary', before.summary, after.summary);
+    diff('tags', before.tags.join(', '), after.tags.join(', '));
+    diff('transcript', before.transcript, after.transcript);
+    if (changes.isEmpty) return;
+
+    // Update the in-memory view first so the edit sheet shows the entry even if
+    // the append below fails — the history is then correct for this session and
+    // merely incomplete on disk, rather than invisible in both.
+    _revisions
+        .putIfAbsent(after.id, () => <RecordingRevision>[])
+        .insertAll(0, changes);
+    try {
+      await repository.append(changes);
+    } catch (exception) {
+      _logSink.log(
+        'Change history not written: $exception',
+        level: LogLevel.warn,
+        recordingId: after.id,
+      );
+    }
+  }
+
   Future<void> _update(
     String id,
-    Recording Function(Recording) transform,
-  ) async {
+    Recording Function(Recording) transform, {
+    RevisionSource source = RevisionSource.processor,
+  }) async {
+    // Captured before the map so the diff below compares the same item across
+    // the transform. Every mutation in this class funnels through here, which
+    // is what makes the history impossible to bypass by adding a new setter.
+    final int index = _recordings.indexWhere((Recording item) => item.id == id);
+    final Recording? before = index < 0 ? null : _recordings[index];
+
     _recordings = _recordings
         .map((Recording item) => item.id == id ? transform(item) : item)
         .toList();
+
+    if (before != null) {
+      final Recording after = _recordings[index];
+      await _recordRevisions(before, after, source);
+    }
     // Persist even after dispose: the drain can be mid-job when the shell tears
     // the page down, and the status it just computed still belongs on disk.
     await _persistAll();
@@ -954,6 +1156,17 @@ class RecordingsController extends ChangeNotifier {
   /// with processing now off the `_isBusy` lock, a capture/retry save can race a
   /// drain save. Wait for any in-flight write, then persist the latest state.
   Future<void> _persistAll() async {
+    // The one place a refusal is worth more than a write. Every mutation in
+    // this class funnels through here, so this single guard is what makes the
+    // "unreadable index is never overwritten" promise unbypassable.
+    if (_indexUnreadable) {
+      _logSink.log(
+        'Write refused — the recordings index could not be read; '
+        'existing history is left untouched.',
+        level: LogLevel.error,
+      );
+      return;
+    }
     while (_saveInFlight != null) {
       await _saveInFlight;
     }

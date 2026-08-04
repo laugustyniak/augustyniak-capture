@@ -79,3 +79,32 @@ String _fromMime(String? mimeType, {required String fallback}) {
   if (mimeType == null) return fallback;
   return _mimeExtensions[mimeType.trim().toLowerCase()] ?? fallback;
 }
+
+/// Inverse of [extensionFor]: which [CaptureType] a stray source file on disk
+/// belongs to, or null when the extension is not one this app ever writes.
+///
+/// Used only by orphan recovery — re-adopting a source artifact whose index row
+/// was lost. It is deliberately a *separate* function rather than a reverse
+/// lookup of [_mimeExtensions], because that map is many-to-one (`audio/mp4`
+/// and `audio/aac` both yield `m4a`) and because the answer wanted here is the
+/// capture type, not the mime type it came from.
+///
+/// Null for anything unrecognised, which is what keeps `recordings.json`,
+/// `logs.json`, `settings.json` and the `.thumb.jpg` posters out of the queue.
+/// Extension matching is case-insensitive and tolerates a leading dot.
+CaptureType? typeForExtension(String extension) {
+  final String normalized =
+      extension.trim().toLowerCase().replaceFirst(RegExp(r'^\.'), '');
+  return switch (normalized) {
+    // Ambiguous by design: an `.m4a` is either a mic capture or an uploaded
+    // AAC file, and nothing on disk distinguishes them once the index row is
+    // gone. `audioRecording` is the same value `CaptureType.fromName(null)`
+    // picks for a legacy row, so recovery degrades the way loading does.
+    'm4a' => CaptureType.audioRecording,
+    'mp3' || 'wav' || 'ogg' || 'flac' => CaptureType.audioUpload,
+    'jpg' || 'jpeg' || 'png' || 'webp' || 'heic' => CaptureType.image,
+    'mp4' || 'mov' => CaptureType.video,
+    'txt' => CaptureType.text,
+    _ => null,
+  };
+}
