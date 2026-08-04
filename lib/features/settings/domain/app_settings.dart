@@ -13,6 +13,7 @@ class AppSettings {
     this.profiles = const <ProviderProfile>[],
     this.activeProfileId,
     this.activeEnrichmentProfileId,
+    this.enrichmentInstructions,
     this.audio = AudioConfig.defaults,
     Map<ShortcutAction, HotkeyBinding>? shortcuts,
   }) : _shortcuts = shortcuts;
@@ -25,6 +26,16 @@ class AppSettings {
   /// The enrichment profile in force. Independent of [activeProfileId] because
   /// one profile of each kind has to be active at the same time.
   final String? activeEnrichmentProfileId;
+
+  /// Free-form "who I am and what I collect", sent to the enrichment model with
+  /// every capture. Null and blank both mean "not set" — the prompt simply
+  /// omits the section, so an install that never fills this in gets exactly the
+  /// prompt it got before the field existed.
+  ///
+  /// Lives here rather than on a [ProviderProfile] because it describes the
+  /// *user*, not the endpoint: swapping OpenAI for a local Ollama must not lose
+  /// it.
+  final String? enrichmentInstructions;
   final AudioConfig audio;
 
   /// Null means "never configured". Kept private and nullable rather than
@@ -79,17 +90,23 @@ class AppSettings {
     bool clearActiveProfileId = false,
     String? activeEnrichmentProfileId,
     bool clearActiveEnrichmentProfileId = false,
+    String? enrichmentInstructions,
+    bool clearEnrichmentInstructions = false,
     AudioConfig? audio,
     Map<ShortcutAction, HotkeyBinding>? shortcuts,
     bool resetShortcuts = false,
   }) {
     return AppSettings(
       profiles: profiles ?? this.profiles,
-      activeProfileId:
-          clearActiveProfileId ? null : (activeProfileId ?? this.activeProfileId),
+      activeProfileId: clearActiveProfileId
+          ? null
+          : (activeProfileId ?? this.activeProfileId),
       activeEnrichmentProfileId: clearActiveEnrichmentProfileId
           ? null
           : (activeEnrichmentProfileId ?? this.activeEnrichmentProfileId),
+      enrichmentInstructions: clearEnrichmentInstructions
+          ? null
+          : (enrichmentInstructions ?? this.enrichmentInstructions),
       audio: audio ?? this.audio,
       shortcuts: resetShortcuts ? null : (shortcuts ?? _shortcuts),
     );
@@ -98,10 +115,12 @@ class AppSettings {
   Map<String, dynamic> toJson() {
     final Map<ShortcutAction, HotkeyBinding>? stored = _shortcuts;
     return <String, dynamic>{
-      'profiles':
-          profiles.map((ProviderProfile item) => item.toJson()).toList(),
+      'profiles': profiles
+          .map((ProviderProfile item) => item.toJson())
+          .toList(),
       'activeProfileId': activeProfileId,
       'activeEnrichmentProfileId': activeEnrichmentProfileId,
+      'enrichmentInstructions': enrichmentInstructions,
       'audio': audio.toJson(),
       // Omitted entirely while untouched, so a later build that adds a new
       // action still ships its default to users who never edited a shortcut.
@@ -118,9 +137,9 @@ class AppSettings {
     final dynamic rawProfiles = json['profiles'];
     final List<ProviderProfile> profiles = rawProfiles is List<dynamic>
         ? rawProfiles
-            .whereType<Map<String, dynamic>>()
-            .map(ProviderProfile.fromJson)
-            .toList()
+              .whereType<Map<String, dynamic>>()
+              .map(ProviderProfile.fromJson)
+              .toList()
         : <ProviderProfile>[];
 
     final dynamic rawShortcuts = json['shortcuts'];
@@ -144,12 +163,15 @@ class AppSettings {
       // holding a non-string here would throw out of the whole load, taking the
       // profiles and audio config with it. Same defensive shape as `profiles`
       // and `audio` above.
-      activeProfileId:
-          json['activeProfileId'] is String ? json['activeProfileId'] as String : null,
-      activeEnrichmentProfileId:
-          json['activeEnrichmentProfileId'] is String
-              ? json['activeEnrichmentProfileId'] as String
-              : null,
+      activeProfileId: json['activeProfileId'] is String
+          ? json['activeProfileId'] as String
+          : null,
+      activeEnrichmentProfileId: json['activeEnrichmentProfileId'] is String
+          ? json['activeEnrichmentProfileId'] as String
+          : null,
+      enrichmentInstructions: json['enrichmentInstructions'] is String
+          ? json['enrichmentInstructions'] as String
+          : null,
       audio: rawAudio is Map<String, dynamic>
           ? AudioConfig.fromJson(rawAudio)
           : AudioConfig.defaults,

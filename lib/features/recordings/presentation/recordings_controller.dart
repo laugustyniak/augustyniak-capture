@@ -7,6 +7,7 @@ import 'package:path/path.dart' as p;
 import 'package:record/record.dart';
 import 'package:uuid/uuid.dart';
 
+import '../../enrichment/domain/enrichment_context.dart';
 import '../../enrichment/domain/enrichment_result.dart';
 import '../../enrichment/domain/enrichment_service.dart';
 import '../../logs/domain/log_event.dart';
@@ -34,6 +35,8 @@ class RecordingsController extends ChangeNotifier {
     required RecordingsRepository repository,
     required TranscriptionService transcriptionService,
     EnrichmentService enrichmentService = const DisabledEnrichmentService(),
+    EnrichmentContextSource enrichmentContextSource =
+        const EmptyEnrichmentContextSource(),
     OcrService ocrService = const DisabledOcrService(),
     VideoAudioExtractor videoAudioExtractor =
         const UnavailableVideoAudioExtractor(),
@@ -52,6 +55,7 @@ class RecordingsController extends ChangeNotifier {
        _revisionsRepository = revisionsRepository,
        _transcriptionService = transcriptionService,
        _enrichmentService = enrichmentService,
+       _enrichmentContextSource = enrichmentContextSource,
        _ocrService = ocrService,
        _videoAudioExtractor = videoAudioExtractor,
        _videoPosterExtractor = videoPosterExtractor,
@@ -104,6 +108,11 @@ class RecordingsController extends ChangeNotifier {
   // work started afterwards; it never touches an in-flight pipeline.
   TranscriptionService _transcriptionService;
   EnrichmentService _enrichmentService;
+
+  /// Resolves the user's profile and the item's project description. Not a
+  /// `set` like the services below: the shell builds it once from callbacks
+  /// that read the live controllers, so it is already current on every call.
+  final EnrichmentContextSource _enrichmentContextSource;
   OcrService _ocrService;
   VideoAudioExtractor _videoAudioExtractor;
   VideoPosterExtractor _videoPosterExtractor;
@@ -749,16 +758,13 @@ class RecordingsController extends ChangeNotifier {
     );
   }
 
-  /// Replace an item's user-visible tags. Values are trimmed, lowercased and
-  /// de-duplicated while preserving their first-seen order. Passing only blank
-  /// values clears the tags.
-  /// Replace the item's tags with exactly what the editor hands over.
-  ///
-  /// Authoritative, not additive: the list that arrives is the list that is
-  /// stored. This is what lets the user delete a tag the model proposed —
-  /// under the old provenance model the editor could only rewrite its own
-  /// layer, so a model tag was undeletable by construction.
+  /// Replaces the human-owned layer while preserving AI suggestions. Values
+  /// are normalized and de-duplicated; a human value wins an AI duplicate.
   Future<void> setTags(String id, Iterable<String> tags) async {
+    // Authoritative, not additive: the list that arrives is the list that is
+    // stored. This is what lets the user delete a tag the model proposed —
+    // under the old provenance model the editor could only rewrite its own
+    // layer, so a model tag was undeletable by construction.
     final List<String> normalized = RecordingTags.normalize(tags);
     await _update(
       id,
@@ -1043,13 +1049,23 @@ class RecordingsController extends ChangeNotifier {
   /// case is logged at `warn` rather than `error`.
   Future<void> _enrich(String id, String text) async {
     if (text.trim().isEmpty) return;
+    // Resolved *before* the ANALYZING flag goes up, and that ordering is
+    // load-bearing. Looking the context up can touch the filesystem — a
+    // project's CLAUDE.md — and raising the flag first would put a scan line on
+    // screen for an install whose enrichment is disabled, which is the one case
+    // the disabled service takes care to fail without ever building a frame.
+    final EnrichmentContext context = await _resolveEnrichmentContext(id);
+    if (_disposed) return;
     // Marked before the call and cleared in `finally`, so the card's scan line
     // cannot outlive the request — including on the throwing paths below, which
     // are the common case until a profile is configured.
     _enrichingIds.add(id);
     if (!_disposed) notifyListeners();
     try {
-      final EnrichmentResult result = await _enrichmentService.enrich(text);
+      final EnrichmentResult result = await _enrichmentService.enrich(
+        text,
+        context: context,
+      );
       if (_disposed) return;
       await _update(
         id,
@@ -1063,7 +1079,8 @@ class RecordingsController extends ChangeNotifier {
           // owner: with nothing marking which tags came from a model, a refresh
           // could only refresh *all* of them, and a re-run would keep
           // resurrecting tags the user had deleted. Clearing the list is how
-          // you ask for a fresh set.
+          // you ask for a fresh set. Re-resolving `item` inside the update is
+          // what makes an edit landing mid-request win over this.
           tags: item.tags.isEmpty ? RecordingTags.normalize(result.tags) : null,
         ),
         // The reason this feature exists: `summary` has no editor and is
@@ -1071,7 +1088,17 @@ class RecordingsController extends ChangeNotifier {
         // one is simply gone.
         source: RevisionSource.enrichment,
       );
-      _logSink.log('Enriched \u00b7 ${result.category.name}', recordingId: id);
+      // The context source is named in the log because it is otherwise
+      // invisible: a title that improved after a CLAUDE.md was written is not
+      // something the queue can show, and this is the only place that says
+      // which file the model was actually given.
+      final String source = context.projectSource == null
+          ? ''
+          : ' \u00b7 context: ${context.projectSource}';
+      _logSink.log(
+        'Enriched \u00b7 ${result.category.name}$source',
+        recordingId: id,
+      );
     } on EnrichmentNotConfiguredException {
       // Expected on every item until a profile is configured; not an error.
       _logSink.log(
@@ -1088,6 +1115,26 @@ class RecordingsController extends ChangeNotifier {
     } finally {
       _enrichingIds.remove(id);
       if (!_disposed) notifyListeners();
+    }
+  }
+
+  /// Resolve the user profile and the item's project description.
+  ///
+  /// Swallows everything into the log under the `ClipboardSink` contract: a
+  /// repository that has been moved, renamed or unmounted must cost a worse
+  /// title, never the enrichment — and certainly never the capture.
+  Future<EnrichmentContext> _resolveEnrichmentContext(String id) async {
+    final int index = _recordings.indexWhere((Recording item) => item.id == id);
+    final String? projectId = index < 0 ? null : _recordings[index].projectId;
+    try {
+      return await _enrichmentContextSource.contextFor(projectId);
+    } catch (exception) {
+      _logSink.log(
+        'Enrichment context unavailable: $exception',
+        level: LogLevel.warn,
+        recordingId: id,
+      );
+      return EnrichmentContext.none;
     }
   }
 

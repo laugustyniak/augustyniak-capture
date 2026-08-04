@@ -180,29 +180,40 @@ void main() {
     expect(find.textContaining('other.m4a'), findsNothing);
   });
 
-  testWidgets('every tag renders alike and any of them can be removed', (
+  testWidgets('every tag is one kind: removable, whoever proposed it', (
     WidgetTester tester,
   ) async {
+    // The provenance model is gone, so a tag enrichment suggested and a tag
+    // typed by hand are the same object — same colour on the card, and both
+    // removable in the editor. Under the old model the suggested one rendered
+    // violet and had no remove control at all.
     final RecordingsController controller = await buildRecordingsController(
       appDir,
-      // One list, whoever produced it: 'suggested' arrived from a model on an
-      // earlier run and is indistinguishable from the one the user typed.
       seed: <Recording>[
         makeRecording(id: 'tagged', tags: <String>['manual', 'suggested']),
       ],
     );
     await pumpQueue(tester, controller);
 
-    for (final String tag in <String>['#manual', '#suggested']) {
-      expect(tester.widget<Text>(find.text(tag)).style?.color, Console.cyan);
-    }
+    expect(
+      tester.widget<Text>(find.text('#manual')).style?.color,
+      Console.cyan,
+    );
+    expect(
+      tester.widget<Text>(find.text('#suggested')).style?.color,
+      Console.cyan,
+    );
 
     await tester.tap(find.byIcon(Icons.edit_outlined));
     await tester.pump();
-
-    // The model-suggested one is removable like any other — under the old
-    // provenance model it had no remove control at all.
-    await tester.tap(find.bySemanticsLabel('Remove tag suggested'));
+    tester
+        .widget<InkResponse>(
+          find.descendant(
+            of: find.bySemanticsLabel('Remove tag suggested'),
+            matching: find.byType(InkResponse),
+          ),
+        )
+        .onTap!();
     await settleIo(tester);
 
     expect(controller.recordings.single.tags, <String>['manual']);
@@ -652,7 +663,7 @@ void main() {
     expect(controller.recordings.single.category, CaptureCategory.idea);
   });
 
-  testWidgets('the inline editor creates and clears human tags', (
+  testWidgets('the inline editor creates and clears tags', (
     WidgetTester tester,
   ) async {
     final RecordingsController controller = await buildRecordingsController(

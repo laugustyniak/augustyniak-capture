@@ -188,8 +188,7 @@ class RecordingCard extends StatelessWidget {
               spacing: 6,
               runSpacing: 5,
               children: <Widget>[
-                for (final String tag in recording.tags)
-                  _TagLabel(tag: tag),
+                for (final String tag in recording.tags) _TagLabel(label: tag),
               ],
             ),
           ],
@@ -426,16 +425,14 @@ class _ReviewToggle extends StatelessWidget {
   }
 }
 
-/// One tag, drawn the same whoever put it there.
-///
-/// This used to render in two colours with two icons, keyed on whether a model
-/// or the user supplied the word. Both halves are gone with the provenance
-/// field: a tag is a tag, and the card no longer asks the reader to decode a
-/// palette to find that out.
+/// One tag, as the card shows it. There is only one kind: a tag proposed by
+/// enrichment and a tag typed by hand are the same object, so they render the
+/// same way. Two colours here used to mean two owners, which made the reader
+/// answer "who typed this?" before they could read the word.
 class _TagLabel extends StatelessWidget {
-  const _TagLabel({required this.tag});
+  const _TagLabel({required this.label});
 
-  final String tag;
+  final String label;
 
   @override
   Widget build(BuildContext context) {
@@ -444,10 +441,10 @@ class _TagLabel extends StatelessWidget {
       decoration: BoxDecoration(
         color: Console.cyan.withValues(alpha: .07),
         borderRadius: BorderRadius.circular(999),
-        border: Border.all(color: Console.cyan.withValues(alpha: .22)),
+        border: Border.all(color: Console.cyan.withValues(alpha: .2)),
       ),
       child: Text(
-        '#$tag',
+        '#$label',
         style: ConsoleText.micro.copyWith(color: Console.cyan),
       ),
     );

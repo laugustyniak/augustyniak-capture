@@ -10,24 +10,23 @@ import '../../../app/ui_kit.dart';
 /// part of the data model in the user's head — a tag could not contain one, a
 /// stray space produced a different tag than expected, and removing the middle
 /// tag of five meant editing a sentence. Here every tag is a chip with its own
-/// remove button, and the field below adds one at a time.
+/// remove button, and the field beside them adds one at a time.
 ///
 /// Pasting `a, b, c` still works: [_commit] splits on commas, so anything
 /// arriving from the old world (or from another app) lands as three chips
 /// rather than one tag named "a, b, c". That is the only place the comma
 /// survives, and it is an *input* convenience, never a rendering.
 ///
-/// Normalisation (trim, lowercase, de-dupe) is **not** repeated here — it lives
+/// **There is one kind of tag.** A tag enrichment proposed and a tag typed by
+/// hand are the same value, so every chip here is editable and removable. An
+/// earlier model kept an owner per tag and this editor grew a second, violet,
+/// un-removable row plus a "promote" gesture to move between the two — which
+/// made the editor the thing the user had to understand rather than the tags.
+///
+/// Normalisation (trim, lowercase, de-dupe) is **not** repeated here: it lives
 /// in `RecordingTags.normalize`, reached through `RecordingsController.setTags`,
 /// which is the single point every write passes through. This widget only
 /// avoids offering an obvious duplicate.
-///
-/// **Every tag is editable, whoever produced it.** There is one list and one
-/// chip style; a tag the model proposed can be removed like any other, and
-/// `setTags` stores exactly what this widget hands back. The editor previously
-/// drew a second, un-removable row for model tags that could only be
-/// "promoted" — an interaction that existed purely to work around provenance
-/// being part of the stored value.
 class TagEditor extends StatefulWidget {
   const TagEditor({
     super.key,
@@ -117,11 +116,10 @@ class _TagEditorState extends State<TagEditor> {
 
   List<String> get _visibleSuggestions {
     final String query = _input.text.trim().toLowerCase();
-    final List<String> assigned = widget.tags;
     return widget.suggestions
         .where(
           (String suggestion) =>
-              !assigned.any((String tag) => _same(tag, suggestion)) &&
+              !widget.tags.any((String tag) => _same(tag, suggestion)) &&
               (query.isEmpty || suggestion.toLowerCase().contains(query)),
         )
         .take(_maxSuggestions)
