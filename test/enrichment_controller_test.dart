@@ -188,55 +188,94 @@ void main() {
     expect(enrichment.lastText, 'spotkanie z klientem');
   });
 
-  test('the context reaches the model, resolved from the item project',
-      () async {
+  test('re-runs enrichment from persisted text without reprocessing', () async {
     final Directory dir = await _tmp();
     addTearDown(() => dir.delete(recursive: true));
     final _FakeEnrichment enrichment = _FakeEnrichment(verdict);
-    final _FakeContextSource source = _FakeContextSource(
-      const EnrichmentContext(
-        profile: 'I collect specs.',
-        project: 'Offline-first recorder.',
-        projectSource: 'CLAUDE.md',
-      ),
-    );
-    final RecordingsController c = _controller(
-      _FakeRepo(dir),
-      enrichment: enrichment,
-      contextSource: source,
-    );
+    final _FakeRepo repo = _FakeRepo(dir)
+      ..saved = <Recording>[
+        Recording(
+          id: 'existing',
+          filePath: '${dir.path}/existing.txt',
+          createdAt: DateTime(2026),
+          durationMs: 0,
+          status: RecordingStatus.completed,
+          type: CaptureType.text,
+          transcript: 'persisted note body',
+          title: 'Existing title',
+          category: CaptureCategory.task,
+          summary: 'Old summary',
+          tags: <String>['kept'],
+        ),
+      ];
+    final RecordingsController c = _controller(repo, enrichment: enrichment);
     addTearDown(c.dispose);
+    await c.initialize();
 
-    c.activeProjectId = 'p1';
-    await c.addTextNote('spotkanie z klientem');
-    await c.waitForProcessing();
+    await c.retryEnrichment('existing');
 
-    expect(source.requestedFor, <String?>['p1']);
-    expect(enrichment.lastContext?.profile, 'I collect specs.');
-    expect(enrichment.lastContext?.projectSource, 'CLAUDE.md');
-  });
-
-  test('an unresolvable context costs a better title, never the enrichment',
-      () async {
-    final Directory dir = await _tmp();
-    addTearDown(() => dir.delete(recursive: true));
-    final _FakeEnrichment enrichment = _FakeEnrichment(verdict);
-    final RecordingsController c = _controller(
-      _FakeRepo(dir),
-      enrichment: enrichment,
-      contextSource: _ThrowingContextSource(),
-    );
-    addTearDown(c.dispose);
-
-    await c.addTextNote('spotkanie z klientem');
-    await c.waitForProcessing();
-
-    // The item is still enriched, with an empty context rather than none at all.
     expect(enrichment.calls, 1);
-    expect(enrichment.lastContext?.isEmpty, isTrue);
-    expect(c.recordings.single.title, 'Notatka o kliencie');
+    expect(enrichment.lastText, 'persisted note body');
+    expect(c.recordings.single.title, 'Existing title');
+    expect(c.recordings.single.category, CaptureCategory.task);
+    expect(c.recordings.single.summary, 'Ustalenia ze spotkania.');
+    expect(c.recordings.single.tags, <String>['kept']);
     expect(c.recordings.single.status, RecordingStatus.completed);
   });
+
+  test(
+    'the context reaches the model, resolved from the item project',
+    () async {
+      final Directory dir = await _tmp();
+      addTearDown(() => dir.delete(recursive: true));
+      final _FakeEnrichment enrichment = _FakeEnrichment(verdict);
+      final _FakeContextSource source = _FakeContextSource(
+        const EnrichmentContext(
+          profile: 'I collect specs.',
+          project: 'Offline-first recorder.',
+          projectSource: 'CLAUDE.md',
+        ),
+      );
+      final RecordingsController c = _controller(
+        _FakeRepo(dir),
+        enrichment: enrichment,
+        contextSource: source,
+      );
+      addTearDown(c.dispose);
+
+      c.activeProjectId = 'p1';
+      await c.addTextNote('spotkanie z klientem');
+      await c.waitForProcessing();
+
+      expect(source.requestedFor, <String?>['p1']);
+      expect(enrichment.lastContext?.profile, 'I collect specs.');
+      expect(enrichment.lastContext?.projectSource, 'CLAUDE.md');
+    },
+  );
+
+  test(
+    'an unresolvable context costs a better title, never the enrichment',
+    () async {
+      final Directory dir = await _tmp();
+      addTearDown(() => dir.delete(recursive: true));
+      final _FakeEnrichment enrichment = _FakeEnrichment(verdict);
+      final RecordingsController c = _controller(
+        _FakeRepo(dir),
+        enrichment: enrichment,
+        contextSource: _ThrowingContextSource(),
+      );
+      addTearDown(c.dispose);
+
+      await c.addTextNote('spotkanie z klientem');
+      await c.waitForProcessing();
+
+      // The item is still enriched, with an empty context rather than none at all.
+      expect(enrichment.calls, 1);
+      expect(enrichment.lastContext?.isEmpty, isTrue);
+      expect(c.recordings.single.title, 'Notatka o kliencie');
+      expect(c.recordings.single.status, RecordingStatus.completed);
+    },
+  );
 
   test('never overwrites a user-set title', () async {
     final Directory dir = await _tmp();

@@ -436,7 +436,10 @@ class _RecordingsPageState extends State<RecordingsPage> {
                 Positioned.fill(
                   child: ColoredBox(
                     color: Console.background,
-                    child: RecordingView(controller: controller),
+                    child: RecordingView(
+                      controller: controller,
+                      projects: projects.projects,
+                    ),
                   ),
                 ),
             ],

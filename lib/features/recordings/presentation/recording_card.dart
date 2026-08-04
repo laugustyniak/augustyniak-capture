@@ -25,6 +25,7 @@ class RecordingCard extends StatelessWidget {
     required this.onTogglePlay,
     required this.onOpen,
     required this.onRetry,
+    required this.onEnrich,
     required this.onEdit,
     required this.onToggleProcessed,
     required this.onRoute,
@@ -72,6 +73,7 @@ class RecordingCard extends StatelessWidget {
   /// of the two.
   final VoidCallback onOpen;
   final VoidCallback onRetry;
+  final VoidCallback onEnrich;
   final VoidCallback onEdit;
   final VoidCallback onToggleProcessed;
 
@@ -319,6 +321,17 @@ class RecordingCard extends StatelessWidget {
                 ),
                 const SizedBox(width: 8),
               ],
+              if (hasTranscript) ...<Widget>[
+                _GhostButton(
+                  icon: Icons.auto_awesome_outlined,
+                  label: 'ENRICH',
+                  onTap: isEnriching ? null : onEnrich,
+                  semanticLabel: isEnriching
+                      ? 'LLM enrichment in progress'
+                      : 'Run LLM enrichment',
+                ),
+                const SizedBox(width: 8),
+              ],
               // In-app playback is audio-only; text and image items have no
               // track at all.
               if (recording.type.isPlayableAudio) ...<Widget>[
@@ -421,16 +434,20 @@ class _GhostButton extends StatelessWidget {
     required this.icon,
     required this.label,
     required this.onTap,
+    this.semanticLabel,
   });
 
   final IconData icon;
   final String label;
-  final VoidCallback onTap;
+  final VoidCallback? onTap;
+  final String? semanticLabel;
 
   @override
   Widget build(BuildContext context) {
     return Semantics(
       button: true,
+      enabled: onTap != null,
+      label: semanticLabel,
       child: InkWell(
         onTap: onTap,
         borderRadius: BorderRadius.circular(8),
@@ -443,11 +460,17 @@ class _GhostButton extends StatelessWidget {
           child: Row(
             mainAxisSize: MainAxisSize.min,
             children: <Widget>[
-              Icon(icon, size: 12, color: Console.text),
+              Icon(
+                icon,
+                size: 12,
+                color: onTap == null ? Console.dim : Console.text,
+              ),
               const SizedBox(width: 6),
               Text(
                 label,
-                style: ConsoleText.chip.copyWith(color: Console.text),
+                style: ConsoleText.chip.copyWith(
+                  color: onTap == null ? Console.dim : Console.text,
+                ),
               ),
             ],
           ),
