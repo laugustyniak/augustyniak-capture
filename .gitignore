@@ -35,3 +35,8 @@ android/key.properties
 
 # Worktrees created by Claude Code sessions — each is its own git repo.
 .claude/worktrees/
+
+# A byte-for-byte copy of CLAUDE.md kept for another agent CLI. Two files
+# holding the same guidance drift apart the first time one is edited, so the
+# copy stays local rather than becoming a second source of truth in the repo.
+gemini.md

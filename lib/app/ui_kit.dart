@@ -19,7 +19,23 @@ class Console {
   /// disagreeing at the same window width.
   static const double compactBreakpoint = 600;
 
+  /// At and above this width the bottom navigation is replaced by
+  /// [ConsoleNavRail]. It sits well clear of [compactBreakpoint] on purpose:
+  /// between the two the shell keeps the bottom bar, which is the only layout
+  /// that works at tablet width — a 216 px rail there would take a third of
+  /// the window from the queue it is supposed to serve.
+  static const double railBreakpoint = 900;
+
+  /// The rail's column width. Read by the rail itself and by the shell that
+  /// insets the page beside it, so the two cannot drift apart.
+  static const double railWidth = 216;
+
   static const Color cyan = Color(0xFF22D3EE);
+
+  /// The darker half of the accent gradient — the record button in the rail and
+  /// the wordmark tile. Never used for text: it is a fill partner for [cyan],
+  /// not a step in the text hierarchy.
+  static const Color cyanDeep = Color(0xFF0891B2);
   static const Color background = Color(0xFF0A1322);
   static const Color surface = Color(0xFF101D31);
 
@@ -174,6 +190,15 @@ class ConsoleText {
     fontFamily: ConsoleFont.mono,
     fontSize: 10,
     fontWeight: FontWeight.w600,
+  );
+
+  /// A rail destination. Display rather than mono, and a full 13 px, because
+  /// the rail has the width to spell a destination out — the bottom bar's
+  /// [navLabel] is cramped mono precisely because it does not.
+  static const TextStyle railLabel = TextStyle(
+    fontFamily: ConsoleFont.display,
+    fontSize: 13,
+    color: Console.muted,
   );
 
   /// Body copy inside a card or sheet.

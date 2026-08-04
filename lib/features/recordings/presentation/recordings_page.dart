@@ -41,8 +41,10 @@ import '../data/system_clipboard_sink.dart';
 import '../data/revisions_repository.dart';
 import '../data/system_media_opener.dart';
 import '../domain/capture_type.dart';
+import '../domain/recording.dart';
 import 'capture_dock.dart';
 import 'capture_nav_bar.dart';
+import 'nav_rail.dart';
 import 'queue_tab.dart';
 import 'recording_view.dart';
 import 'recordings_controller.dart';
@@ -397,78 +399,110 @@ class _RecordingsPageState extends State<RecordingsPage> {
             final bool recording = controller.isRecording;
             final bool compact =
                 constraints.maxWidth < Console.compactBreakpoint;
+            // The rail is the *third* form of the shell, not a rename of the
+            // desktop one: between the two breakpoints the window is a tablet,
+            // where a 216 px column would cost the queue more width than the
+            // bottom bar costs it height. Reading the width here — rather than
+            // from MediaQuery — is what lets a desktop window dragged narrow
+            // fall back through all three, and a widget test pick one by
+            // sizing its surface.
+            final bool wide = constraints.maxWidth >= Console.railBreakpoint;
 
             return Scaffold(
               // No AppBar: each tab draws the design's own header (cyan eyebrow +
               // large title) inside its scroll area, so the title scrolls with the
               // content instead of sitting in a separate bar above it.
-              body: Stack(
+              body: Row(
                 children: <Widget>[
-                  // IndexedStack so the Queue tab keeps its search text and filter
-                  // while the user visits Models/Logs/Config.
-                  //
-                  // Wrapped here rather than inside each tab: five separate width
-                  // caps would drift apart, and the dock below has to agree with
-                  // whatever this one is or the record button stops lining up with
-                  // the column it captures into.
-                  ConsolePageWidth(
-                    child: IndexedStack(
-                      index: navigationIndex,
+                  // Outside the Stack, so the rail is a sibling of the page
+                  // rather than an overlay on it — a capture card must never
+                  // scroll under the navigation. It goes with the bottom bar
+                  // while recording for the same reason that one does: the
+                  // capture screen is single-purpose.
+                  if (wide && !recording) _buildRail(),
+                  Expanded(
+                    child: Stack(
                       children: <Widget>[
-                        QueueTab(controller: controller, projects: projects),
-                        ProjectsTab(controller: projects),
-                        ModelsTab(controller: settings),
-                        LogsTab(store: logs),
-                        ConfigTab(
-                          controller: settings,
-                          storagePath: storagePath,
-                          recordingsCount: controller.recordings.length,
-                          logCount: logs.events.length,
-                          onOpenModels: () =>
-                              setState(() => navigationIndex = modelsIndex),
-                          // Reported on in the enrichment-context section: which
-                          // file each repository actually contributes, and which
-                          // paths are wrong. The tab never edits them.
-                          projects: projects.projects,
-                          showShortcuts: _isDesktop,
-                          rejectedShortcuts: rejectedShortcuts,
-                          runWithHotkeysSuspended: _runWithHotkeysSuspended,
+                        // IndexedStack so the Queue tab keeps its search text and filter
+                        // while the user visits Models/Logs/Config.
+                        //
+                        // Wrapped here rather than inside each tab: five separate width
+                        // caps would drift apart, and the dock below has to agree with
+                        // whatever this one is or the record button stops lining up with
+                        // the column it captures into.
+                        ConsolePageWidth(
+                          child: IndexedStack(
+                            index: navigationIndex,
+                            children: <Widget>[
+                              QueueTab(
+                                controller: controller,
+                                projects: projects,
+                              ),
+                              ProjectsTab(controller: projects),
+                              ModelsTab(controller: settings),
+                              LogsTab(store: logs),
+                              ConfigTab(
+                                controller: settings,
+                                storagePath: storagePath,
+                                recordingsCount: controller.recordings.length,
+                                logCount: logs.events.length,
+                                onOpenModels: () => setState(
+                                  () => navigationIndex = modelsIndex,
+                                ),
+                                // Reported on in the enrichment-context section: which
+                                // file each repository actually contributes, and which
+                                // paths are wrong. The tab never edits them.
+                                projects: projects.projects,
+                                showShortcuts: _isDesktop,
+                                rejectedShortcuts: rejectedShortcuts,
+                                runWithHotkeysSuspended:
+                                    _runWithHotkeysSuspended,
+                              ),
+                            ],
+                          ),
                         ),
+                        // The compact bar and the rail both carry the capture actions
+                        // themselves; only the tablet form in between still needs the
+                        // floating dock.
+                        if (!compact &&
+                            !wide &&
+                            navigationIndex == queueIndex &&
+                            !recording)
+                          Positioned(
+                            left: 0,
+                            right: 0,
+                            bottom: 0,
+                            child: ConsolePageWidth(
+                              child: CaptureDock(
+                                controller: controller,
+                                onOpenCaptureMenu: () =>
+                                    _openCaptureMenu(context),
+                              ),
+                            ),
+                          ),
+                        // Overlaid rather than swapped into the IndexedStack: the Queue
+                        // underneath keeps its search text and scroll position for when
+                        // the capture finishes.
+                        if (recording)
+                          Positioned.fill(
+                            child: ColoredBox(
+                              color: Console.background,
+                              child: RecordingView(
+                                controller: controller,
+                                projects: projects.projects,
+                              ),
+                            ),
+                          ),
                       ],
                     ),
                   ),
-                  // The compact bar carries capture actions itself. Wider windows
-                  // keep the existing floating Queue dock unchanged.
-                  if (!compact && navigationIndex == queueIndex && !recording)
-                    Positioned(
-                      left: 0,
-                      right: 0,
-                      bottom: 0,
-                      child: ConsolePageWidth(
-                        child: CaptureDock(
-                          controller: controller,
-                          onOpenCaptureMenu: () => _openCaptureMenu(context),
-                        ),
-                      ),
-                    ),
-                  // Overlaid rather than swapped into the IndexedStack: the Queue
-                  // underneath keeps its search text and scroll position for when
-                  // the capture finishes.
-                  if (recording)
-                    Positioned.fill(
-                      child: ColoredBox(
-                        color: Console.background,
-                        child: RecordingView(
-                          controller: controller,
-                          projects: projects.projects,
-                        ),
-                      ),
-                    ),
                 ],
               ),
               // Hidden while recording — the capture screen is a single-purpose
               // view, and switching tabs mid-take is not a thing to invite.
-              bottomNavigationBar: recording
+              // Also hidden once the rail is up: five destinations with two
+              // homes on one screen is two navigations.
+              bottomNavigationBar: recording || wide
                   ? null
                   : compact
                   ? CaptureNavBar(
@@ -501,6 +535,41 @@ class _RecordingsPageState extends State<RecordingsPage> {
       },
     );
   }
+
+  /// The wide shell's navigation. Built from the same [destinations] list the
+  /// compact bar reads, because the list index *is* [navigationIndex] — two
+  /// hand-kept copies would let a reorder in one silently repoint every
+  /// `setState(() => navigationIndex = …)` in this file.
+  Widget _buildRail() {
+    final int total = controller.recordings.length;
+    return ConsoleNavRail(
+      selectedIndex: navigationIndex,
+      onSelected: (int value) => setState(() => navigationIndex = value),
+      destinations: <RailDestination>[
+        for (int index = 0; index < destinations.length; index++)
+          RailDestination(
+            icon: destinations[index].icon,
+            // The rail has the width for a name rather than an all-caps stub,
+            // and a 216 px column of shouting labels reads as a wall.
+            label: _titleCase(destinations[index].label),
+            // Only the Queue gets a count. A destination showing a bare `0`
+            // reads as broken; one with no count reads as a plain link.
+            count: index == queueIndex ? total : null,
+            warn: index == modelsIndex && settings.activeProfile == null,
+          ),
+      ],
+      reviewed: controller.recordings
+          .where((Recording item) => item.isProcessedByUser)
+          .length,
+      total: total,
+      busy: controller.isBusy,
+      onRecord: controller.startRecording,
+      onCapture: () => _openCaptureMenu(context),
+    );
+  }
+
+  static String _titleCase(String value) =>
+      value[0] + value.substring(1).toLowerCase();
 
   Widget _buildDesktopNavigationBar() {
     return DecoratedBox(
