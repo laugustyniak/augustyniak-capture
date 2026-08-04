@@ -18,6 +18,7 @@ import '../../processing/domain/processor.dart';
 import '../../processing/domain/processor_registry.dart';
 import '../../settings/domain/audio_config.dart';
 import '../../transcription/data/transcription_service.dart';
+import '../../transcription/domain/transcription_limits.dart';
 import '../data/media_importer.dart';
 import '../data/media_picker.dart';
 import '../data/recordings_repository.dart';
@@ -140,6 +141,23 @@ class RecordingsController extends ChangeNotifier {
   /// projects controller owns selection; this is only its capture-time mirror.
   String? activeProjectId;
   String? _error;
+
+  /// The cap a running recording is saved at, and why — or null where none
+  /// applies.
+  ///
+  /// Null is the desktop answer: there the audio is split before it is sent, so
+  /// no length is unsafe. It is set where the whole file has to travel in one
+  /// request — and there it is not a nicety, because the ceiling it guards is
+  /// the one that answers HTTP 200 with half a transcript.
+  ///
+  /// Set from the shell out of the active profile, the audio config and whether
+  /// the platform can split; read on the next tick, so shortening it while a
+  /// recording runs ends that recording. That is the safe direction — the
+  /// reason it shortened is that the running capture no longer fits. The
+  /// capture screen draws its countdown from this, so the automatic save is
+  /// something the user watched approach rather than something that happened
+  /// to them.
+  TranscriptionCeiling? recordingLimit;
 
   // Background processing queue. Capture enqueues an already-persisted item and
   // returns immediately; `_drainProcessingQueue` runs jobs one at a time off the
@@ -443,13 +461,36 @@ class RecordingsController extends ChangeNotifier {
     // controller-wide notification rebuilds the whole page — and the shell's
     // IndexedStack builds all four tabs, so Logs would re-scan its 500-event
     // buffer four times a second while nobody is looking at it.
-    _timer = Timer.periodic(
-      const Duration(milliseconds: 250),
-      (_) => _elapsedTicker.value = _stopwatch.elapsed,
-    );
+    _timer = Timer.periodic(const Duration(milliseconds: 250), _onTick);
     _listenToLevel();
     _isRecording = true;
     notifyListeners();
+  }
+
+  /// Drives the capture clock and, where a cap applies, saves at it.
+  ///
+  /// The cap is enforced here rather than in `RecordingView` because it is an
+  /// invariant of the capture, not of a screen: it has to hold for a recording
+  /// started from a global shortcut, and it must not depend on a widget being
+  /// mounted. Ending the recording is deliberately a **save**, not a discard —
+  /// the same `stopRecording` the SAVE button calls — because no path in this
+  /// app throws a capture away, least of all one the app itself decided to end.
+  ///
+  /// Re-entrancy is already covered: `stopRecording` returns immediately unless
+  /// `_isRecording && !_isBusy`, so the ticks that land while the save is in
+  /// flight are no-ops, and the timer is cancelled inside it.
+  void _onTick(Timer _) {
+    _elapsedTicker.value = _stopwatch.elapsed;
+
+    final TranscriptionCeiling? limit = recordingLimit;
+    if (limit == null || _stopwatch.elapsed < limit.limit) return;
+
+    _logSink.log(
+      'Recording reached its length limit — saving now. ${limit.reason}.',
+      level: LogLevel.warn,
+      recordingId: _activeId,
+    );
+    unawaited(stopRecording());
   }
 
   /// Feed the capture screen's meter from the recorder's own amplitude stream.

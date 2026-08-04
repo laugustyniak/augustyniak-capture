@@ -110,16 +110,20 @@ cp -R build/macos/Build/Products/Release/"Audivoa Core.app" /Applications/
 Recordings land in `~/Documents/recordings/` — without the sandbox that is where
 `getApplicationDocumentsDirectory()` points, rather than inside a container.
 
-### Linux: `keybinder-3.0` required
+### Linux: `keybinder-3.0` and `libsecret-1-dev` required
 
 Global shortcuts (`hotkey_manager`) link against `keybinder-3.0`. Without that
 library `flutter build linux` **aborts while generating build files**
 ("Unable to generate build files") — that is a build error, not a runtime
-degradation, so the app will not start at all:
+degradation, so the app will not start at all. Token encryption
+(`flutter_secure_storage`) links against `libsecret-1-dev` the same way:
 
 ```bash
-sudo apt-get install keybinder-3.0
+sudo apt-get install keybinder-3.0 libsecret-1-dev
 ```
+
+Tokens are encrypted with a key in the system keyring; without a keyring the
+app stores them plaintext and says so in the Config tab.
 
 ### Verification before pushing
 
@@ -177,8 +181,10 @@ Exactly one profile is active at a time. No profile = transcription disabled
 (recording and local persistence work unchanged). `--dart-define` values seed
 the first profile on the first run; after that `settings.json` wins.
 
-> Tokens are stored in plaintext in `settings.json` in the app documents
-> directory. Encryption is planned for a later phase.
+> Tokens are encrypted at rest (AES-256-GCM) with a key held in the system
+> keyring, never written to `settings.json` in plaintext. Without a working
+> keyring the app falls back to plaintext and says so here and in the Config
+> tab.
 
 ### Queue — adding items
 
@@ -268,7 +274,6 @@ directory, and every write is atomic (`.tmp` → `rename`):
 - WorkManager on Android and BGTaskScheduler on iOS, so jobs survive the app
   being backgrounded,
 - local on-device models (whisper.cpp via FFI),
-- token encryption,
 - synchronization with Obsidian/Notion.
 
 Technical design: `docs/superpowers/specs/2026-07-25-multimodal-capture-design.md`.

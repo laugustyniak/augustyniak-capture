@@ -283,6 +283,7 @@ void main() {
     expect(c.recordings.single.category, CaptureCategory.idea);
     // `summary` has no editor, so it is pure derived output and refreshes.
     expect(c.recordings.single.summary, 'Ustalenia ze spotkania.');
+    // Tags are fill-only, and this item already has some, so they stand.
     expect(c.recordings.single.tags, <String>['klient', 'oferta']);
   });
 

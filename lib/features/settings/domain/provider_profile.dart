@@ -3,6 +3,7 @@ import '../../enrichment/domain/enrichment_service.dart';
 import '../../processing/data/http_vision_ocr_service.dart';
 import '../../processing/data/ocr_service.dart';
 import '../../transcription/data/transcription_service.dart';
+import 'token_cipher.dart';
 
 /// What a profile is *for*.
 ///
@@ -58,11 +59,24 @@ class ProviderProfile {
   /// Optional ISO-639-1 hint (`pl`, `en`). Skips language auto-detection.
   final String? language;
 
-  /// Stored in plaintext in the app documents directory — see the Config tab
-  /// warning. Encryption is a later phase.
+  /// Encrypted at rest in `settings.json` when the OS keyring is available
+  /// (see `TokenCipher`); plaintext otherwise, which the Config tab surfaces.
+  /// In memory this is normally the plaintext value, but after a failed
+  /// decrypt (keyring wiped or locked) it holds the sealed `enc:v1:` blob so
+  /// the stored token is never destroyed — [usableBearerToken] filters that
+  /// case out for request headers.
   final String? bearerToken;
 
   bool get hasEndpoint => endpoint.trim().isNotEmpty;
+
+  /// The token a request may actually send: null when unset, blank, or still
+  /// sealed because decryption failed. A sealed blob must never leak into an
+  /// `Authorization` header.
+  String? get usableBearerToken {
+    final String? token = _blankToNull(bearerToken);
+    if (token == null || TokenCipher.isSealed(token)) return null;
+    return token;
+  }
 
   /// Host shown in list rows so the user can tell profiles apart at a glance.
   String get host {
@@ -103,7 +117,7 @@ class ProviderProfile {
     }
     return HttpWhisperTranscriptionService(
       endpoint: uri,
-      bearerToken: _blankToNull(bearerToken),
+      bearerToken: usableBearerToken,
       model: _blankToNull(model),
       language: _blankToNull(language),
     );
@@ -122,7 +136,7 @@ class ProviderProfile {
     }
     return HttpChatEnrichmentService(
       endpoint: uri,
-      bearerToken: _blankToNull(bearerToken),
+      bearerToken: usableBearerToken,
       model: _blankToNull(model),
     );
   }
@@ -139,7 +153,7 @@ class ProviderProfile {
     }
     return HttpVisionOcrService(
       endpoint: uri,
-      bearerToken: _blankToNull(bearerToken),
+      bearerToken: usableBearerToken,
       model: _blankToNull(model),
     );
   }

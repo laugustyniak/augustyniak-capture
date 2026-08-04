@@ -20,6 +20,10 @@ dependencies:
   # shell never builds their implementations there.
   hotkey_manager: ^0.2.3
   window_manager: ^0.5.2
+  # Token encryption at rest: master key in the OS keyring, AES-GCM in Dart.
+  # flutter_secure_storage needs libsecret-1-dev at build time on Linux.
+  flutter_secure_storage: ^9.2.2
+  cryptography: ^2.7.0
 
 dev_dependencies:
   flutter_test:
