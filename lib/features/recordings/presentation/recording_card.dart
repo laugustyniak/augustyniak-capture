@@ -30,6 +30,7 @@ class RecordingCard extends StatelessWidget {
     required this.onToggleProcessed,
     required this.onRoute,
     this.canRoute = false,
+    this.focused = false,
   });
 
   /// Said in both places the action is offered — the poster and the button —
@@ -84,6 +85,14 @@ class RecordingCard extends StatelessWidget {
   /// install with no projects is noise that never becomes an action.
   final bool canRoute;
 
+  /// This row is the one the keyboard is on.
+  ///
+  /// Drawn on the shell's border, which is the card's single state channel, and
+  /// it outranks the others: `failed` and `reviewed` are properties of the item
+  /// and stay true while the user looks elsewhere, whereas this answers "where
+  /// am I", and a selection the user cannot see is the same as no selection.
+  final bool focused;
+
   @override
   Widget build(BuildContext context) {
     final bool failed = recording.status == RecordingStatus.failed;
@@ -91,7 +100,7 @@ class RecordingCard extends StatelessWidget {
     // Enrichment cannot move the status — the item is already `completed` — but
     // the pill is the one place the user looks to find out what is going on, so
     // while the model reads the text it says that rather than the resting READY.
-    final _StatusVisual visual = isEnriching
+    final _StatusVisual? visual = isEnriching
         ? const _StatusVisual('ANALYZING', Console.cyan, pulse: true)
         : _statusVisual(recording.status);
     final String filename = File(recording.filePath).uri.pathSegments.last;
@@ -102,7 +111,9 @@ class RecordingCard extends StatelessWidget {
     final bool openable = recording.type == CaptureType.video;
 
     return RecordingCardShell(
-      borderColor: failed
+      borderColor: focused
+          ? Console.cyan
+          : failed
           ? Console.red.withValues(alpha: .35)
           : reviewed
           ? Console.cyan.withValues(alpha: .35)
@@ -154,34 +165,51 @@ class RecordingCard extends StatelessWidget {
                 ),
               ),
               const SizedBox(width: 8),
-              // Two pills, one row: what the item *is* and where it is in the
-              // pipeline. Reuses StatusPill rather than adding a widget — the
-              // colour is what tells them apart. The category is absent until
-              // enrichment has run, so an install with no enrichment profile
-              // renders exactly the card it rendered before.
+              // Three facts of two different kinds. Project and category are
+              // *labels* — they describe the item and do not change on their
+              // own — so they are outlined; the pipeline status is the only
+              // state here, and keeps the fill. Given the same form all three
+              // had the same weight, and colour alone had to carry the
+              // difference at 10 px.
               Wrap(
                 spacing: 6,
                 runSpacing: 6,
                 crossAxisAlignment: WrapCrossAlignment.center,
                 children: <Widget>[
                   if (projectName != null)
-                    StatusPill(label: projectName!, color: Console.violet),
+                    StatusPill(
+                      label: projectName!,
+                      color: Console.violet,
+                      outlined: true,
+                    ),
                   if (recording.category != null)
                     StatusPill(
                       label: recording.category!.label,
-                      color: Console.mutedSoft,
+                      // Raised off `mutedSoft`, which made the one field that
+                      // says what to *do* with a capture the dimmest thing on
+                      // the row. Category is a routing destination.
+                      color: Console.cyan,
+                      outlined: true,
                     ),
                   // Cross-faded rather than swapped: READY → ANALYZING →
                   // READY happens twice within a couple of seconds, and a
                   // hard cut at that rate reads as the card glitching.
                   AnimatedSwitcher(
                     duration: const Duration(milliseconds: 260),
-                    child: StatusPill(
-                      key: ValueKey<String>(visual.label),
-                      label: visual.label,
-                      color: visual.color,
-                      pulse: visual.pulse,
-                    ),
+                    // The resting state draws nothing. A badge is a claim that
+                    // something is different, and READY was on twenty-seven of
+                    // twenty-eight rows — so the one row that was queued or had
+                    // failed had to compete with a wall of green saying that
+                    // everything was fine. The reviewed border and the queue's
+                    // own chips already report "finished".
+                    child: visual == null
+                        ? const SizedBox.shrink()
+                        : StatusPill(
+                            key: ValueKey<String>(visual.label),
+                            label: visual.label,
+                            color: visual.color,
+                            pulse: visual.pulse,
+                          ),
                   ),
                 ],
               ),
@@ -528,7 +556,8 @@ class _StatusVisual {
   final bool pulse;
 }
 
-_StatusVisual _statusVisual(RecordingStatus status) => switch (status) {
+/// Null for the resting state, which draws no badge at all — see the card.
+_StatusVisual? _statusVisual(RecordingStatus status) => switch (status) {
   // Persisted but not yet handed to a processor — the design calls it RAW.
   RecordingStatus.saved => const _StatusVisual('RAW', Console.muted),
   RecordingStatus.pendingTranscription => const _StatusVisual(
@@ -540,6 +569,6 @@ _StatusVisual _statusVisual(RecordingStatus status) => switch (status) {
     Console.cyan,
     pulse: true,
   ),
-  RecordingStatus.completed => const _StatusVisual('READY', Console.green),
+  RecordingStatus.completed => null,
   RecordingStatus.failed => const _StatusVisual('FAILED', Console.red),
 };

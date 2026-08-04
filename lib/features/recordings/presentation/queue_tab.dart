@@ -67,10 +67,57 @@ class _QueueTabState extends State<QueueTab> {
   /// the reason stated there.
   String? editingId;
 
+  /// The row the keyboard is on, if any. Null means "no row selected", which is
+  /// the state the tab opens in — a selection the user did not ask for would
+  /// make the first arrow press act on an arbitrary capture.
+  ///
+  /// An id rather than an index, for the same reason [editingId] is: the list
+  /// re-sorts and re-filters under the user, and an index would silently move
+  /// the selection onto whatever item slid into that slot.
+  String? focusedId;
+
+  final FocusNode searchFocus = FocusNode();
+
+  /// Owns the arrow keys and the single-letter actions. It sits above the list
+  /// rather than on each row so the shortcuts work before anything is selected,
+  /// and so the row widgets stay free of key handling.
+  final FocusNode listFocus = FocusNode(debugLabel: 'queue-shortcuts');
+
   @override
   void dispose() {
     searchController.dispose();
+    searchFocus.dispose();
+    listFocus.dispose();
     super.dispose();
+  }
+
+  /// Moves the selection by [delta] through what is currently *visible*, so
+  /// arrowing never lands on a row the active filters exclude.
+  void _moveFocus(List<Recording> visible, int delta) {
+    if (visible.isEmpty) return;
+    final int current = visible.indexWhere(
+      (Recording item) => item.id == focusedId,
+    );
+    // No selection yet: the first press takes the end the user is moving
+    // towards rather than jumping to the middle of the list.
+    final int next = current < 0
+        ? (delta > 0 ? 0 : visible.length - 1)
+        : (current + delta).clamp(0, visible.length - 1);
+    setState(() => focusedId = visible[next].id);
+  }
+
+  /// Runs [action] against the selected row, if there is one. Every shortcut
+  /// goes through here so a key press with nothing selected is a no-op rather
+  /// than an action on a guessed item.
+  void _onFocused(List<Recording> visible, void Function(Recording) action) {
+    final String? id = focusedId;
+    if (id == null) return;
+    for (final Recording item in visible) {
+      if (item.id == id) {
+        action(item);
+        return;
+      }
+    }
   }
 
   @override
@@ -88,11 +135,33 @@ class _QueueTabState extends State<QueueTab> {
         .where((Recording item) => item.isProcessedByUser)
         .length;
 
-    return SafeArea(
-      bottom: false,
-      child: Column(
-        children: <Widget>[
-          Padding(
+    return _QueueShortcuts(
+      focusNode: listFocus,
+      // Rebuilt with the current `visible` list on every frame, so a shortcut
+      // can never act on a row that the filters have since removed.
+      onNext: () => _moveFocus(visible, 1),
+      onPrevious: () => _moveFocus(visible, -1),
+      onEdit: () => _onFocused(visible, (Recording item) {
+        setState(() => editingId = item.id);
+      }),
+      onToggleProcessed: () => _onFocused(
+        visible,
+        (Recording item) => controller.toggleProcessed(item.id),
+      ),
+      onTogglePlay: () => _onFocused(
+        visible,
+        (Recording item) => controller.togglePlayback(item.id),
+      ),
+      onRoute: () => _onFocused(visible, (Recording item) {
+        if (controller.canRoute(item)) controller.route(item.id);
+      }),
+      onSearch: () => searchFocus.requestFocus(),
+      onClearFocus: () => setState(() => focusedId = null),
+      child: SafeArea(
+        bottom: false,
+        child: Column(
+          children: <Widget>[
+            Padding(
             padding: const EdgeInsets.fromLTRB(20, 14, 20, 0),
             child: ConsoleHeader(
               title: 'Queue',
@@ -104,26 +173,32 @@ class _QueueTabState extends State<QueueTab> {
             const SizedBox(height: 10),
             ErrorBanner(message: controller.error!),
           ],
-          Expanded(
-            child: ListView(
-              padding: const EdgeInsets.fromLTRB(16, 14, 16, 190),
+          // Pinned above the scroll area, not scrolled with it.
+          //
+          // These four are the screen's entire navigation, and as list children
+          // they left the screen on the first drag. The consequence is worse
+          // than the inconvenience: with the chips off-screen, "empty because a
+          // filter excludes everything" and "empty because there is nothing"
+          // become the same picture, and the user has no way to tell which one
+          // they are looking at without scrolling back up to check.
+          Padding(
+            padding: const EdgeInsets.fromLTRB(20, 14, 20, 0),
+            child: Column(
               children: <Widget>[
-                Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 4),
-                  child: ReviewedStrip(
-                    total: all.length,
-                    reviewed: reviewedCount,
-                    filter: reviewFilter,
-                    onFilterChanged: (ReviewFilter value) {
-                      setState(() => reviewFilter = value);
-                    },
-                  ),
+                ReviewedStrip(
+                  total: all.length,
+                  reviewed: reviewedCount,
+                  filter: reviewFilter,
+                  onFilterChanged: (ReviewFilter value) {
+                    setState(() => reviewFilter = value);
+                  },
                 ),
                 const SizedBox(height: 10),
                 Padding(
                   padding: const EdgeInsets.symmetric(horizontal: 4),
                   child: _QueueControls(
                     searchController: searchController,
+                    searchFocusNode: searchFocus,
                     searchQuery: searchQuery,
                     onSearchChanged: (String value) {
                       setState(() => searchQuery = value);
@@ -149,7 +224,13 @@ class _QueueTabState extends State<QueueTab> {
                     },
                   ),
                 ),
-                const SizedBox(height: 14),
+              ],
+            ),
+          ),
+          Expanded(
+            child: ListView(
+              padding: const EdgeInsets.fromLTRB(16, 14, 16, 190),
+              children: <Widget>[
                 if (visible.isEmpty)
                   Padding(
                     padding: const EdgeInsets.symmetric(horizontal: 4),
@@ -194,7 +275,8 @@ class _QueueTabState extends State<QueueTab> {
               ],
             ),
           ),
-        ],
+          ],
+        ),
       ),
     );
   }
@@ -248,6 +330,7 @@ class _QueueTabState extends State<QueueTab> {
       // off the controller's in-flight set rather than off the item.
       isEnriching: controller.isEnriching(recording.id),
       projectName: _projectName(recording.projectId),
+      focused: recording.id == focusedId,
       canRoute: controller.canRoute(recording),
       onRoute: () => controller.route(recording.id),
       onTogglePlay: () => controller.togglePlayback(recording.id),
@@ -333,6 +416,7 @@ class _QueueTabState extends State<QueueTab> {
 class _QueueControls extends StatelessWidget {
   const _QueueControls({
     required this.searchController,
+    required this.searchFocusNode,
     required this.searchQuery,
     required this.onSearchChanged,
     required this.projects,
@@ -351,6 +435,9 @@ class _QueueControls extends StatelessWidget {
   static const double _projectFilterWidth = 210;
 
   final TextEditingController searchController;
+
+  /// Owned by the tab so `Ctrl+F` and `/` have somewhere to send focus.
+  final FocusNode searchFocusNode;
   final String searchQuery;
   final ValueChanged<String> onSearchChanged;
   final List<Project> projects;
@@ -367,6 +454,7 @@ class _QueueControls extends StatelessWidget {
         final bool singleLine = constraints.maxWidth >= _singleLineWidth;
         final Widget search = _SearchField(
           controller: searchController,
+          focusNode: searchFocusNode,
           value: searchQuery,
           onChanged: onSearchChanged,
         );
@@ -517,6 +605,77 @@ bool _matchesReview(ReviewFilter filter, Recording item) => switch (filter) {
   ReviewFilter.done => item.isProcessedByUser,
 };
 
+/// Keyboard control for the queue.
+///
+/// The app is desktop-first — it ships system-wide global hotkeys — and until
+/// this existed the window itself had exactly one key binding in it (Escape,
+/// in the editor). Reaching the third card meant roughly fifteen presses of
+/// Tab, because every card contributes three to five focusable buttons.
+///
+/// `CallbackShortcuts` reacts only while focus is inside its subtree, which is
+/// why the [focusNode] is `autofocus` and `canRequestFocus`: without a focus
+/// owner the bindings would exist and never fire — the same trap the editor's
+/// Escape fell into. `skipTraversal` keeps it out of the Tab order, so this
+/// node never becomes a stop the user has to press through.
+///
+/// The single-letter bindings deliberately carry no modifier: they are scoped
+/// to this subtree, and the moment focus enters a text field the field consumes
+/// the key first, so `e` types an "e" in the search box and edits a row
+/// everywhere else.
+class _QueueShortcuts extends StatelessWidget {
+  const _QueueShortcuts({
+    required this.focusNode,
+    required this.onNext,
+    required this.onPrevious,
+    required this.onEdit,
+    required this.onToggleProcessed,
+    required this.onTogglePlay,
+    required this.onRoute,
+    required this.onSearch,
+    required this.onClearFocus,
+    required this.child,
+  });
+
+  final FocusNode focusNode;
+  final VoidCallback onNext;
+  final VoidCallback onPrevious;
+  final VoidCallback onEdit;
+  final VoidCallback onToggleProcessed;
+  final VoidCallback onTogglePlay;
+  final VoidCallback onRoute;
+  final VoidCallback onSearch;
+  final VoidCallback onClearFocus;
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) {
+    return CallbackShortcuts(
+      bindings: <ShortcutActivator, VoidCallback>{
+        const SingleActivator(LogicalKeyboardKey.arrowDown): onNext,
+        const SingleActivator(LogicalKeyboardKey.arrowUp): onPrevious,
+        // vi-style, for the same hands that never leave the home row.
+        const SingleActivator(LogicalKeyboardKey.keyJ): onNext,
+        const SingleActivator(LogicalKeyboardKey.keyK): onPrevious,
+        const SingleActivator(LogicalKeyboardKey.keyE): onEdit,
+        const SingleActivator(LogicalKeyboardKey.keyD): onToggleProcessed,
+        const SingleActivator(LogicalKeyboardKey.keyR): onRoute,
+        const SingleActivator(LogicalKeyboardKey.space): onTogglePlay,
+        const SingleActivator(LogicalKeyboardKey.escape): onClearFocus,
+        // Both spellings: control on Linux/Windows, meta on macOS.
+        const SingleActivator(LogicalKeyboardKey.keyF, control: true): onSearch,
+        const SingleActivator(LogicalKeyboardKey.keyF, meta: true): onSearch,
+        const SingleActivator(LogicalKeyboardKey.slash): onSearch,
+      },
+      child: Focus(
+        focusNode: focusNode,
+        autofocus: true,
+        skipTraversal: true,
+        child: child,
+      ),
+    );
+  }
+}
+
 const OutlineInputBorder _fieldBorder = OutlineInputBorder(
   borderRadius: BorderRadius.all(Radius.circular(10)),
   borderSide: BorderSide(color: Console.border),
@@ -538,7 +697,7 @@ const InputDecoration _fieldDecoration = InputDecoration(
   disabledBorder: _fieldBorder,
   focusedBorder: OutlineInputBorder(
     borderRadius: BorderRadius.all(Radius.circular(10)),
-    borderSide: BorderSide(color: Console.borderStrong),
+    borderSide: BorderSide(color: Console.cyan),
   ),
 );
 
@@ -547,16 +706,19 @@ class _SearchField extends StatelessWidget {
     required this.controller,
     required this.value,
     required this.onChanged,
+    this.focusNode,
   });
 
   final TextEditingController controller;
   final String value;
   final ValueChanged<String> onChanged;
+  final FocusNode? focusNode;
 
   @override
   Widget build(BuildContext context) {
     return TextField(
       controller: controller,
+      focusNode: focusNode,
       onChanged: onChanged,
       style: const TextStyle(color: Console.text, fontSize: 13),
       decoration: _fieldDecoration.copyWith(
