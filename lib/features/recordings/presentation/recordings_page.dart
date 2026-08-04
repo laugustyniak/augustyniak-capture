@@ -35,7 +35,7 @@ import '../data/revisions_repository.dart';
 import '../data/system_media_opener.dart';
 import '../domain/capture_type.dart';
 import '../domain/recording.dart';
-import 'capture_dock.dart';
+import 'capture_nav_bar.dart';
 import 'nav_rail.dart';
 import 'queue_tab.dart';
 import 'recording_view.dart';
@@ -53,8 +53,8 @@ class RecordingsPage extends StatefulWidget {
 }
 
 class _RecordingsPageState extends State<RecordingsPage> {
-  // Indices used in code; Projects, Logs and Config are selected only by the
-  // NavigationBar itself.
+  // The two indices this file reaches for by name. The rest are only ever
+  // selected by the navigation the user is looking at.
   static const int queueIndex = 0;
   static const int modelsIndex = 2;
 
@@ -318,14 +318,21 @@ class _RecordingsPageState extends State<RecordingsPage> {
   /// the rail and the bottom bar cannot drift into different orders — the index
   /// is what `navigationIndex` means, and a reorder in one place only would
   /// silently repoint every `setState(() => navigationIndex = …)` in this file.
-  static const List<({IconData icon, String label})> _destinations =
-      <({IconData icon, String label})>[
-        (icon: Icons.format_list_bulleted_rounded, label: 'QUEUE'),
-        (icon: Icons.account_tree_outlined, label: 'PROJECTS'),
-        (icon: Icons.memory_rounded, label: 'MODELS'),
-        (icon: Icons.chevron_right_rounded, label: 'LOGS'),
-        (icon: Icons.tune_rounded, label: 'CONFIG'),
-      ];
+  ///
+  /// Two labels rather than one, because the two hosts have very different
+  /// budgets: the rail is a 216 px column, while the phone bar has to fit five
+  /// of these *and* a 52 px record disc across 393 px — about 54 px per cell.
+  /// [short] is what the bar draws; [label] is what the rail title-cases. They
+  /// stay in one record so a new destination cannot arrive with only one of the
+  /// two filled in.
+  static const List<({IconData icon, String label, String short})>
+  _destinations = <({IconData icon, String label, String short})>[
+    (icon: Icons.format_list_bulleted_rounded, label: 'QUEUE', short: 'QUEUE'),
+    (icon: Icons.account_tree_outlined, label: 'PROJECTS', short: 'PROJ'),
+    (icon: Icons.memory_rounded, label: 'MODELS', short: 'MODELS'),
+    (icon: Icons.chevron_right_rounded, label: 'LOGS', short: 'LOGS'),
+    (icon: Icons.tune_rounded, label: 'CONFIG', short: 'CONFIG'),
+  ];
 
   @override
   Widget build(BuildContext context) {
@@ -350,6 +357,10 @@ class _RecordingsPageState extends State<RecordingsPage> {
                   controller: controller,
                   projects: projects,
                   wide: wide,
+                  // Wide has the rail's own button; the phone header draws one.
+                  onOpenCaptureMenu: wide
+                      ? null
+                      : () => _openCaptureMenu(context),
                 ),
                 ProjectsTab(controller: projects),
                 ModelsTab(controller: settings),
@@ -369,10 +380,9 @@ class _RecordingsPageState extends State<RecordingsPage> {
             );
 
             return Scaffold(
-              // No AppBar in either layout: the wide one puts the title in its
-              // own header bar beside the filters, the narrow one draws the
-              // design's eyebrow + title inside the scroll area, so the title
-              // scrolls with the content instead of sitting above it.
+              // No AppBar in either layout: each one draws its own header
+              // inside the body, so a title never sits in a separate bar above
+              // the content.
               body: Stack(
                 children: <Widget>[
                   Row(
@@ -381,30 +391,7 @@ class _RecordingsPageState extends State<RecordingsPage> {
                       // bar is: the capture screen is single-purpose, and
                       // switching tabs mid-take is not a thing to invite.
                       if (wide && !recording) _buildRail(),
-                      Expanded(
-                        child: Stack(
-                          children: <Widget>[
-                            body,
-                            // The floating dock is the *narrow* capture
-                            // affordance. Wide has the rail's own buttons, and
-                            // a disc floating over a three-column grid would
-                            // land on whichever card happened to be under it.
-                            if (!wide &&
-                                navigationIndex == queueIndex &&
-                                !recording)
-                              Positioned(
-                                left: 0,
-                                right: 0,
-                                bottom: 0,
-                                child: CaptureDock(
-                                  controller: controller,
-                                  onOpenCaptureMenu: () =>
-                                      _openCaptureMenu(context),
-                                ),
-                              ),
-                          ],
-                        ),
-                      ),
+                      Expanded(child: body),
                     ],
                   ),
                   // Overlaid rather than swapped into the IndexedStack: the
@@ -419,31 +406,29 @@ class _RecordingsPageState extends State<RecordingsPage> {
                     ),
                 ],
               ),
+              // Navigation and the record button are **one** bar on the phone,
+              // from the mobile design — see [CaptureNavBar] for why the
+              // floating dock that used to sit above it is gone.
               bottomNavigationBar: wide || recording
                   ? null
-                  : DecoratedBox(
-                      decoration: const BoxDecoration(
-                        border: Border(top: BorderSide(color: Console.border)),
-                      ),
-                      child: NavigationBar(
-                        selectedIndex: navigationIndex,
-                        onDestinationSelected: (int value) {
-                          setState(() => navigationIndex = value);
-                        },
-                        destinations: <NavigationDestination>[
-                          for (int i = 0; i < _destinations.length; i++)
-                            NavigationDestination(
-                              icon: i == modelsIndex
-                                  ? _ProfileBadge(
-                                      icon: _destinations[i].icon,
-                                      hasActiveProfile:
-                                          settings.activeProfile != null,
-                                    )
-                                  : Icon(_destinations[i].icon),
-                              label: _destinations[i].label,
-                            ),
-                        ],
-                      ),
+                  : CaptureNavBar(
+                      controller: controller,
+                      selectedIndex: navigationIndex,
+                      onSelected: (int value) =>
+                          setState(() => navigationIndex = value),
+                      destinations: <NavBarDestination>[
+                        for (int i = 0; i < _destinations.length; i++)
+                          NavBarDestination(
+                            icon: _destinations[i].icon,
+                            // The bar's label, not the rail's: five cells plus
+                            // a 52 px disc leave ~54 px each, which `PROJECTS`
+                            // overruns and `PROJ` does not.
+                            label: _destinations[i].short,
+                            warn:
+                                i == modelsIndex &&
+                                settings.activeProfile == null,
+                          ),
+                      ],
                     ),
             );
           },
@@ -479,30 +464,6 @@ class _RecordingsPageState extends State<RecordingsPage> {
 
   static String _titleCase(String value) =>
       value[0] + value.substring(1).toLowerCase();
-}
-
-/// Amber dot on the Models tab while no provider profile is active, so the
-/// "transcription is off" state is visible without opening the tab.
-///
-/// One icon for both states: the navigation theme already tints it cyan when
-/// selected and dim when not, which is how the design marks the active tab.
-class _ProfileBadge extends StatelessWidget {
-  const _ProfileBadge({required this.icon, required this.hasActiveProfile});
-
-  final IconData icon;
-  final bool hasActiveProfile;
-
-  @override
-  Widget build(BuildContext context) {
-    final Icon icon = Icon(this.icon);
-    if (hasActiveProfile) return icon;
-
-    return Badge(
-      backgroundColor: Console.amber,
-      smallSize: 7,
-      child: icon,
-    );
-  }
 }
 
 enum _CaptureAction { textNote, audioUpload, imageUpload, videoUpload }

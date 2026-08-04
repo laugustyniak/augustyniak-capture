@@ -446,7 +446,7 @@ class _ProjectEditorSheetState extends State<_ProjectEditorSheet> {
                 controller: _sessionName,
                 decoration: const InputDecoration(
                   labelText: 'Session name (optional)',
-                  hintText: 'audivoa',
+                  hintText: 'augustyniak-capture',
                 ),
                 textInputAction: TextInputAction.done,
               ),

@@ -55,7 +55,7 @@ class RecordingView extends StatelessWidget {
             Row(
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: <Widget>[
-                const Text('AUDIVOA CORE', style: ConsoleText.eyebrow),
+                const Text('AUGUSTYNIAK CAPTURE', style: ConsoleText.eyebrow),
                 Container(
                   padding: const EdgeInsets.symmetric(
                     horizontal: 12,
@@ -343,9 +343,7 @@ class _DiscardButton extends StatelessWidget {
           decoration: BoxDecoration(
             borderRadius: BorderRadius.circular(14),
             border: Border.all(
-              color: busy
-                  ? Console.border
-                  : Console.red.withValues(alpha: .45),
+              color: busy ? Console.border : Console.red.withValues(alpha: .45),
             ),
           ),
           child: Icon(

@@ -140,22 +140,32 @@ class RecordingCard extends StatelessWidget {
                 ),
               ),
               const SizedBox(width: 8),
-              // Two pills, one row: what the item *is* and where it is in the
-              // pipeline. Reuses StatusPill rather than adding a widget — the
-              // colour is what tells them apart. The category is absent until
-              // enrichment has run, so an install with no enrichment profile
-              // renders exactly the card it rendered before.
+              // Exactly two pills, from the design's single top-right badge
+              // plus the one thing the design had no concept of: where the item
+              // is in the pipeline. Reuses StatusPill rather than adding a
+              // widget — the colour is what tells them apart. The category is
+              // absent until enrichment has run, so an install with no
+              // enrichment profile renders exactly the card it rendered before.
+              //
+              // The project moved out of here and down to the tag row. It is
+              // the only one of the three whose label is arbitrary-length, and
+              // in a 430 px grid column a long project name was taking the
+              // width the *title* needs — the one field that identifies the row.
               Wrap(
                 spacing: 6,
                 runSpacing: 6,
                 crossAxisAlignment: WrapCrossAlignment.center,
                 children: <Widget>[
-                  if (projectName != null)
-                    StatusPill(label: projectName!, color: Console.violet),
                   if (recording.category != null)
                     StatusPill(
                       label: recording.category!.label,
-                      color: Console.mutedSoft,
+                      // The design gives each destination its own colour, so a
+                      // grid of cards is scannable by badge alone. It is the
+                      // *category* that gets the palette and the status pill
+                      // that stays in the four pipeline colours — the pipeline
+                      // vocabulary is fixed, the category vocabulary is what
+                      // the user is actually sorting by.
+                      color: categoryColorFor(recording.category!),
                     ),
                   // Cross-faded rather than swapped: READY → ANALYZING →
                   // READY happens twice within a couple of seconds, and a
@@ -182,12 +192,19 @@ class RecordingCard extends StatelessWidget {
               style: ConsoleText.cardMeta.copyWith(color: Console.textSoft),
             ),
           ],
-          if (recording.tags.isNotEmpty) ...<Widget>[
+          if (projectName != null || recording.tags.isNotEmpty) ...<Widget>[
             const SizedBox(height: 9),
             Wrap(
               spacing: 6,
               runSpacing: 5,
+              crossAxisAlignment: WrapCrossAlignment.center,
               children: <Widget>[
+                // First in the row and in its own colour: a project is a
+                // filter the queue offers as a control of its own, where a tag
+                // is free text. Same shape, because both are things you scan
+                // for; different colour, because only one of them is a bucket.
+                if (projectName != null)
+                  StatusPill(label: projectName!, color: Console.violet),
                 for (final String tag in recording.tags) _TagLabel(label: tag),
               ],
             ),
@@ -210,26 +227,16 @@ class RecordingCard extends StatelessWidget {
             const _EnrichingStrip(),
           ],
           if (hasTranscript) ...<Widget>[
-            const SizedBox(height: 11),
-            Row(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: <Widget>[
-                Expanded(
-                  child: Text(
-                    transcript,
-                    maxLines: 3,
-                    overflow: TextOverflow.ellipsis,
-                    style: ConsoleText.body,
-                  ),
-                ),
-                const SizedBox(width: 8),
-                // Copies the whole text, not the three lines rendered above.
-                CopyButton(
-                  text: transcript,
-                  tooltip: 'Copy text',
-                  semanticLabel: 'Copy text to clipboard',
-                ),
-              ],
+            const SizedBox(height: 9),
+            // Two lines, from the design's `-webkit-line-clamp:2`. The excerpt
+            // is here to identify the capture, not to be read — the full text
+            // is one tap away in the editor, and the copy button below hands
+            // over all of it regardless of what is rendered.
+            Text(
+              transcript,
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
+              style: ConsoleText.body,
             ),
           ],
           if (recording.error != null) ...<Widget>[
@@ -241,7 +248,11 @@ class RecordingCard extends StatelessWidget {
               style: ConsoleText.micro.copyWith(color: Console.redSoft),
             ),
           ],
-          const SizedBox(height: 11),
+          const SizedBox(height: 10),
+          // The design's footer row: the durability fact on the left, the
+          // action strip pushed right. Copy moved here off the excerpt — four
+          // evenly sized ghost buttons read as one strip of tools, where a
+          // fifth button floating beside the text read as part of the text.
           Row(
             children: <Widget>[
               Expanded(child: VerificationLine(recording: recording)),
@@ -252,7 +263,7 @@ class RecordingCard extends StatelessWidget {
                   label: 'RETRY',
                   onTap: onRetry,
                 ),
-                const SizedBox(width: 8),
+                const SizedBox(width: 6),
               ],
               // In-app playback is audio-only; text and image items have no
               // track at all.
@@ -264,10 +275,8 @@ class RecordingCard extends StatelessWidget {
                   onTap: onTogglePlay,
                   semanticLabel: isPlaying ? 'Stop playback' : 'Play recording',
                   active: isPlaying,
-                  size: 30,
-                  iconSize: 18,
                 ),
-                const SizedBox(width: 7),
+                const SizedBox(width: 6),
               ]
               // A video leaves the app to play: there is no in-process video
               // widget on the desktop targets, so this hands the file to
@@ -278,19 +287,24 @@ class RecordingCard extends StatelessWidget {
                   icon: Icons.play_arrow_rounded,
                   onTap: onOpen,
                   semanticLabel: RecordingCard.openVideoLabel,
-                  size: 30,
-                  iconSize: 18,
                 ),
-                const SizedBox(width: 7),
+                const SizedBox(width: 6),
               ],
               ConsoleIconButton(
                 icon: Icons.edit_outlined,
                 onTap: onEdit,
                 semanticLabel: 'Edit title and text',
-                size: 30,
-                iconSize: 16,
               ),
-              const SizedBox(width: 7),
+              if (hasTranscript) ...<Widget>[
+                const SizedBox(width: 6),
+                // Copies the whole text, not the two lines rendered above.
+                CopyButton(
+                  text: transcript,
+                  tooltip: 'Copy text',
+                  semanticLabel: 'Copy text to clipboard',
+                ),
+              ],
+              const SizedBox(width: 6),
               _ReviewToggle(reviewed: reviewed, onTap: onToggleProcessed),
             ],
           ),
@@ -416,8 +430,12 @@ class _ReviewToggle extends StatelessWidget {
                 ? Icons.check_circle_rounded
                 : Icons.radio_button_unchecked_rounded,
             key: ValueKey<bool>(reviewed),
-            color: reviewed ? Console.green : Console.dim,
-            size: 26,
+            color: reviewed ? Console.green : Console.dimSoft,
+            // Borderless and a touch larger than the ghost buttons beside it.
+            // It is the only control on the row that changes the item's state
+            // rather than showing it, and the one whose result the INBOX
+            // segment immediately acts on.
+            size: 24,
           ),
         ),
       ),
@@ -437,7 +455,7 @@ class _TagLabel extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2.5),
       decoration: BoxDecoration(
         color: Console.cyan.withValues(alpha: .07),
         borderRadius: BorderRadius.circular(999),
@@ -445,7 +463,7 @@ class _TagLabel extends StatelessWidget {
       ),
       child: Text(
         '#$label',
-        style: ConsoleText.micro.copyWith(color: Console.cyan),
+        style: ConsoleText.micro.copyWith(fontSize: 10, color: Console.cyan),
       ),
     );
   }
