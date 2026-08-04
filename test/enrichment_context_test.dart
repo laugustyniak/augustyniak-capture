@@ -57,6 +57,26 @@ void main() {
       );
     });
 
+    test('sourceSummary names every layer that was sent', () {
+      expect(EnrichmentContext.none.sourceSummary, isNull);
+      expect(const EnrichmentContext(profile: '  ').sourceSummary, isNull);
+      // The case every capture is in until a project exists: without naming
+      // the profile layer this would read identically to "no context at all".
+      expect(const EnrichmentContext(profile: 'me').sourceSummary, 'profile');
+      expect(
+        const EnrichmentContext(
+          profile: 'me',
+          project: 'repo',
+          projectSource: 'CLAUDE.md',
+        ).sourceSummary,
+        'profile + CLAUDE.md',
+      );
+      expect(
+        const EnrichmentContext(project: 'repo').sourceSummary,
+        'project',
+      );
+    });
+
     test('the profile has its own, smaller ceiling', () {
       final EnrichmentContext context = EnrichmentContext(
         profile: 'B' * (EnrichmentContext.maxProfileChars + 10),

@@ -36,6 +36,22 @@ class EnrichmentContext {
   bool get isEmpty =>
       _blankToNull(profile) == null && _blankToNull(project) == null;
 
+  /// Names the layers that were actually sent, for the log line. Null when
+  /// nothing was — the caller then omits the segment entirely.
+  ///
+  /// Both layers are named, not only the project one. Reporting just the file
+  /// makes "the profile went, there is no project" indistinguishable from "no
+  /// context at all" — which is exactly the ambiguity this log exists to
+  /// remove, and the state every capture is in until a project is created.
+  String? get sourceSummary {
+    final EnrichmentContext resolved = normalized();
+    final List<String> layers = <String>[
+      if (resolved.profile != null) 'profile',
+      if (resolved.project != null) resolved.projectSource ?? 'project',
+    ];
+    return layers.isEmpty ? null : layers.join(' + ');
+  }
+
   /// Trimmed, blank-collapsed and truncated. Called by the prompt builder, so
   /// no caller can bypass the ceilings by constructing the object directly.
   ///
