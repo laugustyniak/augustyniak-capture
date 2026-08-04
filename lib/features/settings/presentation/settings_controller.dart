@@ -48,7 +48,13 @@ class SettingsController extends ChangeNotifier {
       .where((ProviderProfile item) => item.kind == kind)
       .toList();
   AudioConfig get audio => _settings.audio;
-  String? get enrichmentInstructions => _settings.enrichmentInstructions;
+  /// Never null: an untouched install resolves to the shipped default.
+  String get enrichmentInstructions => _settings.enrichmentInstructions;
+
+  /// False while the shipped default is in force, so the editor can disable
+  /// "restore default" and label which of the two is on screen.
+  bool get hasCustomEnrichmentInstructions =>
+      _settings.hasCustomEnrichmentInstructions;
   String? get error => _error;
 
   /// Whether tokens written to disk are actually encrypted. False on the
@@ -251,7 +257,12 @@ class SettingsController extends ChangeNotifier {
     );
   }
 
-  /// Replace the user's enrichment profile text. Blank clears it.
+  /// Replace the user's enrichment profile text.
+  ///
+  /// A blank value is **stored as blank**, not cleared: it means "send no
+  /// profile", which is a different answer from "I never configured this" and
+  /// must survive a restart. [resetEnrichmentInstructions] is the way back to
+  /// the shipped default.
   ///
   /// Note there is no service cache to invalidate here, unlike every other
   /// setting on this controller: the instructions travel as a per-call argument
@@ -259,14 +270,18 @@ class SettingsController extends ChangeNotifier {
   /// effect on the very next capture without rebuilding the `http.Client`.
   Future<void> setEnrichmentInstructions(String? value) async {
     final String trimmed = value?.trim() ?? '';
-    if (trimmed == (_settings.enrichmentInstructions ?? '')) return;
+    if (_settings.hasCustomEnrichmentInstructions &&
+        trimmed == _settings.enrichmentInstructions.trim()) {
+      return;
+    }
     await _persist(
-      _settings.copyWith(
-        enrichmentInstructions: trimmed.isEmpty ? null : trimmed,
-        clearEnrichmentInstructions: trimmed.isEmpty,
-      ),
+      _settings.copyWith(enrichmentInstructions: trimmed),
     );
   }
+
+  /// Drop the user's text and go back to [EnrichmentProfileDefaults.text].
+  Future<void> resetEnrichmentInstructions() =>
+      _persist(_settings.copyWith(resetEnrichmentInstructions: true));
 
   Future<void> updateAudio(AudioConfig audio) async {
     await _persist(_settings.copyWith(audio: audio));

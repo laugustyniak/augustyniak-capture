@@ -5,6 +5,7 @@ import 'package:audivoa_core/features/settings/domain/audio_config.dart';
 import 'package:audivoa_core/features/settings/domain/provider_profile.dart';
 import 'package:audivoa_core/features/settings/presentation/settings_controller.dart';
 import 'package:audivoa_core/features/enrichment/data/http_chat_enrichment_service.dart';
+import 'package:audivoa_core/features/enrichment/domain/enrichment_defaults.dart';
 import 'package:audivoa_core/features/enrichment/domain/enrichment_service.dart';
 import 'package:audivoa_core/features/processing/data/http_vision_ocr_service.dart';
 import 'package:audivoa_core/features/processing/data/ocr_service.dart';
@@ -178,39 +179,70 @@ void main() {
       expect(restored.audio, AudioConfig.defaults);
     });
 
-    test('enrichmentInstructions round-trip, and legacy files have none', () {
+    test('an untouched install resolves to the shipped default', () {
+      const AppSettings fresh = AppSettings();
+
+      expect(fresh.hasCustomEnrichmentInstructions, isFalse);
+      expect(fresh.enrichmentInstructions, EnrichmentProfileDefaults.text);
+      // Absent from JSON too, so a later build shipping a better default still
+      // reaches everyone who never wrote their own — the `shortcuts` rule.
+      expect(fresh.toJson().containsKey('enrichmentInstructions'), isFalse);
+      expect(
+        AppSettings.fromJson(<String, dynamic>{}).enrichmentInstructions,
+        EnrichmentProfileDefaults.text,
+      );
+    });
+
+    test('a stored value round-trips and wins over the default', () {
       const AppSettings original = AppSettings(
         enrichmentInstructions: 'I collect specs and meeting notes.',
       );
 
+      expect(original.hasCustomEnrichmentInstructions, isTrue);
+      final AppSettings restored = AppSettings.fromJson(original.toJson());
       expect(
-        AppSettings.fromJson(original.toJson()).enrichmentInstructions,
+        restored.enrichmentInstructions,
         'I collect specs and meeting notes.',
       );
-      expect(
-        AppSettings.fromJson(<String, dynamic>{}).enrichmentInstructions,
-        isNull,
-      );
-      // A hand-edited file holding the wrong type must not take the rest of
-      // settings.json down with it — same rule as the id fields.
+      expect(restored.hasCustomEnrichmentInstructions, isTrue);
+    });
+
+    test('a deliberately emptied profile is not the default coming back', () {
+      // The distinction the three-state rule exists for: "send no profile" has
+      // to survive a restart rather than springing the default back.
+      const AppSettings emptied = AppSettings(enrichmentInstructions: '');
+
+      expect(emptied.hasCustomEnrichmentInstructions, isTrue);
+      expect(emptied.enrichmentInstructions, isEmpty);
+      expect(AppSettings.fromJson(emptied.toJson()).enrichmentInstructions, isEmpty);
+    });
+
+    test('a wrong type in the file degrades to the default, not a throw', () {
       expect(
         AppSettings.fromJson(<String, dynamic>{
           'enrichmentInstructions': 42,
         }).enrichmentInstructions,
-        isNull,
+        EnrichmentProfileDefaults.text,
       );
     });
 
-    test('clearing the instructions survives copyWith', () {
-      const AppSettings settings = AppSettings(enrichmentInstructions: 'x');
+    test('reset goes back to the default, and copyWith does not promote', () {
+      const AppSettings custom = AppSettings(enrichmentInstructions: 'x');
 
       expect(
-        settings
-            .copyWith(clearEnrichmentInstructions: true)
-            .enrichmentInstructions,
-        isNull,
+        custom
+            .copyWith(resetEnrichmentInstructions: true)
+            .hasCustomEnrichmentInstructions,
+        isFalse,
       );
-      expect(settings.copyWith().enrichmentInstructions, 'x');
+      expect(custom.copyWith().enrichmentInstructions, 'x');
+      // An unrelated save must not turn an untouched install into a custom one.
+      expect(
+        const AppSettings()
+            .copyWith(audio: const AudioConfig(sampleRate: 22050))
+            .hasCustomEnrichmentInstructions,
+        isFalse,
+      );
     });
 
     test('activeProfile is null when the active id dangles', () {
@@ -302,17 +334,27 @@ void main() {
       },
     );
 
-    test('setEnrichmentInstructions trims, and blank clears it', () async {
+    test('the profile starts at the default and reset returns to it', () async {
       final SettingsController controller = SettingsController(
         repository: _FakeSettingsRepository(),
       );
       await controller.initialize();
 
+      expect(controller.hasCustomEnrichmentInstructions, isFalse);
+      expect(controller.enrichmentInstructions, EnrichmentProfileDefaults.text);
+
       await controller.setEnrichmentInstructions('  I collect specs.  ');
       expect(controller.enrichmentInstructions, 'I collect specs.');
+      expect(controller.hasCustomEnrichmentInstructions, isTrue);
 
+      // Blank is a decision, not a clear: it must not resurrect the default.
       await controller.setEnrichmentInstructions('   ');
-      expect(controller.enrichmentInstructions, isNull);
+      expect(controller.enrichmentInstructions, isEmpty);
+      expect(controller.hasCustomEnrichmentInstructions, isTrue);
+
+      await controller.resetEnrichmentInstructions();
+      expect(controller.enrichmentInstructions, EnrichmentProfileDefaults.text);
+      expect(controller.hasCustomEnrichmentInstructions, isFalse);
     });
 
     test('updateAudio then resetAudio round-trips back to defaults', () async {
