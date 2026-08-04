@@ -43,7 +43,7 @@ class FfmpegVideoAudioExtractor implements VideoAudioExtractor {
     }
 
     final Directory tempDir = await Directory.systemTemp.createTemp(
-      'audivoa_video_audio',
+      'augustyniak-capture-video-audio',
     );
     final String outPath = p.join(tempDir.path, 'audio.m4a');
     final List<String> args = <String>[
