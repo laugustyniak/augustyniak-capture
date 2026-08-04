@@ -19,6 +19,22 @@ import 'recordings_controller.dart';
 /// union — which is what lets each chip carry a count that adds up.
 enum RecordingFilter { all, queue, ready, failed, raw }
 
+/// The *review* axis — deliberately not a sixth [RecordingFilter].
+///
+/// `Recording` carries two independent state axes: where the pipeline has got
+/// to, and whether the user has dealt with the item. [RecordingFilter] covers
+/// the first and partitions it; folding "have I dealt with this" into that row
+/// would break the arithmetic that lets every chip's count add up, and would
+/// claim a relationship between the two that does not exist. So they are two
+/// rows that compose by intersection.
+///
+/// It exists because the header already promoted `DONE 27 / 28` to the biggest
+/// number on the screen while offering no way to act on it: the queue held
+/// every capture ever taken, and ticking one off changed a progress bar and
+/// nothing else. [inbox] is the default for that reason — it is what turns the
+/// review toggle from decoration into the control that empties the list.
+enum ReviewFilter { inbox, done, all }
+
 /// The original Phase-1 screen: header, review progress, search, status filters
 /// and the capture list. Owns only view state; every mutation goes through
 /// [RecordingsController].
@@ -34,6 +50,7 @@ class QueueTab extends StatefulWidget {
 
 class _QueueTabState extends State<QueueTab> {
   RecordingFilter selectedFilter = RecordingFilter.all;
+  ReviewFilter reviewFilter = ReviewFilter.inbox;
   String searchQuery = '';
   String? projectFilterId;
   final TextEditingController searchController = TextEditingController();
@@ -96,6 +113,10 @@ class _QueueTabState extends State<QueueTab> {
                   child: ReviewedStrip(
                     total: all.length,
                     reviewed: reviewedCount,
+                    filter: reviewFilter,
+                    onFilterChanged: (ReviewFilter value) {
+                      setState(() => reviewFilter = value);
+                    },
                   ),
                 ),
                 const SizedBox(height: 10),
@@ -140,11 +161,24 @@ class _QueueTabState extends State<QueueTab> {
                   Padding(
                     padding: const EdgeInsets.symmetric(horizontal: 4),
                     child: EmptyPanel(
-                      icon: Icons.graphic_eq,
-                      title: _emptyLabel(selectedFilter),
-                      blurb:
-                          'Every capture is written to disk and verified '
-                          'before processing is even attempted.',
+                      // An empty list has two very different causes and they
+                      // look identical: nothing was captured, or a filter is
+                      // hiding what was. Naming the filter that emptied the
+                      // list is the whole difference between "you are done"
+                      // and "you cannot see your work".
+                      icon: all.isEmpty
+                          ? Icons.graphic_eq
+                          : Icons.inbox_outlined,
+                      title: _emptyLabel(
+                        selectedFilter,
+                        reviewFilter,
+                        hasAny: all.isNotEmpty,
+                      ),
+                      blurb: all.isEmpty
+                          ? 'Every capture is written to disk and verified '
+                                'before processing is even attempted.'
+                          : 'Nothing is hidden — switch the row above to ALL '
+                                'to see everything you have already closed.',
                     ),
                   )
                 else
@@ -189,6 +223,7 @@ class _QueueTabState extends State<QueueTab> {
     final String query = searchQuery.trim().toLowerCase();
     return recordings.where((Recording item) {
       if (item.id == editingId) return true;
+      if (!_matchesReview(reviewFilter, item)) return false;
       if (!_matches(selectedFilter, item)) return false;
       if (effectiveProjectFilterId != null &&
           item.projectId != effectiveProjectFilterId) {
@@ -198,6 +233,11 @@ class _QueueTabState extends State<QueueTab> {
       final String haystack = <String?>[
         item.transcript,
         item.title,
+        // The model's paraphrase is usually what the user actually remembers
+        // about a capture ("the one about the database migration"), and it was
+        // the one piece of its own output the search could not see.
+        item.summary,
+        item.category?.name,
         ...item.tags,
         item.filePath.split(Platform.pathSeparator).last,
         item.id,
@@ -341,6 +381,14 @@ bool _matches(RecordingFilter filter, Recording item) => switch (filter) {
   RecordingFilter.raw => item.status == RecordingStatus.saved,
 };
 
+/// Single definition of the review axis, for the same reason [_matches] is one:
+/// the chip counts and the list must be answering the same question.
+bool _matchesReview(ReviewFilter filter, Recording item) => switch (filter) {
+  ReviewFilter.all => true,
+  ReviewFilter.inbox => !item.isProcessedByUser,
+  ReviewFilter.done => item.isProcessedByUser,
+};
+
 class _SearchField extends StatelessWidget {
   const _SearchField({
     required this.controller,
@@ -426,10 +474,29 @@ class _FilterRow extends StatelessWidget {
   }
 }
 
-String _emptyLabel(RecordingFilter filter) => switch (filter) {
-  RecordingFilter.all => 'Nothing captured yet.',
-  RecordingFilter.queue => 'The processing queue is empty.',
-  RecordingFilter.ready => 'No finished output yet.',
-  RecordingFilter.failed => 'No failed jobs.',
-  RecordingFilter.raw => 'Nothing waiting to be queued.',
-};
+/// [hasAny] separates "this install has captured nothing" from "the filters
+/// excluded everything", which is the same fact the panel's icon and blurb
+/// switch on. The review axis wins the wording when it is the one narrowing the
+/// list, because reaching inbox zero is an outcome worth naming rather than an
+/// absence to apologise for.
+String _emptyLabel(
+  RecordingFilter filter,
+  ReviewFilter review, {
+  required bool hasAny,
+}) {
+  if (!hasAny) return 'Nothing captured yet.';
+  if (filter == RecordingFilter.all) {
+    return switch (review) {
+      ReviewFilter.inbox => 'Inbox zero — everything is closed.',
+      ReviewFilter.done => 'Nothing closed yet.',
+      ReviewFilter.all => 'Nothing matches the current filters.',
+    };
+  }
+  return switch (filter) {
+    RecordingFilter.all => 'Nothing matches the current filters.',
+    RecordingFilter.queue => 'The processing queue is empty.',
+    RecordingFilter.ready => 'No finished output yet.',
+    RecordingFilter.failed => 'No failed jobs.',
+    RecordingFilter.raw => 'Nothing waiting to be queued.',
+  };
+}
