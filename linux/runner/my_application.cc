@@ -76,7 +76,7 @@ static void my_application_activate(GApplication* application) {
     }
   }
   if (!icon_set) {
-    gtk_window_set_icon_name(window, "com.audivoa.core");
+    gtk_window_set_icon_name(window, "ai.augustyniak.capture");
   }
 
   g_autoptr(FlDartProject) project = fl_dart_project_new();
