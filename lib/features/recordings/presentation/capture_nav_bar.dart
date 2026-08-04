@@ -70,31 +70,41 @@ class CaptureNavBar extends StatelessWidget {
                   ? 44
                   : sharedWidth;
 
-              // At unusually narrow widths the row scrolls instead of shrinking
-              // a destination below its 44 px touch target.
-              return SingleChildScrollView(
-                scrollDirection: Axis.horizontal,
-                child: Row(
-                  children: <Widget>[
-                    for (int index = 0; index < destinations.length; index++)
-                      SizedBox(
-                        width: navigationWidth,
-                        child: _NavigationItem(
-                          destination: destinations[index],
-                          selected: index == selectedIndex,
-                          onTap: () => onSelected(index),
-                        ),
+              // Only destinations scroll at unusually narrow widths. Capture
+              // actions stay fixed and immediately reachable on every phone.
+              return Row(
+                children: <Widget>[
+                  Expanded(
+                    child: SingleChildScrollView(
+                      scrollDirection: Axis.horizontal,
+                      child: Row(
+                        children: <Widget>[
+                          for (
+                            int index = 0;
+                            index < destinations.length;
+                            index++
+                          )
+                            SizedBox(
+                              width: navigationWidth,
+                              child: _NavigationItem(
+                                destination: destinations[index],
+                                selected: index == selectedIndex,
+                                onTap: () => onSelected(index),
+                              ),
+                            ),
+                        ],
                       ),
-                    const SizedBox(width: 4),
-                    _CaptureButton(
-                      icon: Icons.add_rounded,
-                      label: 'New note or upload',
-                      onTap: onOpenCaptureMenu,
                     ),
-                    const SizedBox(width: 4),
-                    _RecordButton(busy: busy, onTap: busy ? null : onRecord),
-                  ],
-                ),
+                  ),
+                  const SizedBox(width: 4),
+                  _CaptureButton(
+                    icon: Icons.add_rounded,
+                    label: 'New note or upload',
+                    onTap: onOpenCaptureMenu,
+                  ),
+                  const SizedBox(width: 4),
+                  _RecordButton(busy: busy, onTap: busy ? null : onRecord),
+                ],
               );
             },
           ),

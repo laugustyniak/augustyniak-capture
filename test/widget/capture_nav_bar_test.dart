@@ -124,5 +124,14 @@ void main() {
         reason: '$label must meet the minimum touch-target width',
       );
     }
+
+    expect(
+      find.bySemanticsLabel('New note or upload').hitTestable(),
+      findsOneWidget,
+    );
+    expect(
+      find.bySemanticsLabel('Start recording').hitTestable(),
+      findsOneWidget,
+    );
   });
 }
