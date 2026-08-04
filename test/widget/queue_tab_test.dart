@@ -265,6 +265,47 @@ void main() {
     expect(controller.recordings.first.projectId, other.id);
   });
 
+  testWidgets('a wide window puts search, project and filters on one line', (
+    WidgetTester tester,
+  ) async {
+    // The stacked layout is what the rest of this suite exercises, since the
+    // default 800 px test window is below the strip's single-line threshold.
+    tester.view.physicalSize = const Size(1400, 900);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+
+    final ProjectsController projects = ProjectsController(
+      repository: ProjectsRepository(directoryProvider: () async => appDir),
+    );
+    addTearDown(projects.dispose);
+    await tester.runAsync(() async {
+      await projects.initialize();
+      await projects.create(name: 'Acme', repoPath: '/work/acme');
+    });
+    final RecordingsController controller = await buildRecordingsController(
+      appDir,
+      seed: <Recording>[makeRecording(id: 'only')],
+    );
+    await pumpQueue(tester, controller, projects: projects);
+
+    // An overflowing Row reports as a rendering exception rather than a failed
+    // assertion, so it has to be claimed explicitly.
+    expect(tester.takeException(), isNull);
+
+    final double searchY = tester.getCenter(find.byType(TextField)).dy;
+    final double projectY = tester
+        .getCenter(find.byType(DropdownButtonFormField<String?>))
+        .dy;
+    final double chipsY = tester.getCenter(find.text('ALL 1')).dy;
+    expect((projectY - searchY).abs(), lessThan(4));
+    expect((chipsY - searchY).abs(), lessThan(4));
+
+    // The compact selector drops the floating label for a hint; the value it
+    // shows must still be the one the stacked layout shows.
+    expect(find.text('All projects'), findsOneWidget);
+    expect(find.text('Project'), findsNothing);
+  });
+
   testWidgets('deleting the selected project resets the Queue filter', (
     WidgetTester tester,
   ) async {
