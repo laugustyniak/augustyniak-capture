@@ -5,77 +5,130 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 /// Shared "Processing Console" palette and the small widgets every tab reuses.
-/// Kept in one place so Queue, Models, Logs and Config stay visually identical.
+/// Kept in one place so Queue, Projects, Models, Logs and Config stay visually
+/// identical.
 ///
-/// Values come from the approved design (direction 1a, "console cards"). The
-/// hairlines are deliberately *translucent* rather than flattened to an opaque
-/// hex: the same border then reads correctly on the page background, on a card
-/// and inside a bottom sheet, which are three different base colours.
+/// Values come from the `Capture Queue` design. The hairlines are deliberately
+/// *translucent* rather than flattened to an opaque hex: the design draws two
+/// different borders (`#14202e` on the rail, `#1b2a3a` on a card) which are the
+/// *same* hairline over two different bases, and one translucent value
+/// reproduces both — plus the third base, a bottom sheet, that the design never
+/// had to draw.
 class Console {
   const Console._();
 
-  static const Color cyan = Color(0xFF22D3EE);
-  static const Color background = Color(0xFF0A1322);
-  static const Color surface = Color(0xFF101D31);
+  /// The house accent: chips, icons, a control that has gone live. Used
+  /// everywhere the design writes `#38cbdd`.
+  static const Color cyan = Color(0xFF38CBDD);
 
-  /// Bottom navigation and filled input fields.
-  static const Color surfaceDeep = Color(0xFF0C1728);
+  /// Reserved for the one *filled* accent on screen — the record button's
+  /// gradient and the focus ring. Brighter than [cyan] on purpose: a fill and a
+  /// hairline at the same luminance make the fill look washed out.
+  static const Color cyanBright = Color(0xFF22D3EE);
 
-  /// Raised control on top of a card — the note button, a disabled fill.
-  static const Color surfaceRaised = Color(0xFF14233A);
+  /// Dark end of the record gradient (`linear-gradient(135deg,#0891b2,#22d3ee)`).
+  static const Color cyanDeep = Color(0xFF0891B2);
 
-  /// The design's `rgba(126,155,196,.16)` hairline, kept translucent.
-  static const Color border = Color(0x297E9BC4);
+  /// Label colour of the selected segment on the review switch. The design uses
+  /// a *different* accent there (`#5eead4`) so the segmented control never reads
+  /// as a second record button.
+  static const Color teal = Color(0xFF5EEAD4);
 
-  /// Same hairline at `.35`, for a control that has to read as tappable.
-  static const Color borderStrong = Color(0x597E9BC4);
+  static const Color background = Color(0xFF0A1017);
 
-  static const Color text = Color(0xFFE8F0FA);
-  static const Color textSoft = Color(0xFFC8D7E4);
+  /// A card, a panel, a filled well.
+  static const Color surface = Color(0xFF0E1723);
 
-  /// Secondary label — meta lines, counters, unselected chips.
-  static const Color muted = Color(0xFF8AA0BC);
+  /// The chrome behind the content: left rail, header bar, bottom navigation.
+  /// Darker than [surface], which is what separates chrome from content without
+  /// a second border.
+  static const Color surfaceDeep = Color(0xFF0B1219);
 
-  /// Icon tint on a raised control.
-  static const Color mutedSoft = Color(0xFF9FB4D0);
+  /// Raised control on top of a card — an icon tile, the note button.
+  static const Color surfaceRaised = Color(0xFF12222F);
+
+  /// The design's card hairline (`#1b2a3a` over `#0e1723`), kept translucent so
+  /// the same value also reads as `#14202e` over the rail.
+  static const Color border = Color(0x248FA6BB);
+
+  /// Same hairline, stronger, for a control that has to read as tappable.
+  static const Color borderStrong = Color(0x4D8FA6BB);
+
+  /// The design's hover border (`#28455e`) — a card under the pointer, the
+  /// active row in a list.
+  static const Color borderBright = Color(0xFF28455E);
+
+  static const Color text = Color(0xFFE8F2FB);
+  static const Color textSoft = Color(0xFFDBE7F3);
+
+  /// Secondary label — excerpts, meta lines, unselected chips.
+  static const Color muted = Color(0xFF8FA6BB);
+
+  /// Icon tint on a raised control, and the quieter of the two body greys.
+  static const Color mutedSoft = Color(0xFFC4D6E6);
 
   /// Tertiary label — the verification footer, timestamps, hint text.
-  static const Color dim = Color(0xFF5F7695);
+  static const Color dim = Color(0xFF4D637A);
 
-  static const Color green = Color(0xFF3DDC97);
+  /// Unselected icon button and inactive nav item.
+  static const Color dimSoft = Color(0xFF6B8299);
+
+  static const Color green = Color(0xFF6EE7B7);
   static const Color amber = Color(0xFFFBBF24);
   static const Color violet = Color(0xFFA78BFA);
+
+  /// The design's fifth category colour (MEETING).
+  static const Color pink = Color(0xFFF472B6);
   static const Color red = Color(0xFFFF7A7A);
   static const Color redSoft = Color(0xFFFF9B9B);
 
   /// Foreground on a cyan fill.
-  static const Color ink = Color(0xFF06202B);
+  static const Color ink = Color(0xFF04191E);
 
   /// Label colour on an unselected chip.
-  static const Color chipLabel = muted;
+  static const Color chipLabel = dimSoft;
 
   /// Background of a square icon tile (the leading badge on a card).
-  static const Color iconTile = Color(0x1F22D3EE);
+  static const Color iconTile = Color(0xFF12222F);
 
-  /// Background of a square icon *button* (play, edit, copy).
-  static const Color surfaceButton = Color(0xFF14233A);
+  /// Fill behind the selected segment of the review switch.
+  static const Color segmentActive = Color(0xFF12303C);
+
+  /// Background of a square icon *button* (play, edit, copy). The design draws
+  /// these as **ghost** controls — border only — so the four of them on a card
+  /// do not read as four filled tiles competing with the record button.
+  static const Color surfaceButton = Color(0x00000000);
 
   /// NavigationBar selection indicator. The design marks the active tab by
   /// colouring its icon and label, not with a pill behind them.
   static const Color navIndicator = Color(0x00000000);
 
   /// Confirmed-copy fill behind the check icon.
-  static const Color greenDeep = Color(0xFF13301F);
+  static const Color greenDeep = Color(0xFF0D2A1E);
 
   /// Error banner fill and its hairline.
-  static const Color redDeep = Color(0xFF2A1220);
+  static const Color redDeep = Color(0xFF26121B);
   static const Color redBorder = Color(0xFF5E2334);
 
-  /// Unfilled part of any progress bar.
-  static const Color track = Color(0x2E7E9BC4);
+  /// Unfilled part of any progress bar, and the rail's divider.
+  static const Color track = Color(0xFF14202E);
 
   /// Drop shadow under anything that floats over the list or the page.
   static const Color shadow = Color(0x80040A14);
+
+  /// Width at or above which the shell switches from the bottom navigation to
+  /// the design's 216 px left rail and lays the queue out as a card grid.
+  ///
+  /// Read off the design rather than guessed: the rail is 216 px and a grid
+  /// column has a 430 px minimum, so below `216 + 430 + padding` a rail would
+  /// leave less room for content than the bottom bar does.
+  static const double railBreakpoint = 900;
+
+  /// The rail's own width, from the design.
+  static const double railWidth = 216;
+
+  /// `minmax(430px, 1fr)` — the queue grid's column minimum.
+  static const double gridColumnMin = 430;
 }
 
 /// The two families vendored under `assets/fonts`. Space Grotesk carries names
@@ -110,6 +163,33 @@ class ConsoleText {
     color: Console.text,
   );
 
+  /// The same title inside the wide layout's one-line header bar, where it
+  /// shares a row with the tabs, the search box and the filter chips. It is a
+  /// *label* there rather than a page heading, which is why it drops nine
+  /// points and the eyebrow above it disappears into the rail's wordmark.
+  static const TextStyle barTitle = TextStyle(
+    fontFamily: ConsoleFont.display,
+    fontSize: 17,
+    fontWeight: FontWeight.w600,
+    color: Console.text,
+  );
+
+  /// One segment of the review switch (`INBOX 3`).
+  static const TextStyle segment = TextStyle(
+    fontFamily: ConsoleFont.mono,
+    fontSize: 10.5,
+    fontWeight: FontWeight.w500,
+    letterSpacing: .6,
+  );
+
+  /// A destination label in the left rail — a name, so it stays in the display
+  /// face while its count beside it goes mono.
+  static const TextStyle railLabel = TextStyle(
+    fontFamily: ConsoleFont.display,
+    fontSize: 13,
+    color: Console.muted,
+  );
+
   /// Right-hand counter next to a page title.
   static const TextStyle counter = TextStyle(
     fontFamily: ConsoleFont.mono,
@@ -141,14 +221,16 @@ class ConsoleText {
 
   static const TextStyle pill = TextStyle(
     fontFamily: ConsoleFont.mono,
-    fontSize: 10,
+    fontSize: 9.5,
     fontWeight: FontWeight.w600,
+    letterSpacing: .8,
   );
 
   static const TextStyle chip = TextStyle(
     fontFamily: ConsoleFont.mono,
-    fontSize: 10.5,
+    fontSize: 10,
     fontWeight: FontWeight.w600,
+    letterSpacing: .6,
   );
 
   static const TextStyle navLabel = TextStyle(
@@ -174,7 +256,7 @@ class ConsoleHeader extends StatelessWidget {
     super.key,
     required this.title,
     this.trailing,
-    this.eyebrow = 'AUDIVOA CORE',
+    this.eyebrow = 'AUGUSTYNIAK CAPTURE',
   });
 
   final String title;
@@ -376,10 +458,10 @@ class ConsoleChip extends StatelessWidget {
         borderRadius: BorderRadius.circular(999),
         child: AnimatedContainer(
           duration: const Duration(milliseconds: 220),
-          padding: const EdgeInsets.symmetric(horizontal: 11, vertical: 7),
+          padding: const EdgeInsets.symmetric(horizontal: 11, vertical: 6),
           decoration: BoxDecoration(
             color: selected
-                ? selectedColor.withValues(alpha: .14)
+                ? selectedColor.withValues(alpha: .12)
                 : Colors.transparent,
             borderRadius: BorderRadius.circular(999),
             border: Border.all(
@@ -529,7 +611,15 @@ class ConsolePosterTile extends StatelessWidget {
   }
 }
 
-/// Tappable square icon button with the console's border treatment.
+/// Tappable square icon button, drawn as the design's **ghost** control: a
+/// hairline box with a quiet glyph, going cyan only when the action it runs is
+/// currently live.
+///
+/// Resting state is deliberately *not* accented. A queue card carries four of
+/// these side by side, and four cyan glyphs on every row would out-shout both
+/// the status pill and the one genuinely accented control on the screen (the
+/// record button). Cyan here means "this is happening", the same claim
+/// [PulseDot] makes.
 class ConsoleIconButton extends StatelessWidget {
   const ConsoleIconButton({
     super.key,
@@ -537,15 +627,15 @@ class ConsoleIconButton extends StatelessWidget {
     required this.onTap,
     required this.semanticLabel,
     this.active = false,
-    this.size = 36,
-    this.iconSize = 19,
+    this.size = 30,
+    this.iconSize = 15,
   });
 
   final IconData icon;
   final VoidCallback onTap;
   final String semanticLabel;
 
-  /// Highlights the border and background, e.g. while a clip is playing.
+  /// Highlights the border, glyph and fill, e.g. while a clip is playing.
   final bool active;
   final double size;
   final double iconSize;
@@ -555,22 +645,105 @@ class ConsoleIconButton extends StatelessWidget {
     return Semantics(
       button: true,
       label: semanticLabel,
-      child: InkResponse(
-        onTap: onTap,
-        radius: 25,
-        child: Container(
-          width: size,
-          height: size,
-          alignment: Alignment.center,
-          decoration: BoxDecoration(
-            color: active ? Console.iconTile : Console.surfaceButton,
-            borderRadius: BorderRadius.circular(10),
-            border: Border.all(
-              color: active ? Console.cyan : Console.borderStrong,
+      child: Tooltip(
+        message: semanticLabel,
+        waitDuration: const Duration(milliseconds: 600),
+        child: InkResponse(
+          onTap: onTap,
+          radius: 22,
+          child: AnimatedContainer(
+            duration: const Duration(milliseconds: 180),
+            width: size,
+            height: size,
+            alignment: Alignment.center,
+            decoration: BoxDecoration(
+              color: active
+                  ? Console.cyan.withValues(alpha: .12)
+                  : Console.surfaceButton,
+              borderRadius: BorderRadius.circular(8),
+              border: Border.all(
+                color: active ? Console.cyan : Console.border,
+              ),
+            ),
+            child: Icon(
+              icon,
+              color: active ? Console.cyan : Console.dimSoft,
+              size: iconSize,
             ),
           ),
-          child: Icon(icon, color: Console.cyan, size: iconSize),
         ),
+      ),
+    );
+  }
+}
+
+/// The design's review switch: `INBOX 3 · DONE 5 · ANY 8` in one inset track,
+/// the selected segment filled and tealed.
+///
+/// Deliberately a different shape from [ConsoleChip], because it answers a
+/// different question. The chips filter by *pipeline* status and are a flat,
+/// multi-valued row; this is a single-choice switch over the **user review**
+/// axis, which `Recording` has always kept independent of `RecordingStatus`.
+/// Making the two look alike would suggest they compose into one filter, when
+/// in fact each narrows the other.
+class ConsoleSegmented<T> extends StatelessWidget {
+  const ConsoleSegmented({
+    super.key,
+    required this.segments,
+    required this.selected,
+    required this.onSelected,
+  });
+
+  /// Ordered `value → label` pairs. Labels carry their own counts, so the
+  /// switch says how much is behind each option before it is chosen.
+  final List<(T, String)> segments;
+  final T selected;
+  final ValueChanged<T> onSelected;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.all(3),
+      decoration: BoxDecoration(
+        color: Console.surface,
+        borderRadius: BorderRadius.circular(9),
+        border: Border.all(color: Console.border),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: <Widget>[
+          for (final (T value, String label) in segments)
+            Semantics(
+              button: true,
+              selected: value == selected,
+              child: InkWell(
+                onTap: () => onSelected(value),
+                borderRadius: BorderRadius.circular(7),
+                child: AnimatedContainer(
+                  duration: const Duration(milliseconds: 200),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 12,
+                    vertical: 6,
+                  ),
+                  decoration: BoxDecoration(
+                    color: value == selected
+                        ? Console.segmentActive
+                        : Colors.transparent,
+                    borderRadius: BorderRadius.circular(7),
+                  ),
+                  child: Text(
+                    label,
+                    style: ConsoleText.segment.copyWith(
+                      color: value == selected ? Console.teal : Console.dimSoft,
+                      fontWeight: value == selected
+                          ? FontWeight.w600
+                          : FontWeight.w500,
+                    ),
+                  ),
+                ),
+              ),
+            ),
+        ],
       ),
     );
   }
@@ -757,14 +930,14 @@ class _CopyButtonState extends State<CopyButton> {
           radius: 22,
           child: AnimatedContainer(
             duration: const Duration(milliseconds: 260),
-            width: 34,
-            height: 34,
+            width: 30,
+            height: 30,
             alignment: Alignment.center,
             decoration: BoxDecoration(
               color: _copied ? Console.greenDeep : Console.surfaceButton,
-              borderRadius: BorderRadius.circular(10),
+              borderRadius: BorderRadius.circular(8),
               border: Border.all(
-                color: _copied ? Console.green : Console.borderStrong,
+                color: _copied ? Console.green : Console.border,
               ),
             ),
             child: AnimatedSwitcher(
@@ -781,8 +954,8 @@ class _CopyButtonState extends State<CopyButton> {
               child: Icon(
                 _copied ? Icons.check_rounded : Icons.copy_rounded,
                 key: ValueKey<bool>(_copied),
-                color: _copied ? Console.green : Console.muted,
-                size: 17,
+                color: _copied ? Console.green : Console.dimSoft,
+                size: 15,
               ),
             ),
           ),
@@ -810,17 +983,21 @@ class StatusPill extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
       decoration: BoxDecoration(
-        color: color.withValues(alpha: .1),
+        // The design's `bg: colour+14 / border: colour+44` — a tint plus its own
+        // hairline, so a pill keeps its shape against both the card and the
+        // header bar. A tint alone disappears on the darker of the two.
+        color: color.withValues(alpha: .08),
         borderRadius: BorderRadius.circular(999),
+        border: Border.all(color: color.withValues(alpha: .27)),
       ),
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: <Widget>[
           if (pulse) ...<Widget>[
-            PulseDot(color: color),
-            const SizedBox(width: 6),
+            PulseDot(color: color, size: 5),
+            const SizedBox(width: 5),
           ],
           Text(label, style: ConsoleText.pill.copyWith(color: color)),
         ],

@@ -34,7 +34,9 @@ import '../data/system_clipboard_sink.dart';
 import '../data/revisions_repository.dart';
 import '../data/system_media_opener.dart';
 import '../domain/capture_type.dart';
+import '../domain/recording.dart';
 import 'capture_dock.dart';
+import 'nav_rail.dart';
 import 'queue_tab.dart';
 import 'recording_view.dart';
 import 'recordings_controller.dart';
@@ -312,106 +314,171 @@ class _RecordingsPageState extends State<RecordingsPage> {
     super.dispose();
   }
 
+  /// The five destinations, in the one order both layouts use. Declared once so
+  /// the rail and the bottom bar cannot drift into different orders — the index
+  /// is what `navigationIndex` means, and a reorder in one place only would
+  /// silently repoint every `setState(() => navigationIndex = …)` in this file.
+  static const List<({IconData icon, String label})> _destinations =
+      <({IconData icon, String label})>[
+        (icon: Icons.format_list_bulleted_rounded, label: 'QUEUE'),
+        (icon: Icons.account_tree_outlined, label: 'PROJECTS'),
+        (icon: Icons.memory_rounded, label: 'MODELS'),
+        (icon: Icons.chevron_right_rounded, label: 'LOGS'),
+        (icon: Icons.tune_rounded, label: 'CONFIG'),
+      ];
+
   @override
   Widget build(BuildContext context) {
     return AnimatedBuilder(
       animation: listenable,
       builder: (BuildContext context, Widget? child) {
-        final bool recording = controller.isRecording;
+        // LayoutBuilder rather than MediaQuery: the shell should follow the box
+        // it was actually given, so a desktop window dragged narrow becomes the
+        // phone layout and a widget test can pump either one by sizing its
+        // surface. Nothing below reads the screen.
+        return LayoutBuilder(
+          builder: (BuildContext context, BoxConstraints constraints) {
+            final bool wide = constraints.maxWidth >= Console.railBreakpoint;
+            final bool recording = controller.isRecording;
 
-        return Scaffold(
-          // No AppBar: each tab draws the design's own header (cyan eyebrow +
-          // large title) inside its scroll area, so the title scrolls with the
-          // content instead of sitting in a separate bar above it.
-          body: Stack(
-            children: <Widget>[
-              // IndexedStack so the Queue tab keeps its search text and filter
-              // while the user visits Models/Logs/Config.
-              IndexedStack(
-                index: navigationIndex,
+            // IndexedStack so the Queue tab keeps its search text and filter
+            // while the user visits Models/Logs/Config.
+            final Widget body = IndexedStack(
+              index: navigationIndex,
+              children: <Widget>[
+                QueueTab(
+                  controller: controller,
+                  projects: projects,
+                  wide: wide,
+                ),
+                ProjectsTab(controller: projects),
+                ModelsTab(controller: settings),
+                LogsTab(store: logs),
+                ConfigTab(
+                  controller: settings,
+                  storagePath: storagePath,
+                  recordingsCount: controller.recordings.length,
+                  logCount: logs.events.length,
+                  onOpenModels: () =>
+                      setState(() => navigationIndex = modelsIndex),
+                  showShortcuts: _isDesktop,
+                  rejectedShortcuts: rejectedShortcuts,
+                  runWithHotkeysSuspended: _runWithHotkeysSuspended,
+                ),
+              ],
+            );
+
+            return Scaffold(
+              // No AppBar in either layout: the wide one puts the title in its
+              // own header bar beside the filters, the narrow one draws the
+              // design's eyebrow + title inside the scroll area, so the title
+              // scrolls with the content instead of sitting above it.
+              body: Stack(
                 children: <Widget>[
-                  QueueTab(controller: controller, projects: projects),
-                  ProjectsTab(controller: projects),
-                  ModelsTab(controller: settings),
-                  LogsTab(store: logs),
-                  ConfigTab(
-                    controller: settings,
-                    storagePath: storagePath,
-                    recordingsCount: controller.recordings.length,
-                    logCount: logs.events.length,
-                    onOpenModels: () =>
-                        setState(() => navigationIndex = modelsIndex),
-                    showShortcuts: _isDesktop,
-                    rejectedShortcuts: rejectedShortcuts,
-                    runWithHotkeysSuspended: _runWithHotkeysSuspended,
-                  ),
-                ],
-              ),
-              if (navigationIndex == queueIndex && !recording)
-                Positioned(
-                  left: 0,
-                  right: 0,
-                  bottom: 0,
-                  child: CaptureDock(
-                    controller: controller,
-                    onOpenCaptureMenu: () => _openCaptureMenu(context),
-                  ),
-                ),
-              // Overlaid rather than swapped into the IndexedStack: the Queue
-              // underneath keeps its search text and scroll position for when
-              // the capture finishes.
-              if (recording)
-                Positioned.fill(
-                  child: ColoredBox(
-                    color: Console.background,
-                    child: RecordingView(controller: controller),
-                  ),
-                ),
-            ],
-          ),
-          // Hidden while recording — the capture screen is a single-purpose
-          // view, and switching tabs mid-take is not a thing to invite.
-          bottomNavigationBar: recording
-              ? null
-              : DecoratedBox(
-                  decoration: const BoxDecoration(
-                    border: Border(top: BorderSide(color: Console.border)),
-                  ),
-                  child: NavigationBar(
-                    selectedIndex: navigationIndex,
-                    onDestinationSelected: (int value) {
-                      setState(() => navigationIndex = value);
-                    },
-                    destinations: <NavigationDestination>[
-                      const NavigationDestination(
-                        icon: Icon(Icons.format_list_bulleted_rounded),
-                        label: 'QUEUE',
-                      ),
-                      const NavigationDestination(
-                        icon: Icon(Icons.account_tree_outlined),
-                        label: 'PROJECTS',
-                      ),
-                      NavigationDestination(
-                        icon: _ProfileBadge(
-                          hasActiveProfile: settings.activeProfile != null,
+                  Row(
+                    children: <Widget>[
+                      // Hidden while recording for the same reason the bottom
+                      // bar is: the capture screen is single-purpose, and
+                      // switching tabs mid-take is not a thing to invite.
+                      if (wide && !recording) _buildRail(),
+                      Expanded(
+                        child: Stack(
+                          children: <Widget>[
+                            body,
+                            // The floating dock is the *narrow* capture
+                            // affordance. Wide has the rail's own buttons, and
+                            // a disc floating over a three-column grid would
+                            // land on whichever card happened to be under it.
+                            if (!wide &&
+                                navigationIndex == queueIndex &&
+                                !recording)
+                              Positioned(
+                                left: 0,
+                                right: 0,
+                                bottom: 0,
+                                child: CaptureDock(
+                                  controller: controller,
+                                  onOpenCaptureMenu: () =>
+                                      _openCaptureMenu(context),
+                                ),
+                              ),
+                          ],
                         ),
-                        label: 'MODELS',
-                      ),
-                      const NavigationDestination(
-                        icon: Icon(Icons.chevron_right_rounded),
-                        label: 'LOGS',
-                      ),
-                      const NavigationDestination(
-                        icon: Icon(Icons.tune_rounded),
-                        label: 'CONFIG',
                       ),
                     ],
                   ),
-                ),
+                  // Overlaid rather than swapped into the IndexedStack: the
+                  // Queue underneath keeps its search text and scroll position
+                  // for when the capture finishes.
+                  if (recording)
+                    Positioned.fill(
+                      child: ColoredBox(
+                        color: Console.background,
+                        child: RecordingView(controller: controller),
+                      ),
+                    ),
+                ],
+              ),
+              bottomNavigationBar: wide || recording
+                  ? null
+                  : DecoratedBox(
+                      decoration: const BoxDecoration(
+                        border: Border(top: BorderSide(color: Console.border)),
+                      ),
+                      child: NavigationBar(
+                        selectedIndex: navigationIndex,
+                        onDestinationSelected: (int value) {
+                          setState(() => navigationIndex = value);
+                        },
+                        destinations: <NavigationDestination>[
+                          for (int i = 0; i < _destinations.length; i++)
+                            NavigationDestination(
+                              icon: i == modelsIndex
+                                  ? _ProfileBadge(
+                                      icon: _destinations[i].icon,
+                                      hasActiveProfile:
+                                          settings.activeProfile != null,
+                                    )
+                                  : Icon(_destinations[i].icon),
+                              label: _destinations[i].label,
+                            ),
+                        ],
+                      ),
+                    ),
+            );
+          },
         );
       },
     );
   }
+
+  Widget _buildRail() {
+    return ConsoleNavRail(
+      selectedIndex: navigationIndex,
+      onSelected: (int value) => setState(() => navigationIndex = value),
+      destinations: <RailDestination>[
+        for (int i = 0; i < _destinations.length; i++)
+          RailDestination(
+            icon: _destinations[i].icon,
+            // The rail has room for a name rather than an all-caps stub, and a
+            // 216 px column of shouting labels reads as a wall.
+            label: _titleCase(_destinations[i].label),
+            count: i == queueIndex ? controller.recordings.length : null,
+            warn: i == modelsIndex && settings.activeProfile == null,
+          ),
+      ],
+      reviewed: controller.recordings
+          .where((Recording item) => item.isProcessedByUser)
+          .length,
+      total: controller.recordings.length,
+      busy: controller.isBusy,
+      onRecord: controller.startRecording,
+      onCapture: () => _openCaptureMenu(context),
+    );
+  }
+
+  static String _titleCase(String value) =>
+      value[0] + value.substring(1).toLowerCase();
 }
 
 /// Amber dot on the Models tab while no provider profile is active, so the
@@ -420,16 +487,17 @@ class _RecordingsPageState extends State<RecordingsPage> {
 /// One icon for both states: the navigation theme already tints it cyan when
 /// selected and dim when not, which is how the design marks the active tab.
 class _ProfileBadge extends StatelessWidget {
-  const _ProfileBadge({required this.hasActiveProfile});
+  const _ProfileBadge({required this.icon, required this.hasActiveProfile});
 
+  final IconData icon;
   final bool hasActiveProfile;
 
   @override
   Widget build(BuildContext context) {
-    const Icon icon = Icon(Icons.memory_rounded);
+    final Icon icon = Icon(this.icon);
     if (hasActiveProfile) return icon;
 
-    return const Badge(
+    return Badge(
       backgroundColor: Console.amber,
       smallSize: 7,
       child: icon,
