@@ -1,5 +1,6 @@
 import 'capture_category.dart';
 import 'capture_type.dart';
+import 'route_record.dart';
 import 'recording_tag.dart';
 
 /// Generic processing state, not transcription-specific: `pendingTranscription`
@@ -37,6 +38,7 @@ class Recording {
     this.error,
     this.isProcessedByUser = false,
     this.processedAt,
+    this.routes = const <RouteRecord>[],
   });
 
   final String id;
@@ -73,8 +75,10 @@ class Recording {
   /// every non-video item, on legacy rows, and whenever the extraction failed.
   final String? thumbPath;
 
-  /// Optional user-set display name. Null on legacy rows and until named; the
-  /// card falls back to the filename. Never set by processing.
+  /// Optional display name, set by the user or by the enrichment stage. Null on
+  /// legacy rows and until named, in which case the UI names the item by type
+  /// and time (`displayNameFor`) rather than by its uuid filename. Never set by
+  /// processing.
   final String? title;
 
   /// What the item *is*, assigned by the enrichment stage and correctable by
@@ -103,6 +107,15 @@ class Recording {
   final bool isProcessedByUser;
   final DateTime? processedAt;
 
+  /// Where this capture has been sent, oldest first. Empty on every legacy row
+  /// and on anything never routed.
+  ///
+  /// It is what turns [isProcessedByUser] from an assertion into a record: the
+  /// bit says the user is finished with the item, and this says why. Routing
+  /// the same capture twice appends rather than replaces — both deliveries
+  /// happened, and the second does not undo the first.
+  final List<RouteRecord> routes;
+
   Recording copyWith({
     RecordingStatus? status,
     String? transcript,
@@ -122,6 +135,7 @@ class Recording {
     bool? isProcessedByUser,
     DateTime? processedAt,
     bool clearProcessedAt = false,
+    List<RouteRecord>? routes,
   }) {
     return Recording(
       id: id,
@@ -142,6 +156,7 @@ class Recording {
       error: clearError ? null : (error ?? this.error),
       isProcessedByUser: isProcessedByUser ?? this.isProcessedByUser,
       processedAt: clearProcessedAt ? null : (processedAt ?? this.processedAt),
+      routes: routes ?? this.routes,
     );
   }
 
@@ -164,6 +179,7 @@ class Recording {
     'error': error,
     'isProcessedByUser': isProcessedByUser,
     'processedAt': processedAt?.toIso8601String(),
+    'routes': routes.map((RouteRecord route) => route.toJson()).toList(),
   };
 
   factory Recording.fromJson(Map<String, dynamic> json) {
@@ -210,6 +226,10 @@ class Recording {
       processedAt: json['processedAt'] == null
           ? null
           : DateTime.parse(json['processedAt'] as String),
+      // Absent on every row written before routing existed. Unreadable entries
+      // are dropped one at a time rather than throwing out of the whole load —
+      // the same rule `tags` and `category` follow.
+      routes: RouteRecord.listFromJson(json['routes']),
     );
   }
 }

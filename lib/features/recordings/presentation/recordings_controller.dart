@@ -26,10 +26,16 @@ import '../data/revisions_repository.dart';
 import '../domain/capture_category.dart';
 import '../domain/capture_type.dart';
 import '../domain/clipboard_sink.dart';
+import '../domain/capture_router.dart';
 import '../domain/media_opener.dart';
 import '../domain/recording.dart';
 import '../domain/recording_revision.dart';
 import '../domain/recording_tag.dart';
+import '../domain/route_record.dart';
+// Same layer, not a widget import: `displayNameFor` is the one definition of
+// what an untitled capture is called, and a destination heading must not be
+// allowed to drift from what the card shows.
+import 'card_parts.dart';
 
 class RecordingsController extends ChangeNotifier {
   RecordingsController({
@@ -47,6 +53,7 @@ class RecordingsController extends ChangeNotifier {
     LogSink logSink = const NoopLogSink(),
     ClipboardSink clipboardSink = const NoopClipboardSink(),
     MediaOpener mediaOpener = const NoopMediaOpener(),
+    CaptureRouter captureRouter = const DisabledCaptureRouter(),
     RevisionsRepository? revisionsRepository,
     ProcessorRegistry? processorRegistry,
     MediaPicker? mediaPicker,
@@ -64,6 +71,7 @@ class RecordingsController extends ChangeNotifier {
        _logSink = logSink,
        _clipboardSink = clipboardSink,
        _mediaOpener = mediaOpener,
+       _captureRouter = captureRouter,
        _mediaPicker = mediaPicker ?? const FilePickerMediaPicker(),
        _importer = MediaImporter(repository),
        _recorder = recorder ?? AudioRecorder(),
@@ -101,6 +109,7 @@ class RecordingsController extends ChangeNotifier {
   final LogSink _logSink;
   final ClipboardSink _clipboardSink;
   final MediaOpener _mediaOpener;
+  final CaptureRouter _captureRouter;
   final MediaPicker _mediaPicker;
   final MediaImporter _importer;
   late final ProcessorRegistry _registry;
@@ -789,8 +798,10 @@ class RecordingsController extends ChangeNotifier {
     _logSink.log('Text updated.', recordingId: id);
   }
 
-  /// Set or clear an item's display title. An empty value clears it (the card
-  /// falls back to the filename).
+  /// Set or clear an item's display title. An empty value clears it, and the
+  /// card falls back to naming the item by type and time — see
+  /// `displayNameFor`. Clearing is also how you ask enrichment to fill it on
+  /// the next processing run.
   Future<void> setTitle(String id, String? title) async {
     final String trimmed = (title ?? '').trim();
     await _update(
@@ -875,6 +886,67 @@ class RecordingsController extends ChangeNotifier {
         clearProcessedAt: !nextValue,
       ),
     );
+  }
+
+  /// Whether [route] has anywhere to send this capture. Synchronous because the
+  /// card gates its button on it during `build`.
+  bool canRoute(Recording recording) =>
+      _captureRouter.canRoute(recording.projectId);
+
+  /// Send a capture to its destination, record where it went, and close it.
+  ///
+  /// **The order matters and mirrors the capture pipeline's.** The delivery
+  /// happens first and everything else is conditional on it: a capture that was
+  /// ticked off as routed but never actually written is strictly worse than one
+  /// that was never routed, because the first is invisible and the second is
+  /// still in the inbox. So a throw leaves the item exactly as it was — open,
+  /// unrouted, retryable — and only the error surfaces.
+  ///
+  /// Closing the item is the point. `isProcessedByUser` was a chore the user
+  /// performed *in addition* to doing something with the capture; here it is
+  /// the consequence of having done it, which is what lets the queue drain
+  /// as a side effect of the work instead of as a separate pass over it.
+  Future<void> route(String id) async {
+    final Recording recording = _recordings.firstWhere(
+      (Recording item) => item.id == id,
+    );
+
+    final RouteRecord record;
+    try {
+      record = await _captureRouter.route(
+        RoutedCapture(
+          projectId: recording.projectId,
+          // Resolved here so a destination never has to reimplement the card's
+          // fallback cascade — and never writes a uuid as a heading.
+          title: displayNameFor(recording),
+          body: recording.transcript ?? '',
+          capturedAt: recording.createdAt,
+          summary: recording.summary,
+          category: recording.category,
+          tags: recording.tags,
+        ),
+      );
+    } catch (exception) {
+      _error = exception.toString();
+      _logSink.log(
+        'Routing failed: $exception',
+        level: LogLevel.error,
+        recordingId: id,
+      );
+      notifyListeners();
+      return;
+    }
+
+    _error = null;
+    await _update(
+      id,
+      (Recording item) => item.copyWith(
+        routes: <RouteRecord>[...item.routes, record],
+        isProcessedByUser: true,
+        processedAt: record.at,
+      ),
+    );
+    _logSink.log('Routed to ${record.target}.', recordingId: id);
   }
 
   /// Re-queue a failed (or any) item for processing. Like capture, this only

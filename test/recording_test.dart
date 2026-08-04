@@ -1,6 +1,7 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:augustyniak_capture/features/recordings/domain/capture_category.dart';
 import 'package:augustyniak_capture/features/recordings/domain/recording.dart';
+import 'package:augustyniak_capture/features/recordings/domain/route_record.dart';
 
 void main() {
   test('recording JSON round-trip preserves AI and user processing state', () {
@@ -112,6 +113,66 @@ void main() {
     expect(restored.summary, 'Ustalenia ze spotkania.');
     expect(restored.tags, <String>['klient', 'oferta']);
     expect(restored.projectId, 'audivoa');
+  });
+
+  test('routes round-trip through JSON', () {
+    final Recording item = Recording(
+      id: 'routed',
+      filePath: '/tmp/routed.m4a',
+      createdAt: DateTime.utc(2026, 8, 4, 17, 9),
+      durationMs: 5000,
+      status: RecordingStatus.completed,
+      routes: <RouteRecord>[
+        RouteRecord(
+          at: DateTime.utc(2026, 8, 4, 17, 20),
+          kind: RouteKind.file,
+          target: 'inbox.md · Acme',
+        ),
+      ],
+    );
+
+    final Recording restored = Recording.fromJson(item.toJson());
+
+    expect(restored.routes, hasLength(1));
+    expect(restored.routes.single.kind, RouteKind.file);
+    expect(restored.routes.single.target, 'inbox.md · Acme');
+    expect(restored.routes.single.at, DateTime.utc(2026, 8, 4, 17, 20));
+  });
+
+  test('legacy JSON has no routes', () {
+    final Recording restored = Recording.fromJson(<String, dynamic>{
+      'id': 'legacy',
+      'filePath': '/tmp/legacy.m4a',
+      'createdAt': '2026-01-01T00:00:00.000',
+      'durationMs': 1000,
+      'status': 'completed',
+    });
+
+    expect(restored.routes, isEmpty);
+  });
+
+  test('an unreadable route row is dropped without taking the others', () {
+    // The rule every other field on this type follows: a hand-edited
+    // recordings.json, or a row written by a build that knew a destination this
+    // one does not, must cost that row and nothing more. Throwing here would
+    // take the whole index down — the failure mode the durability rules exist
+    // to prevent.
+    final Recording restored = Recording.fromJson(<String, dynamic>{
+      'id': 'mixed',
+      'filePath': '/tmp/mixed.m4a',
+      'createdAt': '2026-01-01T00:00:00.000',
+      'durationMs': 1000,
+      'status': 'completed',
+      'routes': <Object?>[
+        <String, dynamic>{'kind': 'telepathy', 'at': '2026-01-01T00:00:00.000', 'target': 'x'},
+        <String, dynamic>{'kind': 'file', 'at': 'not-a-date', 'target': 'x'},
+        <String, dynamic>{'kind': 'file', 'at': '2026-01-02T00:00:00.000', 'target': 'inbox.md'},
+        'nonsense',
+      ],
+    });
+
+    expect(restored.routes, hasLength(1));
+    expect(restored.routes.single.target, 'inbox.md');
   });
 
   test('legacy JSON has no category, summary or tags', () {
