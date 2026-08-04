@@ -1016,4 +1016,127 @@ void main() {
 
     expect(controller.recordings.single.category, isNull);
   });
+
+  testWidgets('deletion is only reachable from the editor', (
+    WidgetTester tester,
+  ) async {
+    final RecordingsController controller = await buildRecordingsController(
+      appDir,
+      seed: <Recording>[makeRecording(id: 'keep', transcript: 'text')],
+    );
+    await pumpQueue(tester, controller);
+
+    // The card's action strip is play/edit/done — all cheap, all reversible.
+    expect(find.byIcon(Icons.delete_outline_rounded), findsNothing);
+
+    await tester.tap(find.byIcon(Icons.edit_outlined));
+    await tester.pump();
+
+    // The editor's footer sits below the fold on a 600 px viewport, so it has
+    // to be scrolled into view before the semantics tree describes it — which
+    // is also the only state in which a user could reach it.
+    // The row grows into the editor over 220 ms; scrolling to the footer before
+    // that lands would aim at a box that is still card-sized.
+    await tester.pump(const Duration(milliseconds: 300));
+    await tester.ensureVisible(find.byIcon(Icons.delete_outline_rounded));
+    await tester.pump();
+    expect(find.bySemanticsLabel(RecordingEditor.deleteLabel), findsOneWidget);
+  });
+
+  testWidgets('DELETE asks first, and cancelling keeps the capture', (
+    WidgetTester tester,
+  ) async {
+    final File source = File(p.join(appDir.path, 'doomed.m4a'))
+      ..writeAsBytesSync(<int>[1, 2, 3]);
+    final RecordingsController controller = await buildRecordingsController(
+      appDir,
+      seed: <Recording>[
+        makeRecording(
+          id: 'doomed',
+          title: 'A bad take',
+          transcript: 'text',
+          filePath: source.path,
+        ),
+      ],
+    );
+    await pumpQueue(tester, controller);
+
+    await tester.tap(find.byIcon(Icons.edit_outlined));
+    await tester.pump();
+    // The row grows into the editor over 220 ms; scrolling to the footer before
+    // that lands would aim at a box that is still card-sized.
+    await tester.pump(const Duration(milliseconds: 300));
+    await tester.ensureVisible(find.byIcon(Icons.delete_outline_rounded));
+    await tester.pump();
+    await tester.tap(find.bySemanticsLabel(RecordingEditor.deleteLabel));
+    // Long enough for the dialog's entrance to finish. With a single pump its
+    // buttons are still being laid out, and a tap aimed at CANCEL lands off
+    // screen — which this test cannot see, because "cancelled" and "missed"
+    // leave the identical state behind.
+    await tester.pump(const Duration(milliseconds: 300));
+
+    // The dialog names the item, because the queue rows all look alike.
+    expect(find.text('Delete this capture?'), findsOneWidget);
+    // Scoped to the dialog — the editor's title field holds the same words.
+    expect(
+      find.descendant(
+        of: find.byType(AlertDialog),
+        matching: find.textContaining('A bad take'),
+      ),
+      findsOneWidget,
+    );
+
+    await tester.tap(find.text('CANCEL'));
+    await settleIo(tester);
+
+    // Asserted first: it is the only thing that distinguishes a real cancel
+    // from a tap that never landed on the button.
+    expect(find.text('Delete this capture?'), findsNothing);
+    expect(controller.recordings, hasLength(1));
+    expect(source.existsSync(), isTrue);
+    // Still in edit mode: backing out of the dialog decided nothing.
+    expect(find.byIcon(Icons.delete_outline_rounded), findsOneWidget);
+  });
+
+  testWidgets('confirming DELETE removes the row, the file and the mode', (
+    WidgetTester tester,
+  ) async {
+    final File source = File(p.join(appDir.path, 'doomed.m4a'))
+      ..writeAsBytesSync(<int>[1, 2, 3]);
+    final RecordingsController controller = await buildRecordingsController(
+      appDir,
+      seed: <Recording>[
+        makeRecording(id: 'doomed', transcript: 'text', filePath: source.path),
+        makeRecording(id: 'kept', transcript: 'other'),
+      ],
+    );
+    await pumpQueue(tester, controller);
+
+    await tester.tap(find.byIcon(Icons.edit_outlined).first);
+    await tester.pump();
+    // The row grows into the editor over 220 ms; scrolling to the footer before
+    // that lands would aim at a box that is still card-sized.
+    await tester.pump(const Duration(milliseconds: 300));
+    await tester.ensureVisible(find.byIcon(Icons.delete_outline_rounded));
+    await tester.pump();
+    await tester.tap(find.bySemanticsLabel(RecordingEditor.deleteLabel));
+    await tester.pump(const Duration(milliseconds: 300));
+    // Scoped to the dialog: the editor's own button carries the same word, and
+    // tapping that one again would only reopen what is already open.
+    await tester.tap(
+      find.descendant(
+        of: find.byType(AlertDialog),
+        matching: find.text('DELETE'),
+      ),
+    );
+    await settleIo(tester);
+
+    expect(controller.recordings.map((Recording item) => item.id), <String>[
+      'kept',
+    ]);
+    expect(source.existsSync(), isFalse);
+    // Edit mode left with the row it belonged to, rather than lingering on an
+    // id nothing in the queue answers to any more.
+    expect(find.byIcon(Icons.delete_outline_rounded), findsNothing);
+  });
 }
