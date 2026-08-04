@@ -60,19 +60,18 @@ Recording _seed({
   CaptureCategory? category,
   String? summary,
   List<String> tags = const <String>[],
-}) =>
-    Recording(
-      id: 'r1',
-      filePath: '/tmp/r1.m4a',
-      createdAt: DateTime.utc(2026, 8, 4),
-      durationMs: 1000,
-      status: RecordingStatus.completed,
-      title: title,
-      transcript: transcript,
-      category: category,
-      summary: summary,
-      tags: tags,
-    );
+}) => Recording(
+  id: 'r1',
+  filePath: '/tmp/r1.m4a',
+  createdAt: DateTime.utc(2026, 8, 4),
+  durationMs: 1000,
+  status: RecordingStatus.completed,
+  title: title,
+  transcript: transcript,
+  category: category,
+  summary: summary,
+  tags: tags,
+);
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
@@ -83,9 +82,9 @@ void main() {
   ]) {
     TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
         .setMockMethodCallHandler(
-      MethodChannel(name),
-      (MethodCall call) async => null,
-    );
+          MethodChannel(name),
+          (MethodCall call) async => null,
+        );
   }
 
   Future<(RecordingsController, _FakeRevisions)> build(
@@ -107,48 +106,59 @@ void main() {
   }
 
   group('what is recorded', () {
-    test('a hand edit that overwrites a title is attributed to the user',
-        () async {
-      final (RecordingsController c, _FakeRevisions revisions) =
-          await build(_seed(title: 'Old name'));
+    test(
+      'a hand edit that overwrites a title is attributed to the user',
+      () async {
+        final (RecordingsController c, _FakeRevisions revisions) = await build(
+          _seed(title: 'Old name'),
+        );
 
-      await c.setTitle('r1', 'New name');
+        await c.setTitle('r1', 'New name');
 
-      final RecordingRevision entry = revisions.appended.single;
-      expect(entry.field, 'title');
-      expect(entry.from, 'Old name');
-      expect(entry.to, 'New name');
-      expect(entry.source, RevisionSource.user);
-      expect(c.revisionsFor('r1'), hasLength(1));
-    });
+        final RecordingRevision entry = revisions.appended.single;
+        expect(entry.field, 'title');
+        expect(entry.from, 'Old name');
+        expect(entry.to, 'New name');
+        expect(entry.source, RevisionSource.user);
+        expect(c.revisionsFor('r1'), hasLength(1));
+      },
+    );
 
-    test('filling a blank field records nothing — nothing was overwritten',
-        () async {
-      final (RecordingsController c, _FakeRevisions revisions) =
-          await build(_seed());
+    test(
+      'filling a blank field records nothing — nothing was overwritten',
+      () async {
+        final (RecordingsController c, _FakeRevisions revisions) = await build(
+          _seed(),
+        );
 
-      await c.setTitle('r1', 'First ever name');
-      await c.editTranscript('r1', 'the first transcript');
+        await c.setTitle('r1', 'First ever name');
+        await c.editTranscript('r1', 'the first transcript');
 
-      expect(revisions.appended, isEmpty);
-      expect(c.revisionsFor('r1'), isEmpty);
-    });
+        expect(revisions.appended, isEmpty);
+        expect(c.revisionsFor('r1'), isEmpty);
+      },
+    );
 
     test('a re-run that replaces the transcript keeps the old text', () async {
-      final (RecordingsController c, _FakeRevisions revisions) =
-          await build(_seed(transcript: 'the original words'));
+      final (RecordingsController c, _FakeRevisions revisions) = await build(
+        _seed(transcript: 'the original words'),
+      );
 
       await c.editTranscript('r1', 'a corrected version');
 
       final RecordingRevision entry = revisions.appended.single;
       expect(entry.field, 'transcript');
-      expect(entry.from, 'the original words',
-          reason: 'the overwritten text is the only copy left anywhere');
+      expect(
+        entry.from,
+        'the original words',
+        reason: 'the overwritten text is the only copy left anywhere',
+      );
     });
 
     test('clearing a category records the removal', () async {
-      final (RecordingsController c, _FakeRevisions revisions) =
-          await build(_seed(category: CaptureCategory.task));
+      final (RecordingsController c, _FakeRevisions revisions) = await build(
+        _seed(category: CaptureCategory.task),
+      );
 
       await c.setCategory('r1', null);
 
@@ -159,8 +169,9 @@ void main() {
     });
 
     test('a status transition is not history', () async {
-      final (RecordingsController c, _FakeRevisions revisions) =
-          await build(_seed(transcript: 'text'));
+      final (RecordingsController c, _FakeRevisions revisions) = await build(
+        _seed(transcript: 'text'),
+      );
 
       await c.retryTranscription('r1');
       await c.waitForProcessing();
@@ -173,44 +184,47 @@ void main() {
   });
 
   group('enrichment', () {
-    test('a refreshed summary is attributed to the model and keeps the old one',
-        () async {
-      final (RecordingsController c, _FakeRevisions revisions) = await build(
-        _seed(
-          title: 'Named by hand',
-          transcript: 'some text',
-          summary: 'the first summary',
-          tags: <String>['old'],
-        ),
-        // Same text back, so the only revisions in play come from enrichment.
-        transcription: _StubTranscription('some text'),
-        enrichment: _StubEnrichment(
-          const EnrichmentResult(
-            title: 'Model name',
-            category: CaptureCategory.idea,
-            summary: 'a fresh summary',
-            tags: <String>['new'],
+    test(
+      'a refreshed summary is attributed to the model and keeps the old one',
+      () async {
+        final (RecordingsController c, _FakeRevisions revisions) = await build(
+          _seed(
+            title: 'Named by hand',
+            transcript: 'some text',
+            summary: 'the first summary',
+            tags: <String>['old'],
           ),
-        ),
-      );
+          // Same text back, so the only revisions in play come from enrichment.
+          transcription: _StubTranscription('some text'),
+          enrichment: _StubEnrichment(
+            const EnrichmentResult(
+              title: 'Model name',
+              category: CaptureCategory.idea,
+              summary: 'a fresh summary',
+              tags: <String>['new'],
+            ),
+          ),
+        );
 
-      await c.retryTranscription('r1');
-      await c.waitForProcessing();
+        await c.retryTranscription('r1');
+        await c.waitForProcessing();
 
-      final RecordingRevision summary = revisions.appended
-          .firstWhere((RecordingRevision r) => r.field == 'summary');
-      expect(summary.from, 'the first summary');
-      expect(summary.to, 'a fresh summary');
-      expect(summary.source, RevisionSource.enrichment);
+        final RecordingRevision summary = revisions.appended.firstWhere(
+          (RecordingRevision r) => r.field == 'summary',
+        );
+        expect(summary.from, 'the first summary');
+        expect(summary.to, 'a fresh summary');
+        expect(summary.source, RevisionSource.enrichment);
 
-      // The fill-only rule still holds: a hand-typed title is not touched, so
-      // there is no title revision to record either.
-      expect(c.recordings.single.title, 'Named by hand');
-      expect(
-        revisions.appended.where((RecordingRevision r) => r.field == 'title'),
-        isEmpty,
-      );
-    });
+        // The fill-only rule still holds: a hand-typed title is not touched, so
+        // there is no title revision to record either.
+        expect(c.recordings.single.title, 'Named by hand');
+        expect(
+          revisions.appended.where((RecordingRevision r) => r.field == 'title'),
+          isEmpty,
+        );
+      },
+    );
   });
 
   group('durability', () {
@@ -281,8 +295,9 @@ void main() {
         to: null,
         source: RevisionSource.user,
       );
-      final RecordingRevision restored =
-          RecordingRevision.fromJson(original.toJson());
+      final RecordingRevision restored = RecordingRevision.fromJson(
+        original.toJson(),
+      );
 
       expect(restored.recordingId, 'r1');
       expect(restored.at, original.at);
@@ -294,13 +309,13 @@ void main() {
     test('an unknown source degrades instead of throwing', () {
       final RecordingRevision restored =
           RecordingRevision.fromJson(<String, dynamic>{
-        'recordingId': 'r1',
-        'at': '2026-08-04T12:00:00.000Z',
-        'field': 'title',
-        'from': 'a',
-        'to': 'b',
-        'source': 'something-a-newer-build-wrote',
-      });
+            'recordingId': 'r1',
+            'at': '2026-08-04T12:00:00.000Z',
+            'field': 'title',
+            'from': 'a',
+            'to': 'b',
+            'source': 'something-a-newer-build-wrote',
+          });
       expect(restored.source, RevisionSource.processor);
     });
 
