@@ -260,6 +260,7 @@ class _QueueTabState extends State<QueueTab> {
       onTogglePlay: () => controller.togglePlayback(recording.id),
       onOpen: () => controller.openSource(recording.id),
       onRetry: () => controller.retryTranscription(recording.id),
+      onEnrich: () => controller.retryEnrichment(recording.id),
       onEdit: () => setState(() => editingId = recording.id),
       onToggleProcessed: () async {
         // Fire-and-forget: the haptic is cosmetic and must not gate a durable

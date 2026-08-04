@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Generate the Audivoa Core app icon for every platform.
+"""Generate the Augustyniak Capture app icon for every platform.
 
 Draws the "Processing Console" mark — cyan waveform bars on the console
 navy panel with the app's translucent hairline border — in three styles:

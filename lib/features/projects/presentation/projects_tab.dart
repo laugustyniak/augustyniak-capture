@@ -1,15 +1,24 @@
 import 'package:flutter/material.dart';
 
 import '../../../app/ui_kit.dart';
+import '../data/directory_picker.dart';
 import '../domain/project.dart';
 import 'projects_controller.dart';
 
 /// Project registry and the explicit entry point for opening coding-agent
 /// sessions in a repository context.
 class ProjectsTab extends StatelessWidget {
-  const ProjectsTab({super.key, required this.controller});
+  const ProjectsTab({
+    super.key,
+    required this.controller,
+    this.directoryPicker = const FilePickerDirectoryPicker(),
+  });
 
   final ProjectsController controller;
+
+  /// Fills the repository-path field from a native folder dialog. Injectable so
+  /// the widget suite never reaches `file_picker`'s platform channel.
+  final DirectoryPicker directoryPicker;
 
   @override
   Widget build(BuildContext context) {
@@ -94,8 +103,10 @@ class ProjectsTab extends StatelessWidget {
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(22)),
       ),
-      builder: (BuildContext context) =>
-          _ProjectEditorSheet(existing: existing),
+      builder: (BuildContext context) => _ProjectEditorSheet(
+        existing: existing,
+        directoryPicker: directoryPicker,
+      ),
     );
     // Persisting belongs to the controller and does not require a live widget
     // context. The tab may be rebuilt while the modal route is closing.
@@ -327,9 +338,13 @@ class _AgentButton extends StatelessWidget {
 }
 
 class _ProjectEditorSheet extends StatefulWidget {
-  const _ProjectEditorSheet({required this.existing});
+  const _ProjectEditorSheet({
+    required this.existing,
+    required this.directoryPicker,
+  });
 
   final Project? existing;
+  final DirectoryPicker directoryPicker;
 
   @override
   State<_ProjectEditorSheet> createState() => _ProjectEditorSheetState();
@@ -352,6 +367,11 @@ class _ProjectEditorSheetState extends State<_ProjectEditorSheet> {
   late final Map<AgentKind, TextEditingController> _arguments;
   late final Map<AgentKind, TextEditingController> _prompts;
   late AgentKind? _defaultAgent = widget.existing?.defaultAgent;
+
+  /// A folder dialog that refuses is reported in the sheet rather than swallowed
+  /// — the field still accepts a typed path, so the failure must not look like
+  /// a dead button. The app uses no snackbars, so this stays inline.
+  String? _browseError;
 
   @override
   void initState() {
@@ -424,13 +444,34 @@ class _ProjectEditorSheetState extends State<_ProjectEditorSheet> {
               TextFormField(
                 key: const ValueKey<String>('project-repo-path-field'),
                 controller: _repoPath,
-                decoration: const InputDecoration(
+                decoration: InputDecoration(
                   labelText: 'Repository path',
                   hintText: '/Users/you/github/apps/project',
+                  suffixIcon: widget.directoryPicker.isAvailable
+                      ? IconButton(
+                          key: const ValueKey<String>(
+                            'project-repo-path-browse',
+                          ),
+                          tooltip: 'Choose directory',
+                          icon: const Icon(
+                            Icons.folder_open_outlined,
+                            color: Console.cyan,
+                            size: 20,
+                          ),
+                          onPressed: _browseForRepository,
+                        )
+                      : null,
                 ),
                 textInputAction: TextInputAction.next,
                 validator: _required,
               ),
+              if (_browseError != null) ...<Widget>[
+                const SizedBox(height: 6),
+                Text(
+                  _browseError!,
+                  style: ConsoleText.micro.copyWith(color: Console.amber),
+                ),
+              ],
               const SizedBox(height: 12),
               TextFormField(
                 controller: _description,
@@ -536,6 +577,28 @@ class _ProjectEditorSheetState extends State<_ProjectEditorSheet> {
         ),
       ),
     );
+  }
+
+  /// Fills the path field from a native folder dialog. The typed value stays
+  /// authoritative: a cancel leaves it untouched, and the dialog opens at the
+  /// current path so editing an existing project starts where it already points.
+  Future<void> _browseForRepository() async {
+    final String current = _repoPath.text.trim();
+    try {
+      final String? chosen = await widget.directoryPicker.pick(
+        initialDirectory: current.isEmpty ? null : current,
+      );
+      if (!mounted || chosen == null) return;
+      setState(() {
+        _repoPath.text = chosen;
+        _browseError = null;
+      });
+      // The field may already have been marked invalid by an earlier submit.
+      _formKey.currentState?.validate();
+    } catch (exception) {
+      if (!mounted) return;
+      setState(() => _browseError = 'Folder dialog failed: $exception');
+    }
   }
 
   void _submit() {
