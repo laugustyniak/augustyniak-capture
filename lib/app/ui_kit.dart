@@ -146,7 +146,8 @@ class ConsoleFont {
 class ConsoleText {
   const ConsoleText._();
 
-  /// `AUDIVOA CORE` above a page title.
+  /// `AUGUSTYNIAK CAPTURE` above a page title — the narrow layout's stand-in
+  /// for the wide layout's rail wordmark.
   static const TextStyle eyebrow = TextStyle(
     fontFamily: ConsoleFont.mono,
     fontSize: 10,
@@ -208,8 +209,8 @@ class ConsoleText {
   /// The `14:52 · 16 kHz mono · 10:24` line under a card title.
   static const TextStyle cardMeta = TextStyle(
     fontFamily: ConsoleFont.mono,
-    fontSize: 11,
-    color: Console.muted,
+    fontSize: 10.5,
+    color: Console.dim,
   );
 
   /// Footer facts — `file verified · 6.8 MB · persisted`.
@@ -239,12 +240,14 @@ class ConsoleText {
     fontWeight: FontWeight.w600,
   );
 
-  /// Body copy inside a card or sheet.
+  /// Body copy inside a card or sheet. Deliberately the muted grey rather than
+  /// the near-white: on a card this is the *excerpt*, and a full-contrast
+  /// paragraph under a title makes the title stop being the title.
   static const TextStyle body = TextStyle(
     fontFamily: ConsoleFont.display,
-    fontSize: 12,
+    fontSize: 12.5,
     height: 1.5,
-    color: Console.textSoft,
+    color: Console.muted,
   );
 }
 
@@ -661,9 +664,7 @@ class ConsoleIconButton extends StatelessWidget {
                   ? Console.cyan.withValues(alpha: .12)
                   : Console.surfaceButton,
               borderRadius: BorderRadius.circular(8),
-              border: Border.all(
-                color: active ? Console.cyan : Console.border,
-              ),
+              border: Border.all(color: active ? Console.cyan : Console.border),
             ),
             child: Icon(
               icon,

@@ -49,9 +49,10 @@ class ConsoleNavRail extends StatelessWidget {
   final int selectedIndex;
   final ValueChanged<int> onSelected;
 
-  /// Drives the `DONE n / m` strip. The same two numbers the narrow layout
-  /// draws as `ReviewedStrip` above the list — the wide layout has a permanent
-  /// column to hang them in, so they stop costing a row of the queue.
+  /// Drives the `DONE n / m` strip. The phone layout carries the same two
+  /// numbers on the review switch itself (`INBOX 4 · DONE 33`), which is why it
+  /// no longer spends a row of the queue on a progress strip; the wide layout
+  /// has a permanent column to hang them in and can afford both.
   final int reviewed;
   final int total;
 

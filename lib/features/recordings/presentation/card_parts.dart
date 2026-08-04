@@ -3,6 +3,7 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 
 import '../../../app/ui_kit.dart';
+import '../domain/capture_category.dart';
 import '../domain/capture_type.dart';
 import '../domain/recording.dart';
 
@@ -62,6 +63,7 @@ class RecordingLeadingTile extends StatelessWidget {
     required this.failed,
     this.onOpen,
     this.semanticLabel,
+    this.size = 30,
   });
 
   final Recording recording;
@@ -72,11 +74,18 @@ class RecordingLeadingTile extends StatelessWidget {
   /// action so a screen reader hears one action, not two.
   final String? semanticLabel;
 
+  /// One value for both the icon and the poster form, so a row's shape never
+  /// depends on whether a frame was extracted. The design shrank this from 38
+  /// to a 26–30 px badge: at grid density the tile is an identifier, not an
+  /// illustration, and the reclaimed height is what lets a card show two lines
+  /// of transcript in the same box.
+  final double size;
+
   @override
   Widget build(BuildContext context) {
     final Color color = failed ? Console.red : Console.cyan;
     final Color background = failed
-        ? Console.red.withValues(alpha: .1)
+        ? Console.red.withValues(alpha: .12)
         : Console.iconTile;
     final String? poster = recording.thumbPath;
 
@@ -86,6 +95,7 @@ class RecordingLeadingTile extends StatelessWidget {
             icon: typeIconFor(recording.type),
             color: color,
             background: background,
+            size: size,
           )
         // A poster path is only ever a *claim* that a frame was extracted; the
         // file may since have been cleaned up, so the tile falls back to the
@@ -95,6 +105,7 @@ class RecordingLeadingTile extends StatelessWidget {
             fallbackIcon: typeIconFor(recording.type),
             color: color,
             background: background,
+            size: size,
           );
 
     if (onOpen == null) return tile;
@@ -160,4 +171,26 @@ IconData typeIconFor(CaptureType type) => switch (type) {
   CaptureType.image => Icons.image_outlined,
   CaptureType.text => Icons.description_outlined,
   CaptureType.video => Icons.movie_outlined,
+};
+
+/// The colour a category badge carries, from the design's badge map.
+///
+/// It lives here rather than on [CaptureCategory] for the same reason
+/// `typeIconFor` does: the enum is domain, and a domain that imports
+/// `material.dart` for a `Color` stops being testable without a binding. The
+/// exhaustive `switch` is what makes adding a category break the build here
+/// instead of silently rendering it in the fallback colour.
+///
+/// Categories are **routing destinations**, so the colours group by how the
+/// item leaves the app rather than by mood: cyan/violet for the two that feed a
+/// machine, amber/green for the two that feed a person, pink for a meeting, and
+/// a neutral grey for the two that say "unrouted".
+Color categoryColorFor(CaptureCategory category) => switch (category) {
+  CaptureCategory.researchLead => Console.cyan,
+  CaptureCategory.agentTask => Console.violet,
+  CaptureCategory.idea => Console.amber,
+  CaptureCategory.task => Console.green,
+  CaptureCategory.meetingNote => Console.pink,
+  CaptureCategory.note => Console.mutedSoft,
+  CaptureCategory.capture => Console.muted,
 };
