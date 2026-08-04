@@ -280,7 +280,7 @@ The interface implements the **console cards** design direction:
   offline-first app must not need the network to render its own text,
 - no app bar: each tab draws its own header inside its scroll area, so the
   title scrolls with the content,
-- a review-progress strip above the list; the per-status counts live on the
+- a done-progress strip above the list; the per-status counts live on the
   filter chips, where they are actionable,
 - the local-file verification line on every card, including failed ones,
 - a dedicated capture screen while recording,
@@ -291,16 +291,23 @@ The interface implements the **console cards** design direction:
 Capture remains local-first throughout: stop → verify the file → persist the
 metadata → queue → process.
 
-## Reviewed state
+## Done state and tags
 
 Each capture has a durable `isProcessedByUser` flag and an optional
 `processedAt` timestamp. This axis is entirely independent of processing
 status: nothing in the pipeline ever sets or clears it, and marking an item
-reviewed never touches its transcript. Both persist in `recordings.json`.
+done never touches its transcript. Both persist in `recordings.json`.
 
 - the toggle animates, the card border picks up the accent and a check appears
   next to the name,
 - selection haptic feedback on toggle,
-- the reviewed counter and its progress bar animate to the new value,
-- full history retention: reviewed items stay visible,
+- the done counter and its progress bar animate to the new value,
+- full history retention: done items stay visible,
 - no "Inbox Zero" celebration or empty-inbox pressure.
+
+Tags are also persisted per capture. They can be edited as a comma-separated
+list, are normalized to lowercase and de-duplicated, render directly on the
+card, and participate in Queue search. A `project:<name>` tag provides a
+lightweight project assignment without introducing a separate project model.
+When enrichment suggests tags it only fills an empty list, so a retry cannot
+overwrite a manual assignment.
