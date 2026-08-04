@@ -1,4 +1,4 @@
-name: audivoa_core
+name: augustyniak_capture
 description: Offline-first Flutter voice recorder. Audio is persisted before transcription starts.
 publish_to: "none"
 version: 0.1.0+1

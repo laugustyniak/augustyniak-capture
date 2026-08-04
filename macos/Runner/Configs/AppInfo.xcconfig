@@ -7,13 +7,14 @@
 // The application's name. By default this is also the title of the Flutter window.
 // This is what the Finder, the Dock and the menu bar show, so it carries the
 // display name rather than the pubspec package name.
-PRODUCT_NAME = Audivoa Core
+PRODUCT_NAME = Augustyniak Capture
+EXECUTABLE_NAME = augustyniak_capture
 
-// The application's bundle identifier. Must stay `com.audivoa.core` — the same
+// The application's bundle identifier. Must stay `ai.augustyniak.capture` — the same
 // identity as the Android applicationId and the iOS PRODUCT_BUNDLE_IDENTIFIER.
-// `flutter create` derives `com.audivoa.audivoaCore` from the org; that is a
+// `flutter create` derives `ai.augustyniak.augustyniakCapture` from the org; that is a
 // different app as far as any store or update mechanism is concerned.
-PRODUCT_BUNDLE_IDENTIFIER = com.audivoa.core
+PRODUCT_BUNDLE_IDENTIFIER = ai.augustyniak.capture
 
 // The copyright displayed in application information
-PRODUCT_COPYRIGHT = Copyright © 2026 com.audivoa. All rights reserved.
+PRODUCT_COPYRIGHT = Copyright © 2026 Augustyniak AI. All rights reserved.

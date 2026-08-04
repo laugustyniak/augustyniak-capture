@@ -4,13 +4,13 @@ import 'ui_kit.dart';
 
 import '../features/recordings/presentation/recordings_page.dart';
 
-class AudivoaCoreApp extends StatelessWidget {
-  const AudivoaCoreApp({super.key});
+class AugustyniakCaptureApp extends StatelessWidget {
+  const AugustyniakCaptureApp({super.key});
 
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-      title: 'Audivoa Core',
+      title: 'Augustyniak Capture',
       debugShowCheckedModeBanner: false,
       themeMode: ThemeMode.dark,
       darkTheme: ThemeData(
@@ -43,31 +43,6 @@ class AudivoaCoreApp extends StatelessWidget {
           backgroundColor: Console.background,
           surfaceTintColor: Colors.transparent,
           elevation: 0,
-        ),
-        navigationBarTheme: NavigationBarThemeData(
-          backgroundColor: Console.surfaceDeep,
-          indicatorColor: Console.navIndicator,
-          // The design's nav is a flat strip: no elevation tint, no pill
-          // behind the selected icon — selection is carried by colour alone.
-          elevation: 0,
-          surfaceTintColor: Colors.transparent,
-          labelBehavior: NavigationDestinationLabelBehavior.alwaysShow,
-          height: 66,
-          labelTextStyle: WidgetStateProperty.resolveWith<TextStyle>(
-            (Set<WidgetState> states) => ConsoleText.navLabel.copyWith(
-              color: states.contains(WidgetState.selected)
-                  ? Console.cyan
-                  : Console.dim,
-            ),
-          ),
-          iconTheme: WidgetStateProperty.resolveWith<IconThemeData>(
-            (Set<WidgetState> states) => IconThemeData(
-              size: 20,
-              color: states.contains(WidgetState.selected)
-                  ? Console.cyan
-                  : Console.dim,
-            ),
-          ),
         ),
         dialogTheme: const DialogThemeData(backgroundColor: Console.surface),
         bottomSheetTheme: const BottomSheetThemeData(

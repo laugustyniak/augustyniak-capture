@@ -35,7 +35,7 @@ fun keystoreProperty(name: String): String =
         )
 
 android {
-    namespace = "com.audivoa.core"
+    namespace = "ai.augustyniak.capture"
     compileSdk = flutter.compileSdkVersion
     ndkVersion = flutter.ndkVersion
 
@@ -45,7 +45,7 @@ android {
     }
 
     defaultConfig {
-        applicationId = "com.audivoa.core"
+        applicationId = "ai.augustyniak.capture"
         // You can update the following values to match your application needs.
         // For more information, see: https://flutter.dev/to/review-gradle-config.
         minSdk = flutter.minSdkVersion
