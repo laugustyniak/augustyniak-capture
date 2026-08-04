@@ -1,31 +1,32 @@
-# Augustyniak AI Rebrand Plan
+# Augustyniak Capture Rebrand Plan
 
 ## Outcome
 
 Ship one coherent product identity across Flutter, Android, iOS, macOS, Linux,
 Windows, documentation, tests, generated artifacts, and distribution metadata.
-The installed application is named **Augustyniak AI**. No legacy brand token,
+The installed application is named **Augustyniak Capture** and is published by
+**Augustyniak AI**. No legacy brand token,
 package name, reverse-DNS identifier, executable name, window title, permission
 copy, test fixture, or generated asset reference remains in the repository.
 
-This plan deliberately separates the smallest compiling rename from visual
+The plan deliberately separates the smallest compiling rename from visual
 polish. Each phase ends in a runnable state.
 
 ## Canonical naming contract
 
 | Surface | Canonical value |
 | --- | --- |
-| Product and display name | `Augustyniak AI` |
-| UI eyebrow | `AUGUSTYNIAK AI` |
-| Dart package | `augustyniak_ai` |
-| Root widget | `AugustyniakAiApp` |
-| Executable / binary stem | `augustyniak_ai` |
-| Application identifier | `ai.augustyniak.app` |
-| Test application identifier | `ai.augustyniak.app.RunnerTests` |
-| Android Kotlin package | `ai.augustyniak.app` |
-| Session and temporary-file prefix | `augustyniak-ai` |
+| Product and display name | `Augustyniak Capture` |
+| UI eyebrow | `AUGUSTYNIAK CAPTURE` |
+| Dart package | `augustyniak_capture` |
+| Root widget | `AugustyniakCaptureApp` |
+| Executable / binary stem | `augustyniak_capture` |
+| Application identifier | `ai.augustyniak.capture` |
+| Test application identifier | `ai.augustyniak.capture.RunnerTests` |
+| Android Kotlin package | `ai.augustyniak.capture` |
+| Session and temporary-file prefix | `augustyniak-capture` |
 | Publisher / company label | `Augustyniak AI` |
-| Primary web identity | `augustyniak.ai` |
+| Product web identity | `augustyniak.ai/capture` |
 
 Do not introduce shorter surname variants. `Augustyniak` is the brand owner and
 must remain intact wherever the identity is user-visible.
@@ -35,7 +36,7 @@ must remain intact wherever the identity is user-visible.
 Before changing any reverse-DNS identifier, confirm that no build using the
 legacy identifier has been published in an application store.
 
-- **Not published:** use `ai.augustyniak.app` everywhere. This is the assumed
+- **Not published:** use `ai.augustyniak.capture` everywhere. This is the assumed
   route for this branch.
 - **Already published:** preserve the store identifier to retain upgrade
   continuity, or explicitly ship a new listing and design a one-time data
@@ -66,9 +67,9 @@ as a permanent allowlist.
 
 ## Phase 1: smallest compiling product rename
 
-1. Rename the Dart package in `pubspec.yaml` to `augustyniak_ai`.
+1. Rename the Dart package in `pubspec.yaml` to `augustyniak_capture`.
 2. Rewrite all `package:` imports in `lib/` and `test/`.
-3. Rename the root application widget to `AugustyniakAiApp`.
+3. Rename the root application widget to `AugustyniakCaptureApp`.
 4. Replace the Material application title and every visible eyebrow with the
    canonical display name.
 5. Replace user-visible window titles and microphone permission descriptions.
@@ -82,8 +83,9 @@ commit, but no user-visible legacy name may remain.
 
 ### Android
 
-- Change `namespace` and `applicationId` to `ai.augustyniak.app`.
-- Move `MainActivity.kt` to `android/app/src/main/kotlin/ai/augustyniak/app/` and
+- Change `namespace` and `applicationId` to `ai.augustyniak.capture`.
+- Move `MainActivity.kt` to
+  `android/app/src/main/kotlin/ai/augustyniak/capture/` and
   update its package declaration.
 - Update the manifest label.
 - Rename the signing-keystore example and its documentation without touching a
@@ -140,7 +142,8 @@ not expose the prior brand in the interface or create new files under it.
 
 The current waveform icon is mechanically reusable but conflicts with the
 multimodal product: captures can be audio, text, image, or video. Replace it with
-an identity that can represent `Augustyniak AI` without encoding only audio.
+an identity that can represent `Augustyniak Capture` without encoding only
+audio.
 
 Deliverables:
 
@@ -168,7 +171,8 @@ remain easy to isolate.
 
 ### Artifact checks
 
-- Android manifest and APK report `Augustyniak AI` and `ai.augustyniak.app`.
+- Android manifest and APK report `Augustyniak Capture` and
+  `ai.augustyniak.capture`.
 - iOS and macOS built plists report the expected product and bundle identifiers.
 - Linux desktop metadata and GTK runtime title match the contract.
 - Windows executable properties and window title match the contract.
@@ -188,7 +192,7 @@ remain easy to isolate.
 1. `refactor: rename Flutter product and Dart package`
 2. `build: align native application identities`
 3. `refactor: rename runtime prefixes and fixtures`
-4. `docs: adopt Augustyniak AI identity`
+4. `docs: adopt Augustyniak Capture product identity`
 5. `design: replace application icon and store artwork`
 6. `test: add rebrand and data-migration verification`
 
@@ -198,6 +202,6 @@ provides useful rollback points if a native runner breaks.
 ## Definition of done
 
 The rebrand is complete only when a clean clone can analyze, test, and build the
-supported artifacts; installed applications display `Augustyniak AI`; all
+supported artifacts; installed applications display `Augustyniak Capture`; all
 identifiers match the canonical contract; existing user data is demonstrably
 safe; and exhaustive scans find no legacy identity in tracked content or paths.
