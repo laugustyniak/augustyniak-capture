@@ -1,4 +1,4 @@
-/// Agent CLIs that Audivoa may start inside a project session.
+/// Agent CLIs that Augustyniak Capture may start inside a project session.
 enum ProjectAgent {
   codex('codex'),
   claude('claude'),

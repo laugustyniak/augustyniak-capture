@@ -24,5 +24,5 @@ Future<void> main() async {
     if (!Platform.isLinux) await hotKeyManager.unregisterAll();
   }
 
-  runApp(const AudivoaCoreApp());
+  runApp(const AugustyniakCaptureApp());
 }

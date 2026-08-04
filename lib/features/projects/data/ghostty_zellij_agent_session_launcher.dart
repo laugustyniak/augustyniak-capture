@@ -124,11 +124,11 @@ class GhosttyZellijAgentSessionLauncher implements AgentSessionLauncher {
     }
     final String stableId = id.length <= 8 ? id : id.substring(0, 8);
     final int availableForName =
-        63 - 'audivoa--$stableId'.length - suffix.length;
+        63 - 'augustyniak-capture--$stableId'.length - suffix.length;
     final String boundedName = name.length <= availableForName
         ? name
         : name.substring(0, availableForName);
-    return 'audivoa-$boundedName-$stableId$suffix';
+    return 'augustyniak-capture-$boundedName-$stableId$suffix';
   }
 
   static void _validateRequest(AgentSessionLaunchRequest request) {
