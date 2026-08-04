@@ -945,15 +945,25 @@ void main() {
     // And the edit is still committable — the exemption is worthless if the
     // widget survives without its pending value. Scoped to the editor: the
     // review toggle on a card carries a `DONE` label of its own.
-    await tester.tap(
-      find.descendant(
-        of: find.byType(RecordingEditor),
-        matching: find.text('DONE'),
-      ),
+    //
+    // The footer sits below the fold on a 600 px viewport and the row grows
+    // into the editor over 220 ms, so it has to be waited out and scrolled to
+    // before the tap has anything to land on. Without this the tap misses
+    // silently and the assertion below passes on a title that was never
+    // committed through this button.
+    final Finder done = find.descendant(
+      of: find.byType(RecordingEditor),
+      matching: find.text('DONE'),
     );
+    await tester.pump(const Duration(milliseconds: 300));
+    await tester.ensureVisible(done);
+    await tester.pump();
+    await tester.tap(done);
     await settleIo(tester);
 
     expect(controller.recordings.single.title, 'Nazwa w trakcie pisania');
+    // The button did what it says: edit mode is gone, not merely un-tapped.
+    expect(find.byType(RecordingEditor), findsNothing);
   });
 
   testWidgets('a status chip that excludes the edited row does not close it', (
