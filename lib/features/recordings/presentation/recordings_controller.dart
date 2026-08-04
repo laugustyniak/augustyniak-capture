@@ -528,12 +528,10 @@ class RecordingsController extends ChangeNotifier {
 
     try {
       final String? stoppedPath = await _recorder.stop();
-      _timer?.cancel();
-      unawaited(_amplitudeSub?.cancel());
-      _amplitudeSub = null;
-      _levelTicker.value = 0;
+      // Stopped here rather than in the teardown below so `durationMs` is the
+      // length of the audio, not of the audio plus the two `stat` calls that
+      // verify it.
       _stopwatch.stop();
-      _isRecording = false;
 
       final String? path = stoppedPath ?? _activeFilePath;
       if (path == null) {
@@ -585,6 +583,20 @@ class RecordingsController extends ChangeNotifier {
         level: LogLevel.error,
       );
     } finally {
+      // Teardown belongs in `finally`, not after the `stop()` await. A recorder
+      // that throws on stop — a disconnected input, a platform exception —
+      // would otherwise leave `_isRecording` true with the 250 ms timer still
+      // live: the capture screen never closes, and once a length cap exists the
+      // tick calls straight back into this method four times a second for the
+      // rest of the session. The capture is unrecoverable either way; being
+      // stuck in it is the part that is fixable.
+      _timer?.cancel();
+      _timer = null;
+      unawaited(_amplitudeSub?.cancel());
+      _amplitudeSub = null;
+      _levelTicker.value = 0;
+      if (_stopwatch.isRunning) _stopwatch.stop();
+      _isRecording = false;
       _isBusy = false;
       _activeFilePath = null;
       _activeId = null;
