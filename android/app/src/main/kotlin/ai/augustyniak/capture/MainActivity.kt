@@ -1,4 +1,4 @@
-package com.audivoa.core
+package ai.augustyniak.capture
 
 import io.flutter.embedding.android.FlutterActivity
 

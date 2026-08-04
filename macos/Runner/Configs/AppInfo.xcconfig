@@ -16,11 +16,20 @@ PRODUCT_NAME = Augustyniak Capture
 // this is what left TEST_HOST pointing at a bundle that is no longer built.
 EXECUTABLE_NAME = augustyniak_capture
 
-// The application's bundle identifier. Must stay `com.audivoa.core` — the same
-// identity as the Android applicationId and the iOS PRODUCT_BUNDLE_IDENTIFIER.
-// `flutter create` derives `com.audivoa.audivoaCore` from the org; that is a
-// different app as far as any store or update mechanism is concerned.
-PRODUCT_BUNDLE_IDENTIFIER = com.audivoa.core
+// The application's bundle identifier — the same identity as the Android
+// applicationId and the iOS PRODUCT_BUNDLE_IDENTIFIER, and it must stay in
+// step with them.
+//
+// It was `com.audivoa.core` until the identifier rebrand; changing it is a
+// re-identification rather than a rename, so an installed build does not
+// upgrade across it. That was a deliberate, planned decision — see
+// docs/plans/2026-08-04-augustyniak-capture-rebrand.md. Do not treat this line
+// as freely editable: the next change costs every existing install again.
+//
+// `flutter create` would derive something like `ai.augustyniak.augustyniakCapture`
+// from the org, which is a different app as far as any store or update
+// mechanism is concerned.
+PRODUCT_BUNDLE_IDENTIFIER = ai.augustyniak.capture
 
 // The copyright displayed in application information
-PRODUCT_COPYRIGHT = Copyright © 2026 com.audivoa. All rights reserved.
+PRODUCT_COPYRIGHT = Copyright © 2026 Augustyniak AI. All rights reserved.

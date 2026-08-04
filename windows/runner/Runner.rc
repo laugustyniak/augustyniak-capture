@@ -92,9 +92,9 @@ BEGIN
             VALUE "CompanyName", "Augustyniak" "\0"
             VALUE "FileDescription", "Augustyniak Capture" "\0"
             VALUE "FileVersion", VERSION_AS_STRING "\0"
-            VALUE "InternalName", "audivoa_core" "\0"
+            VALUE "InternalName", "augustyniak_capture" "\0"
             VALUE "LegalCopyright", "Copyright (C) 2026 Augustyniak. All rights reserved." "\0"
-            VALUE "OriginalFilename", "audivoa_core.exe" "\0"
+            VALUE "OriginalFilename", "augustyniak_capture.exe" "\0"
             VALUE "ProductName", "Augustyniak Capture" "\0"
             VALUE "ProductVersion", VERSION_AS_STRING "\0"
         END
