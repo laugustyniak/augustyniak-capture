@@ -3,15 +3,15 @@ import 'dart:io';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:path/path.dart' as p;
-import 'package:audivoa_core/features/processing/data/ocr_processor.dart';
-import 'package:audivoa_core/features/processing/data/ocr_service.dart';
-import 'package:audivoa_core/features/processing/domain/processor.dart';
-import 'package:audivoa_core/features/recordings/data/media_picker.dart';
-import 'package:audivoa_core/features/recordings/data/recordings_repository.dart';
-import 'package:audivoa_core/features/recordings/domain/capture_type.dart';
-import 'package:audivoa_core/features/recordings/domain/recording.dart';
-import 'package:audivoa_core/features/recordings/presentation/recordings_controller.dart';
-import 'package:audivoa_core/features/transcription/data/transcription_service.dart';
+import 'package:augustyniak_capture/features/processing/data/ocr_processor.dart';
+import 'package:augustyniak_capture/features/processing/data/ocr_service.dart';
+import 'package:augustyniak_capture/features/processing/domain/processor.dart';
+import 'package:augustyniak_capture/features/recordings/data/media_picker.dart';
+import 'package:augustyniak_capture/features/recordings/data/recordings_repository.dart';
+import 'package:augustyniak_capture/features/recordings/domain/capture_type.dart';
+import 'package:augustyniak_capture/features/recordings/domain/recording.dart';
+import 'package:augustyniak_capture/features/recordings/presentation/recordings_controller.dart';
+import 'package:augustyniak_capture/features/transcription/data/transcription_service.dart';
 
 class _FakeRepo extends RecordingsRepository {
   _FakeRepo(this._dir);

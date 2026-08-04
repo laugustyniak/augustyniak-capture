@@ -4,13 +4,13 @@ import 'ui_kit.dart';
 
 import '../features/recordings/presentation/recordings_page.dart';
 
-class AudivoaCoreApp extends StatelessWidget {
-  const AudivoaCoreApp({super.key});
+class AugustyniakCaptureApp extends StatelessWidget {
+  const AugustyniakCaptureApp({super.key});
 
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-      title: 'Audivoa Core',
+      title: 'Augustyniak Capture',
       debugShowCheckedModeBanner: false,
       themeMode: ThemeMode.dark,
       darkTheme: ThemeData(

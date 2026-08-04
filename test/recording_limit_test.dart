@@ -4,12 +4,12 @@ import 'package:audioplayers/audioplayers.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:path/path.dart' as p;
 import 'package:record/record.dart';
-import 'package:audivoa_core/features/recordings/data/recordings_repository.dart';
-import 'package:audivoa_core/features/recordings/domain/recording.dart';
-import 'package:audivoa_core/features/recordings/presentation/recordings_controller.dart';
-import 'package:audivoa_core/features/settings/domain/audio_config.dart';
-import 'package:audivoa_core/features/transcription/data/transcription_service.dart';
-import 'package:audivoa_core/features/transcription/domain/transcription_limits.dart';
+import 'package:augustyniak_capture/features/recordings/data/recordings_repository.dart';
+import 'package:augustyniak_capture/features/recordings/domain/recording.dart';
+import 'package:augustyniak_capture/features/recordings/presentation/recordings_controller.dart';
+import 'package:augustyniak_capture/features/settings/domain/audio_config.dart';
+import 'package:augustyniak_capture/features/transcription/data/transcription_service.dart';
+import 'package:augustyniak_capture/features/transcription/domain/transcription_limits.dart';
 
 class _FakeRepository extends RecordingsRepository {
   _FakeRepository(this.directory);

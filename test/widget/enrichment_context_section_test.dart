@@ -1,8 +1,8 @@
 import 'dart:io';
 
-import 'package:audivoa_core/features/projects/domain/project.dart';
-import 'package:audivoa_core/features/settings/presentation/enrichment_context_section.dart';
-import 'package:audivoa_core/features/settings/presentation/settings_controller.dart';
+import 'package:augustyniak_capture/features/projects/domain/project.dart';
+import 'package:augustyniak_capture/features/settings/presentation/enrichment_context_section.dart';
+import 'package:augustyniak_capture/features/settings/presentation/settings_controller.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 import '../support/harness.dart';

@@ -105,7 +105,7 @@ class GhosttyZellijAgentSessionLauncher implements AgentSessionLauncher {
     }
   }
 
-  /// `audivoa-<project>-<id8>-<agent>`, or `<custom>-<id8>-<agent>` when the
+  /// `augustyniak-<project>-<id8>-<agent>`, or `<custom>-<id8>-<agent>` when the
   /// project names its own session.
   ///
   /// **The id segment is in both forms on purpose.** A session name is what
@@ -116,7 +116,7 @@ class GhosttyZellijAgentSessionLauncher implements AgentSessionLauncher {
   /// name unique per project rather than per word the user chose.
   ///
   /// The prefix is the one thing the two forms do not share: a derived name is
-  /// grouped under `audivoa-` in `zellij ls`, while a hand-chosen one leads
+  /// grouped under `augustyniak-` in `zellij ls`, while a hand-chosen one leads
   /// with the user's own words — that is the whole reason to set one.
   static String buildSessionName(AgentSessionLaunchRequest request) {
     final String? configured = request.sessionName?.trim();
@@ -131,7 +131,7 @@ class GhosttyZellijAgentSessionLauncher implements AgentSessionLauncher {
       _slug(request.projectId, fallback: 'id'),
       8,
     );
-    final String prefix = custom ? '' : 'audivoa-';
+    final String prefix = custom ? '' : 'augustyniak-';
     final String suffix =
         '-${stableId.isEmpty ? 'id' : stableId}'
         '-${request.agent.executable}';

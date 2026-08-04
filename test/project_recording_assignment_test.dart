@@ -1,7 +1,7 @@
 import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
-import 'package:audivoa_core/features/recordings/presentation/recordings_controller.dart';
+import 'package:augustyniak_capture/features/recordings/presentation/recordings_controller.dart';
 
 import 'support/harness.dart';
 

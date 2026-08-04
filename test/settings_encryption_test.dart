@@ -2,12 +2,12 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
-import 'package:audivoa_core/features/settings/data/aes_gcm_token_cipher.dart';
-import 'package:audivoa_core/features/settings/data/settings_repository.dart';
-import 'package:audivoa_core/features/settings/domain/app_settings.dart';
-import 'package:audivoa_core/features/settings/domain/provider_profile.dart';
-import 'package:audivoa_core/features/settings/domain/token_cipher.dart';
-import 'package:audivoa_core/features/transcription/data/transcription_service.dart';
+import 'package:augustyniak_capture/features/settings/data/aes_gcm_token_cipher.dart';
+import 'package:augustyniak_capture/features/settings/data/settings_repository.dart';
+import 'package:augustyniak_capture/features/settings/domain/app_settings.dart';
+import 'package:augustyniak_capture/features/settings/domain/provider_profile.dart';
+import 'package:augustyniak_capture/features/settings/domain/token_cipher.dart';
+import 'package:augustyniak_capture/features/transcription/data/transcription_service.dart';
 
 /// Same convention as `_FakeSettingsRepository` in settings_test.dart, but
 /// keeps the real load/save/seal logic and only redirects the file: the one

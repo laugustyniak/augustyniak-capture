@@ -4,7 +4,7 @@
 /// shortcut never gets its own path through the capture pipeline — it only
 /// pulls the same lever from outside the window.
 enum ShortcutAction {
-  /// Restore, raise and focus the Audivoa window.
+  /// Restore, raise and focus the Augustyniak Capture window.
   showWindow,
 
   /// Start recording, or stop the one in progress.
