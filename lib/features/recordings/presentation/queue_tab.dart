@@ -238,7 +238,12 @@ class _QueueTabState extends State<QueueTab> {
                 ),
                 Expanded(
                   child: ListView(
-                    padding: const EdgeInsets.fromLTRB(16, 14, 16, 190),
+                    padding: EdgeInsets.fromLTRB(
+                      16,
+                      14,
+                      16,
+                      compact ? 24 : 190,
+                    ),
                     children: <Widget>[
                       if (visible.isEmpty)
                         Padding(
