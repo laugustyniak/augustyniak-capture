@@ -189,8 +189,23 @@ class _RecordingEditorState extends State<RecordingEditor> {
       bindings: <ShortcutActivator, VoidCallback>{
         const SingleActivator(LogicalKeyboardKey.escape): _finish,
       },
-      child: RecordingCardShell(
-        borderColor: Console.cyan.withValues(alpha: .55),
+      // The binding above reacts only while focus is inside this subtree, and
+      // opening the editor moves focus nowhere: the pencil is in the *card*,
+      // which is replaced the moment the mode starts, and the title field is
+      // deliberately not autofocused. So Escape used to work only after the
+      // user had clicked into a text field — which made it look intermittent
+      // rather than broken.
+      //
+      // The node goes on the shell, not on the title field, so the fix does not
+      // reintroduce the blinking cursor that autofocusing a `TextField` would:
+      // the container takes focus, no caret is drawn, and `pumpAndSettle` still
+      // reaches a resting frame. It also gives the queue's own shortcut layer
+      // somewhere to hand focus off to, so `e` cannot open a second editor
+      // while this one is up.
+      child: Focus(
+        autofocus: true,
+        child: RecordingCardShell(
+          borderColor: Console.cyan.withValues(alpha: .55),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: <Widget>[
@@ -332,6 +347,7 @@ class _RecordingEditorState extends State<RecordingEditor> {
               ],
             ),
           ],
+          ),
         ),
       ),
     );
