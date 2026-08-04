@@ -17,8 +17,14 @@ class _FakeRepository extends RecordingsRepository {
   final Directory directory;
 
   @override
-  Future<File> createSourceFile(String id, String extension) async =>
-      File(p.join(directory.path, '$id.$extension'));
+  Future<File> createSourceFile(String id, String extension) async {
+    final File file = File(p.join(directory.path, '$id.$extension'));
+    // Stands in for the recorder having written audio: `stopRecording` refuses
+    // to index anything it cannot verify is non-empty, so without this the
+    // capture would fail for a reason that has nothing to do with the cap.
+    await file.writeAsString('audio');
+    return file;
+  }
 
   @override
   Future<List<Recording>> loadAll() async => <Recording>[];
@@ -31,8 +37,21 @@ class _GrantingRecorder implements AudioRecorder {
   @override
   Future<bool> hasPermission({bool request = true}) async => true;
 
+  /// Typed explicitly. `noSuchMethod` answers `Future<dynamic>`, which fails the
+  /// cast at the call site — a fine stand-in for a platform throwing on stop,
+  /// but not for the ordinary path this group is about.
+  @override
+  Future<String?> stop() async => null;
+
   @override
   dynamic noSuchMethod(Invocation invocation) async => null;
+}
+
+/// Fails the way a disconnected input does: the recording is unrecoverable, and
+/// the question is whether the controller stays stuck in it.
+class _FailingStopRecorder extends _GrantingRecorder {
+  @override
+  Future<String?> stop() async => throw Exception('input went away');
 }
 
 class _FakePlayer implements AudioPlayer {
@@ -40,6 +59,23 @@ class _FakePlayer implements AudioPlayer {
   Stream<void> get onPlayerComplete => const Stream<void>.empty();
   @override
   dynamic noSuchMethod(Invocation invocation) async => null;
+}
+
+/// Waits for a real-time condition instead of sleeping a fixed span.
+///
+/// The recording cap is driven by a `Timer.periodic`, so these tests depend on
+/// wall-clock scheduling. A fixed sleep encodes an assumption about how busy
+/// the machine is, and fails when that assumption is wrong rather than when the
+/// behaviour is. Returning as soon as the condition holds keeps an idle run as
+/// fast as the sleep was.
+Future<void> _until(
+  bool Function() condition, {
+  Duration timeout = const Duration(seconds: 5),
+}) async {
+  final DateTime deadline = DateTime.now().add(timeout);
+  while (!condition() && DateTime.now().isBefore(deadline)) {
+    await Future<void>.delayed(const Duration(milliseconds: 25));
+  }
 }
 
 void main() {
@@ -96,7 +132,11 @@ void main() {
     test('an unknown or absent model gets the size ceiling only', () {
       // A local whisper.cpp has no duration limit to speak of, and a model name
       // the app has never heard of must not inherit one on a guess.
-      for (final String? model in <String?>[null, '', 'whisper-large-v3-turbo']) {
+      for (final String? model in <String?>[
+        null,
+        '',
+        'whisper-large-v3-turbo',
+      ]) {
         expect(
           TranscriptionLimits.forRequest(model: model, audio: defaults)!.limit,
           const Duration(seconds: 3125),
@@ -123,12 +163,13 @@ void main() {
     setUp(() => appDir = Directory.systemTemp.createTempSync('audivoa_cap_'));
     tearDown(() => appDir.deleteSync(recursive: true));
 
-    RecordingsController build() => RecordingsController(
-      repository: _FakeRepository(appDir),
-      transcriptionService: const DisabledTranscriptionService(),
-      recorder: _GrantingRecorder(),
-      player: _FakePlayer(),
-    );
+    RecordingsController build({AudioRecorder? recorder}) =>
+        RecordingsController(
+          repository: _FakeRepository(appDir),
+          transcriptionService: const DisabledTranscriptionService(),
+          recorder: recorder ?? _GrantingRecorder(),
+          player: _FakePlayer(),
+        );
 
     test('a running capture is saved when it reaches the limit', () async {
       final RecordingsController controller = build()
@@ -140,12 +181,40 @@ void main() {
       await controller.startRecording();
       expect(controller.isRecording, isTrue);
 
-      // Two ticks past the cap. The tick that crosses it calls the same
-      // `stopRecording` the SAVE button does — the capture is saved, not thrown
-      // away, which is the whole contract of this app.
-      await Future<void>.delayed(const Duration(milliseconds: 900));
+      // The tick that crosses the cap calls the same `stopRecording` the SAVE
+      // button does — so the capture is *saved*, not thrown away. Nothing in
+      // this app discards a capture, least of all one the app itself ended.
+      //
+      // Polled rather than slept for a fixed span: the cap is driven by a real
+      // 250 ms timer, so on a loaded machine — a parallel test file, a platform
+      // build in another terminal — a fixed wait can expire before the crossing
+      // tick ever runs, and the test then fails for being early rather than for
+      // being wrong. Polling stays fast while the machine is idle.
+      await _until(() => !controller.isRecording);
 
       expect(controller.isRecording, isFalse);
+      expect(controller.recordings, hasLength(1));
+      expect(controller.error, isNull);
+      controller.dispose();
+    });
+
+    test('a recorder that throws on stop does not wedge the capture', () async {
+      // Regression: the teardown used to sit after the `stop()` await, inside
+      // the try. A throw there left `_isRecording` true with the tick still
+      // live, so the capture screen never closed — and with a cap set, every
+      // tick called back into `stopRecording` for the rest of the session.
+      final RecordingsController controller =
+          build(recorder: _FailingStopRecorder())
+            ..recordingLimit = const TranscriptionCeiling(
+              Duration(milliseconds: 400),
+              'test ceiling',
+            );
+
+      await controller.startRecording();
+      await _until(() => !controller.isRecording);
+
+      expect(controller.isRecording, isFalse);
+      expect(controller.error, contains('input went away'));
       controller.dispose();
     });
 
