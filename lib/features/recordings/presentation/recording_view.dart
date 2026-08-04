@@ -3,6 +3,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 
 import '../../../app/ui_kit.dart';
+import '../../projects/domain/project.dart';
 import '../../settings/domain/audio_config.dart';
 import '../../transcription/domain/transcription_limits.dart';
 import 'recordings_controller.dart';
@@ -16,9 +17,18 @@ import 'recordings_controller.dart';
 /// The single full-width `SAVE` is deliberate: there is no discard button,
 /// because there is no path in this app that throws a capture away.
 class RecordingView extends StatelessWidget {
-  const RecordingView({super.key, required this.controller});
+  const RecordingView({
+    super.key,
+    required this.controller,
+    this.projects = const <Project>[],
+  });
 
   final RecordingsController controller;
+
+  /// Offered as a row of chips so the capture can be re-filed while it runs.
+  /// Empty by default — and then the picker is not drawn at all, so an install
+  /// with no projects keeps the screen it had.
+  final List<Project> projects;
 
   @override
   Widget build(BuildContext context) {
@@ -76,6 +86,10 @@ class RecordingView extends StatelessWidget {
                 ],
               ),
             ),
+            if (projects.isNotEmpty) ...<Widget>[
+              _ProjectPicker(controller: controller, projects: projects),
+              const SizedBox(height: 14),
+            ],
             Text(
               'the source file is never deleted — a processing failure '
               'keeps the audio',
@@ -367,6 +381,60 @@ class _PipelineChecklist extends StatelessWidget {
             ),
         ],
       ),
+    );
+  }
+}
+
+/// Which project this capture lands in, changeable while the mic is live.
+///
+/// It sits on the capture screen rather than in front of it because a hotkey
+/// recording starts with no UI at all — the window is raised *after* the mic
+/// is already running, so any pre-capture picker would be unreachable exactly
+/// when capture is fastest. Filing mid-recording also matches how the app is
+/// used: you start talking first and work out where it belongs while talking.
+///
+/// `NONE` is a real option, not an absence: a capture with no project is the
+/// normal case, and it has to be reachable after picking one by mistake.
+class _ProjectPicker extends StatelessWidget {
+  const _ProjectPicker({required this.controller, required this.projects});
+
+  final RecordingsController controller;
+  final List<Project> projects;
+
+  @override
+  Widget build(BuildContext context) {
+    final String? selected = controller.recordingProjectId;
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: <Widget>[
+        Text(
+          'FILE UNDER',
+          style: ConsoleText.micro.copyWith(
+            color: Console.muted,
+            fontWeight: FontWeight.w800,
+            letterSpacing: .6,
+          ),
+        ),
+        const SizedBox(height: 7),
+        Wrap(
+          spacing: 8,
+          runSpacing: 8,
+          children: <Widget>[
+            ConsoleChip(
+              label: 'NONE',
+              selected: selected == null,
+              onSelected: () => controller.setRecordingProject(null),
+            ),
+            for (final Project project in projects)
+              ConsoleChip(
+                label: project.name,
+                selected: project.id == selected,
+                onSelected: () => controller.setRecordingProject(project.id),
+              ),
+          ],
+        ),
+      ],
     );
   }
 }
