@@ -22,6 +22,17 @@ class _TempFileSettingsRepository extends SettingsRepository {
   Future<File> settingsFile() async => file;
 }
 
+/// Simulates a disk-full / read-only-directory write failure so the
+/// one-time migration save inside `load()` has something to fail on.
+class _FailingSaveSettingsRepository extends _TempFileSettingsRepository {
+  _FailingSaveSettingsRepository(super.file, {super.cipher});
+
+  @override
+  Future<void> save(AppSettings settings) async {
+    throw const FileSystemException('disk full');
+  }
+}
+
 class _MemoryKeyStore implements MasterKeyStore {
   String? value;
 
@@ -189,6 +200,28 @@ void main() {
       // of it and not null.
       await reader.save(loaded);
       expect(await fileIn(tempDir).readAsString(), sealedOnDisk);
+    });
+
+    test(
+        'a failing migration write still returns the loaded settings, '
+        'and leaves the file untouched', () async {
+      final String legacy =
+          jsonEncode(_settingsWithToken('sk-secret').toJson());
+      await fileIn(tempDir).writeAsString(legacy);
+
+      final AesGcmTokenCipher cipher =
+          AesGcmTokenCipher(keyStore: _MemoryKeyStore());
+      final _FailingSaveSettingsRepository repository =
+          _FailingSaveSettingsRepository(fileIn(tempDir), cipher: cipher);
+
+      // Must not throw: the migration save failing inside load() is
+      // swallowed, not propagated.
+      final AppSettings? loaded = await repository.load();
+
+      expect(loaded!.profiles.single.bearerToken, 'sk-secret');
+      // The failing save() override never wrote anything — the file on
+      // disk is exactly what it was before load() ran.
+      expect(await fileIn(tempDir).readAsString(), legacy);
     });
   });
 }

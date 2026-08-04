@@ -65,7 +65,16 @@ class SettingsRepository {
     // sealed as soon as a working cipher sees it. With no cipher the file is
     // deliberately left untouched and the migration retries next launch.
     if (_cipher.encrypts && _hasPlaintextToken(stored)) {
-      await save(settings);
+      // Best-effort: the migration write can fail (disk full, read-only
+      // dir) and must never cost the session its already-parsed settings.
+      // Swallow it here and retry on a later launch, exactly like the
+      // keyring-unavailable path.
+      try {
+        await save(settings);
+      } catch (_) {
+        // Migration retries next launch; the returned settings are still
+        // the correctly-unsealed in-memory values from this load.
+      }
     }
     return settings;
   }
