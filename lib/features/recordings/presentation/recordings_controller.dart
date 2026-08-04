@@ -140,6 +140,25 @@ class RecordingsController extends ChangeNotifier {
   /// Project inherited by captures created from this point onward. The
   /// projects controller owns selection; this is only its capture-time mirror.
   String? activeProjectId;
+
+  /// The project the *in-flight* recording will be filed under.
+  ///
+  /// Separate from [activeProjectId] on purpose: picking a project for one
+  /// capture must not silently repoint every capture that follows. Seeded at
+  /// [startRecording], cleared when the recording ends.
+  String? _recordingProjectId;
+  String? get recordingProjectId => _recordingProjectId;
+
+  /// Re-file the recording that is running right now.
+  ///
+  /// A no-op unless the mic is live, so a stray tap after `SAVE` cannot attach
+  /// a project to the next capture instead.
+  void setRecordingProject(String? projectId) {
+    if (!_isRecording || _recordingProjectId == projectId) return;
+    _recordingProjectId = projectId;
+    notifyListeners();
+  }
+
   String? _error;
 
   /// The cap a running recording is saved at, and why — or null where none
@@ -434,6 +453,11 @@ class RecordingsController extends ChangeNotifier {
     final File audioFile = await _repository.createAudioFile(id);
     _activeFilePath = audioFile.path;
     _activeId = id;
+    // Seeded from the active project, then editable for the duration of this
+    // capture only. A hotkey recording starts before any UI can be touched, so
+    // the choice has to be changeable *while* the mic is live rather than
+    // before it opens.
+    _recordingProjectId = activeProjectId;
 
     await _recorder.start(
       RecordConfig(
@@ -561,7 +585,11 @@ class RecordingsController extends ChangeNotifier {
         sizeBytes: sizeBytes,
         status: RecordingStatus.saved,
         type: CaptureType.audioRecording,
-        projectId: activeProjectId,
+        // Read directly, with no `?? activeProjectId` fallback: `startRecording`
+        // always seeds this, so null here means the user deliberately picked
+        // NONE. Falling back would make "file this one nowhere" impossible to
+        // express — the same three-state trap as the enrichment profile.
+        projectId: _recordingProjectId,
       );
 
       // Critical invariant: persist metadata only after the audio file exists.
@@ -600,6 +628,9 @@ class RecordingsController extends ChangeNotifier {
       _isBusy = false;
       _activeFilePath = null;
       _activeId = null;
+      // Cleared with the rest of the per-capture state: the next recording
+      // seeds its own from the active project.
+      _recordingProjectId = null;
       notifyListeners();
     }
   }
@@ -852,6 +883,30 @@ class RecordingsController extends ChangeNotifier {
   Future<void> retryTranscription(String id) async {
     _logSink.log('Retrying processing.', level: LogLevel.warn, recordingId: id);
     await _enqueueProcessing(id);
+  }
+
+  /// Re-run only the optional LLM stage against the text already on disk.
+  ///
+  /// This is intentionally separate from [retryTranscription]: enrichment can
+  /// fail (or the app can stop) after processing has already completed, and
+  /// re-running an expensive transcription/OCR pass would add cost and risk
+  /// overwriting a corrected transcript for no benefit.
+  Future<void> retryEnrichment(String id) async {
+    final int index = _recordings.indexWhere((Recording item) => item.id == id);
+    if (index < 0 || _enrichingIds.contains(id)) return;
+
+    final String text = _recordings[index].transcript ?? '';
+    if (text.trim().isEmpty) {
+      _logSink.log(
+        'Enrichment skipped — this capture has no text.',
+        level: LogLevel.warn,
+        recordingId: id,
+      );
+      return;
+    }
+
+    _logSink.log('Retrying enrichment.', level: LogLevel.warn, recordingId: id);
+    await _enrich(id, text);
   }
 
   /// Mark an already-persisted item `pendingTranscription`, add it to the
@@ -1112,7 +1167,9 @@ class RecordingsController extends ChangeNotifier {
     // Marked before the call and cleared in `finally`, so the card's scan line
     // cannot outlive the request — including on the throwing paths below, which
     // are the common case until a profile is configured.
-    _enrichingIds.add(id);
+    // `add` is also the mutex. Two fast taps can both resolve context before a
+    // frame disables the button; only the first is allowed to reach the model.
+    if (!_enrichingIds.add(id)) return;
     if (!_disposed) notifyListeners();
     try {
       final EnrichmentResult result = await _enrichmentService.enrich(
