@@ -40,14 +40,14 @@ class CountingRepository extends TempRepository {
 }
 
 Recording _item(String id, {String? transcript}) => Recording(
-      id: id,
-      filePath: '/tmp/$id.m4a',
-      createdAt: DateTime.parse('2026-08-04T12:00:00'),
-      durationMs: 1000,
-      sizeBytes: 1234,
-      status: RecordingStatus.completed,
-      transcript: transcript,
-    );
+  id: id,
+  filePath: '/tmp/$id.m4a',
+  createdAt: DateTime.parse('2026-08-04T12:00:00'),
+  durationMs: 1000,
+  sizeBytes: 1234,
+  status: RecordingStatus.completed,
+  transcript: transcript,
+);
 
 void main() {
   // The controller constructs a real recorder and player; stubbing their
@@ -61,9 +61,9 @@ void main() {
   ]) {
     TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
         .setMockMethodCallHandler(
-      MethodChannel(name),
-      (MethodCall call) async => null,
-    );
+          MethodChannel(name),
+          (MethodCall call) async => null,
+        );
   }
 
   late Directory root;
@@ -107,14 +107,16 @@ void main() {
       expect(backups, hasLength(1));
     });
 
-    test('valid JSON that is not a list throws rather than loading empty',
-        () async {
-      await indexFile().writeAsString('{"recordings": []}');
-      await expectLater(
-        TempRepository(root).loadAll(),
-        throwsA(isA<IndexUnreadableException>()),
-      );
-    });
+    test(
+      'valid JSON that is not a list throws rather than loading empty',
+      () async {
+        await indexFile().writeAsString('{"recordings": []}');
+        await expectLater(
+          TempRepository(root).loadAll(),
+          throwsA(isA<IndexUnreadableException>()),
+        );
+      },
+    );
 
     test('one malformed row does not cost the others', () async {
       await indexFile().writeAsString(
@@ -133,9 +135,9 @@ void main() {
       // The dropped row is preserved, because the next save writes over it.
       expect(
         root.listSync().where(
-              (FileSystemEntity entity) =>
-                  p.basename(entity.path).contains('partial'),
-            ),
+          (FileSystemEntity entity) =>
+              p.basename(entity.path).contains('partial'),
+        ),
         hasLength(1),
       );
     });
@@ -147,8 +149,8 @@ void main() {
       await repository.saveAll(<Recording>[_item('a'), _item('b')]);
       expect(
         root.listSync().where(
-              (FileSystemEntity e) => p.basename(e.path).contains('shrank'),
-            ),
+          (FileSystemEntity e) => p.basename(e.path).contains('shrank'),
+        ),
         isEmpty,
         reason: 'growing is normal and must not cost a copy',
       );
@@ -156,8 +158,8 @@ void main() {
       await repository.saveAll(<Recording>[_item('a')]);
       expect(
         root.listSync().where(
-              (FileSystemEntity e) => p.basename(e.path).contains('shrank'),
-            ),
+          (FileSystemEntity e) => p.basename(e.path).contains('shrank'),
+        ),
         hasLength(1),
       );
     });
@@ -186,7 +188,9 @@ void main() {
     });
 
     test('a readable index leaves writes enabled', () async {
-      await indexFile().writeAsString(jsonEncode(<dynamic>[_item('a').toJson()]));
+      await indexFile().writeAsString(
+        jsonEncode(<dynamic>[_item('a').toJson()]),
+      );
       final CountingRepository repository = CountingRepository(root);
       final RecordingsController controller = RecordingsController(
         repository: repository,
@@ -228,16 +232,21 @@ void main() {
       final List<Recording> items = controller.recordings;
       expect(items, hasLength(2));
 
-      final Recording recovered =
-          items.firstWhere((Recording item) => item.id == 'orphan-1');
-      expect(recovered.status, RecordingStatus.saved,
-          reason: 'recovered items must not auto-spend transcription calls');
+      final Recording recovered = items.firstWhere(
+        (Recording item) => item.id == 'orphan-1',
+      );
+      expect(
+        recovered.status,
+        RecordingStatus.saved,
+        reason: 'recovered items must not auto-spend transcription calls',
+      );
       expect(recovered.type, CaptureType.audioRecording);
       expect(recovered.transcript, isNull);
 
       // The existing row keeps everything it had.
-      final Recording untouched =
-          items.firstWhere((Recording item) => item.id == 'known-1');
+      final Recording untouched = items.firstWhere(
+        (Recording item) => item.id == 'known-1',
+      );
       expect(untouched.transcript, 'kept');
     });
 

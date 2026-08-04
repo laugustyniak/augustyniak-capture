@@ -91,11 +91,16 @@ class FfmpegVideoPosterExtractor implements VideoPosterExtractor {
   static List<String> _argsFor(String seek, File video, File destination) =>
       <String>[
         '-y',
-        '-ss', seek,
-        '-i', video.path,
-        '-frames:v', '1',
-        '-vf', 'scale=320:-2',
-        '-f', 'image2',
+        '-ss',
+        seek,
+        '-i',
+        video.path,
+        '-frames:v',
+        '1',
+        '-vf',
+        'scale=320:-2',
+        '-f',
+        'image2',
         destination.path,
       ];
 }

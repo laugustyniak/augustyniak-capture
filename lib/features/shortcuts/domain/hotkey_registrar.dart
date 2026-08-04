@@ -29,8 +29,7 @@ class NoopHotkeyRegistrar implements HotkeyRegistrar {
   Future<Set<ShortcutAction>> apply(
     Map<ShortcutAction, HotkeyBinding> bindings,
     ShortcutTrigger onTriggered,
-  ) async =>
-      const <ShortcutAction>{};
+  ) async => const <ShortcutAction>{};
 
   @override
   Future<void> unregisterAll() async {}

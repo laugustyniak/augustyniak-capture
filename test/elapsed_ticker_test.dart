@@ -48,37 +48,39 @@ void main() {
   setUp(() => appDir = Directory.systemTemp.createTempSync('audivoa_tick_'));
   tearDown(() => appDir.deleteSync(recursive: true));
 
-  test('the recording tick drives elapsedTicker, not the whole controller',
-      () async {
-    final RecordingsController controller = RecordingsController(
-      repository: _FakeRepository(appDir),
-      transcriptionService: const DisabledTranscriptionService(),
-      recorder: _GrantingRecorder(),
-      player: _FakePlayer(),
-    );
+  test(
+    'the recording tick drives elapsedTicker, not the whole controller',
+    () async {
+      final RecordingsController controller = RecordingsController(
+        repository: _FakeRepository(appDir),
+        transcriptionService: const DisabledTranscriptionService(),
+        recorder: _GrantingRecorder(),
+        player: _FakePlayer(),
+      );
 
-    int controllerNotifications = 0;
-    int tickerNotifications = 0;
-    controller.addListener(() => controllerNotifications++);
-    controller.elapsedTicker.addListener(() => tickerNotifications++);
+      int controllerNotifications = 0;
+      int tickerNotifications = 0;
+      controller.addListener(() => controllerNotifications++);
+      controller.elapsedTicker.addListener(() => tickerNotifications++);
 
-    await controller.startRecording();
-    expect(controller.isRecording, isTrue);
+      await controller.startRecording();
+      expect(controller.isRecording, isTrue);
 
-    // startRecording itself notifies once — that is a real state change.
-    final int afterStart = controllerNotifications;
+      // startRecording itself notifies once — that is a real state change.
+      final int afterStart = controllerNotifications;
 
-    // The timer fires every 250ms; wait for a few ticks.
-    await Future<void>.delayed(const Duration(milliseconds: 800));
+      // The timer fires every 250ms; wait for a few ticks.
+      await Future<void>.delayed(const Duration(milliseconds: 800));
 
-    // The ticks moved the ticker...
-    expect(tickerNotifications, greaterThanOrEqualTo(2));
-    // ...and did NOT rebuild the page. A controller notification here would fan
-    // out through the shell's IndexedStack into all four tabs, four times a
-    // second, purely to redraw one mm:ss label.
-    expect(controllerNotifications, afterStart);
-    expect(controller.elapsedTicker.value, greaterThan(Duration.zero));
+      // The ticks moved the ticker...
+      expect(tickerNotifications, greaterThanOrEqualTo(2));
+      // ...and did NOT rebuild the page. A controller notification here would fan
+      // out through the shell's IndexedStack into all four tabs, four times a
+      // second, purely to redraw one mm:ss label.
+      expect(controllerNotifications, afterStart);
+      expect(controller.elapsedTicker.value, greaterThan(Duration.zero));
 
-    controller.dispose();
-  });
+      controller.dispose();
+    },
+  );
 }

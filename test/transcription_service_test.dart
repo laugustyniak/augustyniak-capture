@@ -39,12 +39,12 @@ void main() {
 
     final HttpWhisperTranscriptionService service =
         HttpWhisperTranscriptionService(
-      endpoint: Uri.parse('https://api.openai.com/v1/audio/transcriptions'),
-      bearerToken: 'sk-test',
-      model: 'whisper-1',
-      language: 'pl',
-      client: client,
-    );
+          endpoint: Uri.parse('https://api.openai.com/v1/audio/transcriptions'),
+          bearerToken: 'sk-test',
+          model: 'whisper-1',
+          language: 'pl',
+          client: client,
+        );
 
     final String text = await service.transcribe(audioFile);
 
@@ -64,9 +64,9 @@ void main() {
 
     final HttpWhisperTranscriptionService service =
         HttpWhisperTranscriptionService(
-      endpoint: Uri.parse('https://example.com/transcribe'),
-      client: client,
-    );
+          endpoint: Uri.parse('https://example.com/transcribe'),
+          client: client,
+        );
 
     expect(await service.transcribe(audioFile), 'fallback');
   });
@@ -80,9 +80,9 @@ void main() {
 
     final HttpWhisperTranscriptionService service =
         HttpWhisperTranscriptionService(
-      endpoint: Uri.parse('https://example.com/transcribe'),
-      client: client,
-    );
+          endpoint: Uri.parse('https://example.com/transcribe'),
+          client: client,
+        );
 
     await service.transcribe(audioFile);
     expect(capturedBody, isNot(contains('name="model"')));
@@ -96,14 +96,11 @@ void main() {
 
     final HttpWhisperTranscriptionService service =
         HttpWhisperTranscriptionService(
-      endpoint: Uri.parse('https://example.com/transcribe'),
-      client: client,
-    );
+          endpoint: Uri.parse('https://example.com/transcribe'),
+          client: client,
+        );
 
-    expect(
-      () => service.transcribe(audioFile),
-      throwsA(isA<HttpException>()),
-    );
+    expect(() => service.transcribe(audioFile), throwsA(isA<HttpException>()));
   });
 
   test('missing text/transcript throws FormatException', () async {
@@ -113,9 +110,9 @@ void main() {
 
     final HttpWhisperTranscriptionService service =
         HttpWhisperTranscriptionService(
-      endpoint: Uri.parse('https://example.com/transcribe'),
-      client: client,
-    );
+          endpoint: Uri.parse('https://example.com/transcribe'),
+          client: client,
+        );
 
     expect(
       () => service.transcribe(audioFile),

@@ -60,32 +60,37 @@ void main() {
     'xyz.luan/audioplayers.global',
   ]) {
     messenger.setMockMethodCallHandler(
-        MethodChannel(name), (MethodCall call) async => null);
+      MethodChannel(name),
+      (MethodCall call) async => null,
+    );
   }
 
   group('VideoTranscriptionProcessor', () {
-    test('extracts audio, transcribes it, and deletes the temp audio',
-        () async {
-      final Directory tmp = await Directory.systemTemp.createTemp('vidproc');
-      final File audio = File(p.join(tmp.path, 'audio.m4a'));
-      await audio.writeAsBytes(<int>[1, 2, 3]);
+    test(
+      'extracts audio, transcribes it, and deletes the temp audio',
+      () async {
+        final Directory tmp = await Directory.systemTemp.createTemp('vidproc');
+        final File audio = File(p.join(tmp.path, 'audio.m4a'));
+        await audio.writeAsBytes(<int>[1, 2, 3]);
 
-      final VideoTranscriptionProcessor processor = VideoTranscriptionProcessor(
-        () => const _StubService('VIDEO TRANSCRIPT'),
-        () => _FakeExtractor(audio),
-      );
-      final Recording item = Recording(
-        id: 'v',
-        filePath: '/x/v.mp4',
-        createdAt: DateTime.utc(2026),
-        durationMs: 0,
-        status: RecordingStatus.pendingTranscription,
-        type: CaptureType.video,
-      );
+        final VideoTranscriptionProcessor processor =
+            VideoTranscriptionProcessor(
+              () => const _StubService('VIDEO TRANSCRIPT'),
+              () => _FakeExtractor(audio),
+            );
+        final Recording item = Recording(
+          id: 'v',
+          filePath: '/x/v.mp4',
+          createdAt: DateTime.utc(2026),
+          durationMs: 0,
+          status: RecordingStatus.pendingTranscription,
+          type: CaptureType.video,
+        );
 
-      expect(await processor.process(item), 'VIDEO TRANSCRIPT');
-      expect(tmp.existsSync(), isFalse); // derived temp cleaned up
-    });
+        expect(await processor.process(item), 'VIDEO TRANSCRIPT');
+        expect(tmp.existsSync(), isFalse); // derived temp cleaned up
+      },
+    );
 
     test('propagates extractor failure', () async {
       final VideoTranscriptionProcessor processor = VideoTranscriptionProcessor(
@@ -113,8 +118,9 @@ void main() {
 
     test('missing video file throws FileSystemException', () {
       expect(
-        () => const FfmpegVideoAudioExtractor()
-            .extractAudio(File(p.join(tmp.path, 'nope.mp4'))),
+        () => const FfmpegVideoAudioExtractor().extractAudio(
+          File(p.join(tmp.path, 'nope.mp4')),
+        ),
         throwsA(isA<FileSystemException>()),
       );
     });
@@ -124,8 +130,8 @@ void main() {
       await vid.writeAsBytes(<int>[1, 2, 3]);
       expect(
         () => const FfmpegVideoAudioExtractor(
-                executable: 'ffmpeg_definitely_absent')
-            .extractAudio(vid),
+          executable: 'ffmpeg_definitely_absent',
+        ).extractAudio(vid),
         throwsA(isA<ProcessException>()),
       );
     });
@@ -140,14 +146,17 @@ void main() {
       int scratchDirs() => Directory.systemTemp
           .listSync()
           .whereType<Directory>()
-          .where((Directory dir) =>
-              p.basename(dir.path).startsWith('audivoa_video_audio'))
+          .where(
+            (Directory dir) =>
+                p.basename(dir.path).startsWith('audivoa_video_audio'),
+          )
           .length;
 
       final int before = scratchDirs();
       await expectLater(
-        const FfmpegVideoAudioExtractor(executable: 'ffmpeg_definitely_absent')
-            .extractAudio(vid),
+        const FfmpegVideoAudioExtractor(
+          executable: 'ffmpeg_definitely_absent',
+        ).extractAudio(vid),
         throwsA(isA<ProcessException>()),
       );
 
@@ -156,59 +165,66 @@ void main() {
   });
 
   group('video ingestion routes to extract+transcribe (real upload path)', () {
-    test('a picked video is imported and its transcript lands on the item',
-        () async {
-      final Directory tmp = await Directory.systemTemp.createTemp('vid_ingest');
-      final File src = File(p.join(tmp.path, 'clip.mp4'));
-      await src.writeAsBytes(<int>[0, 0, 0, 0x18, 1, 2, 3]);
-      final Directory audioDir =
-          await Directory.systemTemp.createTemp('vid_audio');
-      final File extracted = File(p.join(audioDir.path, 'audio.m4a'));
-      await extracted.writeAsBytes(<int>[9, 9, 9]);
+    test(
+      'a picked video is imported and its transcript lands on the item',
+      () async {
+        final Directory tmp = await Directory.systemTemp.createTemp(
+          'vid_ingest',
+        );
+        final File src = File(p.join(tmp.path, 'clip.mp4'));
+        await src.writeAsBytes(<int>[0, 0, 0, 0x18, 1, 2, 3]);
+        final Directory audioDir = await Directory.systemTemp.createTemp(
+          'vid_audio',
+        );
+        final File extracted = File(p.join(audioDir.path, 'audio.m4a'));
+        await extracted.writeAsBytes(<int>[9, 9, 9]);
 
-      final RecordingsController controller = RecordingsController(
-        repository: _FakeRepo(tmp),
-        transcriptionService: const _StubService('napisy z wideo'),
-        videoAudioExtractor: _FakeExtractor(extracted),
-        mediaPicker: _FakePicker(
-          PickedMedia(file: src, mimeType: 'video/mp4'),
-        ),
-      );
-      addTearDown(controller.dispose);
+        final RecordingsController controller = RecordingsController(
+          repository: _FakeRepo(tmp),
+          transcriptionService: const _StubService('napisy z wideo'),
+          videoAudioExtractor: _FakeExtractor(extracted),
+          mediaPicker: _FakePicker(
+            PickedMedia(file: src, mimeType: 'video/mp4'),
+          ),
+        );
+        addTearDown(controller.dispose);
 
-      await controller.addUpload(CaptureType.video);
-      await controller.waitForProcessing();
+        await controller.addUpload(CaptureType.video);
+        await controller.waitForProcessing();
 
-      final Recording item = controller.recordings.single;
-      expect(item.type, CaptureType.video);
-      expect(item.status, RecordingStatus.completed);
-      expect(item.transcript, 'napisy z wideo');
-      expect(File(item.filePath).existsSync(), isTrue);
-    });
+        final Recording item = controller.recordings.single;
+        expect(item.type, CaptureType.video);
+        expect(item.status, RecordingStatus.completed);
+        expect(item.transcript, 'napisy z wideo');
+        expect(File(item.filePath).existsSync(), isTrue);
+      },
+    );
 
-    test('extraction failure leaves the video failed with the source intact',
-        () async {
-      final Directory tmp = await Directory.systemTemp.createTemp('vid_fail');
-      final File src = File(p.join(tmp.path, 'clip.mp4'));
-      await src.writeAsBytes(<int>[0, 0, 0, 0x18, 1, 2, 3]);
+    test(
+      'extraction failure leaves the video failed with the source intact',
+      () async {
+        final Directory tmp = await Directory.systemTemp.createTemp('vid_fail');
+        final File src = File(p.join(tmp.path, 'clip.mp4'));
+        await src.writeAsBytes(<int>[0, 0, 0, 0x18, 1, 2, 3]);
 
-      final RecordingsController controller = RecordingsController(
-        repository: _FakeRepo(tmp),
-        transcriptionService: const _StubService('x'),
-        videoAudioExtractor: const _ThrowingExtractor(),
-        mediaPicker: _FakePicker(
-          PickedMedia(file: src, mimeType: 'video/mp4'),
-        ),
-      );
-      addTearDown(controller.dispose);
+        final RecordingsController controller = RecordingsController(
+          repository: _FakeRepo(tmp),
+          transcriptionService: const _StubService('x'),
+          videoAudioExtractor: const _ThrowingExtractor(),
+          mediaPicker: _FakePicker(
+            PickedMedia(file: src, mimeType: 'video/mp4'),
+          ),
+        );
+        addTearDown(controller.dispose);
 
-      await controller.addUpload(CaptureType.video);
-      await controller.waitForProcessing();
+        await controller.addUpload(CaptureType.video);
+        await controller.waitForProcessing();
 
-      final Recording item = controller.recordings.single;
-      expect(item.status, RecordingStatus.failed);
-      expect(item.error, isNotNull);
-      expect(File(item.filePath).existsSync(), isTrue);
-    });
+        final Recording item = controller.recordings.single;
+        expect(item.status, RecordingStatus.failed);
+        expect(item.error, isNotNull);
+        expect(File(item.filePath).existsSync(), isTrue);
+      },
+    );
   });
 }

@@ -40,9 +40,7 @@ class RecordingTags {
   /// index down with it.
   static List<String> fromJson(dynamic json) {
     if (json is! List<dynamic>) return const <String>[];
-    return normalize(
-      json.map(_valueOf).whereType<String>(),
-    );
+    return normalize(json.map(_valueOf).whereType<String>());
   }
 
   static String? _valueOf(dynamic entry) {

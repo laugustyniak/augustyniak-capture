@@ -89,16 +89,17 @@ void main() {
     }
 
     String chatBody(String content) => jsonEncode(<String, dynamic>{
-          'choices': <dynamic>[
-            <String, dynamic>{
-              'message': <String, dynamic>{'content': content},
-            },
-          ],
-        });
+      'choices': <dynamic>[
+        <String, dynamic>{
+          'message': <String, dynamic>{'content': content},
+        },
+      ],
+    });
 
     String userContent(Map<String, dynamic> sent) =>
         ((sent['messages'] as List<dynamic>).last
-            as Map<String, dynamic>)['content'] as String;
+                as Map<String, dynamic>)['content']
+            as String;
 
     test('sends model, token and JSON response format', () async {
       late Map<String, dynamic> sent;
@@ -107,8 +108,9 @@ void main() {
       final HttpChatEnrichmentService service = serviceReturning(
         chatBody('{"title":"T","category":"note","summary":"S","tags":["a"]}'),
         onRequest: (http.Request request) {
-          sent = jsonDecode(utf8.decode(request.bodyBytes))
-              as Map<String, dynamic>;
+          sent =
+              jsonDecode(utf8.decode(request.bodyBytes))
+                  as Map<String, dynamic>;
           headers = request.headers;
         },
       );
@@ -130,10 +132,12 @@ void main() {
     });
 
     test('parses a clean response', () async {
-      final EnrichmentResult result = await serviceReturning(chatBody(
-        '{"title":"Spotkanie z klientem","category":"meetingNote",'
-        '"summary":"Ustalenia.","tags":["Klient","OFERTA"]}',
-      )).enrich('...');
+      final EnrichmentResult result = await serviceReturning(
+        chatBody(
+          '{"title":"Spotkanie z klientem","category":"meetingNote",'
+          '"summary":"Ustalenia.","tags":["Klient","OFERTA"]}',
+        ),
+      ).enrich('...');
 
       expect(result.title, 'Spotkanie z klientem');
       expect(result.category, CaptureCategory.meetingNote);
@@ -142,9 +146,9 @@ void main() {
     });
 
     test('strips a markdown code fence around the JSON', () async {
-      final EnrichmentResult result = await serviceReturning(chatBody(
-        '```json\n{"title":"T","category":"task"}\n```',
-      )).enrich('...');
+      final EnrichmentResult result = await serviceReturning(
+        chatBody('```json\n{"title":"T","category":"task"}\n```'),
+      ).enrich('...');
 
       expect(result.title, 'T');
       expect(result.category, CaptureCategory.task);
@@ -159,8 +163,9 @@ void main() {
     });
 
     test('a missing category degrades to capture', () async {
-      final EnrichmentResult result =
-          await serviceReturning(chatBody('{"title":"T"}')).enrich('...');
+      final EnrichmentResult result = await serviceReturning(
+        chatBody('{"title":"T"}'),
+      ).enrich('...');
 
       expect(result.category, CaptureCategory.capture);
       expect(result.tags, isEmpty);
@@ -168,10 +173,12 @@ void main() {
     });
 
     test('a blank title becomes null and tags are capped at five', () async {
-      final EnrichmentResult result = await serviceReturning(chatBody(
-        '{"title":"   ","category":"note",'
-        '"tags":["a","b","c","d","e","f","a"]}',
-      )).enrich('...');
+      final EnrichmentResult result = await serviceReturning(
+        chatBody(
+          '{"title":"   ","category":"note",'
+          '"tags":["a","b","c","d","e","f","a"]}',
+        ),
+      ).enrich('...');
 
       expect(result.title, isNull);
       expect(result.tags, <String>['a', 'b', 'c', 'd', 'e']);

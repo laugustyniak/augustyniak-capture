@@ -89,11 +89,11 @@ class ModelsTab extends StatelessWidget {
               : 'No enrichment profiles.',
           blurb: isTranscription
               ? 'Add a profile to enable transcription. Recording works '
-                  'without one — audio is always saved locally.'
+                    'without one — audio is always saved locally.'
               : 'Add a profile to have finished items named and categorised — '
-                  'it also powers image OCR, so pick a vision-capable model. '
-                  'Without one, items are captured as usual, just left '
-                  'untitled, and images fall back to local OCR on desktop.',
+                    'it also powers image OCR, so pick a vision-capable model. '
+                    'Without one, items are captured as usual, just left '
+                    'untitled, and images fall back to local OCR on desktop.',
         )
       else
         ...profiles.map(
@@ -123,8 +123,13 @@ class ModelsTab extends StatelessWidget {
         ),
         icon: const Icon(Icons.add),
         label: Text(
-          isTranscription ? 'ADD TRANSCRIPTION PROFILE' : 'ADD ENRICHMENT PROFILE',
-          style: const TextStyle(fontWeight: FontWeight.w900, letterSpacing: .5),
+          isTranscription
+              ? 'ADD TRANSCRIPTION PROFILE'
+              : 'ADD ENRICHMENT PROFILE',
+          style: const TextStyle(
+            fontWeight: FontWeight.w900,
+            letterSpacing: .5,
+          ),
         ),
       ),
     ];
@@ -179,7 +184,8 @@ class ModelsTab extends StatelessWidget {
     final bool confirmed = await confirmDestructive(
       context,
       title: 'Delete profile?',
-      message: '"${profile.name}" will be removed. Recordings and transcripts '
+      message:
+          '"${profile.name}" will be removed. Recordings and transcripts '
           'stay untouched.',
       confirmLabel: 'DELETE',
     );
@@ -249,7 +255,10 @@ class _ActiveProfileCard extends StatelessWidget {
                 color: item == null ? Console.amber : Console.cyan,
               ),
               if (item?.model != null)
-                StatusPill(label: item!.model!.toUpperCase(), color: Console.green),
+                StatusPill(
+                  label: item!.model!.toUpperCase(),
+                  color: Console.green,
+                ),
               // Only transcription sends a language hint; the enrichment
               // prompt asks the model to answer in the language of the input.
               if (kind == ProfileKind.transcription && item?.language != null)
@@ -323,7 +332,9 @@ class _ProfileCard extends StatelessWidget {
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                   style: TextStyle(
-                    color: profile.hasEndpoint ? Console.mutedSoft : Console.amber,
+                    color: profile.hasEndpoint
+                        ? Console.mutedSoft
+                        : Console.amber,
                     fontSize: 10,
                   ),
                 ),
@@ -489,7 +500,7 @@ class _ProfileEditorSheetState extends State<_ProfileEditorSheet> {
             children: <Widget>[
               Text(
                 '${isEdit ? 'EDIT' : 'NEW'} '
-                    '${isTranscription ? 'TRANSCRIPTION' : 'ENRICHMENT'} PROFILE',
+                '${isTranscription ? 'TRANSCRIPTION' : 'ENRICHMENT'} PROFILE',
                 style: const TextStyle(
                   fontSize: 12,
                   fontWeight: FontWeight.w900,
@@ -529,11 +540,13 @@ class _ProfileEditorSheetState extends State<_ProfileEditorSheet> {
               _SheetField(
                 controller: _name,
                 label: 'Name',
-                hint: isTranscription ? 'e.g. OpenAI Whisper' : 'e.g. OpenAI GPT-4o mini',
+                hint: isTranscription
+                    ? 'e.g. OpenAI Whisper'
+                    : 'e.g. OpenAI GPT-4o mini',
                 validator: (String? value) =>
                     (value == null || value.trim().isEmpty)
-                        ? 'Enter a profile name.'
-                        : null,
+                    ? 'Enter a profile name.'
+                    : null,
               ),
               _SheetField(
                 controller: _endpoint,

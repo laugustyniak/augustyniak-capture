@@ -34,7 +34,8 @@ class IndexUnreadableException implements Exception {
   final String? backupPath;
 
   @override
-  String toString() => 'Recordings index at $path is unreadable: $cause'
+  String toString() =>
+      'Recordings index at $path is unreadable: $cause'
       '${backupPath == null ? '' : ' (kept a copy at $backupPath)'}';
 }
 
@@ -56,7 +57,9 @@ class RecordingsRepository {
 
   Future<Directory> recordingsDirectory() async {
     final Directory appDirectory = await getApplicationDocumentsDirectory();
-    final Directory directory = Directory(p.join(appDirectory.path, 'recordings'));
+    final Directory directory = Directory(
+      p.join(appDirectory.path, 'recordings'),
+    );
     if (!await directory.exists()) {
       await directory.create(recursive: true);
     }
@@ -135,7 +138,9 @@ class RecordingsRepository {
       await _preserve(index, 'partial');
     }
 
-    recordings.sort((Recording a, Recording b) => b.createdAt.compareTo(a.createdAt));
+    recordings.sort(
+      (Recording a, Recording b) => b.createdAt.compareTo(a.createdAt),
+    );
     _knownCount = recordings.length;
     return recordings;
   }
@@ -148,12 +153,15 @@ class RecordingsRepository {
     // moment history would be destroyed. Cheap because it never fires in normal
     // use: one copy at the exact instant something is going wrong.
     final int? previous = _knownCount;
-    if (previous != null && recordings.length < previous && await index.exists()) {
+    if (previous != null &&
+        recordings.length < previous &&
+        await index.exists()) {
       await _preserve(index, 'shrank');
     }
 
-    final String payload = const JsonEncoder.withIndent('  ')
-        .convert(recordings.map((Recording item) => item.toJson()).toList());
+    final String payload = const JsonEncoder.withIndent(
+      '  ',
+    ).convert(recordings.map((Recording item) => item.toJson()).toList());
 
     final File temporary = File('${index.path}.tmp');
     await temporary.writeAsString(payload, flush: true);
@@ -175,8 +183,7 @@ class RecordingsRepository {
   /// mtime, which is the closest thing to a capture time still on disk.
   Future<List<Recording>> findOrphans(List<Recording> indexed) async {
     final Directory directory = await recordingsDirectory();
-    final Set<String> known =
-        indexed.map((Recording item) => item.id).toSet();
+    final Set<String> known = indexed.map((Recording item) => item.id).toSet();
 
     final List<Recording> orphans = <Recording>[];
     await for (final FileSystemEntity entity in directory.list()) {
@@ -208,7 +215,9 @@ class RecordingsRepository {
       );
     }
 
-    orphans.sort((Recording a, Recording b) => b.createdAt.compareTo(a.createdAt));
+    orphans.sort(
+      (Recording a, Recording b) => b.createdAt.compareTo(a.createdAt),
+    );
     return orphans;
   }
 
@@ -218,9 +227,10 @@ class RecordingsRepository {
   /// error the caller is actually reporting.
   Future<String?> _preserve(File file, String reason) async {
     try {
-      final String stamp = DateTime.now()
-          .toIso8601String()
-          .replaceAll(RegExp(r'[:.]'), '-');
+      final String stamp = DateTime.now().toIso8601String().replaceAll(
+        RegExp(r'[:.]'),
+        '-',
+      );
       final String destination = p.join(
         p.dirname(file.path),
         '${p.basenameWithoutExtension(file.path)}.$reason-$stamp.json',

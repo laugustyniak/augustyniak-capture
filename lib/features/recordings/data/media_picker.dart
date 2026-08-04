@@ -40,11 +40,11 @@ class FilePickerMediaPicker implements MediaPicker {
   }
 
   FileType _filterFor(CaptureType type) => switch (type) {
-        CaptureType.audioUpload => FileType.audio,
-        CaptureType.image => FileType.image,
-        CaptureType.video => FileType.video,
-        _ => FileType.any,
-      };
+    CaptureType.audioUpload => FileType.audio,
+    CaptureType.image => FileType.image,
+    CaptureType.video => FileType.video,
+    _ => FileType.any,
+  };
 
   /// Minimal extension→mime map, matching the extensions
   /// `RecordingsRepository.extensionFor` understands, so a picked `.png` is

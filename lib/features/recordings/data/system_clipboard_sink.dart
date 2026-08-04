@@ -9,5 +9,6 @@ class SystemClipboardSink implements ClipboardSink {
   const SystemClipboardSink();
 
   @override
-  Future<void> copy(String text) => Clipboard.setData(ClipboardData(text: text));
+  Future<void> copy(String text) =>
+      Clipboard.setData(ClipboardData(text: text));
 }

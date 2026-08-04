@@ -33,10 +33,10 @@ class AudioConfig {
   }
 
   Map<String, dynamic> toJson() => <String, dynamic>{
-        'sampleRate': sampleRate,
-        'numChannels': numChannels,
-        'bitRate': bitRate,
-      };
+    'sampleRate': sampleRate,
+    'numChannels': numChannels,
+    'bitRate': bitRate,
+  };
 
   factory AudioConfig.fromJson(Map<String, dynamic> json) {
     return AudioConfig(

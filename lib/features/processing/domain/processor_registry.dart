@@ -27,8 +27,9 @@ class ProcessorRegistry {
     OcrService Function() ocrService = _disabledOcr,
     VideoAudioExtractor Function() videoAudioExtractor = _unavailableExtractor,
   }) {
-    final TranscriptionProcessor transcription =
-        TranscriptionProcessor(transcriptionService);
+    final TranscriptionProcessor transcription = TranscriptionProcessor(
+      transcriptionService,
+    );
     return ProcessorRegistry(<CaptureType, Processor>{
       CaptureType.audioRecording: transcription,
       CaptureType.audioUpload: transcription,

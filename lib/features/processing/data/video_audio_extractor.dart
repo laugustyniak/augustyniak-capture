@@ -42,8 +42,9 @@ class FfmpegVideoAudioExtractor implements VideoAudioExtractor {
       throw FileSystemException('Video file is missing.', video.path);
     }
 
-    final Directory tempDir =
-        await Directory.systemTemp.createTemp('audivoa_video_audio');
+    final Directory tempDir = await Directory.systemTemp.createTemp(
+      'audivoa_video_audio',
+    );
     final String outPath = p.join(tempDir.path, 'audio.m4a');
     final List<String> args = <String>[
       '-y',

@@ -171,7 +171,8 @@ void main() {
     );
 
     await controller.addUpload(CaptureType.audioUpload);
-    await controller.waitForProcessing();    expect(clipboard.copied, isEmpty);
+    await controller.waitForProcessing();
+    expect(clipboard.copied, isEmpty);
 
     // Swapping the service mirrors the user fixing the profile in Models.
     controller.transcriptionService = _StubTranscription('po naprawie');

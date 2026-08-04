@@ -107,7 +107,9 @@ void main() {
     'xyz.luan/audioplayers.global',
   ]) {
     messenger.setMockMethodCallHandler(
-        MethodChannel(name), (MethodCall call) async => null);
+      MethodChannel(name),
+      (MethodCall call) async => null,
+    );
   }
 
   test('capture returns without blocking on processing', () async {
@@ -140,7 +142,9 @@ void main() {
     await _pump();
 
     expect(
-      c.recordings.every((Recording r) => r.status == RecordingStatus.completed),
+      c.recordings.every(
+        (Recording r) => r.status == RecordingStatus.completed,
+      ),
       isTrue,
     );
     expect(c.isProcessing, isFalse);
@@ -171,7 +175,9 @@ void main() {
 
     expect(proc.maxActive, 1); // never more than one concurrent
     expect(
-      c.recordings.where((Recording r) => r.status == RecordingStatus.completed).length,
+      c.recordings
+          .where((Recording r) => r.status == RecordingStatus.completed)
+          .length,
       3,
     );
     expect(c.pendingProcessingCount, 0);
@@ -188,61 +194,75 @@ void main() {
     await c.addTextNote('will-pass');
     await _pump(12);
 
-    final List<RecordingStatus> statuses =
-        c.recordings.map((Recording r) => r.status).toList();
-    expect(statuses.where((RecordingStatus s) => s == RecordingStatus.failed).length, 1);
+    final List<RecordingStatus> statuses = c.recordings
+        .map((Recording r) => r.status)
+        .toList();
     expect(
-        statuses.where((RecordingStatus s) => s == RecordingStatus.completed).length, 1);
+      statuses.where((RecordingStatus s) => s == RecordingStatus.failed).length,
+      1,
+    );
+    expect(
+      statuses
+          .where((RecordingStatus s) => s == RecordingStatus.completed)
+          .length,
+      1,
+    );
     expect(c.isProcessing, isFalse);
   });
 
-  test('initialize resumes items left non-terminal by a previous session',
-      () async {
-    final Directory dir = await _tmp();
-    addTearDown(() => dir.delete(recursive: true));
-    final Recording stuck = Recording(
-      id: 's1',
-      filePath: '${dir.path}/s1.txt',
-      createdAt: DateTime.utc(2026, 7, 25),
-      durationMs: 0,
-      status: RecordingStatus.transcribing, // interrupted mid-processing
-      type: CaptureType.text,
-    );
-    final RecordingsController c =
-        _controller(_SeededRepo(dir, <Recording>[stuck]), _TestProcessor());
-    addTearDown(c.dispose);
+  test(
+    'initialize resumes items left non-terminal by a previous session',
+    () async {
+      final Directory dir = await _tmp();
+      addTearDown(() => dir.delete(recursive: true));
+      final Recording stuck = Recording(
+        id: 's1',
+        filePath: '${dir.path}/s1.txt',
+        createdAt: DateTime.utc(2026, 7, 25),
+        durationMs: 0,
+        status: RecordingStatus.transcribing, // interrupted mid-processing
+        type: CaptureType.text,
+      );
+      final RecordingsController c = _controller(
+        _SeededRepo(dir, <Recording>[stuck]),
+        _TestProcessor(),
+      );
+      addTearDown(c.dispose);
 
-    await c.initialize();
-    await c.waitForProcessing();
+      await c.initialize();
+      await c.waitForProcessing();
 
-    expect(c.recordings.single.status, RecordingStatus.completed);
-  });
+      expect(c.recordings.single.status, RecordingStatus.completed);
+    },
+  );
 
-  test('concurrent index writes are serialized (no shared-temp overlap)',
-      () async {
-    final Directory dir = await _tmp();
-    addTearDown(() => dir.delete(recursive: true));
-    final Recording seed = Recording(
-      id: 'r',
-      filePath: '${dir.path}/r.txt',
-      createdAt: DateTime.utc(2026, 7, 25),
-      durationMs: 0,
-      status: RecordingStatus.completed,
-      type: CaptureType.text,
-    );
-    final _ConcurrencyRepo repo = _ConcurrencyRepo(dir, <Recording>[seed]);
-    final RecordingsController c = _controller(repo, _TestProcessor());
-    addTearDown(c.dispose);
-    await c.initialize();
-    await c.waitForProcessing();
+  test(
+    'concurrent index writes are serialized (no shared-temp overlap)',
+    () async {
+      final Directory dir = await _tmp();
+      addTearDown(() => dir.delete(recursive: true));
+      final Recording seed = Recording(
+        id: 'r',
+        filePath: '${dir.path}/r.txt',
+        createdAt: DateTime.utc(2026, 7, 25),
+        durationMs: 0,
+        status: RecordingStatus.completed,
+        type: CaptureType.text,
+      );
+      final _ConcurrencyRepo repo = _ConcurrencyRepo(dir, <Recording>[seed]);
+      final RecordingsController c = _controller(repo, _TestProcessor());
+      addTearDown(c.dispose);
+      await c.initialize();
+      await c.waitForProcessing();
 
-    // Fire two persist-triggering mutations without awaiting between them.
-    final Future<void> f1 = c.toggleProcessed('r');
-    final Future<void> f2 = c.toggleProcessed('r');
-    await Future.wait(<Future<void>>[f1, f2]);
+      // Fire two persist-triggering mutations without awaiting between them.
+      final Future<void> f1 = c.toggleProcessed('r');
+      final Future<void> f2 = c.toggleProcessed('r');
+      await Future.wait(<Future<void>>[f1, f2]);
 
-    expect(repo.maxActive, 1); // never two saveAll in flight at once
-  });
+      expect(repo.maxActive, 1); // never two saveAll in flight at once
+    },
+  );
 
   test('re-enqueuing a running item does not process it twice', () async {
     final Directory dir = await _tmp();
