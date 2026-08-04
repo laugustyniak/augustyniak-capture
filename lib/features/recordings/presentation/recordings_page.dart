@@ -12,6 +12,9 @@ import '../../logs/presentation/logs_tab.dart';
 import '../../processing/data/ocr_service.dart';
 import '../../processing/data/video_audio_extractor.dart';
 import '../../processing/data/video_poster_extractor.dart';
+import '../../settings/data/aes_gcm_token_cipher.dart';
+import '../../settings/data/secure_storage_master_key_store.dart';
+import '../../settings/data/settings_repository.dart';
 import '../../settings/presentation/config_tab.dart';
 import '../../settings/presentation/models_tab.dart';
 import '../../settings/presentation/settings_controller.dart';
@@ -66,7 +69,14 @@ class _RecordingsPageState extends State<RecordingsPage> {
   @override
   void initState() {
     super.initState();
-    settings = SettingsController();
+    settings = SettingsController(
+      repository: SettingsRepository(
+        // Real keyring-backed cipher on every platform; ensureReady degrades
+        // to the plaintext behaviour when no keyring answers (headless Linux,
+        // locked Secret Service, test bindings).
+        cipher: AesGcmTokenCipher(keyStore: const SecureStorageMasterKeyStore()),
+      ),
+    );
     logs = LogStore(archive: FileLogArchive());
     controller = RecordingsController(
       repository: repository,
