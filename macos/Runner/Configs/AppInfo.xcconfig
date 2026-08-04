@@ -9,6 +9,13 @@
 // display name rather than the pubspec package name.
 PRODUCT_NAME = Augustyniak Capture
 
+// The binary inside the bundle, kept separate from the display name because
+// PRODUCT_NAME now contains a space. Without this the executable is named
+// `Augustyniak Capture` too, and every path that refers to it — TEST_HOST
+// above all — has to carry that space. Renaming the product without setting
+// this is what left TEST_HOST pointing at a bundle that is no longer built.
+EXECUTABLE_NAME = augustyniak_capture
+
 // The application's bundle identifier. Must stay `com.audivoa.core` — the same
 // identity as the Android applicationId and the iOS PRODUCT_BUNDLE_IDENTIFIER.
 // `flutter create` derives `com.audivoa.audivoaCore` from the org; that is a
