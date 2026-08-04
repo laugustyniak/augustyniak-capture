@@ -311,9 +311,19 @@ done never touches its transcript. Both persist in `recordings.json`.
 - the toggle animates, the card border picks up the accent and a check appears
   next to the name,
 - selection haptic feedback on toggle,
-- the done counter and its progress bar animate to the new value,
-- full history retention: done items stay visible,
-- no "Inbox Zero" celebration or empty-inbox pressure.
+- the hand-off counter and its progress bar animate to the new value,
+- full history retention: handed-off items stay visible,
+- no celebration and no empty-queue pressure.
+
+The vocabulary on this axis is deliberately one of delegation rather than mail.
+A capture sits on the user's `DESK` until they decide who executes it — the
+`task` / `agentTask` split in the enrichment prompt is exactly that question —
+and leaves as `OFF DESK` once it has been handed off. An inbox holds what the
+world puts on you; this queue only ever holds your own thoughts, so the arrow
+points the other way and "inbox zero" describes the wrong motion. Handing off
+is fire-and-forget on purpose: `RouteRecord` states where a capture went and
+when, and nothing comes back, so the word promises delivery and not an
+outcome.
 
 Tags are one list per capture, with no notion of who wrote them: a value the
 model proposed and one typed by hand are the same tag. Values are normalized to

@@ -49,9 +49,9 @@ class ConsoleNavRail extends StatelessWidget {
   final int selectedIndex;
   final ValueChanged<int> onSelected;
 
-  /// Drives the `DONE n / m` strip. The phone layout carries the same two
-  /// numbers on the review switch itself (`INBOX 4 · DONE 33`), which is why it
-  /// no longer spends a row of the queue on a progress strip; the wide layout
+  /// Drives the `CLEAR n / m` strip. The phone layout carries the same two
+  /// numbers on the review switch itself (`DESK 4 · OFF DESK 33`), which is why
+  /// it no longer spends a row of the queue on a progress strip; the wide layout
   /// has a permanent column to hang them in and can afford both.
   final int reviewed;
   final int total;
@@ -236,7 +236,13 @@ class _RailButton extends StatelessWidget {
   }
 }
 
-/// `DONE 33 / 36 · 92%` over a 3 px bar — the user-owned axis, stated as a goal.
+/// `CLEAR 33 / 36 · 92%` over a 3 px bar — the user-owned axis, stated as a
+/// goal.
+///
+/// `CLEAR` rather than the chips' `OFF DESK`: this row carries the percentage
+/// too, and at [ConsoleText.micro]'s letter spacing the longer label overflows
+/// the 184 px the rail leaves by 21 px. Same image at the length that fits —
+/// the empty panel says "Desk clear" in full.
 class _ReviewProgress extends StatelessWidget {
   const _ReviewProgress({required this.reviewed, required this.total});
 
@@ -249,7 +255,7 @@ class _ReviewProgress extends StatelessWidget {
     final bool complete = total > 0 && reviewed == total;
 
     return Semantics(
-      label: 'Done $reviewed of $total captures',
+      label: 'Handed off $reviewed of $total captures',
       child: Padding(
         padding: const EdgeInsets.symmetric(horizontal: 6),
         child: Column(
@@ -259,7 +265,7 @@ class _ReviewProgress extends StatelessWidget {
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: <Widget>[
                 Text(
-                  'DONE $reviewed / $total',
+                  'CLEAR $reviewed / $total',
                   style: ConsoleText.micro.copyWith(fontSize: 10.5),
                 ),
                 Text(
