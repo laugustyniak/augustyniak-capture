@@ -34,6 +34,16 @@ class UnavailableVideoAudioExtractor implements VideoAudioExtractor {
 class FfmpegVideoAudioExtractor implements VideoAudioExtractor {
   const FfmpegVideoAudioExtractor({this.executable = 'ffmpeg'});
 
+  /// Prefix of the scratch directory each extraction creates.
+  ///
+  /// Public because the leak test finds those directories by name, and a
+  /// literal repeated there is a test that silently stops testing: it counts
+  /// matching directories before and after, so a prefix that matches nothing
+  /// compares 0 to 0 and passes whatever the extractor does. That is exactly
+  /// what happened when the product rename moved this string and the test kept
+  /// the old one.
+  static const String tempDirPrefix = 'augustyniak_video_audio';
+
   final String executable;
 
   @override
@@ -43,7 +53,7 @@ class FfmpegVideoAudioExtractor implements VideoAudioExtractor {
     }
 
     final Directory tempDir = await Directory.systemTemp.createTemp(
-      'augustyniak_video_audio',
+      tempDirPrefix,
     );
     final String outPath = p.join(tempDir.path, 'audio.m4a');
     final List<String> args = <String>[

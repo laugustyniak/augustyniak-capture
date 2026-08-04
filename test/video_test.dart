@@ -148,7 +148,9 @@ void main() {
           .whereType<Directory>()
           .where(
             (Directory dir) =>
-                p.basename(dir.path).startsWith('audivoa_video_audio'),
+                p.basename(dir.path).startsWith(
+                  FfmpegVideoAudioExtractor.tempDirPrefix,
+                ),
           )
           .length;
 
