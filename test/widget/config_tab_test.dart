@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:audivoa_core/features/projects/domain/project.dart';
 import 'package:audivoa_core/features/settings/domain/audio_config.dart';
 import 'package:audivoa_core/features/settings/presentation/config_tab.dart';
 import 'package:audivoa_core/features/settings/presentation/settings_controller.dart';
@@ -12,8 +13,9 @@ import '../support/harness.dart';
 void main() {
   Future<void> pumpConfig(
     WidgetTester tester,
-    SettingsController controller,
-  ) async {
+    SettingsController controller, {
+    List<Project> projects = const <Project>[],
+  }) async {
     await tester.pumpWidget(
       hostTab(
         () => ConfigTab(
@@ -22,6 +24,7 @@ void main() {
           recordingsCount: 3,
           logCount: 7,
           onOpenModels: () {},
+          projects: projects,
         ),
         listenable: controller,
       ),
@@ -159,6 +162,29 @@ void main() {
     expect(find.text('/tmp/recordings'), findsOneWidget);
     expect(find.textContaining('3 .m4a files'), findsOneWidget);
     expect(find.textContaining('7 events'), findsOneWidget);
+  });
+
+  testWidgets('with no projects the section touches no disk and says so', (
+    WidgetTester tester,
+  ) async {
+    final SettingsController controller = buildSettingsController();
+    await controller.initialize();
+    await pumpConfig(tester, controller);
+
+    await tester.scrollUntilVisible(
+      find.text('ENRICHMENT CONTEXT'),
+      300,
+      scrollable: find.byType(Scrollable).first,
+    );
+
+    // No probe runs, so this settles — which is the whole point of defaulting
+    // the project list to empty.
+    await tester.pumpAndSettle();
+    expect(
+      find.text('No projects yet — captures carry the profile above only.'),
+      findsOneWidget,
+    );
+    expect(find.text('RESCAN'), findsNothing);
   });
 
   testWidgets('the shortcuts section is hidden unless the shell enables it', (

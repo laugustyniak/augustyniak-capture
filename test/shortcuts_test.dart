@@ -1,5 +1,6 @@
 import 'dart:convert';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:audivoa_core/features/settings/data/settings_repository.dart';
@@ -74,6 +75,31 @@ void main() {
         },
       );
       expect(a.label, 'Ctrl + Alt + Shift + N');
+    });
+
+    /// The other three modifiers print the same everywhere; `meta` does not,
+    /// and the platform is pinned here rather than inferred so this assertion
+    /// does not silently mean something different on a Linux contributor's
+    /// machine than it does on the author's Mac.
+    test('meta is named after the platform, not always Win', () {
+      final HotkeyBinding binding = _binding(
+        PhysicalKeyboardKey.keyR,
+        LogicalKeyboardKey.keyR,
+        modifiers: const <HotkeyModifier>{
+          HotkeyModifier.shift,
+          HotkeyModifier.meta,
+        },
+      );
+      addTearDown(() => debugDefaultTargetPlatformOverride = null);
+
+      debugDefaultTargetPlatformOverride = TargetPlatform.macOS;
+      expect(binding.label, 'Shift + Cmd + R');
+
+      debugDefaultTargetPlatformOverride = TargetPlatform.linux;
+      expect(binding.label, 'Shift + Super + R');
+
+      debugDefaultTargetPlatformOverride = TargetPlatform.windows;
+      expect(binding.label, 'Shift + Win + R');
     });
 
     test('a binding without modifiers is invalid and never restored', () {

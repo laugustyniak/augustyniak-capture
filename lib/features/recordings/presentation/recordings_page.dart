@@ -341,6 +341,10 @@ class _RecordingsPageState extends State<RecordingsPage> {
                     logCount: logs.events.length,
                     onOpenModels: () =>
                         setState(() => navigationIndex = modelsIndex),
+                    // Reported on in the enrichment-context section: which file
+                    // each repository actually contributes, and which paths are
+                    // wrong. The tab never edits them.
+                    projects: projects.projects,
                     showShortcuts: _isDesktop,
                     rejectedShortcuts: rejectedShortcuts,
                     runWithHotkeysSuspended: _runWithHotkeysSuspended,
