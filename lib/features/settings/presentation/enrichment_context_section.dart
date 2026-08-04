@@ -179,7 +179,7 @@ class _EnrichmentContextSectionState extends State<EnrichmentContextSection> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: <Widget>[
-        const SectionHeader(title: 'ENRICHMENT CONTEXT'),
+        SectionHeader(title: 'ENRICHMENT CONTEXT'),
         const SizedBox(height: 12),
         ConsoleCard(
           child: Column(
@@ -187,7 +187,7 @@ class _EnrichmentContextSectionState extends State<EnrichmentContextSection> {
             children: <Widget>[
               Row(
                 children: <Widget>[
-                  const Expanded(
+                  Expanded(
                     child: Text(
                       'Who you are and what you collect. Sent with every '
                       'capture so titles, categories and tags match how you '
@@ -209,7 +209,7 @@ class _EnrichmentContextSectionState extends State<EnrichmentContextSection> {
                         : 'DEFAULT',
                     style: ConsoleText.micro.copyWith(
                       color: widget.controller.hasCustomEnrichmentInstructions
-                          ? Console.cyan
+                          ? Console.accent
                           : Console.dimText,
                     ),
                   ),
@@ -260,7 +260,8 @@ class _EnrichmentContextSectionState extends State<EnrichmentContextSection> {
                     TextButton.icon(
                       // Disabled while the default is already in force, like
                       // the audio card's own restore button.
-                      onPressed: widget.controller.hasCustomEnrichmentInstructions
+                      onPressed:
+                          widget.controller.hasCustomEnrichmentInstructions
                           ? _restoreDefault
                           : null,
                       icon: const Icon(Icons.restart_alt, size: 15),
@@ -268,7 +269,7 @@ class _EnrichmentContextSectionState extends State<EnrichmentContextSection> {
                     ),
                 ],
               ),
-              const Divider(color: Console.border, height: 26),
+              Divider(color: Console.border, height: 26),
               Row(
                 children: <Widget>[
                   Text(
@@ -283,7 +284,7 @@ class _EnrichmentContextSectionState extends State<EnrichmentContextSection> {
                   if (_scanning)
                     Text(
                       'SCANNING…',
-                      style: ConsoleText.micro.copyWith(color: Console.cyan),
+                      style: ConsoleText.micro.copyWith(color: Console.accent),
                     )
                   else if (widget.projects.isNotEmpty)
                     TextButton.icon(
@@ -301,7 +302,7 @@ class _EnrichmentContextSectionState extends State<EnrichmentContextSection> {
                 'found in its repository is used, so the repo stays the source '
                 'of truth and the context updates itself. Read once per '
                 'capture, so an edit to the file applies immediately.',
-                style: const TextStyle(
+                style: TextStyle(
                   color: Console.mutedSoft,
                   fontSize: 10,
                   height: 1.45,

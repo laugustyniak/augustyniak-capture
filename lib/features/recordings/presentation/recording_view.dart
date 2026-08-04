@@ -66,7 +66,7 @@ class RecordingView extends StatelessWidget {
             Row(
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: <Widget>[
-                const Text('AUGUSTYNIAK CAPTURE', style: ConsoleText.eyebrow),
+                Text('AUGUSTYNIAK CAPTURE', style: ConsoleText.eyebrow),
                 Container(
                   padding: const EdgeInsets.symmetric(
                     horizontal: 12,
@@ -82,7 +82,7 @@ class RecordingView extends StatelessWidget {
                   child: Row(
                     mainAxisSize: MainAxisSize.min,
                     children: <Widget>[
-                      const PulseDot(color: Console.red, size: 7),
+                      PulseDot(color: Console.red, size: 7),
                       const SizedBox(width: 7),
                       Text(
                         'REC',
@@ -105,7 +105,7 @@ class RecordingView extends StatelessWidget {
                   const SizedBox(height: 26),
                   _LevelMeter(level: controller.levelTicker),
                   const SizedBox(height: 26),
-                  const _PipelineChecklist(),
+                  _PipelineChecklist(),
                 ],
               ),
             ),
@@ -170,7 +170,7 @@ class _ElapsedReadout extends StatelessWidget {
               children: <Widget>[
                 Text(
                   formatDuration(elapsed),
-                  style: const TextStyle(
+                  style: TextStyle(
                     fontFamily: ConsoleFont.mono,
                     fontSize: 52,
                     height: 1,
@@ -180,7 +180,7 @@ class _ElapsedReadout extends StatelessWidget {
                 ),
                 Text(
                   '.${(elapsed.inMilliseconds ~/ 100) % 10}',
-                  style: const TextStyle(
+                  style: TextStyle(
                     fontFamily: ConsoleFont.mono,
                     fontSize: 28,
                     height: 1,
@@ -251,7 +251,9 @@ class _LimitReadout extends StatelessWidget {
           decoration: BoxDecoration(
             color: color.withValues(alpha: near ? .12 : .06),
             borderRadius: BorderRadius.circular(999),
-            border: Border.all(color: color.withValues(alpha: near ? .45 : .25)),
+            border: Border.all(
+              color: color.withValues(alpha: near ? .45 : .25),
+            ),
           ),
           child: Text(
             '${_format(remaining)} LEFT · MAX ${_format(limit.limit)}',
@@ -354,7 +356,7 @@ class _LevelMeterState extends State<_LevelMeter> {
                 duration: const Duration(milliseconds: 120),
                 height: height,
                 decoration: BoxDecoration(
-                  color: level <= 0 ? Console.track : Console.cyan,
+                  color: level <= 0 ? Console.track : Console.accent,
                   borderRadius: BorderRadius.circular(2),
                 ),
               ),
@@ -390,12 +392,12 @@ class _PipelineChecklist extends StatelessWidget {
               child: Row(
                 children: <Widget>[
                   if (index == 0)
-                    const PulseDot(color: Console.cyan, size: 7)
+                    PulseDot(color: Console.accent, size: 7)
                   else
                     Container(
                       width: 7,
                       height: 7,
-                      decoration: const BoxDecoration(
+                      decoration: BoxDecoration(
                         color: Console.track,
                         shape: BoxShape.circle,
                       ),
@@ -528,11 +530,11 @@ class _SaveButton extends StatelessWidget {
           padding: const EdgeInsets.symmetric(vertical: 18),
           alignment: Alignment.center,
           decoration: BoxDecoration(
-            color: busy ? Console.surfaceRaised : Console.cyan,
+            color: busy ? Console.surfaceRaised : Console.accent,
             borderRadius: BorderRadius.circular(14),
             boxShadow: <BoxShadow>[
               BoxShadow(
-                color: Console.cyan.withValues(alpha: busy ? 0 : .35),
+                color: Console.accent.withValues(alpha: busy ? 0 : .35),
                 blurRadius: 28,
                 offset: const Offset(0, 8),
               ),
