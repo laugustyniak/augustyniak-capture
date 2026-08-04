@@ -65,8 +65,10 @@ void main() {
       title: 'old title',
     );
 
-    final Recording edited =
-        original.copyWith(transcript: 'new', title: 'new title');
+    final Recording edited = original.copyWith(
+      transcript: 'new',
+      title: 'new title',
+    );
     expect(edited.transcript, 'new');
     expect(edited.title, 'new title');
 
@@ -100,14 +102,18 @@ void main() {
       status: RecordingStatus.completed,
       category: CaptureCategory.meetingNote,
       summary: 'Ustalenia ze spotkania.',
-      tags: <String>['klient', 'oferta'],
+      tags: const <String>['klient', 'oferta'],
+      projectId: 'audivoa',
     );
 
     final Recording restored = Recording.fromJson(item.toJson());
 
     expect(restored.category, CaptureCategory.meetingNote);
     expect(restored.summary, 'Ustalenia ze spotkania.');
+    // First-seen order, kept as written: the list is the user's, so a save
+    // must not reorder it.
     expect(restored.tags, <String>['klient', 'oferta']);
+    expect(restored.projectId, 'audivoa');
   });
 
   test('legacy JSON has no category, summary or tags', () {
@@ -238,11 +244,13 @@ void main() {
       status: RecordingStatus.completed,
       category: CaptureCategory.task,
       summary: 'coś',
-      tags: <String>['a'],
+      tags: const <String>['a'],
     );
 
-    final Recording cleared =
-        item.copyWith(clearCategory: true, clearSummary: true);
+    final Recording cleared = item.copyWith(
+      clearCategory: true,
+      clearSummary: true,
+    );
 
     expect(cleared.category, isNull);
     expect(cleared.summary, isNull);

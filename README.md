@@ -32,6 +32,10 @@ The processor **only reads** the source file — it never modifies or deletes it
   immediately, a long job never blocks the next one,
 - retry for failed processing,
 - editing an item's title and its output text,
+- durable projects with repository paths, per-agent launch settings and one-click
+  Codex, Claude Code or Gemini sessions on macOS,
+- separate AI and human tag provenance, with editable human tags and promotion
+  of useful AI suggestions,
 - finished output is handed to the system clipboard, so a clipboard manager
   keeps it in history,
 - system-wide global shortcuts on desktop,
@@ -157,11 +161,12 @@ The endpoint should accept `multipart/form-data` with a `file` field.
 
 ## Tabs
 
-The app has four tabs in the bottom navigation:
+The app has five tabs in the bottom navigation:
 
 | Tab | What it is for |
 | --- | --- |
 | **Queue** | list of all items, review progress, search, status filters, capture buttons, playback, editing |
+| **Projects** | repository contexts, active capture project and coding-agent session launchers |
 | **Models** | transcription provider profiles: add, edit, delete, pick the active one |
 | **Logs** | stream of pipeline events (persist, queue, transcription, errors), level filter |
 | **Config** | recording parameters, global shortcuts, active provider summary, file information |
@@ -310,9 +315,16 @@ done never touches its transcript. Both persist in `recordings.json`.
 - full history retention: done items stay visible,
 - no "Inbox Zero" celebration or empty-inbox pressure.
 
-Tags are also persisted per capture. They can be edited as a comma-separated
-list, are normalized to lowercase and de-duplicated, render directly on the
-card, and participate in Queue search. A `project:<name>` tag provides a
-lightweight project assignment without introducing a separate project model.
-When enrichment suggests tags it only fills an empty list, so a retry cannot
-overwrite a manual assignment.
+Tags are persisted per capture with explicit provenance. Human tags are cyan,
+editable chips; AI tags are violet suggestions that can be promoted to human
+with one tap. Values are normalized to lowercase and de-duplicated, render on
+the card, and participate in Queue search. Enrichment refreshes only the AI
+layer, so a retry cannot overwrite a manual tag.
+
+Projects are a separate durable model rather than a naming convention hidden
+inside tags. Each project stores a repository path, description, optional
+Zellij session name, default agent, and per-agent arguments/prompt. Selecting an
+active project assigns subsequent captures automatically; existing captures
+can be reassigned or filtered in Queue. On macOS the Projects tab can open a
+named Ghostty/Zellij session for Codex, Claude Code or Gemini without invoking a
+shell or interpolating a command string.

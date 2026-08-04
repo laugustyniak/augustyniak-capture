@@ -56,9 +56,7 @@ class CaptureDock extends StatelessWidget {
             child: Column(
               mainAxisSize: MainAxisSize.min,
               children: <Widget>[
-                _SecondaryCaptureButton(
-                  onTap: busy ? null : onOpenCaptureMenu,
-                ),
+                _SecondaryCaptureButton(onTap: busy ? null : onOpenCaptureMenu),
                 const SizedBox(height: 10),
                 _RecordButton(controller: controller),
               ],
@@ -156,7 +154,11 @@ class _RecordButton extends StatelessWidget {
                     color: Console.cyan,
                   ),
                 )
-              : const Icon(Icons.mic_none_rounded, size: 26, color: Console.ink),
+              : const Icon(
+                  Icons.mic_none_rounded,
+                  size: 26,
+                  color: Console.ink,
+                ),
         ),
       ),
     );

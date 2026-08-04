@@ -117,8 +117,9 @@ Future<RecordingsController> buildRecordingsController(
 SettingsController buildSettingsController({AppSettings? stored}) {
   final FakeSettingsRepository repository = FakeSettingsRepository()
     ..stored = stored;
-  final SettingsController controller =
-      SettingsController(repository: repository);
+  final SettingsController controller = SettingsController(
+    repository: repository,
+  );
   addTearDown(controller.dispose);
   return controller;
 }
@@ -163,6 +164,7 @@ Recording makeRecording({
   CaptureCategory? category,
   String? summary,
   List<String> tags = const <String>[],
+  String? projectId,
   String? error,
   int durationMs = 1500,
   int sizeBytes = 0,
@@ -184,6 +186,7 @@ Recording makeRecording({
     category: category,
     summary: summary,
     tags: tags,
+    projectId: projectId,
     error: error,
     isProcessedByUser: isProcessedByUser,
   );
