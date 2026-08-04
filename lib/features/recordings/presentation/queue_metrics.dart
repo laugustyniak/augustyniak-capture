@@ -2,18 +2,14 @@ import 'package:flutter/material.dart';
 
 import '../../../app/ui_kit.dart';
 
-/// The review progress row above the queue list.
+/// The user-owned done progress row above the queue list.
 ///
 /// The design replaced three separate metric cards with this single strip: the
 /// per-status counts moved onto the filter chips, which is where they are
 /// actionable, leaving only the one number that is a goal rather than a fact —
 /// how much of the queue the user has actually read.
 class ReviewedStrip extends StatelessWidget {
-  const ReviewedStrip({
-    super.key,
-    required this.total,
-    required this.reviewed,
-  });
+  const ReviewedStrip({super.key, required this.total, required this.reviewed});
 
   final int total;
   final int reviewed;
@@ -24,7 +20,7 @@ class ReviewedStrip extends StatelessWidget {
     final bool allReviewed = total > 0 && reviewed == total;
 
     return Semantics(
-      label: 'Reviewed $reviewed of $total captures',
+      label: 'Done $reviewed of $total captures',
       child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
         decoration: BoxDecoration(
@@ -48,7 +44,7 @@ class ReviewedStrip extends StatelessWidget {
                     mainAxisAlignment: MainAxisAlignment.spaceBetween,
                     children: <Widget>[
                       Text(
-                        'REVIEWED',
+                        'DONE',
                         style: ConsoleText.cardMeta.copyWith(
                           fontWeight: FontWeight.w500,
                         ),
@@ -69,18 +65,15 @@ class ReviewedStrip extends StatelessWidget {
                       tween: Tween<double>(end: progress),
                       duration: const Duration(milliseconds: 550),
                       curve: Curves.easeOutCubic,
-                      builder: (
-                        BuildContext context,
-                        double value,
-                        Widget? child,
-                      ) {
-                        return LinearProgressIndicator(
-                          value: value,
-                          minHeight: 4,
-                          color: allReviewed ? Console.green : Console.cyan,
-                          backgroundColor: Console.track,
-                        );
-                      },
+                      builder:
+                          (BuildContext context, double value, Widget? child) {
+                            return LinearProgressIndicator(
+                              value: value,
+                              minHeight: 4,
+                              color: allReviewed ? Console.green : Console.cyan,
+                              backgroundColor: Console.track,
+                            );
+                          },
                     ),
                   ),
                 ],

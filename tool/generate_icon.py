@@ -7,6 +7,10 @@ navy panel with the app's translucent hairline border — in three styles:
   rounded     rounded panel, transparent corners (desktop / Linux)
   flat        full-bleed opaque square, no border — iOS masks its own
               corners and rejects icons that carry an alpha channel
+  macos       the rounded panel inset into a transparent canvas on
+              Apple's macOS icon grid — macOS masks nothing, so a
+              full-bleed icon would sit visibly larger than every
+              system icon next to it in the Dock
   foreground  bars only on a transparent canvas, scaled into the
               adaptive-icon safe zone (Android; doubles as the
               monochrome layer for Android 13 themed icons, which
@@ -20,6 +24,8 @@ Usage:
     python3 tool/generate_icon.py --android-res android/app/src/main/res
     python3 tool/generate_icon.py \\
         --ios-appiconset ios/Runner/Assets.xcassets/AppIcon.appiconset
+    python3 tool/generate_icon.py \\
+        --macos-appiconset macos/Runner/Assets.xcassets/AppIcon.appiconset
 """
 
 import argparse
@@ -40,6 +46,12 @@ BAR_WIDTH = 64 / MASTER
 BAR_GAP = 44 / MASTER
 BAR_HEIGHTS = (0.26, 0.46, 0.72, 0.58, 0.40, 0.62, 0.30)
 BORDER_WIDTH = 10 / MASTER
+
+# Apple's macOS icon grid: on a 1024 px canvas the rounded square occupies a
+# centred 824 px, leaving the margin the system reserves for the icon's own
+# shadow. Unlike iOS, macOS applies no mask and no corner rounding of its own,
+# so an icon that ignores this simply renders bigger than its neighbours.
+MACOS_PANEL_SCALE = 824 / 1024
 
 # Adaptive icons show roughly the middle 72dp of the 108dp canvas and mask
 # it to the launcher's shape; the guaranteed-visible safe zone is a centred
@@ -98,22 +110,38 @@ def _draw_bars(draw: ImageDraw.ImageDraw, s: float, scale: float) -> None:
         x += bar_w + gap
 
 
+def _draw_panel(draw: ImageDraw.ImageDraw, s: float, scale: float) -> None:
+    """Centred navy panel with the hairline border, at `scale` of the canvas.
+
+    At scale 1.0 the panel is full-bleed (the desktop/Linux icon); below that
+    it leaves a transparent margin, which is how the macOS grid works.
+    """
+    edge = s * scale
+    inset = (s - edge) / 2
+    x0 = y0 = inset
+    x1 = y1 = s - 1 - inset
+    radius = edge * CORNER_RADIUS
+    draw.rounded_rectangle((x0, y0, x1, y1), radius=radius, fill=PANEL)
+    border = max(1, round(edge * BORDER_WIDTH))
+    draw.rounded_rectangle(
+        (x0 + border // 2, y0 + border // 2, x1 - border // 2, y1 - border // 2),
+        radius=radius - border // 2,
+        outline=HAIRLINE,
+        width=border,
+    )
+
+
 def render(size: int, style: str = "rounded") -> Image.Image:
     s = size * SUPERSAMPLE
     img = Image.new("RGBA", (s, s), (0, 0, 0, 0))
     draw = ImageDraw.Draw(img)
 
     if style == "rounded":
-        radius = s * CORNER_RADIUS
-        draw.rounded_rectangle((0, 0, s - 1, s - 1), radius=radius, fill=PANEL)
-        border = max(1, round(s * BORDER_WIDTH))
-        draw.rounded_rectangle(
-            (border // 2, border // 2, s - 1 - border // 2, s - 1 - border // 2),
-            radius=radius - border // 2,
-            outline=HAIRLINE,
-            width=border,
-        )
+        _draw_panel(draw, s, 1.0)
         _draw_bars(draw, s, 1.0)
+    elif style == "macos":
+        _draw_panel(draw, s, MACOS_PANEL_SCALE)
+        _draw_bars(draw, s, MACOS_PANEL_SCALE)
     elif style == "flat":
         draw.rectangle((0, 0, s, s), fill=PANEL)
         _draw_bars(draw, s, 1.0)
@@ -143,18 +171,31 @@ def write_android(res: pathlib.Path) -> None:
     xml.write_text(ADAPTIVE_ICON_XML)
     print(f"wrote {xml}")
     color = res / "values" / "ic_launcher_background.xml"
+    color.parent.mkdir(parents=True, exist_ok=True)
     color.write_text(BACKGROUND_COLOR_XML)
     print(f"wrote {color}")
 
 
-def write_ios(appiconset: pathlib.Path) -> None:
+def write_appiconset(appiconset: pathlib.Path, style: str) -> None:
+    """Render every entry Contents.json asks for, in the given style.
+
+    The catalogue is the source of truth for which pixel sizes exist, so this
+    stays correct when Xcode rewrites it. macOS points several entries at one
+    file (16pt@2x and 32pt@1x are both app_icon_32.png), hence the dedupe —
+    without it the same image is rendered twice.
+    """
     contents = json.loads((appiconset / "Contents.json").read_text())
+    written: set[str] = set()
     for image in contents["images"]:
+        filename = image["filename"]
+        if filename in written:
+            continue
+        written.add(filename)
         points = float(image["size"].split("x")[0])
         scale = int(image["scale"].rstrip("x"))
         px = round(points * scale)
-        out = appiconset / image["filename"]
-        render(px, "flat").save(out)
+        out = appiconset / filename
+        render(px, style).save(out)
         print(f"wrote {out} ({px} px)")
 
 
@@ -171,6 +212,7 @@ def main() -> None:
     parser.add_argument("--sizes-dir", type=pathlib.Path, default=None)
     parser.add_argument("--android-res", type=pathlib.Path, default=None)
     parser.add_argument("--ios-appiconset", type=pathlib.Path, default=None)
+    parser.add_argument("--macos-appiconset", type=pathlib.Path, default=None)
     parser.add_argument("sizes", type=int, nargs="*", default=[])
     args = parser.parse_args()
 
@@ -189,7 +231,10 @@ def main() -> None:
         write_android(args.android_res)
 
     if args.ios_appiconset:
-        write_ios(args.ios_appiconset)
+        write_appiconset(args.ios_appiconset, "flat")
+
+    if args.macos_appiconset:
+        write_appiconset(args.macos_appiconset, "macos")
 
 
 if __name__ == "__main__":

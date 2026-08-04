@@ -44,23 +44,24 @@ class RecordingsController extends ChangeNotifier {
     MediaPicker? mediaPicker,
     AudioRecorder? recorder,
     AudioPlayer? player,
-  })  : _repository = repository,
-        _transcriptionService = transcriptionService,
-        _enrichmentService = enrichmentService,
-        _ocrService = ocrService,
-        _videoAudioExtractor = videoAudioExtractor,
-        _videoPosterExtractor = videoPosterExtractor,
-        _audioConfig = audioConfig,
-        _logSink = logSink,
-        _clipboardSink = clipboardSink,
-        _mediaOpener = mediaOpener,
-        _mediaPicker = mediaPicker ?? const FilePickerMediaPicker(),
-        _importer = MediaImporter(repository),
-        _recorder = recorder ?? AudioRecorder(),
-        _player = player ?? AudioPlayer() {
+  }) : _repository = repository,
+       _transcriptionService = transcriptionService,
+       _enrichmentService = enrichmentService,
+       _ocrService = ocrService,
+       _videoAudioExtractor = videoAudioExtractor,
+       _videoPosterExtractor = videoPosterExtractor,
+       _audioConfig = audioConfig,
+       _logSink = logSink,
+       _clipboardSink = clipboardSink,
+       _mediaOpener = mediaOpener,
+       _mediaPicker = mediaPicker ?? const FilePickerMediaPicker(),
+       _importer = MediaImporter(repository),
+       _recorder = recorder ?? AudioRecorder(),
+       _player = player ?? AudioPlayer() {
     // The default registry resolves the services lazily, so the Models/Config
     // tabs can keep swapping them without rebuilding the registry.
-    _registry = processorRegistry ??
+    _registry =
+        processorRegistry ??
         ProcessorRegistry.standard(
           transcriptionService: () => _transcriptionService,
           ocrService: () => _ocrService,
@@ -95,8 +96,9 @@ class RecordingsController extends ChangeNotifier {
   StreamSubscription<void>? _playerCompleteSub;
 
   final Stopwatch _stopwatch = Stopwatch();
-  final ValueNotifier<Duration> _elapsedTicker =
-      ValueNotifier<Duration>(Duration.zero);
+  final ValueNotifier<Duration> _elapsedTicker = ValueNotifier<Duration>(
+    Duration.zero,
+  );
   final ValueNotifier<double> _levelTicker = ValueNotifier<double>(0);
   StreamSubscription<Amplitude>? _amplitudeSub;
   Timer? _timer;
@@ -127,6 +129,16 @@ class RecordingsController extends ChangeNotifier {
   /// [initialize] runs.
   Future<void>? _posterBackfill;
 
+  /// Ids whose enrichment call is in flight right now — the second AI stage,
+  /// which runs *after* the item is already `completed` and persisted.
+  ///
+  /// Deliberately in-memory only, and deliberately not a [RecordingStatus].
+  /// That enum is written to `recordings.json`, so a new value would be a
+  /// backward-compatibility change for a state that is never resumed: a kill in
+  /// this window costs a title, and the item on disk is already whole. This is
+  /// therefore a *view* fact, in the same class as [_postersInFlight].
+  final Set<String> _enrichingIds = <String>{};
+
   List<Recording> get recordings => List<Recording>.unmodifiable(_recordings);
   bool get isRecording => _isRecording;
   bool get isBusy => _isBusy;
@@ -134,13 +146,25 @@ class RecordingsController extends ChangeNotifier {
   /// Whether the background processing loop is currently running a job.
   bool get isProcessing => _isDraining;
 
+  /// Whether the enrichment model is reading this item's text right now, i.e.
+  /// the window between the `completed` write and the title/category/summary
+  /// landing. The queue card draws its scan line off this.
+  ///
+  /// Effectively never true on an install with no enrichment profile: the
+  /// disabled service fails on its own microtask rather than on a network
+  /// round trip, so the flag is set and cleared without a frame in between and
+  /// the card never flickers a stage that is not configured.
+  bool isEnriching(String id) => _enrichingIds.contains(id);
+
   /// Items currently in the processing pipeline — queued (`pendingTranscription`)
   /// plus the one running (`transcribing`). Derived from status so it always
   /// matches what the queue renders.
   int get pendingProcessingCount => _recordings
-      .where((Recording item) =>
-          item.status == RecordingStatus.pendingTranscription ||
-          item.status == RecordingStatus.transcribing)
+      .where(
+        (Recording item) =>
+            item.status == RecordingStatus.pendingTranscription ||
+            item.status == RecordingStatus.transcribing,
+      )
       .length;
   Duration get elapsed => _stopwatch.elapsed;
 
@@ -210,9 +234,11 @@ class RecordingsController extends ChangeNotifier {
     // mid-processing). Their source is already on disk, so re-enqueuing is safe
     // and idempotent — the same persist-then-process invariant.
     final List<String> stuck = _recordings
-        .where((Recording item) =>
-            item.status == RecordingStatus.pendingTranscription ||
-            item.status == RecordingStatus.transcribing)
+        .where(
+          (Recording item) =>
+              item.status == RecordingStatus.pendingTranscription ||
+              item.status == RecordingStatus.transcribing,
+        )
         .map((Recording item) => item.id)
         .toList();
     for (final String id in stuck) {
@@ -351,7 +377,10 @@ class RecordingsController extends ChangeNotifier {
       // gates persistence, and it is the size the card reports afterwards.
       final int sizeBytes = await file.exists() ? await file.length() : 0;
       if (sizeBytes == 0) {
-        throw FileSystemException('Recording file was not persisted correctly.', path);
+        throw FileSystemException(
+          'Recording file was not persisted correctly.',
+          path,
+        );
       }
 
       // Use the id generated at record start rather than parsing it back out of
@@ -382,7 +411,10 @@ class RecordingsController extends ChangeNotifier {
       await _enqueueProcessing(saved.id);
     } catch (exception) {
       _error = exception.toString();
-      _logSink.log('Failed to save recording: $exception', level: LogLevel.error);
+      _logSink.log(
+        'Failed to save recording: $exception',
+        level: LogLevel.error,
+      );
     } finally {
       _isBusy = false;
       _activeFilePath = null;
@@ -412,7 +444,10 @@ class RecordingsController extends ChangeNotifier {
       await file.writeAsString(trimmed, flush: true);
       final int sizeBytes = await file.exists() ? await file.length() : 0;
       if (sizeBytes == 0) {
-        throw FileSystemException('Note file was not persisted correctly.', file.path);
+        throw FileSystemException(
+          'Note file was not persisted correctly.',
+          file.path,
+        );
       }
 
       final Recording saved = Recording(
@@ -499,11 +534,15 @@ class RecordingsController extends ChangeNotifier {
         return;
       }
 
-      final Recording recording =
-          _recordings.firstWhere((Recording item) => item.id == id);
+      final Recording recording = _recordings.firstWhere(
+        (Recording item) => item.id == id,
+      );
       final File file = File(recording.filePath);
       if (!await file.exists()) {
-        throw FileSystemException('Source file is missing.', recording.filePath);
+        throw FileSystemException(
+          'Source file is missing.',
+          recording.filePath,
+        );
       }
 
       await _player.stop();
@@ -554,10 +593,8 @@ class RecordingsController extends ChangeNotifier {
   Future<void> setCategory(String id, CaptureCategory? category) async {
     await _update(
       id,
-      (Recording item) => item.copyWith(
-        category: category,
-        clearCategory: category == null,
-      ),
+      (Recording item) =>
+          item.copyWith(category: category, clearCategory: category == null),
     );
     _logSink.log(
       category == null
@@ -567,9 +604,27 @@ class RecordingsController extends ChangeNotifier {
     );
   }
 
+  /// Replace an item's user-visible tags. Values are trimmed, lowercased and
+  /// de-duplicated while preserving their first-seen order. Passing only blank
+  /// values clears the tags.
+  Future<void> setTags(String id, Iterable<String> tags) async {
+    final Set<String> seen = <String>{};
+    final List<String> normalized = <String>[];
+    for (final String value in tags) {
+      final String tag = value.trim().toLowerCase();
+      if (tag.isNotEmpty && seen.add(tag)) normalized.add(tag);
+    }
+    await _update(id, (Recording item) => item.copyWith(tags: normalized));
+    _logSink.log(
+      normalized.isEmpty ? 'Tags cleared.' : 'Tags updated.',
+      recordingId: id,
+    );
+  }
+
   Future<void> toggleProcessed(String id) async {
-    final Recording recording =
-        _recordings.firstWhere((Recording item) => item.id == id);
+    final Recording recording = _recordings.firstWhere(
+      (Recording item) => item.id == id,
+    );
     final bool nextValue = !recording.isProcessedByUser;
 
     await _update(
@@ -660,8 +715,9 @@ class RecordingsController extends ChangeNotifier {
       );
       _logSink.log('Processing started.', recordingId: id);
 
-      final Recording recording =
-          _recordings.firstWhere((Recording item) => item.id == id);
+      final Recording recording = _recordings.firstWhere(
+        (Recording item) => item.id == id,
+      );
       // Pin the processor for this job: a runtime swap (Models tab) during the
       // await gaps above must not redirect a job that already started.
       final Processor processor = _registry.forType(recording.type);
@@ -741,8 +797,10 @@ class RecordingsController extends ChangeNotifier {
     // narrower race onto the same `<id>.thumb.jpg`.
     if (!_postersInFlight.add(id)) return;
     try {
-      final File destination =
-          await _repository.createSourceFile(item.id, 'thumb.jpg');
+      final File destination = await _repository.createSourceFile(
+        item.id,
+        'thumb.jpg',
+      );
       final File poster = await _videoPosterExtractor.extractPoster(
         File(item.filePath),
         destination,
@@ -774,10 +832,14 @@ class RecordingsController extends ChangeNotifier {
   Future<void> openSource(String id) async {
     _error = null;
     try {
-      final Recording recording =
-          _recordings.firstWhere((Recording item) => item.id == id);
+      final Recording recording = _recordings.firstWhere(
+        (Recording item) => item.id == id,
+      );
       if (!await File(recording.filePath).exists()) {
-        throw FileSystemException('Source file is missing.', recording.filePath);
+        throw FileSystemException(
+          'Source file is missing.',
+          recording.filePath,
+        );
       }
 
       await _mediaOpener.open(recording.filePath);
@@ -804,7 +866,11 @@ class RecordingsController extends ChangeNotifier {
   ///
   /// Swallows every error, on the same rule as logging — this runs after the
   /// item is already `completed` on disk and must never fail the pipeline.
-  Future<void> _copyToClipboard(CaptureType type, String text, String id) async {
+  Future<void> _copyToClipboard(
+    CaptureType type,
+    String text,
+    String id,
+  ) async {
     if (type == CaptureType.text || text.trim().isEmpty) return;
     try {
       await _clipboardSink.copy(text);
@@ -827,20 +893,23 @@ class RecordingsController extends ChangeNotifier {
   /// case is logged at `warn` rather than `error`.
   Future<void> _enrich(String id, String text) async {
     if (text.trim().isEmpty) return;
+    // Marked before the call and cleared in `finally`, so the card's scan line
+    // cannot outlive the request — including on the throwing paths below, which
+    // are the common case until a profile is configured.
+    _enrichingIds.add(id);
+    if (!_disposed) notifyListeners();
     try {
       final EnrichmentResult result = await _enrichmentService.enrich(text);
       if (_disposed) return;
       await _update(
         id,
         (Recording item) => item.copyWith(
-          // Title and category are the two fields the user can correct by hand,
-          // so enrichment only ever *fills* them: an already-set value survives
-          // a retry. Summary and tags have no editor, so they are pure derived
-          // output and a re-run refreshes them.
+          // User-editable fields are fill-only: a retry must not undo a manual
+          // correction. Clearing a field asks enrichment to fill it again.
           title: (item.title ?? '').trim().isEmpty ? result.title : null,
           category: item.category ?? result.category,
           summary: result.summary,
-          tags: result.tags,
+          tags: item.tags.isEmpty ? result.tags : null,
         ),
       );
       _logSink.log('Enriched \u00b7 ${result.category.name}', recordingId: id);
@@ -857,10 +926,16 @@ class RecordingsController extends ChangeNotifier {
         level: LogLevel.warn,
         recordingId: id,
       );
+    } finally {
+      _enrichingIds.remove(id);
+      if (!_disposed) notifyListeners();
     }
   }
 
-  Future<void> _update(String id, Recording Function(Recording) transform) async {
+  Future<void> _update(
+    String id,
+    Recording Function(Recording) transform,
+  ) async {
     _recordings = _recordings
         .map((Recording item) => item.id == id ? transform(item) : item)
         .toList();
