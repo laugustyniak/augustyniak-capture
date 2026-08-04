@@ -5,9 +5,10 @@
 Ship one coherent product identity across Flutter, Android, iOS, macOS, Linux,
 Windows, documentation, tests, generated artifacts, and distribution metadata.
 The installed application is named **Augustyniak Capture** and is published by
-**Augustyniak AI**. No legacy brand token,
-package name, reverse-DNS identifier, executable name, window title, permission
-copy, test fixture, or generated asset reference remains in the repository.
+**Augustyniak AI**. Under the assumed undistributed route, no legacy brand
+token, package name, reverse-DNS identifier, executable name, window title,
+permission copy, test fixture, or generated asset reference remains in the
+repository.
 
 The plan deliberately separates the smallest compiling rename from visual
 polish. Each phase ends in a runnable state.
@@ -34,19 +35,23 @@ must remain intact wherever the identity is user-visible.
 ## Gate 0: release identity and user data
 
 Before changing any reverse-DNS identifier, confirm that no build using the
-legacy identifier has been published in an application store.
+legacy identifier has been published in an application store or distributed to
+users whose local data must survive the rename.
 
-- **Not published:** use `ai.augustyniak.capture` everywhere. This is the assumed
-  route for this branch.
+- **Not published or distributed:** use `ai.augustyniak.capture` everywhere.
+  This is the assumed route for this branch; there is no compatibility layer and
+  repository scans can require zero legacy identity tokens.
 - **Already published:** preserve the store identifier to retain upgrade
-  continuity, or explicitly ship a new listing and design a one-time data
-  migration. Do not silently choose between these outcomes.
+  continuity, or explicitly ship a new listing with a user-driven export/import
+  migration. A new Android application ID or Apple bundle ID has a different
+  sandbox and cannot directly read the previous application's private data.
+  Do not silently choose between these outcomes.
 
-Changing the identifier can change the application container on Android and
-Apple platforms. Before release, install the old and new builds on each target
-and prove that existing captures, `recordings.json`, `settings.json`,
-`projects.json`, revisions, logs, and credentials are either preserved or
-migrated. Source files must never be deleted as part of migration.
+If Gate 0 finds distributed builds, define and test the export/import path before
+changing identifiers. It must cover captures, `recordings.json`, `settings.json`,
+`projects.json`, revisions, and logs. Credentials require a separate decision:
+do not export plaintext secrets by default. Source files must never be deleted
+as part of migration.
 
 ## Baseline inventory
 
@@ -124,16 +129,19 @@ Replace brand-bearing operational prefixes in:
 - test fixtures, expected session names, temporary directories, and sample
   project identifiers.
 
-Where a generated name may already exist on a user's machine, support reading
-the prior value while writing only the canonical value. Compatibility code must
-not expose the prior brand in the interface or create new files under it.
+Under the assumed undistributed route, rename these values without a fallback.
+If Gate 0 instead requires compatibility, isolate every necessary legacy literal
+in one migration module, document the exception to the zero-match rule, and test
+that it reads prior values while writing only canonical ones. Compatibility code
+must not expose the prior brand in the interface or create new files under it.
 
 ## Phase 4: documentation and repository metadata
 
 - Rewrite `README.md`, `CLAUDE.md`, code comments, installation commands, signing
   examples, and architectural descriptions.
-- Rename the repository and primary checkout only after code-level verification;
-  update the Git remote and any external scripts in the same operation.
+- After code-level verification and **before merging the implementation PR**,
+  rename the GitHub repository to `augustyniak-capture`, rename the primary
+  checkout, and update Git remotes plus external scripts in the same operation.
 - Search external release scripts, store listings, signing configuration,
   screenshots, package registries, website metadata, and social profiles. These
   are outside this worktree and require a separate deployment checklist.
@@ -160,10 +168,13 @@ remain easy to isolate.
 
 ### Repository invariants
 
-- Repository-wide, case-insensitive scans return zero matches for the legacy
-  product word, compound display name, snake-case package name, and reverse-DNS
-  identifier. Include hidden files; exclude only `.git/` and build outputs.
-- No tracked path contains a legacy brand token.
+- Under the assumed undistributed route, repository-wide, case-insensitive scans
+  return zero matches for the legacy product word, compound display name,
+  snake-case package name, and reverse-DNS identifier. Include hidden files;
+  exclude only `.git/` and build outputs. If Gate 0 requires migration, the sole
+  reviewed migration module is the only permitted exception.
+- No tracked path contains a legacy brand token; the optional migration-module
+  exception applies to file contents only.
 - `git diff --check` passes.
 - `dart format --output=none --set-exit-if-changed lib test` passes.
 - `flutter analyze` passes.
@@ -181,10 +192,11 @@ remain easy to isolate.
 
 ### Data-safety checks
 
-- Make a capture with the pre-rebrand build, then install and launch the
-  rebranded build on every supported platform.
-- Confirm source bytes, index rows, projects, settings, revisions, and logs.
-- Simulate a failed migration and prove the original files remain untouched.
+- If Gate 0 finds distributed builds, export a capture set from the pre-rebrand
+  build and import it into the rebranded build on every supported platform.
+- Confirm source bytes, index rows, projects, settings, revisions, and logs;
+  confirm separately that credentials were not exported implicitly.
+- Simulate a failed import and prove the original files remain untouched.
 - Back up the application data directory before any destructive migration test.
 
 ## Commit sequence
@@ -203,5 +215,6 @@ provides useful rollback points if a native runner breaks.
 
 The rebrand is complete only when a clean clone can analyze, test, and build the
 supported artifacts; installed applications display `Augustyniak Capture`; all
-identifiers match the canonical contract; existing user data is demonstrably
-safe; and exhaustive scans find no legacy identity in tracked content or paths.
+identifiers match the canonical contract; the GitHub repository has been renamed
+to `augustyniak-capture`; existing user data is demonstrably safe; and exhaustive
+scans find no unauthorized legacy identity in tracked content or paths.
