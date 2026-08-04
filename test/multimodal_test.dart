@@ -33,26 +33,37 @@ void main() {
 
   group('RecordingsRepository.extensionFor', () {
     test('fixed extensions for recordings and text', () {
-      expect(RecordingsRepository.extensionFor(CaptureType.audioRecording),
-          'm4a');
+      expect(
+        RecordingsRepository.extensionFor(CaptureType.audioRecording),
+        'm4a',
+      );
       expect(RecordingsRepository.extensionFor(CaptureType.text), 'txt');
     });
 
     test('derives from mime with a per-type fallback', () {
       expect(
-          RecordingsRepository.extensionFor(CaptureType.image,
-              sourceMimeType: 'image/png'),
-          'png');
+        RecordingsRepository.extensionFor(
+          CaptureType.image,
+          sourceMimeType: 'image/png',
+        ),
+        'png',
+      );
       expect(RecordingsRepository.extensionFor(CaptureType.image), 'jpg');
       expect(
-          RecordingsRepository.extensionFor(CaptureType.audioUpload,
-              sourceMimeType: 'audio/mpeg'),
-          'mp3');
+        RecordingsRepository.extensionFor(
+          CaptureType.audioUpload,
+          sourceMimeType: 'audio/mpeg',
+        ),
+        'mp3',
+      );
       expect(RecordingsRepository.extensionFor(CaptureType.audioUpload), 'm4a');
       expect(
-          RecordingsRepository.extensionFor(CaptureType.video,
-              sourceMimeType: 'video/quicktime'),
-          'mov');
+        RecordingsRepository.extensionFor(
+          CaptureType.video,
+          sourceMimeType: 'video/quicktime',
+        ),
+        'mov',
+      );
       expect(RecordingsRepository.extensionFor(CaptureType.video), 'mp4');
     });
   });
@@ -91,39 +102,47 @@ void main() {
       expect(restored.sourceMimeType, isNull);
     });
 
-    test('copyWith carries type and sourceMimeType through a status change', () {
-      final Recording original = Recording(
-        id: 't',
-        filePath: '/docs/t.txt',
-        createdAt: DateTime.utc(2026, 7, 25),
-        durationMs: 0,
-        status: RecordingStatus.saved,
-        type: CaptureType.text,
-        sourceMimeType: 'text/plain',
-      );
-      final Recording updated =
-          original.copyWith(status: RecordingStatus.completed);
+    test(
+      'copyWith carries type and sourceMimeType through a status change',
+      () {
+        final Recording original = Recording(
+          id: 't',
+          filePath: '/docs/t.txt',
+          createdAt: DateTime.utc(2026, 7, 25),
+          durationMs: 0,
+          status: RecordingStatus.saved,
+          type: CaptureType.text,
+          sourceMimeType: 'text/plain',
+        );
+        final Recording updated = original.copyWith(
+          status: RecordingStatus.completed,
+        );
 
-      expect(updated.type, CaptureType.text);
-      expect(updated.sourceMimeType, 'text/plain');
-      expect(updated.status, RecordingStatus.completed);
-    });
+        expect(updated.type, CaptureType.text);
+        expect(updated.sourceMimeType, 'text/plain');
+        expect(updated.status, RecordingStatus.completed);
+      },
+    );
   });
 
   group('ProcessorRegistry.standard', () {
     ProcessorRegistry build() => ProcessorRegistry.standard(
-          transcriptionService: () => const DisabledTranscriptionService(),
-        );
+      transcriptionService: () => const DisabledTranscriptionService(),
+    );
 
     test('dispatches text to the passthrough processor', () {
-      expect(build().forType(CaptureType.text),
-          isA<TextPassthroughProcessor>());
+      expect(
+        build().forType(CaptureType.text),
+        isA<TextPassthroughProcessor>(),
+      );
     });
 
     test('image routes to OCR, video routes to the video processor', () {
       expect(build().forType(CaptureType.image), isA<OcrProcessor>());
-      expect(build().forType(CaptureType.video),
-          isA<VideoTranscriptionProcessor>());
+      expect(
+        build().forType(CaptureType.video),
+        isA<VideoTranscriptionProcessor>(),
+      );
     });
 
     test('default OCR service is disabled and degrades cleanly', () async {
@@ -141,20 +160,22 @@ void main() {
       );
     });
 
-    test('default video extractor is unavailable and degrades cleanly',
-        () async {
-      final Recording item = Recording(
-        id: 'v',
-        filePath: '/docs/v.mp4',
-        createdAt: DateTime.utc(2026),
-        durationMs: 0,
-        status: RecordingStatus.pendingTranscription,
-        type: CaptureType.video,
-      );
-      await expectLater(
-        build().forType(CaptureType.video).process(item),
-        throwsA(isA<ProcessorNotConfiguredException>()),
-      );
-    });
+    test(
+      'default video extractor is unavailable and degrades cleanly',
+      () async {
+        final Recording item = Recording(
+          id: 'v',
+          filePath: '/docs/v.mp4',
+          createdAt: DateTime.utc(2026),
+          durationMs: 0,
+          status: RecordingStatus.pendingTranscription,
+          type: CaptureType.video,
+        );
+        await expectLater(
+          build().forType(CaptureType.video).process(item),
+          throwsA(isA<ProcessorNotConfiguredException>()),
+        );
+      },
+    );
   });
 }

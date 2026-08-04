@@ -36,18 +36,18 @@ String? ffmpegSkipReason() {
 /// no checked-in binary asset. `yuv420p` keeps the clip readable by anything.
 Future<File> generateClip(Directory dir, String name, String seconds) async {
   final File file = File(p.join(dir.path, name));
-  final ProcessResult result = await Process.run(
-    'ffmpeg',
-    <String>[
-      '-y',
-      '-loglevel', 'error',
-      '-f', 'lavfi',
-      '-i', 'testsrc=duration=$seconds:size=160x120:rate=5',
-      '-pix_fmt', 'yuv420p',
-      file.path,
-    ],
-    stderrEncoding: SystemEncoding(),
-  );
+  final ProcessResult result = await Process.run('ffmpeg', <String>[
+    '-y',
+    '-loglevel',
+    'error',
+    '-f',
+    'lavfi',
+    '-i',
+    'testsrc=duration=$seconds:size=160x120:rate=5',
+    '-pix_fmt',
+    'yuv420p',
+    file.path,
+  ], stderrEncoding: SystemEncoding());
   if (result.exitCode != 0 || !await file.exists()) {
     throw StateError('Could not build the fixture clip: ${result.stderr}');
   }
@@ -70,11 +70,8 @@ void main() {
       final DateTime modifiedBefore = await video.lastModified();
       final File destination = File(p.join(tmp.path, 'clip.thumb.jpg'));
 
-      final File poster =
-          await const FfmpegVideoPosterExtractor().extractPoster(
-        video,
-        destination,
-      );
+      final File poster = await const FfmpegVideoPosterExtractor()
+          .extractPoster(video, destination);
 
       expect(poster.path, destination.path);
       final Uint8List bytes = await poster.readAsBytes();
@@ -82,8 +79,10 @@ void main() {
       // SOI … EOI: a truncated write (a killed ffmpeg) would satisfy "non-empty"
       // but not this, and it is what the queue would render as a broken tile.
       expect(bytes.sublist(0, 2), <int>[0xFF, 0xD8], reason: 'JPEG SOI marker');
-      expect(bytes.sublist(bytes.length - 2), <int>[0xFF, 0xD9],
-          reason: 'JPEG EOI marker');
+      expect(bytes.sublist(bytes.length - 2), <int>[
+        0xFF,
+        0xD9,
+      ], reason: 'JPEG EOI marker');
 
       // The rule this suite exists to prove with a real binary: a processor only
       // ever *reads* its source.
@@ -93,11 +92,12 @@ void main() {
       // And it writes exactly one thing: the poster the caller named. A stray
       // `clip.thumb.jpg.tmp` or a numbered image-sequence file would mean the
       // recordings directory silently accumulating junk beside the sources.
-      final List<String> left = tmp
-          .listSync()
-          .map((FileSystemEntity entity) => p.basename(entity.path))
-          .toList()
-        ..sort();
+      final List<String> left =
+          tmp
+              .listSync()
+              .map((FileSystemEntity entity) => p.basename(entity.path))
+              .toList()
+            ..sort();
       expect(left, <String>['clip.mp4', 'clip.thumb.jpg']);
     }, skip: skip);
 
@@ -112,29 +112,28 @@ void main() {
       // assertion below is about the retry rather than about ffmpeg being
       // lenient.
       final File control = File(p.join(tmp.path, 'control.jpg'));
-      await Process.run(
-        'ffmpeg',
-        <String>[
-          '-y', '-loglevel', 'error',
-          '-ss', '1',
-          '-i', video.path,
-          '-frames:v', '1',
-          '-f', 'image2',
-          control.path,
-        ],
-        stderrEncoding: SystemEncoding(),
-      );
+      await Process.run('ffmpeg', <String>[
+        '-y',
+        '-loglevel',
+        'error',
+        '-ss',
+        '1',
+        '-i',
+        video.path,
+        '-frames:v',
+        '1',
+        '-f',
+        'image2',
+        control.path,
+      ], stderrEncoding: SystemEncoding());
       expect(
         control.existsSync() && control.lengthSync() > 0,
         isFalse,
         reason: 'seeking past the end of the clip should encode nothing',
       );
 
-      final File poster =
-          await const FfmpegVideoPosterExtractor().extractPoster(
-        video,
-        File(p.join(tmp.path, 'short.thumb.jpg')),
-      );
+      final File poster = await const FfmpegVideoPosterExtractor()
+          .extractPoster(video, File(p.join(tmp.path, 'short.thumb.jpg')));
 
       final Uint8List bytes = await poster.readAsBytes();
       expect(bytes, isNotEmpty);

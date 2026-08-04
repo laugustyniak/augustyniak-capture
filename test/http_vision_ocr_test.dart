@@ -9,19 +9,41 @@ import 'package:audivoa_core/features/processing/data/ocr_service.dart';
 import 'package:audivoa_core/features/settings/domain/provider_profile.dart';
 
 const List<int> _pngMagic = <int>[
-  0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, 0, 0, 0, 0,
+  0x89,
+  0x50,
+  0x4E,
+  0x47,
+  0x0D,
+  0x0A,
+  0x1A,
+  0x0A,
+  0,
+  0,
+  0,
+  0,
 ];
 const List<int> _jpegMagic = <int>[
-  0xFF, 0xD8, 0xFF, 0xE0, 0, 0, 0, 0, 0, 0, 0, 0,
+  0xFF,
+  0xD8,
+  0xFF,
+  0xE0,
+  0,
+  0,
+  0,
+  0,
+  0,
+  0,
+  0,
+  0,
 ];
 
 String _chatBody(String content) => jsonEncode(<String, dynamic>{
-      'choices': <Map<String, dynamic>>[
-        <String, dynamic>{
-          'message': <String, dynamic>{'role': 'assistant', 'content': content},
-        },
-      ],
-    });
+  'choices': <Map<String, dynamic>>[
+    <String, dynamic>{
+      'message': <String, dynamic>{'role': 'assistant', 'content': content},
+    },
+  ],
+});
 
 void main() {
   late Directory tempDir;
@@ -63,7 +85,8 @@ void main() {
       expect(payload['model'], 'gpt-4o-mini');
       final List<dynamic> content =
           ((payload['messages'] as List<dynamic>).single
-              as Map<String, dynamic>)['content'] as List<dynamic>;
+                  as Map<String, dynamic>)['content']
+              as List<dynamic>;
       final Map<String, dynamic> imagePart =
           content.first as Map<String, dynamic>;
       expect(imagePart['type'], 'image_url');
@@ -71,7 +94,8 @@ void main() {
         (imagePart['image_url'] as Map<String, dynamic>)['url'],
         startsWith('data:image/png;base64,'),
       );
-      final Map<String, dynamic> textPart = content.last as Map<String, dynamic>;
+      final Map<String, dynamic> textPart =
+          content.last as Map<String, dynamic>;
       expect(textPart['type'], 'text');
       expect(textPart['text'], contains('Transcribe'));
     });
@@ -199,31 +223,59 @@ void main() {
 
   group('sniffImageMime', () {
     test('recognises the supported formats', () {
-      expect(HttpVisionOcrService.sniffImageMime(_jpegMagic, 'x.bin'),
-          'image/jpeg');
       expect(
-          HttpVisionOcrService.sniffImageMime(_pngMagic, 'x.bin'), 'image/png');
+        HttpVisionOcrService.sniffImageMime(_jpegMagic, 'x.bin'),
+        'image/jpeg',
+      );
       expect(
-        HttpVisionOcrService.sniffImageMime(
-          <int>[0x52, 0x49, 0x46, 0x46, 0, 0, 0, 0, 0x57, 0x45, 0x42, 0x50],
-          'x.bin',
-        ),
+        HttpVisionOcrService.sniffImageMime(_pngMagic, 'x.bin'),
+        'image/png',
+      );
+      expect(
+        HttpVisionOcrService.sniffImageMime(<int>[
+          0x52,
+          0x49,
+          0x46,
+          0x46,
+          0,
+          0,
+          0,
+          0,
+          0x57,
+          0x45,
+          0x42,
+          0x50,
+        ], 'x.bin'),
         'image/webp',
       );
       expect(
-        HttpVisionOcrService.sniffImageMime(
-          <int>[0, 0, 0, 0x18, 0x66, 0x74, 0x79, 0x70, 0x68, 0x65, 0x69, 0x63],
-          'x.bin',
-        ),
+        HttpVisionOcrService.sniffImageMime(<int>[
+          0,
+          0,
+          0,
+          0x18,
+          0x66,
+          0x74,
+          0x79,
+          0x70,
+          0x68,
+          0x65,
+          0x69,
+          0x63,
+        ], 'x.bin'),
         'image/heic',
       );
     });
 
     test('falls back to extension, then jpeg', () {
-      expect(HttpVisionOcrService.sniffImageMime(<int>[], 'a.webp'),
-          'image/webp');
-      expect(HttpVisionOcrService.sniffImageMime(<int>[], 'a.unknown'),
-          'image/jpeg');
+      expect(
+        HttpVisionOcrService.sniffImageMime(<int>[], 'a.webp'),
+        'image/webp',
+      );
+      expect(
+        HttpVisionOcrService.sniffImageMime(<int>[], 'a.unknown'),
+        'image/jpeg',
+      );
     });
   });
 

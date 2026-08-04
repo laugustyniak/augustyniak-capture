@@ -23,10 +23,10 @@ enum RevisionSource {
       RevisionSource.values.asNameMap()[name] ?? RevisionSource.processor;
 
   String get label => switch (this) {
-        RevisionSource.user => 'YOU',
-        RevisionSource.enrichment => 'MODEL',
-        RevisionSource.processor => 'PIPELINE',
-      };
+    RevisionSource.user => 'YOU',
+    RevisionSource.enrichment => 'MODEL',
+    RevisionSource.processor => 'PIPELINE',
+  };
 }
 
 /// One field of one capture changing value, once.
@@ -82,13 +82,13 @@ class RecordingRevision {
   }
 
   Map<String, dynamic> toJson() => <String, dynamic>{
-        'recordingId': recordingId,
-        'at': at.toIso8601String(),
-        'field': field,
-        'from': from,
-        'to': to,
-        'source': source.name,
-      };
+    'recordingId': recordingId,
+    'at': at.toIso8601String(),
+    'field': field,
+    'from': from,
+    'to': to,
+    'source': source.name,
+  };
 
   /// Throws on a row missing its required keys; the repository skips such rows
   /// rather than failing the whole load, exactly as the recordings index does.

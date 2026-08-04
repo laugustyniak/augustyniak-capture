@@ -24,7 +24,7 @@ class ShortcutsSection extends StatelessWidget {
   /// Runs [action] with every global registration released. Supplied by the
   /// shell, which owns the coordinator; see [_capture] for why it is needed.
   final Future<void> Function(Future<void> Function() action)
-      runWithHotkeysSuspended;
+  runWithHotkeysSuspended;
 
   @override
   Widget build(BuildContext context) {
@@ -40,7 +40,8 @@ class ShortcutsSection extends StatelessWidget {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: <Widget>[
-              for (final ShortcutAction action in ShortcutAction.values) ...<Widget>[
+              for (final ShortcutAction action
+                  in ShortcutAction.values) ...<Widget>[
                 _ShortcutRow(
                   action: action,
                   binding: bindings[action],
@@ -242,7 +243,8 @@ class _HotkeyCaptureSheetState extends State<_HotkeyCaptureSheet> {
     final Set<HotkeyModifier> modifiers = _pressedModifiers();
     if (modifiers.isEmpty) {
       setState(() {
-        _hint = 'A global shortcut needs a modifier — otherwise it would '
+        _hint =
+            'A global shortcut needs a modifier — otherwise it would '
             'swallow this key system-wide.';
       });
       return KeyEventResult.handled;

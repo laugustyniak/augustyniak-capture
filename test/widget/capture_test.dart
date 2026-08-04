@@ -168,10 +168,7 @@ void main() {
       await tester.pump();
 
       expect(find.text('REC'), findsOneWidget);
-      expect(
-        find.text('AAC-LC · 16 kHz · mono · 64 kbps'),
-        findsOneWidget,
-      );
+      expect(find.text('AAC-LC · 16 kHz · mono · 64 kbps'), findsOneWidget);
       expect(find.text('recording → .m4a'), findsOneWidget);
       expect(find.text('persist recordings.json (atomic)'), findsOneWidget);
       // The guarantee is stated on the screen where it matters most.
@@ -315,10 +312,13 @@ void main() {
     ) async {
       String? saved;
       bool popped = false;
-      await openSheet(tester, onResult: (String? body) {
-        saved = body;
-        popped = true;
-      });
+      await openSheet(
+        tester,
+        onResult: (String? body) {
+          saved = body;
+          popped = true;
+        },
+      );
 
       await tester.enterText(find.byType(TextField), 'ship it');
       await tester.pumpAndSettle();

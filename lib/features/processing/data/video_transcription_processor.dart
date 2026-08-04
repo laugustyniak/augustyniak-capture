@@ -11,7 +11,10 @@ import 'video_audio_extractor.dart';
 /// touched**, upholding the processor rule. Both dependencies resolve lazily so
 /// the shell can swap them at runtime (only later work is affected).
 class VideoTranscriptionProcessor implements Processor {
-  const VideoTranscriptionProcessor(this._transcriptionService, this._extractor);
+  const VideoTranscriptionProcessor(
+    this._transcriptionService,
+    this._extractor,
+  );
 
   final TranscriptionService Function() _transcriptionService;
   final VideoAudioExtractor Function() _extractor;

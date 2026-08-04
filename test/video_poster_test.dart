@@ -94,7 +94,9 @@ void main() {
     'xyz.luan/audioplayers.global',
   ]) {
     messenger.setMockMethodCallHandler(
-        MethodChannel(name), (MethodCall call) async => null);
+      MethodChannel(name),
+      (MethodCall call) async => null,
+    );
   }
 
   /// A recordings directory holding a fake video source, plus the "extracted"
@@ -108,8 +110,9 @@ void main() {
     final Directory tmp = await Directory.systemTemp.createTemp(prefix);
     final File src = File(p.join(tmp.path, 'clip.mp4'));
     await src.writeAsBytes(<int>[0, 0, 0, 0x18, 1, 2, 3]);
-    final Directory audioDir =
-        await Directory.systemTemp.createTemp('${prefix}_audio');
+    final Directory audioDir = await Directory.systemTemp.createTemp(
+      '${prefix}_audio',
+    );
     final File audio = File(p.join(audioDir.path, 'audio.m4a'));
     await audio.writeAsBytes(<int>[9, 9, 9]);
     return (tmp, src, audio);
@@ -117,8 +120,9 @@ void main() {
 
   group('poster extraction during processing', () {
     test('a processed video ends with a poster on the item', () async {
-      final (Directory tmp, File src, File audio) =
-          await videoFixture('poster_ok');
+      final (Directory tmp, File src, File audio) = await videoFixture(
+        'poster_ok',
+      );
       final _FakePosterExtractor poster = _FakePosterExtractor();
 
       final RecordingsController controller = RecordingsController(
@@ -140,37 +144,43 @@ void main() {
       expect(poster.calls, 1);
     });
 
-    test('a failing poster extractor still leaves the item completed',
-        () async {
-      // The core invariant: the poster is derived, best-effort and last in
-      // importance. Nothing about it may reach `status`.
-      final (Directory tmp, File src, File audio) =
-          await videoFixture('poster_throws');
+    test(
+      'a failing poster extractor still leaves the item completed',
+      () async {
+        // The core invariant: the poster is derived, best-effort and last in
+        // importance. Nothing about it may reach `status`.
+        final (Directory tmp, File src, File audio) = await videoFixture(
+          'poster_throws',
+        );
 
-      final RecordingsController controller = RecordingsController(
-        repository: _FakeRepo(tmp),
-        transcriptionService: const _StubService('transcript'),
-        videoAudioExtractor: _FakeAudioExtractor(audio),
-        videoPosterExtractor: const _ThrowingPosterExtractor(),
-        mediaPicker: _FakePicker(PickedMedia(file: src, mimeType: 'video/mp4')),
-      );
-      addTearDown(controller.dispose);
+        final RecordingsController controller = RecordingsController(
+          repository: _FakeRepo(tmp),
+          transcriptionService: const _StubService('transcript'),
+          videoAudioExtractor: _FakeAudioExtractor(audio),
+          videoPosterExtractor: const _ThrowingPosterExtractor(),
+          mediaPicker: _FakePicker(
+            PickedMedia(file: src, mimeType: 'video/mp4'),
+          ),
+        );
+        addTearDown(controller.dispose);
 
-      await controller.addUpload(CaptureType.video);
-      await controller.waitForProcessing();
+        await controller.addUpload(CaptureType.video);
+        await controller.waitForProcessing();
 
-      final Recording item = controller.recordings.single;
-      expect(item.status, RecordingStatus.completed);
-      expect(item.transcript, 'transcript');
-      expect(item.thumbPath, isNull);
-      expect(item.error, isNull);
-    });
+        final Recording item = controller.recordings.single;
+        expect(item.status, RecordingStatus.completed);
+        expect(item.transcript, 'transcript');
+        expect(item.thumbPath, isNull);
+        expect(item.error, isNull);
+      },
+    );
 
     test('a video whose processor fails still gets its poster', () async {
       // The other half of the same rule: a video that could not be transcribed
       // is exactly the one the user needs to recognise in the queue.
-      final (Directory tmp, File src, File _) =
-          await videoFixture('poster_proc_fails');
+      final (Directory tmp, File src, File _) = await videoFixture(
+        'poster_proc_fails',
+      );
       final _FakePosterExtractor poster = _FakePosterExtractor();
 
       final RecordingsController controller = RecordingsController(
@@ -193,34 +203,41 @@ void main() {
       expect(poster.calls, 1);
     });
 
-    test('a retry does not re-extract a poster that is still on disk',
-        () async {
-      final (Directory tmp, File src, File audio) =
-          await videoFixture('poster_retry');
-      final _FakePosterExtractor poster = _FakePosterExtractor();
+    test(
+      'a retry does not re-extract a poster that is still on disk',
+      () async {
+        final (Directory tmp, File src, File audio) = await videoFixture(
+          'poster_retry',
+        );
+        final _FakePosterExtractor poster = _FakePosterExtractor();
 
-      final RecordingsController controller = RecordingsController(
-        repository: _FakeRepo(tmp),
-        transcriptionService: const _StubService('transcript'),
-        videoAudioExtractor: _FakeAudioExtractor(audio),
-        videoPosterExtractor: poster,
-        mediaPicker: _FakePicker(PickedMedia(file: src, mimeType: 'video/mp4')),
-      );
-      addTearDown(controller.dispose);
+        final RecordingsController controller = RecordingsController(
+          repository: _FakeRepo(tmp),
+          transcriptionService: const _StubService('transcript'),
+          videoAudioExtractor: _FakeAudioExtractor(audio),
+          videoPosterExtractor: poster,
+          mediaPicker: _FakePicker(
+            PickedMedia(file: src, mimeType: 'video/mp4'),
+          ),
+        );
+        addTearDown(controller.dispose);
 
-      await controller.addUpload(CaptureType.video);
-      await controller.waitForProcessing();
-      expect(poster.calls, 1);
+        await controller.addUpload(CaptureType.video);
+        await controller.waitForProcessing();
+        expect(poster.calls, 1);
 
-      await controller.retryTranscription(controller.recordings.single.id);
-      await controller.waitForProcessing();
+        await controller.retryTranscription(controller.recordings.single.id);
+        await controller.waitForProcessing();
 
-      expect(poster.calls, 1); // ffmpeg is not re-shelled for the same frame
-      expect(controller.recordings.single.thumbPath, isNotNull);
-    });
+        expect(poster.calls, 1); // ffmpeg is not re-shelled for the same frame
+        expect(controller.recordings.single.thumbPath, isNotNull);
+      },
+    );
 
     test('a non-video item never touches the extractor', () async {
-      final Directory tmp = await Directory.systemTemp.createTemp('poster_note');
+      final Directory tmp = await Directory.systemTemp.createTemp(
+        'poster_note',
+      );
       final _FakePosterExtractor poster = _FakePosterExtractor();
 
       final RecordingsController controller = RecordingsController(
@@ -265,35 +282,37 @@ void main() {
       );
     }
 
-    test('a video completed before posters existed gets one at startup',
-        () async {
-      // The acceptance criterion is "video cards show a poster", and an item
-      // that already succeeded never re-enters the processing queue — so
-      // without the backfill it would show the movie glyph forever.
-      final (Directory tmp, Recording old) = await settled('backfill_old');
-      final _FakeRepo repo = _FakeRepo(tmp, <Recording>[old]);
-      final _FakePosterExtractor poster = _FakePosterExtractor();
+    test(
+      'a video completed before posters existed gets one at startup',
+      () async {
+        // The acceptance criterion is "video cards show a poster", and an item
+        // that already succeeded never re-enters the processing queue — so
+        // without the backfill it would show the movie glyph forever.
+        final (Directory tmp, Recording old) = await settled('backfill_old');
+        final _FakeRepo repo = _FakeRepo(tmp, <Recording>[old]);
+        final _FakePosterExtractor poster = _FakePosterExtractor();
 
-      final RecordingsController controller = RecordingsController(
-        repository: repo,
-        transcriptionService: const _StubService('unused'),
-        videoPosterExtractor: poster,
-      );
-      addTearDown(controller.dispose);
+        final RecordingsController controller = RecordingsController(
+          repository: repo,
+          transcriptionService: const _StubService('unused'),
+          videoPosterExtractor: poster,
+        );
+        addTearDown(controller.dispose);
 
-      await controller.initialize();
-      await controller.waitForProcessing();
+        await controller.initialize();
+        await controller.waitForProcessing();
 
-      final Recording item = controller.recordings.single;
-      expect(poster.calls, 1);
-      expect(item.thumbPath, isNotNull);
-      expect(File(item.thumbPath!).existsSync(), isTrue);
-      // Best-effort means best-effort: the status axis is untouched.
-      expect(item.status, RecordingStatus.completed);
-      expect(item.transcript, 'from a previous session');
-      // And the claim is durable, or the next launch would extract it again.
-      expect(repo.saved.single.thumbPath, item.thumbPath);
-    });
+        final Recording item = controller.recordings.single;
+        expect(poster.calls, 1);
+        expect(item.thumbPath, isNotNull);
+        expect(File(item.thumbPath!).existsSync(), isTrue);
+        // Best-effort means best-effort: the status axis is untouched.
+        expect(item.status, RecordingStatus.completed);
+        expect(item.transcript, 'from a previous session');
+        // And the claim is durable, or the next launch would extract it again.
+        expect(repo.saved.single.thumbPath, item.thumbPath);
+      },
+    );
 
     test('a poster file deleted since the last run is re-extracted', () async {
       final (Directory tmp, Recording old) = await settled(
@@ -313,11 +332,16 @@ void main() {
       await controller.waitForProcessing();
 
       expect(poster.calls, 1);
-      expect(File(controller.recordings.single.thumbPath!).existsSync(), isTrue);
+      expect(
+        File(controller.recordings.single.thumbPath!).existsSync(),
+        isTrue,
+      );
     });
 
     test('a poster still on disk is left alone', () async {
-      final Directory tmp = await Directory.systemTemp.createTemp('backfill_ok');
+      final Directory tmp = await Directory.systemTemp.createTemp(
+        'backfill_ok',
+      );
       final File src = File(p.join(tmp.path, 'old.mp4'));
       await src.writeAsBytes(<int>[0, 0, 0, 0x18, 1, 2, 3]);
       final File existing = File(p.join(tmp.path, 'old.thumb.jpg'));
@@ -347,8 +371,7 @@ void main() {
       expect(poster.calls, 0); // one stat, no ffmpeg
     });
 
-    test('the backfill and the resumed drain never both shell ffmpeg',
-        () async {
+    test('the backfill and the resumed drain never both shell ffmpeg', () async {
       // A video left mid-processing is re-enqueued by `initialize`, so both the
       // drain loop and the backfill reach for the same `<id>.thumb.jpg`. Two
       // concurrent ffmpeg runs onto one destination is exactly what the
@@ -357,8 +380,9 @@ void main() {
         'backfill_stuck',
         status: RecordingStatus.transcribing,
       );
-      final Directory audioDir =
-          await Directory.systemTemp.createTemp('backfill_stuck_audio');
+      final Directory audioDir = await Directory.systemTemp.createTemp(
+        'backfill_stuck_audio',
+      );
       final File audio = File(p.join(audioDir.path, 'audio.m4a'));
       await audio.writeAsBytes(<int>[9, 9, 9]);
       final _FakePosterExtractor poster = _FakePosterExtractor();
@@ -381,7 +405,9 @@ void main() {
     });
 
     test('a non-video item is never backfilled', () async {
-      final Directory tmp = await Directory.systemTemp.createTemp('backfill_txt');
+      final Directory tmp = await Directory.systemTemp.createTemp(
+        'backfill_txt',
+      );
       final File src = File(p.join(tmp.path, 'note.txt'));
       await src.writeAsString('body');
       final _FakePosterExtractor poster = _FakePosterExtractor();
@@ -426,23 +452,25 @@ void main() {
       );
     });
 
-    test('a missing binary throws and leaves no partial poster behind',
-        () async {
-      final File video = File(p.join(tmp.path, 'v.mp4'));
-      await video.writeAsBytes(<int>[1, 2, 3]);
-      final File destination = File(p.join(tmp.path, 'v.thumb.jpg'));
+    test(
+      'a missing binary throws and leaves no partial poster behind',
+      () async {
+        final File video = File(p.join(tmp.path, 'v.mp4'));
+        await video.writeAsBytes(<int>[1, 2, 3]);
+        final File destination = File(p.join(tmp.path, 'v.thumb.jpg'));
 
-      await expectLater(
-        const FfmpegVideoPosterExtractor(
-          executable: 'ffmpeg_definitely_absent',
-        ).extractPoster(video, destination),
-        throwsA(isA<ProcessException>()),
-      );
+        await expectLater(
+          const FfmpegVideoPosterExtractor(
+            executable: 'ffmpeg_definitely_absent',
+          ).extractPoster(video, destination),
+          throwsA(isA<ProcessException>()),
+        );
 
-      // A zero-length poster would be persisted as `thumbPath` and render as a
-      // permanently broken image, so a failure must leave nothing at all.
-      expect(destination.existsSync(), isFalse);
-    });
+        // A zero-length poster would be persisted as `thumbPath` and render as a
+        // permanently broken image, so a failure must leave nothing at all.
+        expect(destination.existsSync(), isFalse);
+      },
+    );
   });
 
   group('openSource', () {
@@ -471,70 +499,82 @@ void main() {
       expect(controller.error, isNull);
     });
 
-    test('a missing source sets the error and never reaches the opener',
-        () async {
-      final Directory tmp = await Directory.systemTemp.createTemp('open_gone');
-      final File src = File(p.join(tmp.path, 'clip.mp4'));
-      await src.writeAsBytes(<int>[0, 0, 0, 0x18, 1, 2, 3]);
-      final _FakeOpener opener = _FakeOpener();
+    test(
+      'a missing source sets the error and never reaches the opener',
+      () async {
+        final Directory tmp = await Directory.systemTemp.createTemp(
+          'open_gone',
+        );
+        final File src = File(p.join(tmp.path, 'clip.mp4'));
+        await src.writeAsBytes(<int>[0, 0, 0, 0x18, 1, 2, 3]);
+        final _FakeOpener opener = _FakeOpener();
 
-      final RecordingsController controller = RecordingsController(
-        repository: _FakeRepo(tmp),
-        transcriptionService: const _StubService('x'),
-        videoAudioExtractor: const _ThrowingAudioExtractor(),
-        mediaPicker: _FakePicker(PickedMedia(file: src, mimeType: 'video/mp4')),
-        mediaOpener: opener,
-      );
-      addTearDown(controller.dispose);
+        final RecordingsController controller = RecordingsController(
+          repository: _FakeRepo(tmp),
+          transcriptionService: const _StubService('x'),
+          videoAudioExtractor: const _ThrowingAudioExtractor(),
+          mediaPicker: _FakePicker(
+            PickedMedia(file: src, mimeType: 'video/mp4'),
+          ),
+          mediaOpener: opener,
+        );
+        addTearDown(controller.dispose);
 
-      await controller.addUpload(CaptureType.video);
-      await controller.waitForProcessing();
+        await controller.addUpload(CaptureType.video);
+        await controller.waitForProcessing();
 
-      final Recording item = controller.recordings.single;
-      await File(item.filePath).delete();
-      await controller.openSource(item.id);
+        final Recording item = controller.recordings.single;
+        await File(item.filePath).delete();
+        await controller.openSource(item.id);
 
-      expect(opener.opened, isEmpty);
-      expect(controller.error, contains('Source file is missing'));
-    });
+        expect(opener.opened, isEmpty);
+        expect(controller.error, contains('Source file is missing'));
+      },
+    );
 
-    test('a successful open clears a previous error and rebuilds the view',
-        () async {
-      final Directory tmp = await Directory.systemTemp.createTemp('open_clear');
-      final File src = File(p.join(tmp.path, 'clip.mp4'));
-      await src.writeAsBytes(<int>[0, 0, 0, 0x18, 1, 2, 3]);
-      final _FakeOpener opener = _FakeOpener();
+    test(
+      'a successful open clears a previous error and rebuilds the view',
+      () async {
+        final Directory tmp = await Directory.systemTemp.createTemp(
+          'open_clear',
+        );
+        final File src = File(p.join(tmp.path, 'clip.mp4'));
+        await src.writeAsBytes(<int>[0, 0, 0, 0x18, 1, 2, 3]);
+        final _FakeOpener opener = _FakeOpener();
 
-      final RecordingsController controller = RecordingsController(
-        repository: _FakeRepo(tmp),
-        transcriptionService: const _StubService('x'),
-        videoAudioExtractor: const _ThrowingAudioExtractor(),
-        mediaPicker: _FakePicker(PickedMedia(file: src, mimeType: 'video/mp4')),
-        mediaOpener: opener,
-      );
-      addTearDown(controller.dispose);
+        final RecordingsController controller = RecordingsController(
+          repository: _FakeRepo(tmp),
+          transcriptionService: const _StubService('x'),
+          videoAudioExtractor: const _ThrowingAudioExtractor(),
+          mediaPicker: _FakePicker(
+            PickedMedia(file: src, mimeType: 'video/mp4'),
+          ),
+          mediaOpener: opener,
+        );
+        addTearDown(controller.dispose);
 
-      await controller.addUpload(CaptureType.video);
-      await controller.waitForProcessing();
+        await controller.addUpload(CaptureType.video);
+        await controller.waitForProcessing();
 
-      final Recording item = controller.recordings.single;
-      final File source = File(item.filePath);
-      final List<int> bytes = await source.readAsBytes();
+        final Recording item = controller.recordings.single;
+        final File source = File(item.filePath);
+        final List<int> bytes = await source.readAsBytes();
 
-      // Fail once, so there is a banner on screen to clear.
-      await source.delete();
-      await controller.openSource(item.id);
-      expect(controller.error, isNotNull);
+        // Fail once, so there is a banner on screen to clear.
+        await source.delete();
+        await controller.openSource(item.id);
+        expect(controller.error, isNotNull);
 
-      // Then succeed. Clearing `_error` is worthless on its own: the banner is
-      // drawn from a build, so the notify is what actually takes it down.
-      await source.writeAsBytes(bytes);
-      int notifications = 0;
-      controller.addListener(() => notifications++);
-      await controller.openSource(item.id);
+        // Then succeed. Clearing `_error` is worthless on its own: the banner is
+        // drawn from a build, so the notify is what actually takes it down.
+        await source.writeAsBytes(bytes);
+        int notifications = 0;
+        controller.addListener(() => notifications++);
+        await controller.openSource(item.id);
 
-      expect(controller.error, isNull);
-      expect(notifications, greaterThan(0));
-    });
+        expect(controller.error, isNull);
+        expect(notifications, greaterThan(0));
+      },
+    );
   });
 }

@@ -19,18 +19,18 @@ class _FakeRepo extends RecordingsRepository {
 }
 
 Recording _seed() => Recording(
-      id: 'r1',
-      filePath: '/tmp/r1.m4a',
-      createdAt: DateTime.utc(2026, 7, 25),
-      durationMs: 1000,
-      status: RecordingStatus.completed,
-      transcript: 'oryginalny tekst',
-    );
+  id: 'r1',
+  filePath: '/tmp/r1.m4a',
+  createdAt: DateTime.utc(2026, 7, 25),
+  durationMs: 1000,
+  status: RecordingStatus.completed,
+  transcript: 'oryginalny tekst',
+);
 
 RecordingsController _controller(_FakeRepo repo) => RecordingsController(
-      repository: repo,
-      transcriptionService: const DisabledTranscriptionService(),
-    );
+  repository: repo,
+  transcriptionService: const DisabledTranscriptionService(),
+);
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
@@ -42,7 +42,9 @@ void main() {
     'xyz.luan/audioplayers.global',
   ]) {
     messenger.setMockMethodCallHandler(
-        MethodChannel(name), (MethodCall call) async => null);
+      MethodChannel(name),
+      (MethodCall call) async => null,
+    );
   }
 
   group('editTranscript', () {

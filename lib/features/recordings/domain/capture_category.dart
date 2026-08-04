@@ -37,12 +37,12 @@ enum CaptureCategory {
 
   /// The card chip and the edit-sheet dropdown label.
   String get label => switch (this) {
-        CaptureCategory.note => 'NOTE',
-        CaptureCategory.task => 'TASK',
-        CaptureCategory.agentTask => 'AGENT TASK',
-        CaptureCategory.idea => 'IDEA',
-        CaptureCategory.meetingNote => 'MEETING',
-        CaptureCategory.researchLead => 'RESEARCH',
-        CaptureCategory.capture => 'CAPTURE',
-      };
+    CaptureCategory.note => 'NOTE',
+    CaptureCategory.task => 'TASK',
+    CaptureCategory.agentTask => 'AGENT TASK',
+    CaptureCategory.idea => 'IDEA',
+    CaptureCategory.meetingNote => 'MEETING',
+    CaptureCategory.researchLead => 'RESEARCH',
+    CaptureCategory.capture => 'CAPTURE',
+  };
 }

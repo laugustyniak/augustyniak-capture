@@ -30,13 +30,13 @@ enum ShortcutAction {
       ShortcutAction.values.asNameMap()[name];
 
   String get label => switch (this) {
-        ShortcutAction.showWindow => 'Show window',
-        ShortcutAction.toggleRecording => 'Start/stop recording',
-        ShortcutAction.newTextNote => 'New note',
-        ShortcutAction.uploadAudio => 'Upload audio file',
-        ShortcutAction.uploadImage => 'Upload image',
-        ShortcutAction.uploadVideo => 'Upload video',
-      };
+    ShortcutAction.showWindow => 'Show window',
+    ShortcutAction.toggleRecording => 'Start/stop recording',
+    ShortcutAction.newTextNote => 'New note',
+    ShortcutAction.uploadAudio => 'Upload audio file',
+    ShortcutAction.uploadImage => 'Upload image',
+    ShortcutAction.uploadVideo => 'Upload video',
+  };
 
   /// Whether the action opens UI (a sheet or a file dialog) and therefore needs
   /// the window raised *before* it runs.

@@ -21,9 +21,9 @@ enum ProfileKind {
 
   /// Section header in the Models tab.
   String get label => switch (this) {
-        ProfileKind.transcription => 'TRANSCRIPTION PROFILES',
-        ProfileKind.enrichment => 'ENRICHMENT PROFILES',
-      };
+    ProfileKind.transcription => 'TRANSCRIPTION PROFILES',
+    ProfileKind.enrichment => 'ENRICHMENT PROFILES',
+  };
 }
 
 /// A named transcription endpoint the user can switch between.
@@ -145,14 +145,14 @@ class ProviderProfile {
   }
 
   Map<String, dynamic> toJson() => <String, dynamic>{
-        'id': id,
-        'name': name,
-        'endpoint': endpoint,
-        'kind': kind.name,
-        'model': model,
-        'language': language,
-        'bearerToken': bearerToken,
-      };
+    'id': id,
+    'name': name,
+    'endpoint': endpoint,
+    'kind': kind.name,
+    'model': model,
+    'language': language,
+    'bearerToken': bearerToken,
+  };
 
   factory ProviderProfile.fromJson(Map<String, dynamic> json) {
     return ProviderProfile(
@@ -206,14 +206,22 @@ class ProviderPreset {
       name: 'OpenAI Whisper',
       endpoint: 'https://api.openai.com/v1/audio/transcriptions',
       model: 'whisper-1',
-      models: <String>['whisper-1', 'gpt-4o-transcribe', 'gpt-4o-mini-transcribe'],
+      models: <String>[
+        'whisper-1',
+        'gpt-4o-transcribe',
+        'gpt-4o-mini-transcribe',
+      ],
       tokenHint: 'OpenAI API key (sk-…)',
     ),
     ProviderPreset(
       name: 'OpenAI GPT-4o transcribe',
       endpoint: 'https://api.openai.com/v1/audio/transcriptions',
       model: 'gpt-4o-transcribe',
-      models: <String>['gpt-4o-transcribe', 'gpt-4o-mini-transcribe', 'whisper-1'],
+      models: <String>[
+        'gpt-4o-transcribe',
+        'gpt-4o-mini-transcribe',
+        'whisper-1',
+      ],
       tokenHint: 'OpenAI API key (sk-…)',
     ),
     ProviderPreset(
@@ -227,10 +235,7 @@ class ProviderPreset {
       name: 'Local whisper.cpp',
       endpoint: 'http://localhost:8080/inference',
     ),
-    ProviderPreset(
-      name: 'Custom endpoint',
-      endpoint: '',
-    ),
+    ProviderPreset(name: 'Custom endpoint', endpoint: ''),
     // Enrichment presets double as OCR providers: the active enrichment
     // profile also powers image OCR, so every model listed here should be
     // vision-capable (or the provider ignores images gracefully).

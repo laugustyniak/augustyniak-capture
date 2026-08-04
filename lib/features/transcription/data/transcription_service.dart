@@ -39,8 +39,10 @@ class HttpWhisperTranscriptionService implements TranscriptionService {
 
   @override
   Future<String> transcribe(File audioFile) async {
-    final http.MultipartRequest request = http.MultipartRequest('POST', endpoint)
-      ..files.add(await http.MultipartFile.fromPath('file', audioFile.path));
+    final http.MultipartRequest request = http.MultipartRequest(
+      'POST',
+      endpoint,
+    )..files.add(await http.MultipartFile.fromPath('file', audioFile.path));
 
     if (model != null && model!.isNotEmpty) {
       request.fields['model'] = model!;
@@ -57,7 +59,9 @@ class HttpWhisperTranscriptionService implements TranscriptionService {
     final String body = await response.stream.bytesToString();
 
     if (response.statusCode < 200 || response.statusCode >= 300) {
-      throw HttpException('Transcription failed (${response.statusCode}): $body');
+      throw HttpException(
+        'Transcription failed (${response.statusCode}): $body',
+      );
     }
 
     final dynamic decoded = jsonDecode(body);
@@ -68,7 +72,9 @@ class HttpWhisperTranscriptionService implements TranscriptionService {
       }
     }
 
-    throw const FormatException('Response does not contain text or transcript.');
+    throw const FormatException(
+      'Response does not contain text or transcript.',
+    );
   }
 }
 

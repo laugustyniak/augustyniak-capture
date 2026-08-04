@@ -127,8 +127,7 @@ void main() {
     controller.dispose();
   });
 
-  test('image upload is indexed then fails cleanly, source preserved',
-      () async {
+  test('image upload is indexed then fails cleanly, source preserved', () async {
     final File source = File(p.join(pickDir.path, 'photo.png'))
       ..writeAsStringSync('PNGDATA');
     final _FakeRepository repo = _FakeRepository(appDir);
@@ -153,50 +152,54 @@ void main() {
     controller.dispose();
   });
 
-  test('audio upload with no active provider fails as not-configured',
-      () async {
-    final File source = File(p.join(pickDir.path, 'clip.mp3'))
-      ..writeAsStringSync('SOUND');
-    final _FakeRepository repo = _FakeRepository(appDir);
-    final RecordingsController controller = buildController(
-      repo,
-      picked: PickedMedia(file: source, mimeType: 'audio/mpeg'),
-    );
+  test(
+    'audio upload with no active provider fails as not-configured',
+    () async {
+      final File source = File(p.join(pickDir.path, 'clip.mp3'))
+        ..writeAsStringSync('SOUND');
+      final _FakeRepository repo = _FakeRepository(appDir);
+      final RecordingsController controller = buildController(
+        repo,
+        picked: PickedMedia(file: source, mimeType: 'audio/mpeg'),
+      );
 
-    await controller.addUpload(CaptureType.audioUpload);
-    await controller.waitForProcessing();
-    final Recording item = controller.recordings.single;
-    expect(item.type, CaptureType.audioUpload);
-    expect(item.status, RecordingStatus.failed);
-    expect(File(item.filePath).existsSync(), isTrue);
-    controller.dispose();
-  });
+      await controller.addUpload(CaptureType.audioUpload);
+      await controller.waitForProcessing();
+      final Recording item = controller.recordings.single;
+      expect(item.type, CaptureType.audioUpload);
+      expect(item.status, RecordingStatus.failed);
+      expect(File(item.filePath).existsSync(), isTrue);
+      controller.dispose();
+    },
+  );
 
-  test('disposing mid-processing does not throw from the unawaited drain',
-      () async {
-    final File source = File(p.join(pickDir.path, 'original.mp3'))
-      ..writeAsStringSync('SOUND');
-    final _FakeRepository repo = _FakeRepository(appDir);
-    final _GatedTranscriptionService gated = _GatedTranscriptionService();
-    final RecordingsController controller = buildController(
-      repo,
-      picked: PickedMedia(file: source, mimeType: 'audio/mpeg'),
-      service: gated,
-    );
+  test(
+    'disposing mid-processing does not throw from the unawaited drain',
+    () async {
+      final File source = File(p.join(pickDir.path, 'original.mp3'))
+        ..writeAsStringSync('SOUND');
+      final _FakeRepository repo = _FakeRepository(appDir);
+      final _GatedTranscriptionService gated = _GatedTranscriptionService();
+      final RecordingsController controller = buildController(
+        repo,
+        picked: PickedMedia(file: source, mimeType: 'audio/mpeg'),
+        service: gated,
+      );
 
-    // Processing is enqueued and drained unawaited, so the job is parked inside
-    // the processor when the page tears the controller down.
-    await controller.addUpload(CaptureType.audioUpload);
-    controller.dispose();
-    gated.gate.complete();
+      // Processing is enqueued and drained unawaited, so the job is parked inside
+      // the processor when the page tears the controller down.
+      await controller.addUpload(CaptureType.audioUpload);
+      controller.dispose();
+      gated.gate.complete();
 
-    // The drain now resumes against a disposed controller. Its status write
-    // must still land on disk without notifying a dead ChangeNotifier — an
-    // unhandled async error here fails the test.
-    await pumpEventQueue();
+      // The drain now resumes against a disposed controller. Its status write
+      // must still land on disk without notifying a dead ChangeNotifier — an
+      // unhandled async error here fails the test.
+      await pumpEventQueue();
 
-    expect(repo.saved, isNotEmpty);
-  });
+      expect(repo.saved, isNotEmpty);
+    },
+  );
 
   test('index write follows the copy — the ordering invariant', () async {
     final File source = File(p.join(pickDir.path, 'original.mp3'))

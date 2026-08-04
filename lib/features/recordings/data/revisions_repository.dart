@@ -113,8 +113,9 @@ class RevisionsRepository {
 
   Future<File> _file() async {
     final Directory appDirectory = await getApplicationDocumentsDirectory();
-    final Directory directory =
-        Directory(p.join(appDirectory.path, 'recordings'));
+    final Directory directory = Directory(
+      p.join(appDirectory.path, 'recordings'),
+    );
     if (!await directory.exists()) {
       await directory.create(recursive: true);
     }

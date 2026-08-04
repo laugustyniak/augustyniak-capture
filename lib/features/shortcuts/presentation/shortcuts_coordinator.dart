@@ -23,12 +23,12 @@ class ShortcutsCoordinator {
     HotkeyRegistrar registrar = const NoopHotkeyRegistrar(),
     WindowPresenter windowPresenter = const NoopWindowPresenter(),
     LogSink logSink = const NoopLogSink(),
-  })  : _recordings = recordings,
-        _composeTextNote = composeTextNote,
-        _revealQueue = revealQueue,
-        _registrar = registrar,
-        _windowPresenter = windowPresenter,
-        _logSink = logSink;
+  }) : _recordings = recordings,
+       _composeTextNote = composeTextNote,
+       _revealQueue = revealQueue,
+       _registrar = registrar,
+       _windowPresenter = windowPresenter,
+       _logSink = logSink;
 
   final RecordingsController _recordings;
   final Future<void> Function() _composeTextNote;
@@ -68,8 +68,7 @@ class ShortcutsCoordinator {
   /// audio parameter) never churn the OS hotkey table.
   Future<Set<ShortcutAction>> apply(
     Map<ShortcutAction, HotkeyBinding> bindings,
-  ) =>
-      _serial(() => _apply(bindings));
+  ) => _serial(() => _apply(bindings));
 
   Future<Set<ShortcutAction>> _apply(
     Map<ShortcutAction, HotkeyBinding> bindings,
@@ -91,23 +90,23 @@ class ShortcutsCoordinator {
   /// rebind the combination that is currently bound would fire its action
   /// instead of being captured.
   Future<void> suspend() => _serial(() async {
-        if (_disposed || _suspended) return;
-        _suspended = true;
-        try {
-          await _registrar.unregisterAll();
-        } catch (exception) {
-          _logSink.log(
-            'Failed to release shortcuts: $exception',
-            level: LogLevel.error,
-          );
-        }
-      });
+    if (_disposed || _suspended) return;
+    _suspended = true;
+    try {
+      await _registrar.unregisterAll();
+    } catch (exception) {
+      _logSink.log(
+        'Failed to release shortcuts: $exception',
+        level: LogLevel.error,
+      );
+    }
+  });
 
   Future<void> resume() => _serial(() async {
-        if (_disposed || !_suspended) return;
-        _suspended = false;
-        await _register();
-      });
+    if (_disposed || !_suspended) return;
+    _suspended = false;
+    await _register();
+  });
 
   Future<void> _register() async {
     final Map<ShortcutAction, HotkeyBinding>? bindings = _applied;

@@ -37,12 +37,11 @@ HotkeyBinding _binding(
     HotkeyModifier.alt,
     HotkeyModifier.shift,
   },
-}) =>
-    HotkeyBinding.fromKeys(
-      physical: physical,
-      logical: logical,
-      modifiers: modifiers,
-    );
+}) => HotkeyBinding.fromKeys(
+  physical: physical,
+  logical: logical,
+  modifiers: modifiers,
+);
 
 void main() {
   group('HotkeyBinding', () {
@@ -92,7 +91,9 @@ void main() {
 
     test('a truncated entry loads as unbound rather than throwing', () {
       expect(
-        HotkeyBinding.fromJson(<String, dynamic>{'modifiers': <String>['alt']}),
+        HotkeyBinding.fromJson(<String, dynamic>{
+          'modifiers': <String>['alt'],
+        }),
         isNull,
       );
     });
@@ -150,26 +151,34 @@ void main() {
       // it a keysym it is not listening for. It binds, the grab is taken, the
       // callback never arrives — the press vanishes with no error anywhere.
       expect(
-        _binding(PhysicalKeyboardKey.keyA, LogicalKeyboardKey.keyA)
-            .isUnsupportedOnLinux,
+        _binding(
+          PhysicalKeyboardKey.keyA,
+          LogicalKeyboardKey.keyA,
+        ).isUnsupportedOnLinux,
         isTrue,
       );
       expect(
-        _binding(PhysicalKeyboardKey.digit1, LogicalKeyboardKey.digit1)
-            .isUnsupportedOnLinux,
+        _binding(
+          PhysicalKeyboardKey.digit1,
+          LogicalKeyboardKey.digit1,
+        ).isUnsupportedOnLinux,
         isTrue,
       );
 
       // No shifted keysym, so these survive Shift — all verified firing against
       // keybinder 0.3.2.
       expect(
-        _binding(PhysicalKeyboardKey.space, LogicalKeyboardKey.space)
-            .isUnsupportedOnLinux,
+        _binding(
+          PhysicalKeyboardKey.space,
+          LogicalKeyboardKey.space,
+        ).isUnsupportedOnLinux,
         isFalse,
       );
       expect(
-        _binding(PhysicalKeyboardKey.f9, LogicalKeyboardKey.f9)
-            .isUnsupportedOnLinux,
+        _binding(
+          PhysicalKeyboardKey.f9,
+          LogicalKeyboardKey.f9,
+        ).isUnsupportedOnLinux,
         isFalse,
       );
 
@@ -194,8 +203,11 @@ void main() {
       for (final MapEntry<ShortcutAction, HotkeyBinding> entry
           in ShortcutDefaults.bindings.entries) {
         expect(entry.value.isValid, isTrue, reason: entry.key.name);
-        expect(entry.value.isUnsupportedOnLinux, isFalse,
-            reason: entry.key.name);
+        expect(
+          entry.value.isUnsupportedOnLinux,
+          isFalse,
+          reason: entry.key.name,
+        );
       }
     });
 
@@ -218,33 +230,43 @@ void main() {
 
       expect(settings.hasCustomShortcuts, isFalse);
       expect(settings.shortcuts, ShortcutDefaults.bindings);
-      expect(settings.shortcuts[ShortcutAction.toggleRecording]?.label,
-          'Ctrl + Alt + R');
+      expect(
+        settings.shortcuts[ShortcutAction.toggleRecording]?.label,
+        'Ctrl + Alt + R',
+      );
       // Untouched defaults are not written back, so a later build can still ship
       // a default for an action that does not exist yet.
       expect(settings.toJson().containsKey('shortcuts'), isFalse);
     });
 
-    test('a stored map is authoritative — a cleared shortcut stays cleared', () {
-      final AppSettings edited = AppSettings.empty.copyWith(
-        shortcuts: <ShortcutAction, HotkeyBinding>{
-          ShortcutAction.showWindow:
-              _binding(PhysicalKeyboardKey.keyA, LogicalKeyboardKey.keyA),
-        },
-      );
+    test(
+      'a stored map is authoritative — a cleared shortcut stays cleared',
+      () {
+        final AppSettings edited = AppSettings.empty.copyWith(
+          shortcuts: <ShortcutAction, HotkeyBinding>{
+            ShortcutAction.showWindow: _binding(
+              PhysicalKeyboardKey.keyA,
+              LogicalKeyboardKey.keyA,
+            ),
+          },
+        );
 
-      final AppSettings restored = AppSettings.fromJson(
-        jsonDecode(jsonEncode(edited.toJson())) as Map<String, dynamic>,
-      );
+        final AppSettings restored = AppSettings.fromJson(
+          jsonDecode(jsonEncode(edited.toJson())) as Map<String, dynamic>,
+        );
 
-      expect(restored.hasCustomShortcuts, isTrue);
-      expect(restored.shortcuts.keys, <ShortcutAction>[ShortcutAction.showWindow]);
-      expect(restored.shortcuts[ShortcutAction.toggleRecording], isNull);
-    });
+        expect(restored.hasCustomShortcuts, isTrue);
+        expect(restored.shortcuts.keys, <ShortcutAction>[
+          ShortcutAction.showWindow,
+        ]);
+        expect(restored.shortcuts[ShortcutAction.toggleRecording], isNull);
+      },
+    );
 
     test('an empty stored map means every shortcut is off', () {
-      final AppSettings none = AppSettings.empty
-          .copyWith(shortcuts: <ShortcutAction, HotkeyBinding>{});
+      final AppSettings none = AppSettings.empty.copyWith(
+        shortcuts: <ShortcutAction, HotkeyBinding>{},
+      );
       final AppSettings restored = AppSettings.fromJson(
         jsonDecode(jsonEncode(none.toJson())) as Map<String, dynamic>,
       );
@@ -261,13 +283,16 @@ void main() {
             'logicalKeyId': 1,
             'modifiers': <String>['alt'],
           },
-          'showWindow':
-              _binding(PhysicalKeyboardKey.keyA, LogicalKeyboardKey.keyA)
-                  .toJson(),
+          'showWindow': _binding(
+            PhysicalKeyboardKey.keyA,
+            LogicalKeyboardKey.keyA,
+          ).toJson(),
         },
       });
 
-      expect(restored.shortcuts.keys, <ShortcutAction>[ShortcutAction.showWindow]);
+      expect(restored.shortcuts.keys, <ShortcutAction>[
+        ShortcutAction.showWindow,
+      ]);
     });
   });
 
@@ -292,26 +317,35 @@ void main() {
 
       await controller.setShortcut(ShortcutAction.uploadImage, binding);
 
-      expect(controller.settings.shortcuts[ShortcutAction.uploadImage], binding);
+      expect(
+        controller.settings.shortcuts[ShortcutAction.uploadImage],
+        binding,
+      );
       // The defaults it started from are now written down too, not implied.
       final AppSettings persisted = repository.storedSettings!;
       expect(persisted.hasCustomShortcuts, isTrue);
       expect(persisted.shortcuts[ShortcutAction.toggleRecording], isNotNull);
     });
 
-    test('binding a combination takes it away from the action that had it',
-        () async {
-      final HotkeyBinding recordDefault =
-          controller.settings.shortcuts[ShortcutAction.toggleRecording]!;
+    test(
+      'binding a combination takes it away from the action that had it',
+      () async {
+        final HotkeyBinding recordDefault =
+            controller.settings.shortcuts[ShortcutAction.toggleRecording]!;
 
-      await controller.setShortcut(ShortcutAction.uploadVideo, recordDefault);
+        await controller.setShortcut(ShortcutAction.uploadVideo, recordDefault);
 
-      expect(controller.settings.shortcuts[ShortcutAction.uploadVideo],
-          recordDefault);
-      // Two registrations of one combination would let the OS pick a winner.
-      expect(controller.settings.shortcuts[ShortcutAction.toggleRecording],
-          isNull);
-    });
+        expect(
+          controller.settings.shortcuts[ShortcutAction.uploadVideo],
+          recordDefault,
+        );
+        // Two registrations of one combination would let the OS pick a winner.
+        expect(
+          controller.settings.shortcuts[ShortcutAction.toggleRecording],
+          isNull,
+        );
+      },
+    );
 
     test('a modifier-less binding is refused outright', () async {
       await controller.setShortcut(
@@ -326,20 +360,26 @@ void main() {
       expect(controller.settings.hasCustomShortcuts, isFalse);
     });
 
-    test('clearShortcut survives a reload, resetShortcuts brings defaults back',
-        () async {
-      await controller.clearShortcut(ShortcutAction.toggleRecording);
+    test(
+      'clearShortcut survives a reload, resetShortcuts brings defaults back',
+      () async {
+        await controller.clearShortcut(ShortcutAction.toggleRecording);
 
-      final SettingsController reloaded =
-          SettingsController(repository: repository);
-      await reloaded.initialize();
-      expect(reloaded.settings.shortcuts[ShortcutAction.toggleRecording], isNull);
-      reloaded.dispose();
+        final SettingsController reloaded = SettingsController(
+          repository: repository,
+        );
+        await reloaded.initialize();
+        expect(
+          reloaded.settings.shortcuts[ShortcutAction.toggleRecording],
+          isNull,
+        );
+        reloaded.dispose();
 
-      await controller.resetShortcuts();
-      expect(controller.settings.hasCustomShortcuts, isFalse);
-      expect(controller.settings.shortcuts, ShortcutDefaults.bindings);
-    });
+        await controller.resetShortcuts();
+        expect(controller.settings.hasCustomShortcuts, isFalse);
+        expect(controller.settings.shortcuts, ShortcutDefaults.bindings);
+      },
+    );
   });
 
   group('LinuxHotkeyRegistrar.gdkKeyval', () {
@@ -355,12 +395,30 @@ void main() {
 
     test('printable ASCII passes through, non-printables use the table', () {
       // GDK keyvals are ASCII in this range, so `a` is 0x61 on both sides.
-      expect(LinuxHotkeyRegistrar.gdkKeyval(LogicalKeyboardKey.keyA.keyId), 0x61);
-      expect(LinuxHotkeyRegistrar.gdkKeyval(LogicalKeyboardKey.digit1.keyId), 0x31);
-      expect(LinuxHotkeyRegistrar.gdkKeyval(LogicalKeyboardKey.f1.keyId), 0xffbe);
-      expect(LinuxHotkeyRegistrar.gdkKeyval(LogicalKeyboardKey.f12.keyId), 0xffc9);
-      expect(LinuxHotkeyRegistrar.gdkKeyval(LogicalKeyboardKey.enter.keyId), 0xff0d);
-      expect(LinuxHotkeyRegistrar.gdkKeyval(LogicalKeyboardKey.delete.keyId), 0xffff);
+      expect(
+        LinuxHotkeyRegistrar.gdkKeyval(LogicalKeyboardKey.keyA.keyId),
+        0x61,
+      );
+      expect(
+        LinuxHotkeyRegistrar.gdkKeyval(LogicalKeyboardKey.digit1.keyId),
+        0x31,
+      );
+      expect(
+        LinuxHotkeyRegistrar.gdkKeyval(LogicalKeyboardKey.f1.keyId),
+        0xffbe,
+      );
+      expect(
+        LinuxHotkeyRegistrar.gdkKeyval(LogicalKeyboardKey.f12.keyId),
+        0xffc9,
+      );
+      expect(
+        LinuxHotkeyRegistrar.gdkKeyval(LogicalKeyboardKey.enter.keyId),
+        0xff0d,
+      );
+      expect(
+        LinuxHotkeyRegistrar.gdkKeyval(LogicalKeyboardKey.delete.keyId),
+        0xffff,
+      );
     });
 
     test('an unmapped key is null so it can be rejected, not guessed', () {

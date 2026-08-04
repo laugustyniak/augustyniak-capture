@@ -67,35 +67,39 @@ void main() {
     expect(File(item.filePath).readAsStringSync(), 'PNGDATA');
   });
 
-  test('derives the extension from the capture type when mime is absent',
-      () async {
-    final File source = writePicked('clip.bin', 'AUDIO');
+  test(
+    'derives the extension from the capture type when mime is absent',
+    () async {
+      final File source = writePicked('clip.bin', 'AUDIO');
 
-    final Recording item = await importer.importFile(
-      id: 'up1',
-      type: CaptureType.audioUpload,
-      source: source,
-      createdAt: DateTime.utc(2026),
-    );
+      final Recording item = await importer.importFile(
+        id: 'up1',
+        type: CaptureType.audioUpload,
+        source: source,
+        createdAt: DateTime.utc(2026),
+      );
 
-    // audioUpload with no mime falls back to m4a.
-    expect(p.basename(item.filePath), 'up1.m4a');
-  });
+      // audioUpload with no mime falls back to m4a.
+      expect(p.basename(item.filePath), 'up1.m4a');
+    },
+  );
 
-  test('leaves the picked source file in place (never moves or deletes it)',
-      () async {
-    final File source = writePicked('note.mp3', 'SOUND');
+  test(
+    'leaves the picked source file in place (never moves or deletes it)',
+    () async {
+      final File source = writePicked('note.mp3', 'SOUND');
 
-    await importer.importFile(
-      id: 'k',
-      type: CaptureType.audioUpload,
-      source: source,
-      mimeType: 'audio/mpeg',
-      createdAt: DateTime.utc(2026),
-    );
+      await importer.importFile(
+        id: 'k',
+        type: CaptureType.audioUpload,
+        source: source,
+        mimeType: 'audio/mpeg',
+        createdAt: DateTime.utc(2026),
+      );
 
-    expect(source.existsSync(), isTrue, reason: 'source must survive import');
-  });
+      expect(source.existsSync(), isTrue, reason: 'source must survive import');
+    },
+  );
 
   test('throws on a missing source and indexes nothing', () async {
     final File missing = File(p.join(pickDir.path, 'gone.png'));

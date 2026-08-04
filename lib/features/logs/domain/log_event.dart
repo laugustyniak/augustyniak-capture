@@ -21,12 +21,12 @@ class LogEvent {
   final String? recordingId;
 
   Map<String, dynamic> toJson() => <String, dynamic>{
-        'id': id,
-        'timestamp': timestamp.toIso8601String(),
-        'level': level.name,
-        'message': message,
-        'recordingId': recordingId,
-      };
+    'id': id,
+    'timestamp': timestamp.toIso8601String(),
+    'level': level.name,
+    'message': message,
+    'recordingId': recordingId,
+  };
 
   factory LogEvent.fromJson(Map<String, dynamic> json) {
     return LogEvent(
@@ -54,5 +54,9 @@ class NoopLogSink implements LogSink {
   const NoopLogSink();
 
   @override
-  void log(String message, {LogLevel level = LogLevel.info, String? recordingId}) {}
+  void log(
+    String message, {
+    LogLevel level = LogLevel.info,
+    String? recordingId,
+  }) {}
 }

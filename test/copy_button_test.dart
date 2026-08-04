@@ -13,11 +13,12 @@ void main() {
   setUp(() {
     platformCalls = <MethodCall>[];
     TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
-        .setMockMethodCallHandler(SystemChannels.platform,
-            (MethodCall call) async {
-      platformCalls.add(call);
-      return null;
-    });
+        .setMockMethodCallHandler(SystemChannels.platform, (
+          MethodCall call,
+        ) async {
+          platformCalls.add(call);
+          return null;
+        });
   });
 
   tearDown(() {
@@ -28,7 +29,9 @@ void main() {
   Future<void> pumpButton(WidgetTester tester, String text) {
     return tester.pumpWidget(
       MaterialApp(
-        home: Scaffold(body: Center(child: CopyButton(text: text))),
+        home: Scaffold(
+          body: Center(child: CopyButton(text: text)),
+        ),
       ),
     );
   }
@@ -90,7 +93,9 @@ void main() {
     await tester.pump();
 
     // Scroll/rebuild the button out of the tree while the reset is pending.
-    await tester.pumpWidget(const MaterialApp(home: Scaffold(body: SizedBox())));
+    await tester.pumpWidget(
+      const MaterialApp(home: Scaffold(body: SizedBox())),
+    );
     await tester.pump(const Duration(seconds: 2));
 
     expect(tester.takeException(), isNull);

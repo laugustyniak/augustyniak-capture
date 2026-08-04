@@ -54,23 +54,29 @@ void main() {
     'xyz.luan/audioplayers.global',
   ]) {
     messenger.setMockMethodCallHandler(
-        MethodChannel(name), (MethodCall call) async => null);
+      MethodChannel(name),
+      (MethodCall call) async => null,
+    );
   }
 
   group('OcrProcessor', () {
-    test('reads the image via the current service and returns its text',
-        () async {
-      final OcrProcessor processor = OcrProcessor(() => const _StubOcr('OCR!'));
-      final Recording item = Recording(
-        id: 'i',
-        filePath: '/x/i.jpg',
-        createdAt: DateTime.utc(2026),
-        durationMs: 0,
-        status: RecordingStatus.pendingTranscription,
-        type: CaptureType.image,
-      );
-      expect(await processor.process(item), 'OCR!');
-    });
+    test(
+      'reads the image via the current service and returns its text',
+      () async {
+        final OcrProcessor processor = OcrProcessor(
+          () => const _StubOcr('OCR!'),
+        );
+        final Recording item = Recording(
+          id: 'i',
+          filePath: '/x/i.jpg',
+          createdAt: DateTime.utc(2026),
+          durationMs: 0,
+          status: RecordingStatus.pendingTranscription,
+          type: CaptureType.image,
+        );
+        expect(await processor.process(item), 'OCR!');
+      },
+    );
   });
 
   group('DisabledOcrService', () {
@@ -91,8 +97,9 @@ void main() {
 
     test('missing image file throws FileSystemException', () {
       expect(
-        () => const TesseractOcrService()
-            .extractText(File(p.join(tmp.path, 'nope.png'))),
+        () => const TesseractOcrService().extractText(
+          File(p.join(tmp.path, 'nope.png')),
+        ),
         throwsA(isA<FileSystemException>()),
       );
     });
@@ -101,8 +108,9 @@ void main() {
       final File img = File(p.join(tmp.path, 'x.png'));
       await img.writeAsBytes(<int>[1, 2, 3]);
       expect(
-        () => const TesseractOcrService(executable: 'tesseract_definitely_absent')
-            .extractText(img),
+        () => const TesseractOcrService(
+          executable: 'tesseract_definitely_absent',
+        ).extractText(img),
         throwsA(isA<ProcessException>()),
       );
     });
@@ -110,8 +118,7 @@ void main() {
 
   group('image ingestion routes to OCR (through the real upload path)', () {
     test('a picked image is imported and OCR text lands on the item', () async {
-      final Directory tmp =
-          await Directory.systemTemp.createTemp('ocr_ingest');
+      final Directory tmp = await Directory.systemTemp.createTemp('ocr_ingest');
       final File src = File(p.join(tmp.path, 'photo.png'));
       await src.writeAsBytes(<int>[0x89, 0x50, 0x4e, 0x47, 1, 2, 3]);
 
@@ -119,9 +126,7 @@ void main() {
         repository: _FakeRepo(tmp),
         transcriptionService: const DisabledTranscriptionService(),
         ocrService: const _StubOcr('rozpoznany tekst'),
-        mediaPicker: _FakePicker(
-          PickedMedia(file: src, mimeType: 'image/png'),
-        ),
+        mediaPicker: _FakePicker(PickedMedia(file: src, mimeType: 'image/png')),
       );
       addTearDown(controller.dispose);
 
@@ -135,31 +140,32 @@ void main() {
       expect(File(item.filePath).existsSync(), isTrue);
     });
 
-    test('OCR failure leaves the image failed with the source intact',
-        () async {
-      final Directory tmp =
-          await Directory.systemTemp.createTemp('ocr_fail');
-      final File src = File(p.join(tmp.path, 'photo.png'));
-      await src.writeAsBytes(<int>[0x89, 0x50, 0x4e, 0x47, 1, 2, 3]);
+    test(
+      'OCR failure leaves the image failed with the source intact',
+      () async {
+        final Directory tmp = await Directory.systemTemp.createTemp('ocr_fail');
+        final File src = File(p.join(tmp.path, 'photo.png'));
+        await src.writeAsBytes(<int>[0x89, 0x50, 0x4e, 0x47, 1, 2, 3]);
 
-      final RecordingsController controller = RecordingsController(
-        repository: _FakeRepo(tmp),
-        transcriptionService: const DisabledTranscriptionService(),
-        ocrService: const _ThrowingOcr(),
-        mediaPicker: _FakePicker(
-          PickedMedia(file: src, mimeType: 'image/png'),
-        ),
-      );
-      addTearDown(controller.dispose);
+        final RecordingsController controller = RecordingsController(
+          repository: _FakeRepo(tmp),
+          transcriptionService: const DisabledTranscriptionService(),
+          ocrService: const _ThrowingOcr(),
+          mediaPicker: _FakePicker(
+            PickedMedia(file: src, mimeType: 'image/png'),
+          ),
+        );
+        addTearDown(controller.dispose);
 
-      await controller.addUpload(CaptureType.image);
-      await controller.waitForProcessing();
+        await controller.addUpload(CaptureType.image);
+        await controller.waitForProcessing();
 
-      final Recording item = controller.recordings.single;
-      expect(item.status, RecordingStatus.failed);
-      expect(item.error, isNotNull);
-      expect(File(item.filePath).existsSync(), isTrue);
-    });
+        final Recording item = controller.recordings.single;
+        expect(item.status, RecordingStatus.failed);
+        expect(item.error, isNotNull);
+        expect(File(item.filePath).existsSync(), isTrue);
+      },
+    );
 
     test('a swapped OCR service only affects the next job', () async {
       final Directory tmp = await Directory.systemTemp.createTemp('ocr_swap');
@@ -170,9 +176,7 @@ void main() {
         repository: _FakeRepo(tmp),
         transcriptionService: const DisabledTranscriptionService(),
         ocrService: const _StubOcr('first engine'),
-        mediaPicker: _FakePicker(
-          PickedMedia(file: src, mimeType: 'image/png'),
-        ),
+        mediaPicker: _FakePicker(PickedMedia(file: src, mimeType: 'image/png')),
       );
       addTearDown(controller.dispose);
 

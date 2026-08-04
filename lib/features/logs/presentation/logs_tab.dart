@@ -30,7 +30,8 @@ class _LogsTabState extends State<LogsTab> {
         children: <Widget>[
           ConsoleHeader(
             title: 'Logs',
-            trailing: '${store.events.length} '
+            trailing:
+                '${store.events.length} '
                 '${store.events.length == 1 ? 'event' : 'events'}',
           ),
           const SizedBox(height: 18),
@@ -55,7 +56,8 @@ class _LogsTabState extends State<LogsTab> {
             const EmptyPanel(
               icon: Icons.terminal_outlined,
               title: 'No events.',
-              blurb: 'Record a note — every pipeline step (save, queue, '
+              blurb:
+                  'Record a note — every pipeline step (save, queue, '
                   'transcription, errors) shows up here.',
             )
           else
@@ -93,7 +95,8 @@ class _LogsTabState extends State<LogsTab> {
     final bool confirmed = await confirmDestructive(
       context,
       title: 'Clear logs?',
-      message: 'The event history will be deleted. Recordings and transcripts '
+      message:
+          'The event history will be deleted. Recordings and transcripts '
           'stay untouched.',
       confirmLabel: 'CLEAR',
     );
@@ -159,7 +162,8 @@ class _LogRow extends StatelessWidget {
         onLongPress: () async {
           await Clipboard.setData(
             ClipboardData(
-              text: '${formatDateTime(event.timestamp)} '
+              text:
+                  '${formatDateTime(event.timestamp)} '
                   '[${event.level.name.toUpperCase()}] ${event.message}',
             ),
           );
@@ -241,14 +245,14 @@ class _LogRow extends StatelessWidget {
 }
 
 Color levelColor(LogLevel level) => switch (level) {
-      LogLevel.info => Console.cyan,
-      LogLevel.warn => Console.amber,
-      LogLevel.error => Console.red,
-    };
+  LogLevel.info => Console.cyan,
+  LogLevel.warn => Console.amber,
+  LogLevel.error => Console.red,
+};
 
 String _levelLabel(LogLevel? level) => switch (level) {
-      null => 'ALL',
-      LogLevel.info => 'INFO',
-      LogLevel.warn => 'WARN',
-      LogLevel.error => 'ERROR',
-    };
+  null => 'ALL',
+  LogLevel.info => 'INFO',
+  LogLevel.warn => 'WARN',
+  LogLevel.error => 'ERROR',
+};

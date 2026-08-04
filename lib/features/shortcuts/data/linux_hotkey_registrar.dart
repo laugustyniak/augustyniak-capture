@@ -25,10 +25,12 @@ import '../domain/shortcut_action.dart';
 class LinuxHotkeyRegistrar implements HotkeyRegistrar {
   LinuxHotkeyRegistrar();
 
-  static const MethodChannel _methods =
-      MethodChannel('dev.leanflutter.plugins/hotkey_manager');
-  static const EventChannel _events =
-      EventChannel('dev.leanflutter.plugins/hotkey_manager_event');
+  static const MethodChannel _methods = MethodChannel(
+    'dev.leanflutter.plugins/hotkey_manager',
+  );
+  static const EventChannel _events = EventChannel(
+    'dev.leanflutter.plugins/hotkey_manager_event',
+  );
 
   StreamSubscription<dynamic>? _subscription;
   ShortcutTrigger? _onTriggered;

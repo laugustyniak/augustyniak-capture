@@ -15,11 +15,11 @@ enum HotkeyModifier {
   meta;
 
   String get label => switch (this) {
-        HotkeyModifier.control => 'Ctrl',
-        HotkeyModifier.alt => 'Alt',
-        HotkeyModifier.shift => 'Shift',
-        HotkeyModifier.meta => 'Win',
-      };
+    HotkeyModifier.control => 'Ctrl',
+    HotkeyModifier.alt => 'Alt',
+    HotkeyModifier.shift => 'Shift',
+    HotkeyModifier.meta => 'Win',
+  };
 
   static HotkeyModifier? fromName(String? name) =>
       HotkeyModifier.values.asNameMap()[name];
@@ -87,17 +87,18 @@ class HotkeyBinding {
 
   /// e.g. `Alt + Shift + R`.
   String get label => <String>[
-        for (final HotkeyModifier modifier in HotkeyModifier.values)
-          if (modifiers.contains(modifier)) modifier.label,
-        keyLabel,
-      ].join(' + ');
+    for (final HotkeyModifier modifier in HotkeyModifier.values)
+      if (modifiers.contains(modifier)) modifier.label,
+    keyLabel,
+  ].join(' + ');
 
   String get keyLabel {
     final String? explicit = _explicitLabels[logicalKeyId];
     if (explicit != null) return explicit;
 
-    final LogicalKeyboardKey? key =
-        LogicalKeyboardKey.findKeyByKeyId(logicalKeyId);
+    final LogicalKeyboardKey? key = LogicalKeyboardKey.findKeyByKeyId(
+      logicalKeyId,
+    );
     if (key == null) return _hex;
     final String raw = key.keyLabel.trim();
     // `debugName` is null in release builds, so this last fallback is hex. Any
@@ -172,12 +173,12 @@ class HotkeyBinding {
   };
 
   Map<String, dynamic> toJson() => <String, dynamic>{
-        'usbHidUsage': usbHidUsage,
-        'logicalKeyId': logicalKeyId,
-        'modifiers': modifiers
-            .map((HotkeyModifier modifier) => modifier.name)
-            .toList(),
-      };
+    'usbHidUsage': usbHidUsage,
+    'logicalKeyId': logicalKeyId,
+    'modifiers': modifiers
+        .map((HotkeyModifier modifier) => modifier.name)
+        .toList(),
+  };
 
   /// Returns null for anything unusable — a truncated entry, or one that lost
   /// its modifiers — so a malformed `settings.json` leaves the action unbound
@@ -191,8 +192,9 @@ class HotkeyBinding {
     final Set<HotkeyModifier> modifiers = <HotkeyModifier>{};
     if (rawModifiers is List<dynamic>) {
       for (final Object? entry in rawModifiers) {
-        final HotkeyModifier? modifier =
-            HotkeyModifier.fromName(entry is String ? entry : null);
+        final HotkeyModifier? modifier = HotkeyModifier.fromName(
+          entry is String ? entry : null,
+        );
         if (modifier != null) modifiers.add(modifier);
       }
     }
@@ -215,10 +217,8 @@ class HotkeyBinding {
   // physical key with the same modifiers are the same hotkey to the OS, whatever
   // letter the current layout prints on it.
   @override
-  int get hashCode => Object.hash(
-        usbHidUsage,
-        Object.hashAllUnordered(modifiers),
-      );
+  int get hashCode =>
+      Object.hash(usbHidUsage, Object.hashAllUnordered(modifiers));
 
   @override
   String toString() => 'HotkeyBinding($label)';
@@ -246,24 +246,24 @@ class ShortcutDefaults {
   /// system-wide — stealing one silently is worse than leaving it to the user.
   static final Map<ShortcutAction, HotkeyBinding> bindings =
       Map<ShortcutAction, HotkeyBinding>.unmodifiable(
-    <ShortcutAction, HotkeyBinding>{
-      ShortcutAction.showWindow: HotkeyBinding.fromKeys(
-        physical: PhysicalKeyboardKey.keyA,
-        logical: LogicalKeyboardKey.keyA,
-        modifiers: _controlAlt,
-      ),
-      ShortcutAction.toggleRecording: HotkeyBinding.fromKeys(
-        physical: PhysicalKeyboardKey.keyR,
-        logical: LogicalKeyboardKey.keyR,
-        modifiers: _controlAlt,
-      ),
-      ShortcutAction.newTextNote: HotkeyBinding.fromKeys(
-        physical: PhysicalKeyboardKey.keyN,
-        logical: LogicalKeyboardKey.keyN,
-        modifiers: _controlAlt,
-      ),
-    },
-  );
+        <ShortcutAction, HotkeyBinding>{
+          ShortcutAction.showWindow: HotkeyBinding.fromKeys(
+            physical: PhysicalKeyboardKey.keyA,
+            logical: LogicalKeyboardKey.keyA,
+            modifiers: _controlAlt,
+          ),
+          ShortcutAction.toggleRecording: HotkeyBinding.fromKeys(
+            physical: PhysicalKeyboardKey.keyR,
+            logical: LogicalKeyboardKey.keyR,
+            modifiers: _controlAlt,
+          ),
+          ShortcutAction.newTextNote: HotkeyBinding.fromKeys(
+            physical: PhysicalKeyboardKey.keyN,
+            logical: LogicalKeyboardKey.keyN,
+            modifiers: _controlAlt,
+          ),
+        },
+      );
 
   static const Set<HotkeyModifier> _controlAlt = <HotkeyModifier>{
     HotkeyModifier.control,

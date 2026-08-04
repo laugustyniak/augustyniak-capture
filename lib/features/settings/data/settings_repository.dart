@@ -11,8 +11,9 @@ import '../domain/app_settings.dart';
 class SettingsRepository {
   Future<Directory> _directory() async {
     final Directory appDirectory = await getApplicationDocumentsDirectory();
-    final Directory directory =
-        Directory(p.join(appDirectory.path, 'recordings'));
+    final Directory directory = Directory(
+      p.join(appDirectory.path, 'recordings'),
+    );
     if (!await directory.exists()) {
       await directory.create(recursive: true);
     }
@@ -44,8 +45,9 @@ class SettingsRepository {
 
   Future<void> save(AppSettings settings) async {
     final File file = await settingsFile();
-    final String payload =
-        const JsonEncoder.withIndent('  ').convert(settings.toJson());
+    final String payload = const JsonEncoder.withIndent(
+      '  ',
+    ).convert(settings.toJson());
 
     final File temporary = File('${file.path}.tmp');
     await temporary.writeAsString(payload, flush: true);

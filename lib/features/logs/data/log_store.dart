@@ -53,7 +53,11 @@ class LogStore extends ChangeNotifier implements LogSink {
   }
 
   @override
-  void log(String message, {LogLevel level = LogLevel.info, String? recordingId}) {
+  void log(
+    String message, {
+    LogLevel level = LogLevel.info,
+    String? recordingId,
+  }) {
     add(
       LogEvent(
         id: _uuid.v4(),
@@ -115,8 +119,9 @@ class LogStore extends ChangeNotifier implements LogSink {
 class FileLogArchive implements LogArchive {
   Future<File> _file() async {
     final Directory appDirectory = await getApplicationDocumentsDirectory();
-    final Directory directory =
-        Directory(p.join(appDirectory.path, 'recordings'));
+    final Directory directory = Directory(
+      p.join(appDirectory.path, 'recordings'),
+    );
     if (!await directory.exists()) {
       await directory.create(recursive: true);
     }
