@@ -13,5 +13,9 @@
 	<true/>
 	<key>com.apple.security.network.server</key>
 	<true/>
+	<!-- `file_picker` refuses to open any panel without this, even unsandboxed.
+	     See the note in Release.entitlements; the two must agree. -->
+	<key>com.apple.security.files.user-selected.read-only</key>
+	<true/>
 </dict>
 </plist>
