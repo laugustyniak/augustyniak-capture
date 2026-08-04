@@ -69,11 +69,37 @@ class RevisionsRepository {
     return byRecording;
   }
 
-  /// Append [revisions] as one line each. A single `writeAsString` call so the
-  /// batch from one edit lands together rather than interleaved with a
-  /// concurrent append from the processing queue.
+  /// Serializes appends. `O_APPEND` places every write at the end of the file,
+  /// but it does not make a *large* write indivisible — and a row here carries
+  /// up to [RecordingRevision.maxValueLength] characters per side, far past any
+  /// size the platform writes in one go. Two concurrent appends could therefore
+  /// interleave mid-row and produce two corrupt lines out of two good ones.
+  ///
+  /// That is not hypothetical: the background drain and a hand edit both reach
+  /// [RecordingsController] `_update` independently, which is exactly why the
+  /// index write has `_saveInFlight`. Same problem, same fix.
+  Future<void>? _appendInFlight;
+
+  /// Append [revisions], one line each, in a single write so the batch from one
+  /// edit lands together.
   Future<void> append(List<RecordingRevision> revisions) async {
     if (revisions.isEmpty) return;
+
+    while (_appendInFlight != null) {
+      // Await, then re-check: another caller may have queued behind the same
+      // future while this one was suspended.
+      await _appendInFlight;
+    }
+    final Future<void> mine = _append(revisions);
+    _appendInFlight = mine;
+    try {
+      await mine;
+    } finally {
+      if (identical(_appendInFlight, mine)) _appendInFlight = null;
+    }
+  }
+
+  Future<void> _append(List<RecordingRevision> revisions) async {
     final File file = await _file();
     final String payload = revisions
         .map((RecordingRevision revision) => jsonEncode(revision.toJson()))
