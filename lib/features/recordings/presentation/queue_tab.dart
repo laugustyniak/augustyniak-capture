@@ -9,6 +9,7 @@ import '../../projects/domain/project.dart';
 import '../../projects/presentation/projects_controller.dart';
 import '../domain/capture_category.dart';
 import '../domain/recording.dart';
+import 'card_parts.dart';
 import 'queue_metrics.dart';
 import 'recording_card.dart';
 import 'recording_editor.dart';
@@ -374,8 +375,40 @@ class _QueueTabState extends State<QueueTab> {
           controller.setTags(recording.id, values),
       onProjectChanged: (String? value) =>
           controller.setProject(recording.id, value),
+      onDelete: () => _confirmDelete(recording),
       onDone: () => setState(() => editingId = null),
     );
+  }
+
+  /// The one irreversible action in the queue, so it is the one that asks.
+  ///
+  /// Awaited rather than fired and forgotten, unlike every other editor
+  /// callback: those each persist one field and the controller notifies when it
+  /// lands, while this one has to leave edit mode *after* the row is gone —
+  /// clearing `editingId` first would flash the read-only card for a frame
+  /// before it disappears, and clearing it never would leave the tab holding the
+  /// id of an item that no longer exists.
+  Future<void> _confirmDelete(Recording recording) async {
+    // The same name the card shows, so the dialog names the row the user is
+    // looking at rather than a filename they have never seen.
+    final String name = displayNameFor(recording);
+    final bool confirmed = await confirmDestructive(
+      context,
+      title: 'Delete this capture?',
+      message:
+          '"$name" and its source file are removed from disk. The text, tags '
+          'and category go with it. This cannot be undone.',
+      confirmLabel: 'DELETE',
+    );
+    if (!confirmed || !mounted) return;
+    await widget.controller.deleteRecording(recording.id);
+    if (!mounted) return;
+    setState(() {
+      editingId = null;
+      // The selection is an id, and this one no longer resolves — leaving it
+      // would point the keyboard layer at a row that is gone.
+      if (focusedId == recording.id) focusedId = null;
+    });
   }
 
   /// The vocabulary already in use elsewhere, most-used first, excluding this
