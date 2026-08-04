@@ -122,16 +122,59 @@ void main() {
 
   test('sanitizes a project-configured session base and appends agent', () {
     final AgentSessionLaunchRequest configured = AgentSessionLaunchRequest(
-      projectId: 'ignored-for-custom-name',
-      projectName: 'Ignored',
+      projectId: '550E8400-E29B-41D4-A716-446655440000',
+      projectName: 'Ignored once a session name is set',
       repoPath: repo.path,
       agent: ProjectAgent.gemini,
       sessionName: '  My Client / Workspace  ',
     );
 
+    // The user's words lead — that is the point of naming a session — but the
+    // project id still rides along, for the reason the next test states.
     expect(
       GhosttyZellijAgentSessionLauncher.buildSessionName(configured),
-      'my-client-workspace-gemini',
+      'my-client-workspace-550e8400-gemini',
+    );
+  });
+
+  test('two projects sharing a session name do not share a session', () {
+    AgentSessionLaunchRequest named(String projectId) =>
+        AgentSessionLaunchRequest(
+          projectId: projectId,
+          projectName: 'Shared name',
+          repoPath: repo.path,
+          agent: ProjectAgent.claude,
+          sessionName: 'client-work',
+        );
+
+    // Without the id segment both would resolve to `client-work-claude`,
+    // `_sessionExists` would report a hit for the second project, and it would
+    // attach to a session whose panes are open in the *first* project's repo.
+    expect(
+      GhosttyZellijAgentSessionLauncher.buildSessionName(
+        named('550E8400-E29B-41D4-A716-446655440000'),
+      ),
+      isNot(
+        GhosttyZellijAgentSessionLauncher.buildSessionName(
+          named('6BA7B810-9DAD-11D1-80B4-00C04FD430C8'),
+        ),
+      ),
+    );
+  });
+
+  test('a truncated id never leaves a dangling separator', () {
+    final AgentSessionLaunchRequest shortId = AgentSessionLaunchRequest(
+      projectId: 'ab-cdef-gh-ij',
+      projectName: 'Notes',
+      repoPath: repo.path,
+      agent: ProjectAgent.codex,
+    );
+
+    // `ab-cdef-gh-ij` cut at 8 is `ab-cdef-`; the separator has to go, or the
+    // name reads `audivoa-notes-ab-cdef--codex`.
+    expect(
+      GhosttyZellijAgentSessionLauncher.buildSessionName(shortId),
+      'audivoa-notes-ab-cdef-codex',
     );
   });
 
