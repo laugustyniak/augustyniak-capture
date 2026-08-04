@@ -39,8 +39,22 @@ class Console {
   /// Icon tint on a raised control.
   static const Color mutedSoft = Color(0xFF9FB4D0);
 
-  /// Tertiary label — the verification footer, timestamps, hint text.
+  /// Tertiary *non-text* tint — a disabled control, a decorative fraction.
+  ///
+  /// Deliberately below the 4.5:1 text floor: at 3.4–4.0:1 against the four
+  /// surfaces it is legal for graphics (3:1) and for a disabled affordance,
+  /// which is exempt, and nothing else. Reach for [dimText] the moment the
+  /// colour carries words.
   static const Color dim = Color(0xFF5F7695);
+
+  /// Tertiary *label* — the verification footer, timestamps, hint text.
+  ///
+  /// Split out of [dim] because that value carried the whole `micro` scale at
+  /// 10.5 px and 3.63:1 on a card, i.e. the app's entire layer of facts sat
+  /// under AA. This one measures 5.19:1 on `surface` and 4.84:1 on
+  /// `surfaceRaised`, while staying a clear step below [muted] (6.31:1) so the
+  /// three-level hierarchy survives the fix.
+  static const Color dimText = Color(0xFF7A90B0);
 
   static const Color green = Color(0xFF3DDC97);
   static const Color amber = Color(0xFFFBBF24);
@@ -136,7 +150,7 @@ class ConsoleText {
   static const TextStyle micro = TextStyle(
     fontFamily: ConsoleFont.mono,
     fontSize: 10.5,
-    color: Console.dim,
+    color: Console.dimText,
   );
 
   static const TextStyle pill = TextStyle(
@@ -164,6 +178,36 @@ class ConsoleText {
     height: 1.5,
     color: Console.textSoft,
   );
+}
+
+/// Caps how wide a tab's content grows, and centres it in whatever is left.
+///
+/// The design is a single column, and every tab draws one `ListView` with a
+/// symmetric padding and no ceiling — which is invisible on a phone and wrong
+/// on a desktop window. At 2000 px a card's three-line excerpt runs to roughly
+/// 200 characters per line against a 45–75 optimum, and the action buttons sit
+/// over a thousand pixels from the title they act on. This is the one place
+/// that number lives; the shell wraps the whole `IndexedStack` in it, so the
+/// cap cannot drift between tabs the way five separate paddings would.
+class ConsolePageWidth extends StatelessWidget {
+  const ConsolePageWidth({super.key, required this.child});
+
+  /// About 90 characters of `ConsoleText.body`. Comfortably above the editor's
+  /// own `_wideEnough = 460` breakpoint, so the two-column field layout still
+  /// resolves to its wide form inside the cap.
+  static const double maxWidth = 880;
+
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) {
+    return Center(
+      child: ConstrainedBox(
+        constraints: const BoxConstraints(maxWidth: maxWidth),
+        child: child,
+      ),
+    );
+  }
 }
 
 /// The page header from the design: cyan eyebrow, large title, optional
@@ -346,7 +390,12 @@ class _ScanLineState extends State<ScanLine>
 /// The design draws these as *outlined* pills rather than solid fills: a row of
 /// five solid chips competes with the cyan record button for attention, and the
 /// selected one has to win that row without winning the screen.
-class ConsoleChip extends StatelessWidget {
+/// Hover is carried by the border rather than by the Material ink: the chip's
+/// unselected fill is transparent, so the ink *does* show through — but the
+/// dark theme's hover overlay is white at 4% alpha over `#101D31`, which is at
+/// the edge of visible. This is the most-clicked control in the app and it has
+/// to answer a pointer.
+class ConsoleChip extends StatefulWidget {
   const ConsoleChip({
     super.key,
     required this.label,
@@ -366,35 +415,56 @@ class ConsoleChip extends StatelessWidget {
   final int? count;
 
   @override
+  State<ConsoleChip> createState() => _ConsoleChipState();
+}
+
+class _ConsoleChipState extends State<ConsoleChip> {
+  bool _hovered = false;
+  bool _focused = false;
+
+  @override
   Widget build(BuildContext context) {
-    final Color foreground = selected ? selectedColor : Console.chipLabel;
+    final bool selected = widget.selected;
+    final Color foreground = selected
+        ? widget.selectedColor
+        : (_hovered || _focused ? Console.textSoft : Console.chipLabel);
     return Semantics(
       button: true,
       selected: selected,
-      child: InkWell(
-        onTap: onSelected,
-        borderRadius: BorderRadius.circular(999),
-        child: AnimatedContainer(
-          duration: const Duration(milliseconds: 220),
-          padding: const EdgeInsets.symmetric(horizontal: 11, vertical: 7),
-          decoration: BoxDecoration(
-            color: selected
-                ? selectedColor.withValues(alpha: .14)
-                : Colors.transparent,
-            borderRadius: BorderRadius.circular(999),
-            border: Border.all(
+      child: MouseRegion(
+        cursor: SystemMouseCursors.click,
+        onEnter: (_) => setState(() => _hovered = true),
+        onExit: (_) => setState(() => _hovered = false),
+        child: InkWell(
+          onTap: widget.onSelected,
+          borderRadius: BorderRadius.circular(999),
+          onFocusChange: (bool value) => setState(() => _focused = value),
+          child: AnimatedContainer(
+            duration: const Duration(milliseconds: 220),
+            padding: const EdgeInsets.symmetric(horizontal: 11, vertical: 7),
+            decoration: BoxDecoration(
               color: selected
-                  ? selectedColor.withValues(alpha: .4)
-                  : Console.border,
+                  ? widget.selectedColor.withValues(alpha: .14)
+                  : Colors.transparent,
+              borderRadius: BorderRadius.circular(999),
+              border: Border.all(
+                color: selected
+                    ? widget.selectedColor.withValues(alpha: .4)
+                    : (_hovered || _focused
+                          ? Console.borderStrong
+                          : Console.border),
+              ),
             ),
-          ),
-          child: Text(
-            // Not uppercased here: some callers label chips with units
-            // (`16 kHz`, `64 kbps`) that must keep their casing.
-            count == null ? label : '$label $count',
-            style: ConsoleText.chip.copyWith(
-              color: foreground,
-              fontWeight: selected ? FontWeight.w600 : FontWeight.w500,
+            child: Text(
+              // Not uppercased here: some callers label chips with units
+              // (`16 kHz`, `64 kbps`) that must keep their casing.
+              widget.count == null
+                  ? widget.label
+                  : '${widget.label} ${widget.count}',
+              style: ConsoleText.chip.copyWith(
+                color: foreground,
+                fontWeight: selected ? FontWeight.w600 : FontWeight.w500,
+              ),
             ),
           ),
         ),
@@ -530,7 +600,21 @@ class ConsolePosterTile extends StatelessWidget {
 }
 
 /// Tappable square icon button with the console's border treatment.
-class ConsoleIconButton extends StatelessWidget {
+/// Square icon control — play, edit, copy-adjacent actions on a card.
+///
+/// Two desktop affordances live here rather than at the call sites, because
+/// every icon action in the app funnels through this one widget:
+///
+/// - **The tooltip is [semanticLabel]**, which was already required and, until
+///   now, only ever reached a screen reader. On a pointer the buttons said
+///   nothing at all on hover.
+/// - **Hover and focus repaint the border**, they do not rely on the Material
+///   ink. That is not a preference: the ink splash is painted on the `Material`
+///   *below* this widget's child, and the child is an opaque `Container`, so
+///   the default hover and focus highlights are drawn where nothing can see
+///   them. Anything that must be visible has to move the container's own
+///   decoration.
+class ConsoleIconButton extends StatefulWidget {
   const ConsoleIconButton({
     super.key,
     required this.icon,
@@ -551,25 +635,50 @@ class ConsoleIconButton extends StatelessWidget {
   final double iconSize;
 
   @override
+  State<ConsoleIconButton> createState() => _ConsoleIconButtonState();
+}
+
+class _ConsoleIconButtonState extends State<ConsoleIconButton> {
+  bool _hovered = false;
+  bool _focused = false;
+
+  @override
   Widget build(BuildContext context) {
+    // `active` is a state of the item (a clip is playing) and outranks a
+    // pointer that merely passed over the button.
+    final bool highlighted = widget.active || _hovered || _focused;
     return Semantics(
       button: true,
-      label: semanticLabel,
-      child: InkResponse(
-        onTap: onTap,
-        radius: 25,
-        child: Container(
-          width: size,
-          height: size,
-          alignment: Alignment.center,
-          decoration: BoxDecoration(
-            color: active ? Console.iconTile : Console.surfaceButton,
-            borderRadius: BorderRadius.circular(10),
-            border: Border.all(
-              color: active ? Console.cyan : Console.borderStrong,
+      label: widget.semanticLabel,
+      child: Tooltip(
+        message: widget.semanticLabel,
+        child: MouseRegion(
+          cursor: SystemMouseCursors.click,
+          onEnter: (_) => setState(() => _hovered = true),
+          onExit: (_) => setState(() => _hovered = false),
+          child: InkResponse(
+            onTap: widget.onTap,
+            radius: 25,
+            onFocusChange: (bool value) => setState(() => _focused = value),
+            child: AnimatedContainer(
+              duration: const Duration(milliseconds: 140),
+              width: widget.size,
+              height: widget.size,
+              alignment: Alignment.center,
+              decoration: BoxDecoration(
+                color: highlighted ? Console.iconTile : Console.surfaceButton,
+                borderRadius: BorderRadius.circular(10),
+                border: Border.all(
+                  color: highlighted ? Console.cyan : Console.borderStrong,
+                ),
+              ),
+              child: Icon(
+                widget.icon,
+                color: Console.cyan,
+                size: widget.iconSize,
+              ),
             ),
           ),
-          child: Icon(icon, color: Console.cyan, size: iconSize),
         ),
       ),
     );
@@ -641,7 +750,7 @@ class ConsoleField extends StatelessWidget {
         filled: true,
         fillColor: Console.surfaceDeep,
         hintText: hintText,
-        hintStyle: TextStyle(color: Console.dim, fontSize: fontSize),
+        hintStyle: TextStyle(color: Console.dimText, fontSize: fontSize),
         contentPadding: const EdgeInsets.symmetric(
           horizontal: 11,
           vertical: 10,
@@ -724,6 +833,8 @@ class _CopyButtonState extends State<CopyButton> {
 
   Timer? _resetTimer;
   bool _copied = false;
+  bool _hovered = false;
+  bool _focused = false;
 
   @override
   void dispose() {
@@ -752,37 +863,47 @@ class _CopyButtonState extends State<CopyButton> {
       label: _copied ? 'Text copied to clipboard' : widget.semanticLabel,
       child: Tooltip(
         message: _copied ? 'Copied' : widget.tooltip,
-        child: InkResponse(
-          onTap: _copy,
-          radius: 22,
-          child: AnimatedContainer(
-            duration: const Duration(milliseconds: 260),
-            width: 34,
-            height: 34,
-            alignment: Alignment.center,
-            decoration: BoxDecoration(
-              color: _copied ? Console.greenDeep : Console.surfaceButton,
-              borderRadius: BorderRadius.circular(10),
-              border: Border.all(
-                color: _copied ? Console.green : Console.borderStrong,
-              ),
-            ),
-            child: AnimatedSwitcher(
+        child: MouseRegion(
+          cursor: SystemMouseCursors.click,
+          onEnter: (_) => setState(() => _hovered = true),
+          onExit: (_) => setState(() => _hovered = false),
+          child: InkResponse(
+            onTap: _copy,
+            radius: 22,
+            onFocusChange: (bool value) => setState(() => _focused = value),
+            child: AnimatedContainer(
               duration: const Duration(milliseconds: 260),
-              transitionBuilder: (Widget child, Animation<double> animation) {
-                return ScaleTransition(
-                  scale: CurvedAnimation(
-                    parent: animation,
-                    curve: Curves.easeOutBack,
-                  ),
-                  child: FadeTransition(opacity: animation, child: child),
-                );
-              },
-              child: Icon(
-                _copied ? Icons.check_rounded : Icons.copy_rounded,
-                key: ValueKey<bool>(_copied),
-                color: _copied ? Console.green : Console.muted,
-                size: 17,
+              width: 34,
+              height: 34,
+              alignment: Alignment.center,
+              decoration: BoxDecoration(
+                color: _copied ? Console.greenDeep : Console.surfaceButton,
+                borderRadius: BorderRadius.circular(10),
+                border: Border.all(
+                  color: _copied
+                      ? Console.green
+                      : (_hovered || _focused
+                            ? Console.cyan
+                            : Console.borderStrong),
+                ),
+              ),
+              child: AnimatedSwitcher(
+                duration: const Duration(milliseconds: 260),
+                transitionBuilder: (Widget child, Animation<double> animation) {
+                  return ScaleTransition(
+                    scale: CurvedAnimation(
+                      parent: animation,
+                      curve: Curves.easeOutBack,
+                    ),
+                    child: FadeTransition(opacity: animation, child: child),
+                  );
+                },
+                child: Icon(
+                  _copied ? Icons.check_rounded : Icons.copy_rounded,
+                  key: ValueKey<bool>(_copied),
+                  color: _copied ? Console.green : Console.muted,
+                  size: 17,
+                ),
               ),
             ),
           ),

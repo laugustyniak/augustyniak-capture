@@ -96,7 +96,7 @@ class _TextNoteSheetState extends State<TextNoteSheet> {
             ),
             decoration: InputDecoration(
               hintText: 'Type the note…',
-              hintStyle: const TextStyle(color: Console.dim, fontSize: 14),
+              hintStyle: const TextStyle(color: Console.dimText, fontSize: 14),
               filled: true,
               fillColor: Console.background,
               contentPadding: const EdgeInsets.all(14),

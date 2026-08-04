@@ -376,38 +376,47 @@ class _RecordingsPageState extends State<RecordingsPage> {
             children: <Widget>[
               // IndexedStack so the Queue tab keeps its search text and filter
               // while the user visits Models/Logs/Config.
-              IndexedStack(
-                index: navigationIndex,
-                children: <Widget>[
-                  QueueTab(controller: controller, projects: projects),
-                  ProjectsTab(controller: projects),
-                  ModelsTab(controller: settings),
-                  LogsTab(store: logs),
-                  ConfigTab(
-                    controller: settings,
-                    storagePath: storagePath,
-                    recordingsCount: controller.recordings.length,
-                    logCount: logs.events.length,
-                    onOpenModels: () =>
-                        setState(() => navigationIndex = modelsIndex),
-                    // Reported on in the enrichment-context section: which file
-                    // each repository actually contributes, and which paths are
-                    // wrong. The tab never edits them.
-                    projects: projects.projects,
-                    showShortcuts: _isDesktop,
-                    rejectedShortcuts: rejectedShortcuts,
-                    runWithHotkeysSuspended: _runWithHotkeysSuspended,
-                  ),
-                ],
+              //
+              // Wrapped here rather than inside each tab: five separate width
+              // caps would drift apart, and the dock below has to agree with
+              // whatever this one is or the record button stops lining up with
+              // the column it captures into.
+              ConsolePageWidth(
+                child: IndexedStack(
+                  index: navigationIndex,
+                  children: <Widget>[
+                    QueueTab(controller: controller, projects: projects),
+                    ProjectsTab(controller: projects),
+                    ModelsTab(controller: settings),
+                    LogsTab(store: logs),
+                    ConfigTab(
+                      controller: settings,
+                      storagePath: storagePath,
+                      recordingsCount: controller.recordings.length,
+                      logCount: logs.events.length,
+                      onOpenModels: () =>
+                          setState(() => navigationIndex = modelsIndex),
+                      // Reported on in the enrichment-context section: which
+                      // file each repository actually contributes, and which
+                      // paths are wrong. The tab never edits them.
+                      projects: projects.projects,
+                      showShortcuts: _isDesktop,
+                      rejectedShortcuts: rejectedShortcuts,
+                      runWithHotkeysSuspended: _runWithHotkeysSuspended,
+                    ),
+                  ],
+                ),
               ),
               if (navigationIndex == queueIndex && !recording)
                 Positioned(
                   left: 0,
                   right: 0,
                   bottom: 0,
-                  child: CaptureDock(
-                    controller: controller,
-                    onOpenCaptureMenu: () => _openCaptureMenu(context),
+                  child: ConsolePageWidth(
+                    child: CaptureDock(
+                      controller: controller,
+                      onOpenCaptureMenu: () => _openCaptureMenu(context),
+                    ),
                   ),
                 ),
               // Overlaid rather than swapped into the IndexedStack: the Queue
