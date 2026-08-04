@@ -1,4 +1,4 @@
-# Audivoa Core
+# Augustyniak Capture
 
 A minimal **offline-first** Flutter app for recording voice notes.
 
@@ -104,7 +104,7 @@ Install it as a standalone app with:
 
 ```bash
 flutter build macos --release
-cp -R build/macos/Build/Products/Release/"Audivoa Core.app" /Applications/
+cp -R build/macos/Build/Products/Release/"Augustyniak Capture.app" /Applications/
 ```
 
 Recordings land in `~/Documents/recordings/` — without the sandbox that is where
