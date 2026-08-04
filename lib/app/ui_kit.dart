@@ -14,6 +14,11 @@ import 'package:flutter/services.dart';
 class Console {
   const Console._();
 
+  /// Below this width the shell and Queue both switch to their compact forms.
+  /// Keeping the boundary here prevents navigation and item layout from
+  /// disagreeing at the same window width.
+  static const double compactBreakpoint = 600;
+
   static const Color cyan = Color(0xFF22D3EE);
   static const Color background = Color(0xFF0A1322);
   static const Color surface = Color(0xFF101D31);

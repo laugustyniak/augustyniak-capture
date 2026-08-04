@@ -42,6 +42,7 @@ import '../data/revisions_repository.dart';
 import '../data/system_media_opener.dart';
 import '../domain/capture_type.dart';
 import 'capture_dock.dart';
+import 'capture_nav_bar.dart';
 import 'queue_tab.dart';
 import 'recording_view.dart';
 import 'recordings_controller.dart';
@@ -62,6 +63,19 @@ class _RecordingsPageState extends State<RecordingsPage> {
   // NavigationBar itself.
   static const int queueIndex = 0;
   static const int modelsIndex = 2;
+
+  static const List<({IconData icon, String label, String shortLabel})>
+  destinations = <({IconData icon, String label, String shortLabel})>[
+    (
+      icon: Icons.format_list_bulleted_rounded,
+      label: 'QUEUE',
+      shortLabel: 'QUEUE',
+    ),
+    (icon: Icons.account_tree_outlined, label: 'PROJECTS', shortLabel: 'PROJ'),
+    (icon: Icons.memory_rounded, label: 'MODELS', shortLabel: 'MODELS'),
+    (icon: Icons.chevron_right_rounded, label: 'LOGS', shortLabel: 'LOGS'),
+    (icon: Icons.tune_rounded, label: 'CONFIG', shortLabel: 'CONFIG'),
+  ];
 
   final RecordingsRepository repository = RecordingsRepository();
   late final SettingsController settings;
@@ -96,7 +110,9 @@ class _RecordingsPageState extends State<RecordingsPage> {
         // Real keyring-backed cipher on every platform; ensureReady degrades
         // to the plaintext behaviour when no keyring answers (headless Linux,
         // locked Secret Service, test bindings).
-        cipher: AesGcmTokenCipher(keyStore: const SecureStorageMasterKeyStore()),
+        cipher: AesGcmTokenCipher(
+          keyStore: const SecureStorageMasterKeyStore(),
+        ),
       ),
     );
     logs = LogStore(archive: FileLogArchive());
@@ -377,6 +393,8 @@ class _RecordingsPageState extends State<RecordingsPage> {
       animation: listenable,
       builder: (BuildContext context, Widget? child) {
         final bool recording = controller.isRecording;
+        final bool compact =
+            MediaQuery.sizeOf(context).width < Console.compactBreakpoint;
 
         return Scaffold(
           // No AppBar: each tab draws the design's own header (cyan eyebrow +
@@ -417,7 +435,9 @@ class _RecordingsPageState extends State<RecordingsPage> {
                   ],
                 ),
               ),
-              if (navigationIndex == queueIndex && !recording)
+              // The compact bar carries capture actions itself. Wider windows
+              // keep the existing floating Queue dock unchanged.
+              if (!compact && navigationIndex == queueIndex && !recording)
                 Positioned(
                   left: 0,
                   right: 0,
@@ -448,43 +468,67 @@ class _RecordingsPageState extends State<RecordingsPage> {
           // view, and switching tabs mid-take is not a thing to invite.
           bottomNavigationBar: recording
               ? null
-              : DecoratedBox(
-                  decoration: const BoxDecoration(
-                    border: Border(top: BorderSide(color: Console.border)),
-                  ),
-                  child: NavigationBar(
-                    selectedIndex: navigationIndex,
-                    onDestinationSelected: (int value) {
-                      setState(() => navigationIndex = value);
-                    },
-                    destinations: <NavigationDestination>[
-                      const NavigationDestination(
-                        icon: Icon(Icons.format_list_bulleted_rounded),
-                        label: 'QUEUE',
+              : compact
+              ? CaptureNavBar(
+                  destinations: <CaptureNavDestination>[
+                    for (int index = 0; index < destinations.length; index++)
+                      CaptureNavDestination(
+                        icon: destinations[index].icon,
+                        label: destinations[index].label,
+                        shortLabel: destinations[index].shortLabel,
+                        warn:
+                            index == modelsIndex &&
+                            settings.activeProfile == null,
                       ),
-                      const NavigationDestination(
-                        icon: Icon(Icons.account_tree_outlined),
-                        label: 'PROJECTS',
-                      ),
-                      NavigationDestination(
-                        icon: _ProfileBadge(
-                          hasActiveProfile: settings.activeProfile != null,
-                        ),
-                        label: 'MODELS',
-                      ),
-                      const NavigationDestination(
-                        icon: Icon(Icons.chevron_right_rounded),
-                        label: 'LOGS',
-                      ),
-                      const NavigationDestination(
-                        icon: Icon(Icons.tune_rounded),
-                        label: 'CONFIG',
-                      ),
-                    ],
-                  ),
-                ),
+                  ],
+                  selectedIndex: navigationIndex,
+                  onSelected: (int value) =>
+                      setState(() => navigationIndex = value),
+                  busy: controller.isBusy,
+                  onRecord: controller.startRecording,
+                  onOpenCaptureMenu: () => _openCaptureMenu(context),
+                )
+              : _buildDesktopNavigationBar(),
         );
       },
+    );
+  }
+
+  Widget _buildDesktopNavigationBar() {
+    return DecoratedBox(
+      decoration: const BoxDecoration(
+        border: Border(top: BorderSide(color: Console.border)),
+      ),
+      child: NavigationBar(
+        selectedIndex: navigationIndex,
+        onDestinationSelected: (int value) {
+          setState(() => navigationIndex = value);
+        },
+        destinations: <NavigationDestination>[
+          const NavigationDestination(
+            icon: Icon(Icons.format_list_bulleted_rounded),
+            label: 'QUEUE',
+          ),
+          const NavigationDestination(
+            icon: Icon(Icons.account_tree_outlined),
+            label: 'PROJECTS',
+          ),
+          NavigationDestination(
+            icon: _ProfileBadge(
+              hasActiveProfile: settings.activeProfile != null,
+            ),
+            label: 'MODELS',
+          ),
+          const NavigationDestination(
+            icon: Icon(Icons.chevron_right_rounded),
+            label: 'LOGS',
+          ),
+          const NavigationDestination(
+            icon: Icon(Icons.tune_rounded),
+            label: 'CONFIG',
+          ),
+        ],
+      ),
     );
   }
 }
