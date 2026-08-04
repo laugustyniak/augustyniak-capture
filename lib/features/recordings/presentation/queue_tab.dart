@@ -45,6 +45,9 @@ class _QueueTabState extends State<QueueTab> {
   /// card scrolled out of the list would not, and the mode would silently end.
   /// One id also enforces the rule that only one row is editable at a time,
   /// which keeps "where is my keyboard focus" answerable.
+  ///
+  /// It is also read by [_filter], which exempts this row from every filter for
+  /// the reason stated there.
   String? editingId;
 
   @override
@@ -169,23 +172,29 @@ class _QueueTabState extends State<QueueTab> {
     );
   }
 
+  /// The queue narrowed by the status chips, the project selector and the
+  /// search box — with one deliberate exemption.
+  ///
+  /// **The row in edit mode is never filtered away.** A typed-but-uncommitted
+  /// value lives only inside [RecordingEditor], which does not write on
+  /// disposal, so removing its row would discard the edit with nothing left to
+  /// recover it from. Both ways that can happen are ordinary: the user types
+  /// into the search box while the title field is dirty, or a background stage
+  /// finishes and moves the item into a bucket the active chip excludes. The
+  /// exemption covers exactly one row and ends when DONE closes the mode.
   List<Recording> _filter(
     List<Recording> recordings,
     String? effectiveProjectFilterId,
   ) {
-    final List<Recording> byStatus = recordings
-        .where(
-          (Recording item) =>
-              _matches(selectedFilter, item) &&
-              (effectiveProjectFilterId == null ||
-                  item.projectId == effectiveProjectFilterId),
-        )
-        .toList();
     final String query = searchQuery.trim().toLowerCase();
-    if (query.isEmpty) {
-      return byStatus;
-    }
-    return byStatus.where((Recording item) {
+    return recordings.where((Recording item) {
+      if (item.id == editingId) return true;
+      if (!_matches(selectedFilter, item)) return false;
+      if (effectiveProjectFilterId != null &&
+          item.projectId != effectiveProjectFilterId) {
+        return false;
+      }
+      if (query.isEmpty) return true;
       final String haystack = <String?>[
         item.transcript,
         item.title,

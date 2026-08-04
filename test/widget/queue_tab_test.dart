@@ -11,6 +11,7 @@ import 'package:audivoa_core/features/recordings/domain/capture_type.dart';
 import 'package:audivoa_core/features/recordings/domain/recording.dart';
 import 'package:audivoa_core/features/recordings/presentation/queue_tab.dart';
 import 'package:audivoa_core/features/recordings/presentation/recording_card.dart';
+import 'package:audivoa_core/features/recordings/presentation/recording_editor.dart';
 import 'package:audivoa_core/features/recordings/presentation/recordings_controller.dart';
 import 'package:audivoa_core/features/projects/data/projects_repository.dart';
 import 'package:audivoa_core/features/projects/domain/project.dart';
@@ -712,6 +713,100 @@ void main() {
     await settleIo(tester);
 
     expect(controller.recordings.single.tags, isEmpty);
+  });
+
+  /// The editor holds a dirty field in its own state and does not write on
+  /// disposal, so anything that drops its row from the list destroys the edit.
+  /// These two cover the ways that can happen without the user asking for it.
+  testWidgets('a search that excludes the edited row does not close it', (
+    WidgetTester tester,
+  ) async {
+    final RecordingsController controller = await buildRecordingsController(
+      appDir,
+      seed: <Recording>[
+        makeRecording(
+          id: 'keepme',
+          status: RecordingStatus.completed,
+          transcript: 'zachowaj mnie',
+        ),
+      ],
+    );
+    await pumpQueue(tester, controller);
+
+    await tester.tap(find.byIcon(Icons.edit_outlined));
+    await tester.pump();
+    final Finder title = find
+        .descendant(
+          of: find.byType(RecordingEditor),
+          matching: find.byType(TextField),
+        )
+        .first;
+    // Typed, not committed: the value exists only inside the editor.
+    await tester.enterText(title, 'Nazwa w trakcie pisania');
+    await tester.pump();
+
+    await tester.enterText(
+      find.widgetWithText(TextField, 'Search captures'),
+      'nic-takiego-nie-ma',
+    );
+    await tester.pump();
+
+    expect(
+      find.byType(RecordingEditor),
+      findsOneWidget,
+      reason: 'the row being edited is exempt from the search',
+    );
+    expect(find.text('Nazwa w trakcie pisania'), findsOneWidget);
+
+    // And the edit is still committable — the exemption is worthless if the
+    // widget survives without its pending value. Scoped to the editor: the
+    // review toggle on a card carries a `DONE` label of its own.
+    await tester.tap(
+      find.descendant(
+        of: find.byType(RecordingEditor),
+        matching: find.text('DONE'),
+      ),
+    );
+    await settleIo(tester);
+
+    expect(controller.recordings.single.title, 'Nazwa w trakcie pisania');
+  });
+
+  testWidgets('a status chip that excludes the edited row does not close it', (
+    WidgetTester tester,
+  ) async {
+    final RecordingsController controller = await buildRecordingsController(
+      appDir,
+      seed: <Recording>[
+        makeRecording(
+          id: 'ready',
+          status: RecordingStatus.completed,
+          transcript: 'gotowe',
+        ),
+        makeRecording(
+          id: 'broken',
+          status: RecordingStatus.failed,
+          transcript: 'padło',
+          error: 'boom',
+        ),
+      ],
+    );
+    await pumpQueue(tester, controller);
+
+    // The completed row is the first card, so its edit control is the first
+    // one in the list.
+    await tester.tap(find.byIcon(Icons.edit_outlined).first);
+    await tester.pump();
+    expect(find.byType(RecordingEditor), findsOneWidget);
+
+    await tester.tap(find.text('FAILED'));
+    await tester.pump();
+
+    expect(
+      find.byType(RecordingEditor),
+      findsOneWidget,
+      reason: 'a bucket the item no longer belongs to must not end the mode',
+    );
   });
 
   testWidgets('the inline editor clears a category back to unclassified', (
