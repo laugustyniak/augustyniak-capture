@@ -105,30 +105,44 @@ class GhosttyZellijAgentSessionLauncher implements AgentSessionLauncher {
     }
   }
 
+  /// `audivoa-<project>-<id8>-<agent>`, or `<custom>-<id8>-<agent>` when the
+  /// project names its own session.
+  ///
+  /// **The id segment is in both forms on purpose.** A session name is what
+  /// [_sessionExists] matches on, so two names that collide do not produce two
+  /// sessions — they produce one, and the second project silently *attaches* to
+  /// the first one's, rooted in the wrong repository. Nothing stops two
+  /// projects from carrying the same `sessionName`, so the id is what makes the
+  /// name unique per project rather than per word the user chose.
+  ///
+  /// The prefix is the one thing the two forms do not share: a derived name is
+  /// grouped under `audivoa-` in `zellij ls`, while a hand-chosen one leads
+  /// with the user's own words — that is the whole reason to set one.
   static String buildSessionName(AgentSessionLaunchRequest request) {
     final String? configured = request.sessionName?.trim();
+    final bool custom = configured != null && configured.isNotEmpty;
     final String name = _slug(
-      configured == null || configured.isEmpty
-          ? request.projectName
-          : configured,
+      custom ? configured : request.projectName,
       fallback: 'project',
     );
-    final String id = _slug(request.projectId, fallback: 'id');
-    final String suffix = '-${request.agent.executable}';
-    if (configured != null && configured.isNotEmpty) {
-      final int availableForName = 63 - suffix.length;
-      final String boundedName = name.length <= availableForName
-          ? name
-          : name.substring(0, availableForName);
-      return '$boundedName$suffix';
-    }
-    final String stableId = id.length <= 8 ? id : id.substring(0, 8);
-    final int availableForName =
-        63 - 'audivoa--$stableId'.length - suffix.length;
-    final String boundedName = name.length <= availableForName
-        ? name
-        : name.substring(0, availableForName);
-    return 'audivoa-$boundedName-$stableId$suffix';
+    // Bounded rather than sliced: a uuid cut at 8 is `550e8400`, but an id like
+    // `ab-cdef-gh` cuts to `ab-cdef-` and would print a double dash.
+    final String stableId = _bounded(
+      _slug(request.projectId, fallback: 'id'),
+      8,
+    );
+    final String prefix = custom ? '' : 'audivoa-';
+    final String suffix =
+        '-${stableId.isEmpty ? 'id' : stableId}'
+        '-${request.agent.executable}';
+    return '$prefix${_bounded(name, 63 - prefix.length - suffix.length)}$suffix';
+  }
+
+  /// Truncates to [max] characters without leaving a dangling separator.
+  static String _bounded(String value, int max) {
+    if (max <= 0) return '';
+    if (value.length <= max) return value;
+    return value.substring(0, max).replaceAll(RegExp(r'-+$'), '');
   }
 
   static void _validateRequest(AgentSessionLaunchRequest request) {

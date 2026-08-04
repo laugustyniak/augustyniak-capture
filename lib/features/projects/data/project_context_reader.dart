@@ -68,14 +68,21 @@ class ProjectContextReader {
     return null;
   }
 
+  /// One bounded read rather than `openRead`, and that is not only about
+  /// allocations. A file *stream* schedules its own events, which never flow
+  /// inside a `testWidgets` fake-async zone — a probe kicked from `initState`
+  /// would hang the widget rather than fail it. A single `read` is one future
+  /// the zone can complete.
+  ///
   /// `allowMalformed` because the byte cut can land mid-codepoint — a Polish
   /// character split across the boundary must degrade to one replacement glyph,
   /// not throw away the whole context.
   static Future<String> _readHead(File file) async {
-    final List<int> bytes = <int>[];
-    await for (final List<int> chunk in file.openRead(0, maxBytes)) {
-      bytes.addAll(chunk);
+    final RandomAccessFile handle = await file.open();
+    try {
+      return utf8.decode(await handle.read(maxBytes), allowMalformed: true);
+    } finally {
+      await handle.close();
     }
-    return utf8.decode(bytes, allowMalformed: true);
   }
 }

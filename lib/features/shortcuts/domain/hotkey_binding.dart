@@ -14,11 +14,28 @@ enum HotkeyModifier {
   shift,
   meta;
 
+  /// The one modifier whose name is platform-specific: the key that reports as
+  /// `meta` is ⌘ on macOS, Super on Linux and the Windows key elsewhere, so a
+  /// fixed `'Win'` mislabels it on two of the three desktop targets — a macOS
+  /// user reads "Shift + Win + R" and goes looking for a key the machine does
+  /// not have.
+  ///
+  /// Resolved through [defaultTargetPlatform] rather than `Platform.isMacOS`
+  /// for two reasons: `domain/` stays free of `dart:io`, and a test can pin the
+  /// platform with `debugDefaultTargetPlatformOverride` instead of asserting
+  /// whatever the host developer happens to run.
+  ///
+  /// [alt] deliberately stays `'Alt'` on macOS even though the keycap reads
+  /// "option" — every Mac keyboard prints both, whereas none prints "Win".
   String get label => switch (this) {
     HotkeyModifier.control => 'Ctrl',
     HotkeyModifier.alt => 'Alt',
     HotkeyModifier.shift => 'Shift',
-    HotkeyModifier.meta => 'Win',
+    HotkeyModifier.meta => switch (defaultTargetPlatform) {
+      TargetPlatform.macOS => 'Cmd',
+      TargetPlatform.linux => 'Super',
+      _ => 'Win',
+    },
   };
 
   static HotkeyModifier? fromName(String? name) =>
