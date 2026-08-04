@@ -50,7 +50,7 @@ void main() {
 
     await controller.update(
       project: first,
-      name: 'Audivoa Core',
+      name: 'Augustyniak Capture',
       repoPath: first.repoPath,
       sessionName: 'audivoa',
       defaultAgent: AgentKind.gemini,
@@ -59,7 +59,7 @@ void main() {
 
     final List<Project> stored = await repository.loadAll();
     expect(stored, hasLength(1));
-    expect(stored.single.name, 'Audivoa Core');
+    expect(stored.single.name, 'Augustyniak Capture');
     expect(stored.single.repoPath, '/work/audivoa');
     expect(stored.single.sessionName, 'audivoa');
     expect(stored.single.defaultAgent, AgentKind.gemini);

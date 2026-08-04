@@ -25,5 +25,17 @@
 	     release means `flutter run` cannot reproduce an installed-app bug. -->
 	<key>com.apple.security.app-sandbox</key>
 	<false/>
+	<!-- Required even though the sandbox above is off, which is the whole
+	     surprise. `file_picker` 11 checks this entitlement *itself*, via
+	     SecTaskCopyValueForEntitlement on its own task, before it will open any
+	     panel — `pickFiles` (every upload capture type) and `getDirectoryPath`
+	     (the project editor's repository-path browse button) both fail with
+	     PlatformException(ENTITLEMENT_NOT_FOUND) without it, sandbox or no
+	     sandbox. Outside the sandbox the key grants nothing and restricts
+	     nothing; it is a declaration the plugin reads back off the signature.
+	     Read-only is enough: the app only ever reads what the user points at
+	     (`saveFile` would need read-write, and is not used). -->
+	<key>com.apple.security.files.user-selected.read-only</key>
+	<true/>
 </dict>
 </plist>
