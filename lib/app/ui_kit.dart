@@ -1164,4 +1164,12 @@ String formatClock(DateTime value) {
   return '${_two(local.hour)}:${_two(local.minute)}:${_two(local.second)}';
 }
 
+/// `17:09` — the wall clock without seconds. Distinct from [formatClock], which
+/// is a running timer and needs them, and from [formatDateTime], which is the
+/// full stamp the meta line already prints.
+String formatTimeOfDay(DateTime value) {
+  final DateTime local = value.toLocal();
+  return '${_two(local.hour)}:${_two(local.minute)}';
+}
+
 String _two(int value) => value.toString().padLeft(2, '0');

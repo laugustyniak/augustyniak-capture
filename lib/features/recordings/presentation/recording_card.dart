@@ -79,9 +79,7 @@ class RecordingCard extends StatelessWidget {
         ? const _StatusVisual('ANALYZING', Console.cyan, pulse: true)
         : _statusVisual(recording.status);
     final String filename = File(recording.filePath).uri.pathSegments.last;
-    final String? title = recording.title?.trim();
-    final bool hasTitle = title != null && title.isNotEmpty;
-    final String displayName = hasTitle ? title : filename;
+    final String displayName = displayNameFor(recording);
     // Generic processor output: a transcription, OCR text or a note body.
     final String transcript = recording.transcript ?? '';
     final bool hasTranscript = transcript.trim().isNotEmpty;
