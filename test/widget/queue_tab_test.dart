@@ -9,6 +9,7 @@ import 'package:audivoa_core/app/ui_kit.dart';
 import 'package:audivoa_core/features/recordings/domain/capture_category.dart';
 import 'package:audivoa_core/features/recordings/domain/capture_type.dart';
 import 'package:audivoa_core/features/recordings/domain/recording.dart';
+import 'package:audivoa_core/features/recordings/domain/recording_tag.dart';
 import 'package:audivoa_core/features/recordings/presentation/queue_tab.dart';
 import 'package:audivoa_core/features/recordings/presentation/recording_card.dart';
 import 'package:audivoa_core/features/recordings/presentation/recordings_controller.dart';
@@ -180,32 +181,48 @@ void main() {
     expect(find.textContaining('other.m4a'), findsNothing);
   });
 
-  testWidgets('every tag renders alike and any of them can be removed', (
+  testWidgets('AI and human tags have distinct colors and AI can be promoted', (
     WidgetTester tester,
   ) async {
     final RecordingsController controller = await buildRecordingsController(
       appDir,
-      // One list, whoever produced it: 'suggested' arrived from a model on an
-      // earlier run and is indistinguishable from the one the user typed.
       seed: <Recording>[
-        makeRecording(id: 'tagged', tags: <String>['manual', 'suggested']),
+        makeRecording(
+          id: 'tagged',
+          tags: <String>['manual'],
+          aiTags: <String>['suggested'],
+        ),
       ],
     );
     await pumpQueue(tester, controller);
 
-    for (final String tag in <String>['#manual', '#suggested']) {
-      expect(tester.widget<Text>(find.text(tag)).style?.color, Console.cyan);
-    }
+    expect(
+      tester.widget<Text>(find.text('#manual')).style?.color,
+      Console.cyan,
+    );
+    expect(
+      tester.widget<Text>(find.text('#suggested')).style?.color,
+      Console.violet,
+    );
 
     await tester.tap(find.byIcon(Icons.edit_outlined));
     await tester.pump();
 
-    // The model-suggested one is removable like any other — under the old
-    // provenance model it had no remove control at all.
-    await tester.tap(find.bySemanticsLabel('Remove tag suggested'));
+    final Finder aiTagText = find.text('#suggested');
+    tester
+        .widget<InkWell>(
+          find.ancestor(of: aiTagText, matching: find.byType(InkWell)),
+        )
+        .onTap!();
     await settleIo(tester);
 
-    expect(controller.recordings.single.tags, <String>['manual']);
+    expect(controller.recordings.single.aiTags, isEmpty);
+    expect(
+      controller.recordings.single.humanTags.map(
+        (RecordingTag tag) => tag.value,
+      ),
+      <String>['manual', 'suggested'],
+    );
   });
 
   testWidgets('filters and assigns captures by project', (
@@ -678,7 +695,7 @@ void main() {
     );
     await settleIo(tester);
 
-    expect(controller.recordings.single.tags, <String>[
+    expect(controller.recordings.single.tagValues, <String>[
       'project:acme',
       'client',
     ]);

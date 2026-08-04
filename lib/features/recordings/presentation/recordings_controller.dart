@@ -749,20 +749,24 @@ class RecordingsController extends ChangeNotifier {
     );
   }
 
-  /// Replace an item's user-visible tags. Values are trimmed, lowercased and
-  /// de-duplicated while preserving their first-seen order. Passing only blank
-  /// values clears the tags.
-  /// Replace the item's tags with exactly what the editor hands over.
-  ///
-  /// Authoritative, not additive: the list that arrives is the list that is
-  /// stored. This is what lets the user delete a tag the model proposed —
-  /// under the old provenance model the editor could only rewrite its own
-  /// layer, so a model tag was undeletable by construction.
+  /// Replaces the human-owned layer while preserving AI suggestions. Values
+  /// are normalized and de-duplicated; a human value wins an AI duplicate.
   Future<void> setTags(String id, Iterable<String> tags) async {
-    final List<String> normalized = RecordingTags.normalize(tags);
+    final Set<String> seen = <String>{};
+    final List<String> normalized = <String>[];
+    for (final String value in tags) {
+      final String tag = value.trim().toLowerCase();
+      if (tag.isNotEmpty && seen.add(tag)) normalized.add(tag);
+    }
     await _update(
       id,
-      (Recording item) => item.copyWith(tags: normalized),
+      (Recording item) => item.copyWith(
+        tags: RecordingTag.normalize(<RecordingTag>[
+          for (final String value in normalized)
+            RecordingTag(value: value, source: RecordingTagSource.human),
+          ...item.aiTags,
+        ]),
+      ),
       source: RevisionSource.user,
     );
     _logSink.log(
@@ -1059,12 +1063,13 @@ class RecordingsController extends ChangeNotifier {
           title: (item.title ?? '').trim().isEmpty ? result.title : null,
           category: item.category ?? result.category,
           summary: result.summary,
-          // Fill-only, like `title` and `category`, now that a tag carries no
-          // owner: with nothing marking which tags came from a model, a refresh
-          // could only refresh *all* of them, and a re-run would keep
-          // resurrecting tags the user had deleted. Clearing the list is how
-          // you ask for a fresh set.
-          tags: item.tags.isEmpty ? RecordingTags.normalize(result.tags) : null,
+          // Refresh only the model-owned layer. Re-resolving `item` here also
+          // preserves human edits made while enrichment was in flight.
+          tags: RecordingTag.normalize(<RecordingTag>[
+            ...item.humanTags,
+            for (final String value in result.tags)
+              RecordingTag(value: value, source: RecordingTagSource.ai),
+          ]),
         ),
         // The reason this feature exists: `summary` has no editor and is
         // refreshed wholesale on every re-run, so without a record the previous
@@ -1136,7 +1141,7 @@ class RecordingsController extends ChangeNotifier {
     diff('title', before.title, after.title);
     diff('category', before.category?.name, after.category?.name);
     diff('summary', before.summary, after.summary);
-    diff('tags', before.tags.join(', '), after.tags.join(', '));
+    diff('tags', before.tagValues.join(', '), after.tagValues.join(', '));
     diff('transcript', before.transcript, after.transcript);
     if (changes.isEmpty) return;
 

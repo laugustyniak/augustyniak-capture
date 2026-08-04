@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import '../../../app/ui_kit.dart';
+import '../domain/recording_tag.dart';
 
 /// Tags as individual objects, not as one comma-separated string.
 ///
@@ -17,17 +18,9 @@ import '../../../app/ui_kit.dart';
 /// rather than one tag named "a, b, c". That is the only place the comma
 /// survives, and it is an *input* convenience, never a rendering.
 ///
-/// Normalisation (trim, lowercase, de-dupe) is **not** repeated here — it lives
-/// in `RecordingTags.normalize`, reached through `RecordingsController.setTags`,
-/// which is the single point every write passes through. This widget only
-/// avoids offering an obvious duplicate.
-///
-/// **Every tag is editable, whoever produced it.** There is one list and one
-/// chip style; a tag the model proposed can be removed like any other, and
-/// `setTags` stores exactly what this widget hands back. The editor previously
-/// drew a second, un-removable row for model tags that could only be
-/// "promoted" — an interaction that existed purely to work around provenance
-/// being part of the stored value.
+/// Human tags are editable and cyan. AI tags are violet suggestions; tapping
+/// one promotes it to human, where it can then be changed without a future
+/// enrichment retry overwriting it.
 class TagEditor extends StatefulWidget {
   const TagEditor({
     super.key,
@@ -36,11 +29,9 @@ class TagEditor extends StatefulWidget {
     this.suggestions = const <String>[],
   });
 
-  /// The item's current tags, in stored order.
-  final List<String> tags;
+  final List<RecordingTag> tags;
 
-  /// Called with the complete new list on every add or remove — the caller
-  /// persists immediately, so there is no "save tags" step.
+  /// Called with the complete new human list on every edit or promotion.
   final ValueChanged<List<String>> onChanged;
 
   /// Tags already used on *other* captures. Offered as one-tap chips so a
@@ -58,6 +49,18 @@ class _TagEditorState extends State<TagEditor> {
 
   /// Enough to be useful, few enough to stay one or two lines on a card.
   static const int _maxSuggestions = 6;
+
+  static const String promoteHint = 'Tap a suggestion to keep it as your own';
+
+  List<String> get _human => widget.tags
+      .where((RecordingTag tag) => tag.source == RecordingTagSource.human)
+      .map((RecordingTag tag) => tag.value)
+      .toList();
+
+  List<String> get _ai => widget.tags
+      .where((RecordingTag tag) => tag.source == RecordingTagSource.ai)
+      .map((RecordingTag tag) => tag.value)
+      .toList();
 
   @override
   void dispose() {
@@ -80,7 +83,7 @@ class _TagEditorState extends State<TagEditor> {
       setState(() {}); // the suggestion filter reads the field
       return;
     }
-    final List<String> next = <String>[...widget.tags];
+    final List<String> next = <String>[..._human];
     for (final String tag in added) {
       if (!next.any((String existing) => _same(existing, tag))) next.add(tag);
     }
@@ -90,7 +93,7 @@ class _TagEditorState extends State<TagEditor> {
 
   void _remove(String tag) {
     widget.onChanged(
-      widget.tags.where((String value) => !_same(value, tag)).toList(),
+      _human.where((String value) => !_same(value, tag)).toList(),
     );
   }
 
@@ -108,16 +111,17 @@ class _TagEditorState extends State<TagEditor> {
     if (event.logicalKey != LogicalKeyboardKey.backspace) {
       return KeyEventResult.ignored;
     }
-    if (_input.text.isNotEmpty || widget.tags.isEmpty) {
+    final List<String> human = _human;
+    if (_input.text.isNotEmpty || human.isEmpty) {
       return KeyEventResult.ignored;
     }
-    _remove(widget.tags.last);
+    _remove(human.last);
     return KeyEventResult.handled;
   }
 
   List<String> get _visibleSuggestions {
     final String query = _input.text.trim().toLowerCase();
-    final List<String> assigned = widget.tags;
+    final List<String> assigned = <String>[..._human, ..._ai];
     return widget.suggestions
         .where(
           (String suggestion) =>
@@ -131,6 +135,7 @@ class _TagEditorState extends State<TagEditor> {
   @override
   Widget build(BuildContext context) {
     final List<String> suggestions = _visibleSuggestions;
+    final List<String> ai = _ai;
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -141,7 +146,7 @@ class _TagEditorState extends State<TagEditor> {
           runSpacing: 6,
           crossAxisAlignment: WrapCrossAlignment.center,
           children: <Widget>[
-            for (final String tag in widget.tags)
+            for (final String tag in _human)
               _TagChip(label: tag, onRemove: () => _remove(tag)),
             // Sized rather than Expanded: it is a Wrap child, so it has to
             // carry its own width or it would claim a whole run to itself.
@@ -171,6 +176,38 @@ class _TagEditorState extends State<TagEditor> {
             ),
           ],
         ),
+        if (ai.isNotEmpty) ...<Widget>[
+          const SizedBox(height: 9),
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: <Widget>[
+              const Padding(
+                padding: EdgeInsets.only(top: 5),
+                child: Icon(
+                  Icons.auto_awesome,
+                  size: 11,
+                  color: Console.violet,
+                ),
+              ),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Wrap(
+                  spacing: 6,
+                  runSpacing: 6,
+                  children: <Widget>[
+                    for (final String tag in ai)
+                      _AiTagChip(label: tag, onPromote: () => _commit(tag)),
+                  ],
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 5),
+          Text(
+            promoteHint,
+            style: ConsoleText.micro.copyWith(color: Console.dim),
+          ),
+        ],
         if (suggestions.isNotEmpty) ...<Widget>[
           const SizedBox(height: 8),
           Row(
@@ -246,6 +283,37 @@ class _TagChip extends StatelessWidget {
             ),
           ),
         ],
+      ),
+    );
+  }
+}
+
+class _AiTagChip extends StatelessWidget {
+  const _AiTagChip({required this.label, required this.onPromote});
+
+  final String label;
+  final VoidCallback onPromote;
+
+  @override
+  Widget build(BuildContext context) {
+    return Semantics(
+      button: true,
+      label: 'Keep AI tag $label as your own',
+      child: InkWell(
+        onTap: onPromote,
+        borderRadius: BorderRadius.circular(999),
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 4),
+          decoration: BoxDecoration(
+            color: Console.violet.withValues(alpha: .07),
+            borderRadius: BorderRadius.circular(999),
+            border: Border.all(color: Console.violet.withValues(alpha: .22)),
+          ),
+          child: Text(
+            '#$label',
+            style: ConsoleText.micro.copyWith(color: Console.violet),
+          ),
+        ),
       ),
     );
   }

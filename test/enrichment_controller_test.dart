@@ -11,6 +11,7 @@ import 'package:audivoa_core/features/recordings/data/recordings_repository.dart
 import 'package:audivoa_core/features/recordings/domain/capture_category.dart';
 import 'package:audivoa_core/features/recordings/domain/capture_type.dart';
 import 'package:audivoa_core/features/recordings/domain/recording.dart';
+import 'package:audivoa_core/features/recordings/domain/recording_tag.dart';
 import 'package:audivoa_core/features/recordings/presentation/recordings_controller.dart';
 import 'package:audivoa_core/features/transcription/data/transcription_service.dart';
 
@@ -148,7 +149,8 @@ void main() {
     expect(item.title, 'Notatka o kliencie');
     expect(item.category, CaptureCategory.meetingNote);
     expect(item.summary, 'Ustalenia ze spotkania.');
-    expect(item.tags, <String>['klient', 'oferta']);
+    expect(item.tagValues, <String>['klient', 'oferta']);
+    expect(item.aiTags, hasLength(2));
     expect(enrichment.lastText, 'spotkanie z klientem');
   });
 
@@ -197,8 +199,7 @@ void main() {
     expect(c.recordings.single.category, CaptureCategory.idea);
     // `summary` has no editor, so it is pure derived output and refreshes.
     expect(c.recordings.single.summary, 'Ustalenia ze spotkania.');
-    // Tags are fill-only, and this item already has some, so they stand.
-    expect(c.recordings.single.tags, <String>['klient', 'oferta']);
+    expect(c.recordings.single.aiTags, hasLength(2));
   });
 
   test('never overwrites user-set tags', () async {
@@ -219,12 +220,17 @@ void main() {
     await c.retryTranscription(id);
     await c.waitForProcessing();
 
-    // Exactly what the user set, normalised — the model adds nothing to a list
-    // that already exists, and nothing survives from the run before the edit.
-    expect(c.recordings.single.tags, <String>['project:acme', 'legal']);
+    expect(
+      c.recordings.single.humanTags.map((RecordingTag tag) => tag.value),
+      <String>['project:acme', 'legal'],
+    );
+    expect(
+      c.recordings.single.aiTags.map((RecordingTag tag) => tag.value),
+      <String>['klient', 'oferta'],
+    );
   });
 
-  test('a retry leaves an existing tag list alone', () async {
+  test('a retry replaces AI tags but preserves human tags', () async {
     final Directory dir = await _tmp();
     addTearDown(() => dir.delete(recursive: true));
     final _FakeEnrichment enrichment = _FakeEnrichment(verdict);
@@ -248,9 +254,8 @@ void main() {
     await c.retryTranscription(id);
     await c.waitForProcessing();
 
-    // Without provenance there is no "model layer" to refresh: a re-run that
-    // merged its own tags in would keep resurrecting ones the user deleted.
-    expect(c.recordings.single.tags, <String>['legal']);
+    expect(c.recordings.single.humanTags.single.value, 'legal');
+    expect(c.recordings.single.aiTags.single.value, 'follow-up');
     // The field that genuinely has no editor still refreshes.
     expect(c.recordings.single.summary, 'New summary');
   });
@@ -269,10 +274,9 @@ void main() {
     await c.waitForProcessing();
     final String id = c.recordings.single.id;
 
-    // Emptying the list is the one way back to model-suggested tags, exactly
-    // as clearing the category is the way to ask for a re-classification.
     await c.setTags(id, <String>[]);
-    expect(c.recordings.single.tags, isEmpty);
+    expect(c.recordings.single.humanTags, isEmpty);
+    expect(c.recordings.single.aiTags, hasLength(2));
 
     enrichment.result = const EnrichmentResult(
       title: 'ignored because already filled',
@@ -283,8 +287,8 @@ void main() {
     await c.retryTranscription(id);
     await c.waitForProcessing();
 
-    // Normalised on the way in, like anything the user could have typed.
-    expect(c.recordings.single.tags, <String>['follow-up']);
+    expect(c.recordings.single.humanTags, isEmpty);
+    expect(c.recordings.single.aiTags.single.value, 'follow-up');
   });
 
   test('a cleared category is filled again by the next run', () async {

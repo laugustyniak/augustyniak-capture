@@ -1,57 +1,71 @@
-/// Tag normalisation and loading, for a plain `List<String>`.
-///
-/// Tags carry **no provenance**. A capture has one list of tags; enrichment may
-/// propose it and the user may rewrite it, and once written down the two are
-/// indistinguishable — which is the point. An earlier model stored an owner per
-/// tag (`ai` / `human`) so each side could update only its own layer, but that
-/// made the *editor* the thing the user had to understand: a model tag could
-/// not be deleted, only "promoted", and the same word rendered in two colours
-/// depending on who typed it first. A tag list is a tag list.
-///
-/// What survives from that model is [fromJson], which still reads the object
-/// form — rows written while provenance existed are already on disk, and the
-/// owner is simply dropped when they load.
-class RecordingTags {
-  const RecordingTags._();
+enum RecordingTagSource {
+  ai,
+  human;
 
-  /// Lowercase and trimmed. Tags are matched, searched and de-duped by value,
-  /// so `Acme` and `acme` have to be one tag rather than two that look alike.
-  static String normalizeValue(String value) => value.trim().toLowerCase();
+  static RecordingTagSource fromName(String? value) =>
+      RecordingTagSource.values.where((RecordingTagSource item) {
+        return item.name == value;
+      }).firstOrNull ??
+      RecordingTagSource.human;
+}
 
-  /// Normalises, drops blanks and de-dupes, **keeping first-seen order** —
-  /// order is the user's, so a re-save must not shuffle their list.
-  static List<String> normalize(Iterable<String> tags) {
-    final Set<String> seen = <String>{};
-    final List<String> normalized = <String>[];
-    for (final String tag in tags) {
-      final String value = normalizeValue(tag);
-      if (value.isEmpty || !seen.add(value)) continue;
-      normalized.add(value);
+/// A normalized tag together with the actor that owns it.
+class RecordingTag {
+  const RecordingTag({required this.value, required this.source});
+
+  final String value;
+  final RecordingTagSource source;
+
+  Map<String, dynamic> toJson() => <String, dynamic>{
+    'value': value,
+    'source': source.name,
+  };
+
+  static RecordingTag? fromJson(dynamic json) {
+    // Legacy strings have unknowable provenance. Human is conservative: a
+    // wrong color is recoverable, overwriting a person's tag is not.
+    if (json is String) {
+      final String value = normalizeValue(json);
+      return value.isEmpty
+          ? null
+          : RecordingTag(value: value, source: RecordingTagSource.human);
     }
-    return List<String>.unmodifiable(normalized);
-  }
-
-  /// Reads the `tags` field of a persisted row.
-  ///
-  /// Three shapes are accepted, because all three exist on disk: a plain string
-  /// list (the original format and the current one), an object list carrying
-  /// the retired `{value, source}` pair, and anything else — which yields no
-  /// tags rather than throwing, so one hand-edited row cannot take the whole
-  /// index down with it.
-  static List<String> fromJson(dynamic json) {
-    if (json is! List<dynamic>) return const <String>[];
-    return normalize(
-      json.map(_valueOf).whereType<String>(),
+    if (json is! Map<String, dynamic>) return null;
+    final Object? rawValue = json['value'];
+    if (rawValue is! String) return null;
+    final String value = normalizeValue(rawValue);
+    if (value.isEmpty) return null;
+    return RecordingTag(
+      value: value,
+      source: RecordingTagSource.fromName(
+        json['source'] is String ? json['source'] as String : null,
+      ),
     );
   }
 
-  static String? _valueOf(dynamic entry) {
-    if (entry is String) return entry;
-    // The provenance-era shape. `source` is read and discarded: which side
-    // wrote a tag is no longer something the app models.
-    if (entry is Map<String, dynamic> && entry['value'] is String) {
-      return entry['value'] as String;
+  static String normalizeValue(String value) => value.trim().toLowerCase();
+
+  static List<RecordingTag> normalize(Iterable<RecordingTag> tags) {
+    final Set<String> seen = <String>{};
+    final List<RecordingTag> normalized = <RecordingTag>[];
+    final List<RecordingTag> ordered = <RecordingTag>[
+      ...tags.where(
+        (RecordingTag tag) => tag.source == RecordingTagSource.human,
+      ),
+      ...tags.where((RecordingTag tag) => tag.source == RecordingTagSource.ai),
+    ];
+    for (final RecordingTag tag in ordered) {
+      final String value = normalizeValue(tag.value);
+      if (value.isEmpty || !seen.add(value)) continue;
+      normalized.add(RecordingTag(value: value, source: tag.source));
     }
-    return null;
+    return List<RecordingTag>.unmodifiable(normalized);
   }
+
+  @override
+  bool operator ==(Object other) =>
+      other is RecordingTag && other.value == value && other.source == source;
+
+  @override
+  int get hashCode => Object.hash(value, source);
 }
