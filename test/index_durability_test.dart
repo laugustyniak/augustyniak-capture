@@ -69,7 +69,9 @@ void main() {
   late Directory root;
 
   setUp(() async {
-    root = await Directory.systemTemp.createTemp('audivoa-index-test');
+    root = await Directory.systemTemp.createTemp(
+      'augustyniak-capture-index-test',
+    );
   });
 
   tearDown(() async {

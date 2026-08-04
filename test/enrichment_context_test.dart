@@ -13,7 +13,7 @@ Project _project({
   String? description,
 }) => Project(
   id: id,
-  name: 'Audivoa',
+  name: 'Augustyniak Capture',
   repoPath: repoPath,
   description: description,
 );

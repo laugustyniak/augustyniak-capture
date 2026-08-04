@@ -64,7 +64,11 @@ class _FakePlayer implements AudioPlayer {
 void main() {
   late Directory appDir;
 
-  setUp(() => appDir = Directory.systemTemp.createTempSync('audivoa_capture_'));
+  setUp(
+    () => appDir = Directory.systemTemp.createTempSync(
+      'augustyniak_capture_capture_',
+    ),
+  );
   tearDown(() => appDir.deleteSync(recursive: true));
 
   /// Lets filesystem work started from inside the fake-async zone (a button

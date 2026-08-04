@@ -106,8 +106,12 @@ void main() {
   late Directory pickDir;
 
   setUp(() {
-    appDir = Directory.systemTemp.createTempSync('audivoa_ctl_app_');
-    pickDir = Directory.systemTemp.createTempSync('audivoa_ctl_pick_');
+    appDir = Directory.systemTemp.createTempSync(
+      'augustyniak_capture_ctl_app_',
+    );
+    pickDir = Directory.systemTemp.createTempSync(
+      'augustyniak_capture_ctl_pick_',
+    );
   });
 
   tearDown(() {
