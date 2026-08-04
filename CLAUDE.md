@@ -17,6 +17,9 @@ flutter create --platforms=android,ios .
 flutter pub get
 ```
 
+(`macos/` is checked in like `linux/` and `windows/`, so it needs no regeneration
+— see the macOS note below for what in it is hand-tuned and must not be clobbered.)
+
 It leaves every existing file alone (`AndroidManifest.xml` with `RECORD_AUDIO` /
 `INTERNET`, `ios/Runner/Info.plist`) but **adds `test/widget_test.dart`** — the
 counter-app template, which imports a `MyApp` this project does not have. Delete
@@ -65,6 +68,19 @@ apksigner verify --print-certs build/app/outputs/flutter-apk/app-release.apk
 ```
 
 A `key.properties` that exists but is incomplete, or that points at a keystore that is not there, fails the build with a written explanation rather than a null-pointer from inside AGP. The keystore is the one artifact in this project that cannot be regenerated: once a build is on Play under `com.audivoa.core`, losing the key means no future build can ever update it.
+
+**The macOS App Sandbox is off, and that is the platform's load-bearing decision.** Both `macos/Runner/Release.entitlements` and `DebugProfile.entitlements` set `com.apple.security.app-sandbox` to `false` — they must stay in agreement, or a debug run cannot reproduce an installed-app bug. The reason is that a sandboxed process hands its sandbox to every child it spawns, which breaks all three of this app's desktop shell-outs at once: `tesseract` and `ffmpeg` could not read the recordings directory, and `open` could not reach LaunchServices. They break *the same clean way a missing binary does* — the item lands `failed` with its source intact — so the sandbox is invisible as a cause. Turning it back on is a Mac App Store prerequisite, not a security fix: it needs `device.audio-input`, `network.client` and `files.user-selected.read-only` **and** in-process replacements (Vision, AVFoundation, NSWorkspace) before those three features work again. `NSMicrophoneUsageDescription` is in `macos/Runner/Info.plist` and is not optional — without it macOS kills the process at `recorder.hasPermission()`, i.e. on the first recording rather than at launch.
+
+Builds are **ad-hoc signed** (`CODE_SIGN_IDENTITY = "-"`, no Apple certificate needed). Two consequences: macOS keys microphone consent to the code signature, so a rebuild can re-prompt for the mic; and a Release build still carries `get-task-allow`, so it is debuggable. `PRODUCT_BUNDLE_IDENTIFIER` is pinned to `com.audivoa.core` in `macos/Runner/Configs/AppInfo.xcconfig` — `flutter create` derives `com.audivoa.audivoaCore` from the org, which is a *different* app to every store and update mechanism. Without the sandbox, `getApplicationDocumentsDirectory()` resolves to `~/Documents`, so captures live in `~/Documents/recordings/` rather than in a container. Install a standalone copy with:
+
+```bash
+flutter build macos --release
+cp -R "build/macos/Build/Products/Release/Audivoa Core.app" /Applications/
+```
+
+`SystemHotkeyRegistrar` is now genuinely reachable on macOS (it was dead code while there was no `macos/` target), but its `rejected` set still relies on `hotKeyManager.register` throwing on refusal, which the plugin does not document — check the Config tab rather than trusting an empty rejection list.
+
+**Regenerating one platform rewrites `.metadata`.** `flutter create --platforms=macos .` left *only* `root` and `macos` under `migration.platforms`, silently dropping android/ios/linux/windows. Restore the other entries by hand; `flutter migrate` reads that list.
 
 **Linux builds need `keybinder-3.0` installed first.** `hotkey_manager` (global
 shortcuts) links against it, and without it `flutter build linux` aborts at
