@@ -52,7 +52,7 @@ class CaptureNavBar extends StatelessWidget {
     assert(selectedIndex >= 0 && selectedIndex < destinations.length);
 
     return DecoratedBox(
-      decoration: const BoxDecoration(
+      decoration: BoxDecoration(
         color: Console.surfaceDeep,
         border: Border(top: BorderSide(color: Console.border)),
       ),
@@ -127,7 +127,7 @@ class _NavigationItem extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final Color color = selected ? Console.cyan : Console.dimText;
+    final Color color = selected ? Console.accent : Console.dimText;
     final Widget icon = Icon(destination.icon, size: 18, color: color);
 
     return Semantics(
@@ -221,30 +221,26 @@ class _RecordButton extends StatelessWidget {
           alignment: Alignment.center,
           decoration: BoxDecoration(
             shape: BoxShape.circle,
-            color: busy ? Console.surfaceRaised : Console.cyan,
+            color: busy ? Console.surfaceRaised : Console.accent,
             boxShadow: busy
                 ? null
                 : <BoxShadow>[
                     BoxShadow(
-                      color: Console.cyan.withValues(alpha: .35),
+                      color: Console.accent.withValues(alpha: .35),
                       blurRadius: 18,
                       offset: const Offset(0, 4),
                     ),
                   ],
           ),
           child: busy
-              ? const SizedBox.square(
+              ? SizedBox.square(
                   dimension: 20,
                   child: CircularProgressIndicator(
                     strokeWidth: 2.2,
-                    color: Console.cyan,
+                    color: Console.accent,
                   ),
                 )
-              : const Icon(
-                  Icons.mic_none_rounded,
-                  size: 22,
-                  color: Console.ink,
-                ),
+              : Icon(Icons.mic_none_rounded, size: 22, color: Console.ink),
         ),
       ),
     );

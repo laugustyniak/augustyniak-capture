@@ -8,6 +8,7 @@ import '../../shortcuts/domain/shortcut_action.dart';
 import '../../transcription/data/transcription_service.dart';
 import '../data/settings_repository.dart';
 import '../domain/app_settings.dart';
+import '../domain/app_theme_mode.dart';
 import '../domain/audio_config.dart';
 import '../domain/provider_profile.dart';
 
@@ -48,6 +49,11 @@ class SettingsController extends ChangeNotifier {
       .where((ProviderProfile item) => item.kind == kind)
       .toList();
   AudioConfig get audio => _settings.audio;
+
+  /// Which palette the app paints in. Read by the shell, which lifts it above
+  /// the `MaterialApp`.
+  AppThemeMode get themeMode => _settings.themeMode;
+
   /// Never null: an untouched install resolves to the shipped default.
   String get enrichmentInstructions => _settings.enrichmentInstructions;
 
@@ -274,9 +280,7 @@ class SettingsController extends ChangeNotifier {
         trimmed == _settings.enrichmentInstructions.trim()) {
       return;
     }
-    await _persist(
-      _settings.copyWith(enrichmentInstructions: trimmed),
-    );
+    await _persist(_settings.copyWith(enrichmentInstructions: trimmed));
   }
 
   /// Drop the user's text and go back to [EnrichmentProfileDefaults.text].
@@ -288,6 +292,17 @@ class SettingsController extends ChangeNotifier {
   }
 
   Future<void> resetAudio() => updateAudio(AudioConfig.defaults);
+
+  /// Repaint the app in [mode].
+  ///
+  /// Persisted like anything else here, but it is the one setting the shell
+  /// pushes *upwards* — the palette lives above `MaterialApp`, not below it —
+  /// so the change reaches the screen through the shell's theme notifier rather
+  /// than through a controller a widget listens to.
+  Future<void> setThemeMode(AppThemeMode mode) async {
+    if (mode == _settings.themeMode) return;
+    await _persist(_settings.copyWith(themeMode: mode));
+  }
 
   /// Bind [action] to [binding].
   ///

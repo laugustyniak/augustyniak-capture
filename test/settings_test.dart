@@ -1,6 +1,7 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:augustyniak_capture/features/settings/data/settings_repository.dart';
 import 'package:augustyniak_capture/features/settings/domain/app_settings.dart';
+import 'package:augustyniak_capture/features/settings/domain/app_theme_mode.dart';
 import 'package:augustyniak_capture/features/settings/domain/audio_config.dart';
 import 'package:augustyniak_capture/features/settings/domain/provider_profile.dart';
 import 'package:augustyniak_capture/features/settings/presentation/settings_controller.dart';
@@ -177,6 +178,43 @@ void main() {
       expect(restored.profiles, isEmpty);
       expect(restored.activeProfileId, isNull);
       expect(restored.audio, AudioConfig.defaults);
+      // A `settings.json` written before the theme existed follows the OS,
+      // which is what the app did implicitly anyway.
+      expect(restored.themeMode, AppThemeMode.system);
+    });
+
+    test('theme mode survives a round-trip and degrades on a bad value', () {
+      const AppSettings original = AppSettings(themeMode: AppThemeMode.light);
+
+      expect(
+        AppSettings.fromJson(original.toJson()).themeMode,
+        AppThemeMode.light,
+      );
+      // Unlike `shortcuts`, this key is always written: `system` is a
+      // delegation rather than a default a later build could improve on.
+      expect(
+        const AppSettings().toJson()['themeMode'],
+        AppThemeMode.system.name,
+      );
+      // A newer build's fourth mode, or a hand-edited file, must not take the
+      // profiles down with it.
+      expect(
+        AppSettings.fromJson(<String, dynamic>{'themeMode': 'sepia'}).themeMode,
+        AppThemeMode.system,
+      );
+      expect(
+        AppSettings.fromJson(<String, dynamic>{'themeMode': 7}).themeMode,
+        AppThemeMode.system,
+      );
+    });
+
+    test('copyWith carries the theme through an unrelated save', () {
+      const AppSettings dark = AppSettings(themeMode: AppThemeMode.dark);
+
+      expect(
+        dark.copyWith(audio: const AudioConfig(sampleRate: 44100)).themeMode,
+        AppThemeMode.dark,
+      );
     });
 
     test('an untouched install resolves to the shipped default', () {
@@ -214,7 +252,10 @@ void main() {
 
       expect(emptied.hasCustomEnrichmentInstructions, isTrue);
       expect(emptied.enrichmentInstructions, isEmpty);
-      expect(AppSettings.fromJson(emptied.toJson()).enrichmentInstructions, isEmpty);
+      expect(
+        AppSettings.fromJson(emptied.toJson()).enrichmentInstructions,
+        isEmpty,
+      );
     });
 
     test('a wrong type in the file degrades to the default, not a throw', () {

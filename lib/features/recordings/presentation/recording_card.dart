@@ -47,7 +47,11 @@ class RecordingCard extends StatelessWidget {
 
   /// Names the destination, not the gesture: this is the one control that takes
   /// a capture out of the app, and "route" alone says nothing about where.
-  static const String routeLabel = "Send to the project's inbox and close";
+  ///
+  /// "Hand off" also absorbs the old trailing `and close`: the item leaving the
+  /// user's desk *is* what closing means here, so stating it twice only invited
+  /// the reader to look for a second effect.
+  static const String routeLabel = "Hand off to the project's inbox";
 
   final Recording recording;
   final bool isPlaying;
@@ -101,7 +105,7 @@ class RecordingCard extends StatelessWidget {
     // the pill is the one place the user looks to find out what is going on, so
     // while the model reads the text it says that rather than the resting READY.
     final _StatusVisual? visual = isEnriching
-        ? const _StatusVisual('ANALYZING', Console.cyan, pulse: true)
+        ? _StatusVisual('ANALYZING', Console.accent, pulse: true)
         : _statusVisual(recording.status);
     final String filename = File(recording.filePath).uri.pathSegments.last;
     final String displayName = displayNameFor(recording);
@@ -112,11 +116,11 @@ class RecordingCard extends StatelessWidget {
 
     return RecordingCardShell(
       borderColor: focused
-          ? Console.cyan
+          ? Console.accent
           : failed
           ? Console.red.withValues(alpha: .35)
           : reviewed
-          ? Console.cyan.withValues(alpha: .35)
+          ? Console.accent.withValues(alpha: .35)
           : Console.border,
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -146,10 +150,10 @@ class RecordingCard extends StatelessWidget {
                         ),
                         if (reviewed) ...<Widget>[
                           const SizedBox(width: 7),
-                          const Icon(
+                          Icon(
                             Icons.check_circle_outline_rounded,
                             size: 14,
-                            color: Console.cyan,
+                            color: Console.accent,
                           ),
                         ],
                       ],
@@ -179,7 +183,12 @@ class RecordingCard extends StatelessWidget {
                   if (projectName != null)
                     StatusPill(
                       label: projectName!,
-                      color: Console.violet,
+                      // Neutral, and it has to be: violet is now `agentTask`,
+                      // and the two pills sit side by side in this very Wrap —
+                      // a violet outline would be read as a category by anyone
+                      // scanning colour rather than text. Project is context
+                      // anyway; the category is the thing to act on.
+                      color: Console.mutedSoft,
                       outlined: true,
                     ),
                   if (recording.category != null)
@@ -187,8 +196,10 @@ class RecordingCard extends StatelessWidget {
                       label: recording.category!.label,
                       // Raised off `mutedSoft`, which made the one field that
                       // says what to *do* with a capture the dimmest thing on
-                      // the row. Category is a routing destination.
-                      color: Console.cyan,
+                      // the row. Category is a routing destination — and each
+                      // destination now has its own colour, so the row is
+                      // sortable by eye and not only by reading.
+                      color: categoryColorFor(recording.category),
                       outlined: true,
                     ),
                   // Cross-faded rather than swapped: READY → ANALYZING →
@@ -236,11 +247,11 @@ class RecordingCard extends StatelessWidget {
           ],
           if (recording.status == RecordingStatus.transcribing) ...<Widget>[
             const SizedBox(height: 12),
-            const ClipRRect(
+            ClipRRect(
               borderRadius: BorderRadius.all(Radius.circular(2)),
               child: LinearProgressIndicator(
                 minHeight: 3,
-                color: Console.cyan,
+                color: Console.accent,
                 backgroundColor: Console.track,
               ),
             ),
@@ -249,7 +260,7 @@ class RecordingCard extends StatelessWidget {
           // text underneath it — the model is reading exactly that.
           if (isEnriching) ...<Widget>[
             const SizedBox(height: 12),
-            const _EnrichingStrip(),
+            _EnrichingStrip(),
           ],
           if (hasTranscript) ...<Widget>[
             const SizedBox(height: 11),
@@ -291,7 +302,7 @@ class RecordingCard extends StatelessWidget {
             const SizedBox(height: 9),
             Row(
               children: <Widget>[
-                const Icon(
+                Icon(
                   Icons.subdirectory_arrow_right_rounded,
                   size: 13,
                   color: Console.green,
@@ -405,24 +416,20 @@ class _EnrichingStrip extends StatelessWidget {
       children: <Widget>[
         Row(
           children: <Widget>[
-            const Icon(
-              Icons.auto_awesome_outlined,
-              size: 12,
-              color: Console.cyan,
-            ),
+            Icon(Icons.auto_awesome_outlined, size: 12, color: Console.accent),
             const SizedBox(width: 6),
             Expanded(
               child: Text(
                 RecordingCard.analyzingLabel,
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
-                style: ConsoleText.micro.copyWith(color: Console.cyan),
+                style: ConsoleText.micro.copyWith(color: Console.accent),
               ),
             ),
           ],
         ),
         const SizedBox(height: 7),
-        const ScanLine(),
+        ScanLine(),
       ],
     );
   }
@@ -537,13 +544,13 @@ class _TagLabel extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
       decoration: BoxDecoration(
-        color: Console.cyan.withValues(alpha: .07),
+        color: Console.accent.withValues(alpha: .07),
         borderRadius: BorderRadius.circular(999),
-        border: Border.all(color: Console.cyan.withValues(alpha: .22)),
+        border: Border.all(color: Console.accent.withValues(alpha: .22)),
       ),
       child: Text(
         '#$tag',
-        style: ConsoleText.micro.copyWith(color: Console.cyan),
+        style: ConsoleText.micro.copyWith(color: Console.accent),
       ),
     );
   }
@@ -559,16 +566,16 @@ class _StatusVisual {
 /// Null for the resting state, which draws no badge at all — see the card.
 _StatusVisual? _statusVisual(RecordingStatus status) => switch (status) {
   // Persisted but not yet handed to a processor — the design calls it RAW.
-  RecordingStatus.saved => const _StatusVisual('RAW', Console.muted),
-  RecordingStatus.pendingTranscription => const _StatusVisual(
+  RecordingStatus.saved => _StatusVisual('RAW', Console.muted),
+  RecordingStatus.pendingTranscription => _StatusVisual(
     'QUEUED',
     Console.amber,
   ),
-  RecordingStatus.transcribing => const _StatusVisual(
+  RecordingStatus.transcribing => _StatusVisual(
     'TRANSCRIBING',
-    Console.cyan,
+    Console.accent,
     pulse: true,
   ),
   RecordingStatus.completed => null,
-  RecordingStatus.failed => const _StatusVisual('FAILED', Console.red),
+  RecordingStatus.failed => _StatusVisual('FAILED', Console.red),
 };

@@ -49,9 +49,9 @@ class ConsoleNavRail extends StatelessWidget {
   final int selectedIndex;
   final ValueChanged<int> onSelected;
 
-  /// Drives the `DONE n / m` strip. The phone layout carries the same two
-  /// numbers on the review switch itself (`INBOX 4 · DONE 33`), which is why it
-  /// no longer spends a row of the queue on a progress strip; the wide layout
+  /// Drives the `CLEAR n / m` strip. The phone layout carries the same two
+  /// numbers on the review switch itself (`DESK 4 · OFF DESK 33`), which is why
+  /// it no longer spends a row of the queue on a progress strip; the wide layout
   /// has a permanent column to hang them in and can afford both.
   final int reviewed;
   final int total;
@@ -69,7 +69,7 @@ class ConsoleNavRail extends StatelessWidget {
   Widget build(BuildContext context) {
     return Container(
       width: Console.railWidth,
-      decoration: const BoxDecoration(
+      decoration: BoxDecoration(
         color: Console.surfaceDeep,
         border: Border(right: BorderSide(color: Console.track)),
       ),
@@ -80,7 +80,7 @@ class ConsoleNavRail extends StatelessWidget {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: <Widget>[
-              const _Wordmark(),
+              _Wordmark(),
               const SizedBox(height: 10),
               for (int i = 0; i < destinations.length; i++)
                 _RailButton(
@@ -120,13 +120,13 @@ class _Wordmark extends StatelessWidget {
             alignment: Alignment.center,
             decoration: BoxDecoration(
               borderRadius: BorderRadius.circular(8),
-              gradient: const LinearGradient(
+              gradient: LinearGradient(
                 begin: Alignment.topLeft,
                 end: Alignment.bottomRight,
-                colors: <Color>[Console.cyanDeep, Console.cyan],
+                colors: <Color>[Console.accentDeep, Console.accent],
               ),
             ),
-            child: const Text(
+            child: Text(
               'A',
               style: TextStyle(
                 fontFamily: ConsoleFont.display,
@@ -179,7 +179,7 @@ class _RailButton extends StatelessWidget {
     final Widget icon = Icon(
       destination.icon,
       size: 16,
-      color: selected ? Console.cyan : Console.muted,
+      color: selected ? Console.accent : Console.muted,
     );
 
     return Semantics(
@@ -225,7 +225,7 @@ class _RailButton extends StatelessWidget {
                     fontSize: 10,
                     // dimText, not dim: this carries a number the user reads.
                     // `dim` is the non-text tint and sits below the 4.5:1 floor.
-                    color: selected ? Console.cyan : Console.dimText,
+                    color: selected ? Console.accent : Console.dimText,
                   ),
                 ),
             ],
@@ -236,7 +236,13 @@ class _RailButton extends StatelessWidget {
   }
 }
 
-/// `DONE 33 / 36 · 92%` over a 3 px bar — the user-owned axis, stated as a goal.
+/// `CLEAR 33 / 36 · 92%` over a 3 px bar — the user-owned axis, stated as a
+/// goal.
+///
+/// `CLEAR` rather than the chips' `OFF DESK`: this row carries the percentage
+/// too, and at [ConsoleText.micro]'s letter spacing the longer label overflows
+/// the 184 px the rail leaves by 21 px. Same image at the length that fits —
+/// the empty panel says "Desk clear" in full.
 class _ReviewProgress extends StatelessWidget {
   const _ReviewProgress({required this.reviewed, required this.total});
 
@@ -249,7 +255,7 @@ class _ReviewProgress extends StatelessWidget {
     final bool complete = total > 0 && reviewed == total;
 
     return Semantics(
-      label: 'Done $reviewed of $total captures',
+      label: 'Handed off $reviewed of $total captures',
       child: Padding(
         padding: const EdgeInsets.symmetric(horizontal: 6),
         child: Column(
@@ -259,7 +265,7 @@ class _ReviewProgress extends StatelessWidget {
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: <Widget>[
                 Text(
-                  'DONE $reviewed / $total',
+                  'CLEAR $reviewed / $total',
                   style: ConsoleText.micro.copyWith(fontSize: 10.5),
                 ),
                 Text(
@@ -268,7 +274,7 @@ class _ReviewProgress extends StatelessWidget {
                   '${(progress * 100).floor()}%',
                   style: ConsoleText.micro.copyWith(
                     fontSize: 10.5,
-                    color: complete ? Console.green : Console.cyan,
+                    color: complete ? Console.green : Console.accent,
                   ),
                 ),
               ],
@@ -284,7 +290,7 @@ class _ReviewProgress extends StatelessWidget {
                   return LinearProgressIndicator(
                     value: value,
                     minHeight: 3,
-                    color: complete ? Console.green : Console.cyan,
+                    color: complete ? Console.green : Console.accent,
                     backgroundColor: Console.track,
                   );
                 },
@@ -371,24 +377,24 @@ class _RecordButton extends StatelessWidget {
             borderRadius: BorderRadius.circular(10),
             gradient: busy
                 ? null
-                : const LinearGradient(
+                : LinearGradient(
                     begin: Alignment.topLeft,
                     end: Alignment.bottomRight,
-                    colors: <Color>[Console.cyanDeep, Console.cyan],
+                    colors: <Color>[Console.accentDeep, Console.accent],
                   ),
             color: busy ? Console.surfaceRaised : null,
             boxShadow: busy
                 ? null
                 : <BoxShadow>[
                     BoxShadow(
-                      color: Console.cyan.withValues(alpha: .28),
+                      color: Console.accent.withValues(alpha: .28),
                       blurRadius: 20,
                       offset: const Offset(0, 6),
                     ),
                   ],
           ),
           child: busy
-              ? const SizedBox(
+              ? SizedBox(
                   height: 15,
                   child: Center(
                     child: SizedBox(
@@ -396,7 +402,7 @@ class _RecordButton extends StatelessWidget {
                       height: 15,
                       child: CircularProgressIndicator(
                         strokeWidth: 2,
-                        color: Console.cyan,
+                        color: Console.accent,
                       ),
                     ),
                   ),
@@ -404,7 +410,7 @@ class _RecordButton extends StatelessWidget {
               : Row(
                   mainAxisAlignment: MainAxisAlignment.center,
                   children: <Widget>[
-                    const Icon(
+                    Icon(
                       Icons.fiber_manual_record_rounded,
                       size: 13,
                       color: Console.ink,

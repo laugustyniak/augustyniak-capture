@@ -53,7 +53,7 @@ class _LogsTabState extends State<LogsTab> {
           ),
           const SizedBox(height: 12),
           if (visible.isEmpty)
-            const EmptyPanel(
+            EmptyPanel(
               icon: Icons.terminal_outlined,
               title: 'No events.',
               blurb:
@@ -73,7 +73,7 @@ class _LogsTabState extends State<LogsTab> {
               onPressed: () => _confirmClear(context),
               style: OutlinedButton.styleFrom(
                 foregroundColor: Console.redSoft,
-                side: const BorderSide(color: Console.border),
+                side: BorderSide(color: Console.border),
                 padding: const EdgeInsets.symmetric(vertical: 13),
                 shape: RoundedRectangleBorder(
                   borderRadius: BorderRadius.circular(14),
@@ -137,7 +137,7 @@ class _LevelFilterRow extends StatelessWidget {
               label: '${_levelLabel(level)} ${counts[level] ?? 0}',
               selected: active,
               onSelected: () => onSelected(level),
-              selectedColor: level == null ? Console.cyan : levelColor(level),
+              selectedColor: level == null ? Console.accent : levelColor(level),
             ),
           );
         }).toList(),
@@ -171,7 +171,7 @@ class _LogRow extends StatelessWidget {
         child: Container(
           padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
           decoration: BoxDecoration(
-            color: Console.surfaceDeep,
+            color: Console.surface,
             borderRadius: BorderRadius.circular(14),
             border: Border.all(color: Console.border),
           ),
@@ -195,7 +195,7 @@ class _LogRow extends StatelessWidget {
                       children: <Widget>[
                         Text(
                           formatClock(event.timestamp),
-                          style: const TextStyle(
+                          style: TextStyle(
                             color: Console.muted,
                             fontSize: 10,
                             fontFamily: 'monospace',
@@ -214,7 +214,7 @@ class _LogRow extends StatelessWidget {
                               event.recordingId!.split('-').first,
                               maxLines: 1,
                               overflow: TextOverflow.ellipsis,
-                              style: const TextStyle(
+                              style: TextStyle(
                                 color: Console.muted,
                                 fontSize: 9,
                                 fontFamily: 'monospace',
@@ -227,7 +227,7 @@ class _LogRow extends StatelessWidget {
                     const SizedBox(height: 5),
                     Text(
                       event.message,
-                      style: const TextStyle(
+                      style: TextStyle(
                         color: Console.textSoft,
                         fontSize: 11,
                         height: 1.4,
@@ -245,7 +245,7 @@ class _LogRow extends StatelessWidget {
 }
 
 Color levelColor(LogLevel level) => switch (level) {
-  LogLevel.info => Console.cyan,
+  LogLevel.info => Console.accent,
   LogLevel.warn => Console.amber,
   LogLevel.error => Console.red,
 };

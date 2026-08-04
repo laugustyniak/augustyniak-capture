@@ -174,7 +174,7 @@ class _TagEditorState extends State<TagEditor> {
           Row(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: <Widget>[
-              const Padding(
+              Padding(
                 padding: EdgeInsets.only(top: 5),
                 child: Text('USED', style: ConsoleText.micro),
               ),
@@ -213,16 +213,16 @@ class _TagChip extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.fromLTRB(9, 4, 4, 4),
       decoration: BoxDecoration(
-        color: Console.cyan.withValues(alpha: .07),
+        color: Console.accent.withValues(alpha: .07),
         borderRadius: BorderRadius.circular(999),
-        border: Border.all(color: Console.cyan.withValues(alpha: .2)),
+        border: Border.all(color: Console.accent.withValues(alpha: .2)),
       ),
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: <Widget>[
           Text(
             '#$label',
-            style: ConsoleText.micro.copyWith(color: Console.cyan),
+            style: ConsoleText.micro.copyWith(color: Console.accent),
           ),
           const SizedBox(width: 4),
           // Semantics outside, gesture inside: the label is the node a caller
@@ -233,7 +233,7 @@ class _TagChip extends StatelessWidget {
             child: InkResponse(
               onTap: onRemove,
               radius: 14,
-              child: const Padding(
+              child: Padding(
                 padding: EdgeInsets.all(2),
                 child: Icon(
                   Icons.close_rounded,

@@ -92,7 +92,7 @@ class _SecondaryCaptureButton extends StatelessWidget {
               color: Console.surfaceRaised,
               shape: BoxShape.circle,
               border: Border.all(color: Console.borderStrong),
-              boxShadow: const <BoxShadow>[
+              boxShadow: <BoxShadow>[
                 BoxShadow(
                   color: Console.shadow,
                   blurRadius: 18,
@@ -135,30 +135,26 @@ class _RecordButton extends StatelessWidget {
           height: 64,
           alignment: Alignment.center,
           decoration: BoxDecoration(
-            color: busy ? Console.surfaceRaised : Console.cyan,
+            color: busy ? Console.surfaceRaised : Console.accent,
             shape: BoxShape.circle,
             boxShadow: <BoxShadow>[
               BoxShadow(
-                color: Console.cyan.withValues(alpha: busy ? 0 : .35),
+                color: Console.accent.withValues(alpha: busy ? 0 : .35),
                 blurRadius: 28,
                 offset: const Offset(0, 8),
               ),
             ],
           ),
           child: busy
-              ? const SizedBox(
+              ? SizedBox(
                   width: 22,
                   height: 22,
                   child: CircularProgressIndicator(
                     strokeWidth: 2.4,
-                    color: Console.cyan,
+                    color: Console.accent,
                   ),
                 )
-              : const Icon(
-                  Icons.mic_none_rounded,
-                  size: 26,
-                  color: Console.ink,
-                ),
+              : Icon(Icons.mic_none_rounded, size: 26, color: Console.ink),
         ),
       ),
     );

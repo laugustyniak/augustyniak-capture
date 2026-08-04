@@ -19,6 +19,7 @@ import '../../projects/domain/project.dart';
 import '../../settings/data/aes_gcm_token_cipher.dart';
 import '../../settings/data/secure_storage_master_key_store.dart';
 import '../../settings/data/settings_repository.dart';
+import '../../settings/domain/app_theme_mode.dart';
 import '../../projects/presentation/projects_controller.dart';
 import '../../projects/presentation/projects_tab.dart';
 import '../../settings/presentation/config_tab.dart';
@@ -54,7 +55,15 @@ import 'text_note_sheet.dart';
 /// recordings controller in sync with settings; every tab body lives in its own
 /// file.
 class RecordingsPage extends StatefulWidget {
-  const RecordingsPage({super.key});
+  const RecordingsPage({super.key, this.themeMode});
+
+  /// Where the shell publishes the persisted theme so `AugustyniakCaptureApp`,
+  /// which sits *above* this page, can read it. Write-only from here.
+  ///
+  /// Null in the widget suite: a test pumps this page under its own
+  /// `MaterialApp` with no theme host above it, and the palette it paints in is
+  /// then whatever that test set up.
+  final ValueNotifier<AppThemeMode>? themeMode;
 
   @override
   State<RecordingsPage> createState() => _RecordingsPageState();
@@ -307,6 +316,11 @@ class _RecordingsPageState extends State<RecordingsPage> {
         ? _buildOcrService()
         : ocr;
     controller.audioConfig = settings.audio;
+    // The one setting that travels *up*: the palette is chosen above
+    // `MaterialApp`, which is above this page. A `ValueNotifier` no-ops on an
+    // unchanged value, so this costs nothing on the settings changes that are
+    // not about the theme.
+    widget.themeMode?.value = settings.themeMode;
     // Fire-and-forget: an unchanged binding map short-circuits inside the
     // coordinator, so this does not churn the OS hotkey table on every
     // unrelated settings change.
@@ -347,7 +361,7 @@ class _RecordingsPageState extends State<RecordingsPage> {
       context: context,
       isScrollControlled: true,
       backgroundColor: Console.background,
-      builder: (BuildContext context) => const TextNoteSheet(),
+      builder: (BuildContext context) => TextNoteSheet(),
     );
     if (body != null && body.trim().isNotEmpty) {
       await controller.addTextNote(body);
@@ -358,7 +372,7 @@ class _RecordingsPageState extends State<RecordingsPage> {
     final _CaptureAction? action = await showModalBottomSheet<_CaptureAction>(
       context: context,
       backgroundColor: Console.background,
-      builder: (BuildContext context) => const _CaptureMenuSheet(),
+      builder: (BuildContext context) => _CaptureMenuSheet(),
     );
     if (action == null || !context.mounted) return;
 
@@ -573,7 +587,7 @@ class _RecordingsPageState extends State<RecordingsPage> {
 
   Widget _buildDesktopNavigationBar() {
     return DecoratedBox(
-      decoration: const BoxDecoration(
+      decoration: BoxDecoration(
         border: Border(top: BorderSide(color: Console.border)),
       ),
       child: NavigationBar(
@@ -625,11 +639,7 @@ class _ProfileBadge extends StatelessWidget {
     const Icon icon = Icon(Icons.memory_rounded);
     if (hasActiveProfile) return icon;
 
-    return const Badge(
-      backgroundColor: Console.amber,
-      smallSize: 7,
-      child: icon,
-    );
+    return Badge(backgroundColor: Console.amber, smallSize: 7, child: icon);
   }
 }
 
@@ -643,7 +653,7 @@ class _CaptureMenuSheet extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Container(
-      decoration: const BoxDecoration(
+      decoration: BoxDecoration(
         color: Console.surface,
         borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
         border: Border(

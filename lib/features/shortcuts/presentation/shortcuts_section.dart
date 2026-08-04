@@ -34,7 +34,7 @@ class ShortcutsSection extends StatelessWidget {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: <Widget>[
-        const SectionHeader(title: 'GLOBAL SHORTCUTS'),
+        SectionHeader(title: 'GLOBAL SHORTCUTS'),
         const SizedBox(height: 12),
         ConsoleCard(
           child: Column(
@@ -52,10 +52,10 @@ class ShortcutsSection extends StatelessWidget {
                       : () => controller.clearShortcut(action),
                 ),
                 if (action != ShortcutAction.values.last)
-                  const Divider(color: Console.border, height: 18),
+                  Divider(color: Console.border, height: 18),
               ],
               const SizedBox(height: 12),
-              const Text(
+              Text(
                 'Shortcuts work system-wide, even when the window is '
                 'minimised. Recording raises the window only after the capture '
                 'has started, so the microphone is never kept waiting; '
@@ -132,7 +132,7 @@ class _ShortcutRow extends StatelessWidget {
             children: <Widget>[
               Text(
                 action.label,
-                style: const TextStyle(
+                style: TextStyle(
                   color: Console.text,
                   fontSize: 12,
                   fontWeight: FontWeight.w700,
@@ -140,7 +140,7 @@ class _ShortcutRow extends StatelessWidget {
               ),
               if (isRejected) ...<Widget>[
                 const SizedBox(height: 3),
-                const Text(
+                Text(
                   'This combination will not work — taken by another app, '
                   'or unsupported on this system. Pick another.',
                   style: TextStyle(color: Console.amber, fontSize: 9.5),
@@ -153,7 +153,7 @@ class _ShortcutRow extends StatelessWidget {
         IconButton(
           onPressed: onCapture,
           icon: const Icon(Icons.edit_outlined, size: 17),
-          color: Console.cyan,
+          color: Console.accent,
           tooltip: 'Change shortcut',
         ),
         IconButton(
@@ -178,12 +178,12 @@ class _BindingChip extends StatelessWidget {
     final HotkeyBinding? current = binding;
     final Color color = current == null
         ? Console.muted
-        : (isRejected ? Console.amber : Console.cyan);
+        : (isRejected ? Console.amber : Console.accent);
 
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
       decoration: BoxDecoration(
-        color: Console.surfaceDeep,
+        color: Console.surfaceRaised,
         borderRadius: BorderRadius.circular(9),
         border: Border.all(color: current == null ? Console.border : color),
       ),
@@ -306,7 +306,7 @@ class _HotkeyCaptureSheetState extends State<_HotkeyCaptureSheet> {
                 ),
               ),
               const SizedBox(height: 4),
-              const Text(
+              Text(
                 'Escape cancels.',
                 style: TextStyle(color: Console.mutedSoft, fontSize: 10),
               ),
@@ -316,16 +316,16 @@ class _HotkeyCaptureSheetState extends State<_HotkeyCaptureSheet> {
                 padding: const EdgeInsets.symmetric(vertical: 22),
                 alignment: Alignment.center,
                 decoration: BoxDecoration(
-                  color: Console.surfaceDeep,
+                  color: Console.surfaceRaised,
                   borderRadius: BorderRadius.circular(14),
                   border: Border.all(
-                    color: captured == null ? Console.border : Console.cyan,
+                    color: captured == null ? Console.border : Console.accent,
                   ),
                 ),
                 child: Text(
                   _preview,
                   style: TextStyle(
-                    color: captured == null ? Console.muted : Console.cyan,
+                    color: captured == null ? Console.muted : Console.accent,
                     fontSize: 15,
                     fontWeight: FontWeight.w800,
                     fontFamily: 'monospace',
@@ -336,7 +336,7 @@ class _HotkeyCaptureSheetState extends State<_HotkeyCaptureSheet> {
                 const SizedBox(height: 10),
                 Text(
                   _hint!,
-                  style: const TextStyle(
+                  style: TextStyle(
                     color: Console.amber,
                     fontSize: 10,
                     height: 1.4,
@@ -351,7 +351,7 @@ class _HotkeyCaptureSheetState extends State<_HotkeyCaptureSheet> {
                       ? null
                       : () => Navigator.pop(context, captured),
                   style: FilledButton.styleFrom(
-                    backgroundColor: Console.cyan,
+                    backgroundColor: Console.accent,
                     foregroundColor: Console.ink,
                     disabledBackgroundColor: Console.surfaceRaised,
                     padding: const EdgeInsets.symmetric(vertical: 14),
