@@ -1137,13 +1137,18 @@ class RecordingsController extends ChangeNotifier {
         .map((Recording item) => item.id == id ? transform(item) : item)
         .toList();
 
-    if (before != null) {
-      final Recording after = _recordings[index];
-      await _recordRevisions(before, after, source);
-    }
     // Persist even after dispose: the drain can be mid-job when the shell tears
     // the page down, and the status it just computed still belongs on disk.
     await _persistAll();
+
+    // Deliberately *after* the persist, never before. `_persistAll` can refuse
+    // (an unreadable index) or throw (a full disk), and a history entry for a
+    // change that never reached `recordings.json` would describe a state no
+    // file ever held. Recording it here means the history can only ever lag the
+    // index, never lead it.
+    if (before != null) {
+      await _recordRevisions(before, _recordings[index], source);
+    }
     // Notifying does not. `_processOne` awaits a processor, so dispose can land
     // inside that gap; a disposed ChangeNotifier throws from notifyListeners,
     // and the drain runs unawaited, so the error would surface as an unhandled
