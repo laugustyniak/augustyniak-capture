@@ -15,6 +15,10 @@ import '../../processing/data/video_poster_extractor.dart';
 import '../../settings/data/aes_gcm_token_cipher.dart';
 import '../../settings/data/secure_storage_master_key_store.dart';
 import '../../settings/data/settings_repository.dart';
+import '../../projects/data/ghostty_zellij_agent_session_launcher.dart';
+import '../../projects/data/projects_repository.dart';
+import '../../projects/presentation/projects_controller.dart';
+import '../../projects/presentation/projects_tab.dart';
 import '../../settings/presentation/config_tab.dart';
 import '../../settings/presentation/models_tab.dart';
 import '../../settings/presentation/settings_controller.dart';
@@ -28,6 +32,7 @@ import '../../shortcuts/presentation/shortcuts_coordinator.dart';
 import '../../transcription/data/transcription_service.dart';
 import '../data/recordings_repository.dart';
 import '../data/system_clipboard_sink.dart';
+import '../data/revisions_repository.dart';
 import '../data/system_media_opener.dart';
 import '../domain/capture_type.dart';
 import 'capture_dock.dart';
@@ -36,7 +41,7 @@ import 'recording_view.dart';
 import 'recordings_controller.dart';
 import 'text_note_sheet.dart';
 
-/// Shell for the four navigation tabs. Owns the controllers and keeps the
+/// Shell for the five navigation tabs. Owns the controllers and keeps the
 /// recordings controller in sync with settings; every tab body lives in its own
 /// file.
 class RecordingsPage extends StatefulWidget {
@@ -47,15 +52,16 @@ class RecordingsPage extends StatefulWidget {
 }
 
 class _RecordingsPageState extends State<RecordingsPage> {
-  // Indices used in code; Logs (2) and Config (3) are only ever selected by the
+  // Indices used in code; Projects, Logs and Config are selected only by the
   // NavigationBar itself.
   static const int queueIndex = 0;
-  static const int modelsIndex = 1;
+  static const int modelsIndex = 2;
 
   final RecordingsRepository repository = RecordingsRepository();
   late final SettingsController settings;
   late final LogStore logs;
   late final RecordingsController controller;
+  late final ProjectsController projects;
   late final ShortcutsCoordinator shortcuts;
   late final Listenable listenable;
 
@@ -78,8 +84,16 @@ class _RecordingsPageState extends State<RecordingsPage> {
       ),
     );
     logs = LogStore(archive: FileLogArchive());
+    projects = ProjectsController(
+      repository: ProjectsRepository(),
+      launcher: Platform.isMacOS ? GhosttyZellijAgentSessionLauncher() : null,
+    );
     controller = RecordingsController(
       repository: repository,
+      // Records what the enrichment model and hand edits overwrite. Left null
+      // in tests, like the clipboard and media-opener seams, so the pure-Dart
+      // suites never reach a platform channel.
+      revisionsRepository: RevisionsRepository(),
       // Replaced as soon as settings load; a fresh install with no profile
       // keeps this disabled service, which is the pre-existing behaviour. The
       // enrichment service is left at its disabled default here for the same
@@ -119,7 +133,13 @@ class _RecordingsPageState extends State<RecordingsPage> {
     );
 
     settings.addListener(_applySettings);
-    listenable = Listenable.merge(<Listenable>[controller, settings, logs]);
+    projects.addListener(_applyActiveProject);
+    listenable = Listenable.merge(<Listenable>[
+      controller,
+      projects,
+      settings,
+      logs,
+    ]);
     _bootstrap();
   }
 
@@ -169,16 +189,21 @@ class _RecordingsPageState extends State<RecordingsPage> {
         : const NoopHotkeyRegistrar();
   }
 
-  static WindowPresenter _buildWindowPresenter() => _isDesktop
-      ? const SystemWindowPresenter()
-      : const NoopWindowPresenter();
+  static WindowPresenter _buildWindowPresenter() =>
+      _isDesktop ? const SystemWindowPresenter() : const NoopWindowPresenter();
 
   Future<void> _bootstrap() async {
     await logs.initialize();
     // Settings first so the very first recording already uses the saved
     // provider and capture parameters.
     await settings.initialize();
+    await projects.initialize();
+    _applyActiveProject();
     await controller.initialize();
+    // After loading, never inside it: this reads the recordings *directory*, so
+    // it belongs to the shell that knows the directory is the real one. On a
+    // healthy install it costs one listing and finds nothing.
+    await controller.recoverOrphans();
     // Explicit rather than relying on the notification `initialize` emits, so
     // the hotkeys are guaranteed live once bootstrap returns.
     await _applyShortcuts();
@@ -197,7 +222,9 @@ class _RecordingsPageState extends State<RecordingsPage> {
     // profile active it falls back to the platform default — tesseract on
     // desktop, disabled on mobile — so a fresh install behaves as before.
     final OcrService ocr = settings.ocrService;
-    controller.ocrService = ocr is DisabledOcrService ? _buildOcrService() : ocr;
+    controller.ocrService = ocr is DisabledOcrService
+        ? _buildOcrService()
+        : ocr;
     controller.audioConfig = settings.audio;
     // Fire-and-forget: an unchanged binding map short-circuits inside the
     // coordinator, so this does not churn the OS hotkey table on every
@@ -205,18 +232,21 @@ class _RecordingsPageState extends State<RecordingsPage> {
     unawaited(_applyShortcuts());
   }
 
+  void _applyActiveProject() {
+    controller.activeProjectId = projects.activeProjectId;
+  }
+
   Future<void> _applyShortcuts() async {
-    final Set<ShortcutAction> rejected =
-        await shortcuts.apply(settings.settings.shortcuts);
+    final Set<ShortcutAction> rejected = await shortcuts.apply(
+      settings.settings.shortcuts,
+    );
     if (!mounted || setEquals(rejected, rejectedShortcuts)) return;
     setState(() => rejectedShortcuts = rejected);
   }
 
   /// Pairs suspend/resume in one place so the Config tab cannot leak a
   /// suspended state if the capture sheet throws or is dismissed.
-  Future<void> _runWithHotkeysSuspended(
-    Future<void> Function() action,
-  ) async {
+  Future<void> _runWithHotkeysSuspended(Future<void> Function() action) async {
     await shortcuts.suspend();
     try {
       await action();
@@ -266,11 +296,13 @@ class _RecordingsPageState extends State<RecordingsPage> {
   @override
   void dispose() {
     settings.removeListener(_applySettings);
+    projects.removeListener(_applyActiveProject);
     // The OS keeps a registration until it is told otherwise. This cannot be
     // awaited here, so the coordinator sets its `_disposed` flag synchronously
     // and refuses presses landing in the gap before the unregister completes.
     unawaited(shortcuts.dispose());
     controller.dispose();
+    projects.dispose();
     settings.dispose();
     logs.dispose();
     super.dispose();
@@ -294,7 +326,8 @@ class _RecordingsPageState extends State<RecordingsPage> {
               IndexedStack(
                 index: navigationIndex,
                 children: <Widget>[
-                  QueueTab(controller: controller),
+                  QueueTab(controller: controller, projects: projects),
+                  ProjectsTab(controller: projects),
                   ModelsTab(controller: settings),
                   LogsTab(store: logs),
                   ConfigTab(
@@ -349,6 +382,10 @@ class _RecordingsPageState extends State<RecordingsPage> {
                       const NavigationDestination(
                         icon: Icon(Icons.format_list_bulleted_rounded),
                         label: 'QUEUE',
+                      ),
+                      const NavigationDestination(
+                        icon: Icon(Icons.account_tree_outlined),
+                        label: 'PROJECTS',
                       ),
                       NavigationDestination(
                         icon: _ProfileBadge(
@@ -429,14 +466,34 @@ class _CaptureMenuSheet extends StatelessWidget {
               ),
             ),
             const SizedBox(height: 8),
-            _row(context, Icons.description_outlined, 'New text note',
-                'typed · passthrough', _CaptureAction.textNote),
-            _row(context, Icons.audio_file_outlined, 'Upload audio',
-                'transcribed', _CaptureAction.audioUpload),
-            _row(context, Icons.image_outlined, 'Upload image', 'OCR',
-                _CaptureAction.imageUpload),
-            _row(context, Icons.movie_outlined, 'Upload video',
-                'audio track · transcribed', _CaptureAction.videoUpload),
+            _row(
+              context,
+              Icons.description_outlined,
+              'New text note',
+              'typed · passthrough',
+              _CaptureAction.textNote,
+            ),
+            _row(
+              context,
+              Icons.audio_file_outlined,
+              'Upload audio',
+              'transcribed',
+              _CaptureAction.audioUpload,
+            ),
+            _row(
+              context,
+              Icons.image_outlined,
+              'Upload image',
+              'OCR',
+              _CaptureAction.imageUpload,
+            ),
+            _row(
+              context,
+              Icons.movie_outlined,
+              'Upload video',
+              'audio track · transcribed',
+              _CaptureAction.videoUpload,
+            ),
             const SizedBox(height: 8),
           ],
         ),

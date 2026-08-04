@@ -1,5 +1,6 @@
 import 'capture_category.dart';
 import 'capture_type.dart';
+import 'recording_tag.dart';
 
 /// Generic processing state, not transcription-specific: `pendingTranscription`
 /// and `transcribing` mean "queued" and "running" for whichever processor the
@@ -31,7 +32,8 @@ class Recording {
     this.title,
     this.category,
     this.summary,
-    this.tags = const <String>[],
+    this.tags = const <RecordingTag>[],
+    this.projectId,
     this.error,
     this.isProcessedByUser = false,
     this.processedAt,
@@ -87,9 +89,24 @@ class Recording {
   /// One-line gist from the enrichment stage. Null until enriched.
   final String? summary;
 
-  /// Lowercase tags assigned by the user or suggested by enrichment. Empty on
-  /// legacy rows. User edits take precedence over later enrichment runs.
-  final List<String> tags;
+  /// Normalized tags with persisted ownership. AI may refresh only its own
+  /// suggestions; human tags change only through an explicit user edit.
+  final List<RecordingTag> tags;
+
+  List<RecordingTag> get aiTags => tags
+      .where((RecordingTag tag) => tag.source == RecordingTagSource.ai)
+      .toList(growable: false);
+
+  List<RecordingTag> get humanTags => tags
+      .where((RecordingTag tag) => tag.source == RecordingTagSource.human)
+      .toList(growable: false);
+
+  List<String> get tagValues =>
+      tags.map((RecordingTag tag) => tag.value).toList(growable: false);
+
+  /// Optional executable context. Null keeps legacy and unassigned captures
+  /// fully valid; projects live in their own store and are never embedded here.
+  final String? projectId;
 
   final String? error;
 
@@ -108,7 +125,9 @@ class Recording {
     bool clearCategory = false,
     String? summary,
     bool clearSummary = false,
-    List<String>? tags,
+    List<RecordingTag>? tags,
+    String? projectId,
+    bool clearProjectId = false,
     String? error,
     bool clearError = false,
     bool? isProcessedByUser,
@@ -129,7 +148,8 @@ class Recording {
       title: clearTitle ? null : (title ?? this.title),
       category: clearCategory ? null : (category ?? this.category),
       summary: clearSummary ? null : (summary ?? this.summary),
-      tags: tags ?? this.tags,
+      tags: RecordingTag.normalize(tags ?? this.tags),
+      projectId: clearProjectId ? null : (projectId ?? this.projectId),
       error: clearError ? null : (error ?? this.error),
       isProcessedByUser: isProcessedByUser ?? this.isProcessedByUser,
       processedAt: clearProcessedAt ? null : (processedAt ?? this.processedAt),
@@ -150,7 +170,8 @@ class Recording {
     'title': title,
     'category': category?.name,
     'summary': summary,
-    'tags': tags,
+    'tags': tags.map((RecordingTag tag) => tag.toJson()).toList(),
+    'projectId': projectId,
     'error': error,
     'isProcessedByUser': isProcessedByUser,
     'processedAt': processedAt?.toIso8601String(),
@@ -188,12 +209,18 @@ class Recording {
           ? CaptureCategory.fromName(json['category'] as String)
           : null,
       summary: json['summary'] is String ? json['summary'] as String : null,
-      // Type-filtered rather than cast: a hand-edited recordings.json holding a
-      // non-list, or a list with a stray number in it, would otherwise throw out
-      // of the whole load and take every other recording with it.
+      // Both legacy strings and provenance-aware objects load. Bad entries
+      // degrade individually rather than taking down the index.
       tags: json['tags'] is List<dynamic>
-          ? (json['tags'] as List<dynamic>).whereType<String>().toList()
-          : const <String>[],
+          ? RecordingTag.normalize(
+              (json['tags'] as List<dynamic>)
+                  .map(RecordingTag.fromJson)
+                  .whereType<RecordingTag>(),
+            )
+          : const <RecordingTag>[],
+      projectId: json['projectId'] is String
+          ? json['projectId'] as String
+          : null,
       error: json['error'] as String?,
       isProcessedByUser: json['isProcessedByUser'] as bool? ?? false,
       processedAt: json['processedAt'] == null

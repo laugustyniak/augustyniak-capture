@@ -11,6 +11,7 @@ import 'package:audivoa_core/features/recordings/data/recordings_repository.dart
 import 'package:audivoa_core/features/recordings/domain/capture_category.dart';
 import 'package:audivoa_core/features/recordings/domain/capture_type.dart';
 import 'package:audivoa_core/features/recordings/domain/recording.dart';
+import 'package:audivoa_core/features/recordings/domain/recording_tag.dart';
 import 'package:audivoa_core/features/recordings/presentation/recordings_controller.dart';
 import 'package:audivoa_core/features/transcription/data/transcription_service.dart';
 
@@ -45,7 +46,7 @@ class _EchoProcessor implements Processor {
 
 class _FakeEnrichment implements EnrichmentService {
   _FakeEnrichment(this.result);
-  final EnrichmentResult result;
+  EnrichmentResult result;
   int calls = 0;
   String? lastText;
 
@@ -148,7 +149,8 @@ void main() {
     expect(item.title, 'Notatka o kliencie');
     expect(item.category, CaptureCategory.meetingNote);
     expect(item.summary, 'Ustalenia ze spotkania.');
-    expect(item.tags, <String>['klient', 'oferta']);
+    expect(item.tagValues, <String>['klient', 'oferta']);
+    expect(item.aiTags, hasLength(2));
     expect(enrichment.lastText, 'spotkanie z klientem');
   });
 
@@ -195,10 +197,9 @@ void main() {
 
     // The correction is what an export will read, so a re-run must not undo it.
     expect(c.recordings.single.category, CaptureCategory.idea);
-    // Derived summary is refreshed. Existing tags are retained because tags
-    // are user-editable and a retry must not undo a manual assignment.
+    // `summary` has no editor, so it is pure derived output and refreshes.
     expect(c.recordings.single.summary, 'Ustalenia ze spotkania.');
-    expect(c.recordings.single.tags, <String>['klient', 'oferta']);
+    expect(c.recordings.single.aiTags, hasLength(2));
   });
 
   test('never overwrites user-set tags', () async {
@@ -219,7 +220,75 @@ void main() {
     await c.retryTranscription(id);
     await c.waitForProcessing();
 
-    expect(c.recordings.single.tags, <String>['project:acme', 'legal']);
+    expect(
+      c.recordings.single.humanTags.map((RecordingTag tag) => tag.value),
+      <String>['project:acme', 'legal'],
+    );
+    expect(
+      c.recordings.single.aiTags.map((RecordingTag tag) => tag.value),
+      <String>['klient', 'oferta'],
+    );
+  });
+
+  test('a retry replaces AI tags but preserves human tags', () async {
+    final Directory dir = await _tmp();
+    addTearDown(() => dir.delete(recursive: true));
+    final _FakeEnrichment enrichment = _FakeEnrichment(verdict);
+    final RecordingsController c = _controller(
+      _FakeRepo(dir),
+      enrichment: enrichment,
+    );
+    addTearDown(c.dispose);
+
+    await c.addTextNote('spotkanie z klientem');
+    await c.waitForProcessing();
+    final String id = c.recordings.single.id;
+    await c.setTags(id, <String>['legal']);
+
+    enrichment.result = const EnrichmentResult(
+      title: 'ignored because already filled',
+      category: CaptureCategory.task,
+      summary: 'New summary',
+      tags: <String>['follow-up'],
+    );
+    await c.retryTranscription(id);
+    await c.waitForProcessing();
+
+    expect(c.recordings.single.humanTags.single.value, 'legal');
+    expect(c.recordings.single.aiTags.single.value, 'follow-up');
+    // The field that genuinely has no editor still refreshes.
+    expect(c.recordings.single.summary, 'New summary');
+  });
+
+  test('clearing the tags asks the next run for a fresh set', () async {
+    final Directory dir = await _tmp();
+    addTearDown(() => dir.delete(recursive: true));
+    final _FakeEnrichment enrichment = _FakeEnrichment(verdict);
+    final RecordingsController c = _controller(
+      _FakeRepo(dir),
+      enrichment: enrichment,
+    );
+    addTearDown(c.dispose);
+
+    await c.addTextNote('spotkanie z klientem');
+    await c.waitForProcessing();
+    final String id = c.recordings.single.id;
+
+    await c.setTags(id, <String>[]);
+    expect(c.recordings.single.humanTags, isEmpty);
+    expect(c.recordings.single.aiTags, hasLength(2));
+
+    enrichment.result = const EnrichmentResult(
+      title: 'ignored because already filled',
+      category: CaptureCategory.task,
+      summary: 'New summary',
+      tags: <String>['follow-up', 'Follow-Up', ' '],
+    );
+    await c.retryTranscription(id);
+    await c.waitForProcessing();
+
+    expect(c.recordings.single.humanTags, isEmpty);
+    expect(c.recordings.single.aiTags.single.value, 'follow-up');
   });
 
   test('a cleared category is filled again by the next run', () async {
