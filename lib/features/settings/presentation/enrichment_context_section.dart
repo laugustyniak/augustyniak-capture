@@ -166,7 +166,7 @@ class _EnrichmentContextSectionState extends State<EnrichmentContextSection> {
       value: status?.summary ?? 'checking…',
       monospace: true,
       valueColor: status == null
-          ? Console.dim
+          ? Console.dimText
           : (status.needsAttention ? Console.amber : Console.text),
     );
   }
@@ -210,7 +210,7 @@ class _EnrichmentContextSectionState extends State<EnrichmentContextSection> {
                     style: ConsoleText.micro.copyWith(
                       color: widget.controller.hasCustomEnrichmentInstructions
                           ? Console.cyan
-                          : Console.dim,
+                          : Console.dimText,
                     ),
                   ),
                 ],
@@ -237,7 +237,7 @@ class _EnrichmentContextSectionState extends State<EnrichmentContextSection> {
                   Text(
                     '$length / ${EnrichmentContext.maxProfileChars}',
                     style: ConsoleText.micro.copyWith(
-                      color: overLimit ? Console.amber : Console.dim,
+                      color: overLimit ? Console.amber : Console.dimText,
                     ),
                   ),
                   if (overLimit) ...<Widget>[
@@ -311,7 +311,7 @@ class _EnrichmentContextSectionState extends State<EnrichmentContextSection> {
               if (widget.projects.isEmpty)
                 Text(
                   'No projects yet — captures carry the profile above only.',
-                  style: ConsoleText.micro.copyWith(color: Console.dim),
+                  style: ConsoleText.micro.copyWith(color: Console.dimText),
                 )
               else
                 ...widget.projects.map(_projectRow),

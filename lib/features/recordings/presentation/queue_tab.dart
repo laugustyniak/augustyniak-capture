@@ -366,13 +366,14 @@ class _SearchField extends StatelessWidget {
         isDense: true,
         contentPadding: const EdgeInsets.symmetric(vertical: 13),
         hintText: 'Search captures',
-        hintStyle: const TextStyle(color: Console.dim, fontSize: 13),
-        prefixIcon: const Icon(Icons.search, color: Console.dim, size: 18),
+        hintStyle: const TextStyle(color: Console.dimText, fontSize: 13),
+        prefixIcon: const Icon(Icons.search, color: Console.dimText, size: 18),
         prefixIconConstraints: const BoxConstraints(minWidth: 42),
         suffixIcon: value.isEmpty
             ? null
             : IconButton(
-                icon: const Icon(Icons.close, color: Console.dim, size: 18),
+                tooltip: 'Clear search',
+                icon: const Icon(Icons.close, color: Console.dimText, size: 18),
                 onPressed: () {
                   controller.clear();
                   onChanged('');
