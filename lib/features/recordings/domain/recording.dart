@@ -87,8 +87,8 @@ class Recording {
   /// One-line gist from the enrichment stage. Null until enriched.
   final String? summary;
 
-  /// Up to five lowercase tags from the enrichment stage. Empty until enriched,
-  /// and on every legacy row.
+  /// Lowercase tags assigned by the user or suggested by enrichment. Empty on
+  /// legacy rows. User edits take precedence over later enrichment runs.
   final List<String> tags;
 
   final String? error;
@@ -137,24 +137,24 @@ class Recording {
   }
 
   Map<String, dynamic> toJson() => <String, dynamic>{
-        'id': id,
-        'filePath': filePath,
-        'createdAt': createdAt.toIso8601String(),
-        'durationMs': durationMs,
-        'sizeBytes': sizeBytes,
-        'status': status.name,
-        'type': type.name,
-        'sourceMimeType': sourceMimeType,
-        'transcript': transcript,
-        'thumbPath': thumbPath,
-        'title': title,
-        'category': category?.name,
-        'summary': summary,
-        'tags': tags,
-        'error': error,
-        'isProcessedByUser': isProcessedByUser,
-        'processedAt': processedAt?.toIso8601String(),
-      };
+    'id': id,
+    'filePath': filePath,
+    'createdAt': createdAt.toIso8601String(),
+    'durationMs': durationMs,
+    'sizeBytes': sizeBytes,
+    'status': status.name,
+    'type': type.name,
+    'sourceMimeType': sourceMimeType,
+    'transcript': transcript,
+    'thumbPath': thumbPath,
+    'title': title,
+    'category': category?.name,
+    'summary': summary,
+    'tags': tags,
+    'error': error,
+    'isProcessedByUser': isProcessedByUser,
+    'processedAt': processedAt?.toIso8601String(),
+  };
 
   factory Recording.fromJson(Map<String, dynamic> json) {
     return Recording(
@@ -174,7 +174,9 @@ class Recording {
       // rather than cast for the same reason as `summary`: a hand-edited
       // recordings.json holding a non-string here would otherwise throw out of
       // the whole load. A null poster is simply "no thumbnail".
-      thumbPath: json['thumbPath'] is String ? json['thumbPath'] as String : null,
+      thumbPath: json['thumbPath'] is String
+          ? json['thumbPath'] as String
+          : null,
       title: json['title'] as String?,
       // Absent on every row written before enrichment existed. A missing value
       // stays null — "never enriched" — while a *present* unknown name degrades
