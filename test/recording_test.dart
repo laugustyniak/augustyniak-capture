@@ -1,6 +1,6 @@
 import 'package:flutter_test/flutter_test.dart';
-import 'package:audivoa_core/features/recordings/domain/capture_category.dart';
-import 'package:audivoa_core/features/recordings/domain/recording.dart';
+import 'package:augustyniak_capture/features/recordings/domain/capture_category.dart';
+import 'package:augustyniak_capture/features/recordings/domain/recording.dart';
 
 void main() {
   test('recording JSON round-trip preserves AI and user processing state', () {
@@ -103,7 +103,7 @@ void main() {
       category: CaptureCategory.meetingNote,
       summary: 'Ustalenia ze spotkania.',
       tags: const <String>['klient', 'oferta'],
-      projectId: 'audivoa',
+      projectId: 'augustyniak-capture',
     );
 
     final Recording restored = Recording.fromJson(item.toJson());
@@ -111,7 +111,7 @@ void main() {
     expect(restored.category, CaptureCategory.meetingNote);
     expect(restored.summary, 'Ustalenia ze spotkania.');
     expect(restored.tags, <String>['klient', 'oferta']);
-    expect(restored.projectId, 'audivoa');
+    expect(restored.projectId, 'augustyniak-capture');
   });
 
   test('legacy JSON has no category, summary or tags', () {

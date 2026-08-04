@@ -1,10 +1,10 @@
 import 'dart:io';
 
-import 'package:audivoa_core/features/enrichment/data/composed_enrichment_context_source.dart';
-import 'package:audivoa_core/features/enrichment/domain/enrichment_context.dart';
-import 'package:audivoa_core/features/enrichment/domain/enrichment_prompt.dart';
-import 'package:audivoa_core/features/projects/data/project_context_reader.dart';
-import 'package:audivoa_core/features/projects/domain/project.dart';
+import 'package:augustyniak_capture/features/enrichment/data/composed_enrichment_context_source.dart';
+import 'package:augustyniak_capture/features/enrichment/domain/enrichment_context.dart';
+import 'package:augustyniak_capture/features/enrichment/domain/enrichment_prompt.dart';
+import 'package:augustyniak_capture/features/projects/data/project_context_reader.dart';
+import 'package:augustyniak_capture/features/projects/domain/project.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 Project _project({
@@ -13,7 +13,7 @@ Project _project({
   String? description,
 }) => Project(
   id: id,
-  name: 'Audivoa',
+  name: 'Augustyniak Capture',
   repoPath: repoPath,
   description: description,
 );
@@ -151,7 +151,8 @@ void main() {
       if (repo.existsSync()) await repo.delete(recursive: true);
     });
 
-    File file(String name) => File('${repo.path}${Platform.pathSeparator}$name');
+    File file(String name) =>
+        File('${repo.path}${Platform.pathSeparator}$name');
 
     test('no candidate file yields null rather than throwing', () async {
       expect(await const ProjectContextReader().read(repo.path), isNull);
@@ -193,7 +194,9 @@ void main() {
     });
 
     test('a huge file is cut at the byte ceiling', () async {
-      await file('README.md').writeAsString('x' * (ProjectContextReader.maxBytes * 2));
+      await file(
+        'README.md',
+      ).writeAsString('x' * (ProjectContextReader.maxBytes * 2));
 
       final ProjectContextDocument document =
           (await const ProjectContextReader().read(repo.path))!;
@@ -239,28 +242,34 @@ void main() {
       expect(context.project, isNull);
     });
 
-    test('a project deleted after the capture degrades to the profile', () async {
-      final EnrichmentContext context = await source(
-        profile: 'me',
-        project: _project(id: 'other'),
-      ).contextFor('gone');
+    test(
+      'a project deleted after the capture degrades to the profile',
+      () async {
+        final EnrichmentContext context = await source(
+          profile: 'me',
+          project: _project(id: 'other'),
+        ).contextFor('gone');
 
-      expect(context.profile, 'me');
-      expect(context.project, isNull);
-    });
+        expect(context.profile, 'me');
+        expect(context.project, isNull);
+      },
+    );
 
-    test('the repository file is preferred over the typed description', () async {
-      await File(
-        '${repo.path}${Platform.pathSeparator}CLAUDE.md',
-      ).writeAsString('The repo knows.');
+    test(
+      'the repository file is preferred over the typed description',
+      () async {
+        await File(
+          '${repo.path}${Platform.pathSeparator}CLAUDE.md',
+        ).writeAsString('The repo knows.');
 
-      final EnrichmentContext context = await source(
-        project: _project(repoPath: repo.path, description: 'typed once'),
-      ).contextFor('p1');
+        final EnrichmentContext context = await source(
+          project: _project(repoPath: repo.path, description: 'typed once'),
+        ).contextFor('p1');
 
-      expect(context.project, 'The repo knows.');
-      expect(context.projectSource, 'CLAUDE.md');
-    });
+        expect(context.project, 'The repo knows.');
+        expect(context.projectSource, 'CLAUDE.md');
+      },
+    );
 
     test('with no file in the repo it falls back to the description', () async {
       final EnrichmentContext context = await source(
@@ -271,17 +280,19 @@ void main() {
       expect(context.projectSource, 'project description');
     });
 
-    test('a project with neither file nor description contributes nothing',
-        () async {
-      final EnrichmentContext context = await source(
-        profile: 'me',
-        project: _project(repoPath: repo.path),
-      ).contextFor('p1');
+    test(
+      'a project with neither file nor description contributes nothing',
+      () async {
+        final EnrichmentContext context = await source(
+          profile: 'me',
+          project: _project(repoPath: repo.path),
+        ).contextFor('p1');
 
-      expect(context.profile, 'me');
-      expect(context.project, isNull);
-      expect(context.projectSource, isNull);
-    });
+        expect(context.profile, 'me');
+        expect(context.project, isNull);
+        expect(context.projectSource, isNull);
+      },
+    );
 
     test('an unreadable repo is recorded and never thrown', () async {
       // A directory standing where the reader expects a file: `exists()` is

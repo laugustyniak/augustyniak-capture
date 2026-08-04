@@ -4,9 +4,9 @@ import 'dart:io';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
-import 'package:audivoa_core/features/processing/data/http_vision_ocr_service.dart';
-import 'package:audivoa_core/features/processing/data/ocr_service.dart';
-import 'package:audivoa_core/features/settings/domain/provider_profile.dart';
+import 'package:augustyniak_capture/features/processing/data/http_vision_ocr_service.dart';
+import 'package:augustyniak_capture/features/processing/data/ocr_service.dart';
+import 'package:augustyniak_capture/features/settings/domain/provider_profile.dart';
 
 const List<int> _pngMagic = <int>[
   0x89,

@@ -1,7 +1,7 @@
 import 'package:flutter_test/flutter_test.dart';
-import 'package:audivoa_core/features/logs/data/log_store.dart';
-import 'package:audivoa_core/features/logs/domain/log_event.dart';
-import 'package:audivoa_core/features/logs/presentation/logs_tab.dart';
+import 'package:augustyniak_capture/features/logs/data/log_store.dart';
+import 'package:augustyniak_capture/features/logs/domain/log_event.dart';
+import 'package:augustyniak_capture/features/logs/presentation/logs_tab.dart';
 
 import '../support/harness.dart';
 

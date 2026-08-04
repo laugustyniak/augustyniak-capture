@@ -1,13 +1,13 @@
 import 'dart:async';
 import 'dart:io';
 
-import 'package:audivoa_core/features/processing/domain/processor.dart';
-import 'package:audivoa_core/features/processing/domain/processor_registry.dart';
-import 'package:audivoa_core/features/recordings/data/recordings_repository.dart';
-import 'package:audivoa_core/features/recordings/domain/capture_type.dart';
-import 'package:audivoa_core/features/recordings/domain/recording.dart';
-import 'package:audivoa_core/features/recordings/presentation/recordings_controller.dart';
-import 'package:audivoa_core/features/transcription/data/transcription_service.dart';
+import 'package:augustyniak_capture/features/processing/domain/processor.dart';
+import 'package:augustyniak_capture/features/processing/domain/processor_registry.dart';
+import 'package:augustyniak_capture/features/recordings/data/recordings_repository.dart';
+import 'package:augustyniak_capture/features/recordings/domain/capture_type.dart';
+import 'package:augustyniak_capture/features/recordings/domain/recording.dart';
+import 'package:augustyniak_capture/features/recordings/presentation/recordings_controller.dart';
+import 'package:augustyniak_capture/features/transcription/data/transcription_service.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:record/record.dart';
@@ -105,7 +105,9 @@ void main() {
   late Directory root;
 
   setUp(() async {
-    root = await Directory.systemTemp.createTemp('audivoa-deletion-test');
+    root = await Directory.systemTemp.createTemp(
+      'augustyniak-capture-deletion-test',
+    );
   });
 
   tearDown(() async {

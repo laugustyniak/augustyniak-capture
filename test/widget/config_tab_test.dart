@@ -1,8 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:audivoa_core/features/settings/domain/audio_config.dart';
-import 'package:audivoa_core/features/settings/presentation/config_tab.dart';
-import 'package:audivoa_core/features/settings/presentation/settings_controller.dart';
+import 'package:augustyniak_capture/features/settings/domain/audio_config.dart';
+import 'package:augustyniak_capture/features/settings/presentation/config_tab.dart';
+import 'package:augustyniak_capture/features/settings/presentation/settings_controller.dart';
 
 import '../support/harness.dart';
 

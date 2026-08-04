@@ -3,17 +3,17 @@ import 'dart:io';
 
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:audivoa_core/features/enrichment/domain/enrichment_context.dart';
-import 'package:audivoa_core/features/enrichment/domain/enrichment_result.dart';
-import 'package:audivoa_core/features/enrichment/domain/enrichment_service.dart';
-import 'package:audivoa_core/features/processing/domain/processor.dart';
-import 'package:audivoa_core/features/processing/domain/processor_registry.dart';
-import 'package:audivoa_core/features/recordings/data/recordings_repository.dart';
-import 'package:audivoa_core/features/recordings/domain/capture_category.dart';
-import 'package:audivoa_core/features/recordings/domain/capture_type.dart';
-import 'package:audivoa_core/features/recordings/domain/recording.dart';
-import 'package:audivoa_core/features/recordings/presentation/recordings_controller.dart';
-import 'package:audivoa_core/features/transcription/data/transcription_service.dart';
+import 'package:augustyniak_capture/features/enrichment/domain/enrichment_context.dart';
+import 'package:augustyniak_capture/features/enrichment/domain/enrichment_result.dart';
+import 'package:augustyniak_capture/features/enrichment/domain/enrichment_service.dart';
+import 'package:augustyniak_capture/features/processing/domain/processor.dart';
+import 'package:augustyniak_capture/features/processing/domain/processor_registry.dart';
+import 'package:augustyniak_capture/features/recordings/data/recordings_repository.dart';
+import 'package:augustyniak_capture/features/recordings/domain/capture_category.dart';
+import 'package:augustyniak_capture/features/recordings/domain/capture_type.dart';
+import 'package:augustyniak_capture/features/recordings/domain/recording.dart';
+import 'package:augustyniak_capture/features/recordings/presentation/recordings_controller.dart';
+import 'package:augustyniak_capture/features/transcription/data/transcription_service.dart';
 
 /// Keeps what was written, so a test can assert that a correction survived the
 /// round trip to disk rather than only living in memory.
@@ -188,55 +188,59 @@ void main() {
     expect(enrichment.lastText, 'spotkanie z klientem');
   });
 
-  test('the context reaches the model, resolved from the item project',
-      () async {
-    final Directory dir = await _tmp();
-    addTearDown(() => dir.delete(recursive: true));
-    final _FakeEnrichment enrichment = _FakeEnrichment(verdict);
-    final _FakeContextSource source = _FakeContextSource(
-      const EnrichmentContext(
-        profile: 'I collect specs.',
-        project: 'Offline-first recorder.',
-        projectSource: 'CLAUDE.md',
-      ),
-    );
-    final RecordingsController c = _controller(
-      _FakeRepo(dir),
-      enrichment: enrichment,
-      contextSource: source,
-    );
-    addTearDown(c.dispose);
+  test(
+    'the context reaches the model, resolved from the item project',
+    () async {
+      final Directory dir = await _tmp();
+      addTearDown(() => dir.delete(recursive: true));
+      final _FakeEnrichment enrichment = _FakeEnrichment(verdict);
+      final _FakeContextSource source = _FakeContextSource(
+        const EnrichmentContext(
+          profile: 'I collect specs.',
+          project: 'Offline-first recorder.',
+          projectSource: 'CLAUDE.md',
+        ),
+      );
+      final RecordingsController c = _controller(
+        _FakeRepo(dir),
+        enrichment: enrichment,
+        contextSource: source,
+      );
+      addTearDown(c.dispose);
 
-    c.activeProjectId = 'p1';
-    await c.addTextNote('spotkanie z klientem');
-    await c.waitForProcessing();
+      c.activeProjectId = 'p1';
+      await c.addTextNote('spotkanie z klientem');
+      await c.waitForProcessing();
 
-    expect(source.requestedFor, <String?>['p1']);
-    expect(enrichment.lastContext?.profile, 'I collect specs.');
-    expect(enrichment.lastContext?.projectSource, 'CLAUDE.md');
-  });
+      expect(source.requestedFor, <String?>['p1']);
+      expect(enrichment.lastContext?.profile, 'I collect specs.');
+      expect(enrichment.lastContext?.projectSource, 'CLAUDE.md');
+    },
+  );
 
-  test('an unresolvable context costs a better title, never the enrichment',
-      () async {
-    final Directory dir = await _tmp();
-    addTearDown(() => dir.delete(recursive: true));
-    final _FakeEnrichment enrichment = _FakeEnrichment(verdict);
-    final RecordingsController c = _controller(
-      _FakeRepo(dir),
-      enrichment: enrichment,
-      contextSource: _ThrowingContextSource(),
-    );
-    addTearDown(c.dispose);
+  test(
+    'an unresolvable context costs a better title, never the enrichment',
+    () async {
+      final Directory dir = await _tmp();
+      addTearDown(() => dir.delete(recursive: true));
+      final _FakeEnrichment enrichment = _FakeEnrichment(verdict);
+      final RecordingsController c = _controller(
+        _FakeRepo(dir),
+        enrichment: enrichment,
+        contextSource: _ThrowingContextSource(),
+      );
+      addTearDown(c.dispose);
 
-    await c.addTextNote('spotkanie z klientem');
-    await c.waitForProcessing();
+      await c.addTextNote('spotkanie z klientem');
+      await c.waitForProcessing();
 
-    // The item is still enriched, with an empty context rather than none at all.
-    expect(enrichment.calls, 1);
-    expect(enrichment.lastContext?.isEmpty, isTrue);
-    expect(c.recordings.single.title, 'Notatka o kliencie');
-    expect(c.recordings.single.status, RecordingStatus.completed);
-  });
+      // The item is still enriched, with an empty context rather than none at all.
+      expect(enrichment.calls, 1);
+      expect(enrichment.lastContext?.isEmpty, isTrue);
+      expect(c.recordings.single.title, 'Notatka o kliencie');
+      expect(c.recordings.single.status, RecordingStatus.completed);
+    },
+  );
 
   test('never overwrites a user-set title', () async {
     final Directory dir = await _tmp();

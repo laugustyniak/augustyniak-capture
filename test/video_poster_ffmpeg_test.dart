@@ -3,7 +3,7 @@ import 'dart:typed_data';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:path/path.dart' as p;
-import 'package:audivoa_core/features/processing/data/video_poster_extractor.dart';
+import 'package:augustyniak_capture/features/processing/data/video_poster_extractor.dart';
 
 /// The one suite in the repo that drives a **real** system binary.
 ///
