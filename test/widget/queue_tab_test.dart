@@ -88,8 +88,18 @@ void main() {
     final RecordingsController controller = await buildRecordingsController(
       appDir,
       seed: <Recording>[
-        makeRecording(id: 'done', status: RecordingStatus.completed),
-        makeRecording(id: 'waiting', status: RecordingStatus.saved),
+        // Titled, because the row is located by name below and an untitled
+        // capture no longer prints its uuid filename there.
+        makeRecording(
+          id: 'done',
+          title: 'done',
+          status: RecordingStatus.completed,
+        ),
+        makeRecording(
+          id: 'waiting',
+          title: 'waiting',
+          status: RecordingStatus.saved,
+        ),
       ],
     );
     await pumpQueue(tester, controller);
@@ -97,6 +107,36 @@ void main() {
     expect(find.textContaining('done'), findsOneWidget);
     expect(find.textContaining('waiting'), findsOneWidget);
     expect(find.text('2 captures'), findsOneWidget);
+  });
+
+  testWidgets('an untitled capture names itself by type and time, not by id', (
+    WidgetTester tester,
+  ) async {
+    // Without an enrichment profile nothing ever writes a title, so this is
+    // what the whole queue looks like on an unconfigured install. It used to
+    // be a column of uuids: not merely uninformative but mutually
+    // indistinguishable, which is what stops a list being scannable at all.
+    final RecordingsController controller = await buildRecordingsController(
+      appDir,
+      seed: <Recording>[
+        makeRecording(
+          id: '416cd0e0-9930-4b90-8dd9-74155343cd47',
+          transcript: 'zobaczmy czy nadal działa ładowanie',
+        ),
+      ],
+    );
+    await pumpQueue(tester, controller);
+
+    expect(find.textContaining('416cd0e0'), findsNothing);
+    // Not asserting the clock itself: it is rendered in local time, so a fixed
+    // string here would pass only in the timezone it was written in.
+    expect(find.textContaining('Voice note · '), findsOneWidget);
+    // The name does not repeat the excerpt: the transcript is rendered once,
+    // in the body, which is why the fallback is not derived from it.
+    expect(
+      find.text('zobaczmy czy nadal działa ładowanie'),
+      findsOneWidget,
+    );
   });
 
   testWidgets('the chip counts partition the queue, and All is their sum', (
@@ -130,8 +170,18 @@ void main() {
     final RecordingsController controller = await buildRecordingsController(
       appDir,
       seed: <Recording>[
-        makeRecording(id: 'done', status: RecordingStatus.completed),
-        makeRecording(id: 'waiting', status: RecordingStatus.saved),
+        // Titled, because the row is located by name below and an untitled
+        // capture no longer prints its uuid filename there.
+        makeRecording(
+          id: 'done',
+          title: 'done',
+          status: RecordingStatus.completed,
+        ),
+        makeRecording(
+          id: 'waiting',
+          title: 'waiting',
+          status: RecordingStatus.saved,
+        ),
       ],
     );
     await pumpQueue(tester, controller);
@@ -168,8 +218,16 @@ void main() {
     final RecordingsController controller = await buildRecordingsController(
       appDir,
       seed: <Recording>[
-        makeRecording(id: 'acme', tags: <String>['project:acme']),
-        makeRecording(id: 'other', tags: <String>['project:other']),
+        makeRecording(
+          id: 'acme',
+          title: 'acme capture',
+          tags: <String>['project:acme'],
+        ),
+        makeRecording(
+          id: 'other',
+          title: 'other capture',
+          tags: <String>['project:other'],
+        ),
       ],
     );
     await pumpQueue(tester, controller);
@@ -177,8 +235,9 @@ void main() {
     await tester.enterText(find.byType(TextField).first, 'project:acme');
     await tester.pumpAndSettle();
 
-    expect(find.textContaining('acme.m4a'), findsOneWidget);
-    expect(find.textContaining('other.m4a'), findsNothing);
+    // The filename is still searchable — it just no longer poses as the title.
+    expect(find.textContaining('acme capture'), findsOneWidget);
+    expect(find.textContaining('other capture'), findsNothing);
   });
 
   testWidgets('every tag is one kind: removable, whoever proposed it', (
@@ -239,9 +298,17 @@ void main() {
     final RecordingsController controller = await buildRecordingsController(
       appDir,
       seed: <Recording>[
-        makeRecording(id: 'acme-recording', projectId: acme.id),
-        makeRecording(id: 'other-recording', projectId: other.id),
-        makeRecording(id: 'unassigned'),
+        makeRecording(
+          id: 'acme-recording',
+          title: 'acme-recording',
+          projectId: acme.id,
+        ),
+        makeRecording(
+          id: 'other-recording',
+          title: 'other-recording',
+          projectId: other.id,
+        ),
+        makeRecording(id: 'unassigned', title: 'unassigned'),
       ],
     );
     await pumpQueue(tester, controller, projects: projects);
@@ -320,8 +387,12 @@ void main() {
     final RecordingsController controller = await buildRecordingsController(
       appDir,
       seed: <Recording>[
-        makeRecording(id: 'assigned', projectId: project.id),
-        makeRecording(id: 'unassigned'),
+        makeRecording(
+          id: 'assigned',
+          title: 'assigned',
+          projectId: project.id,
+        ),
+        makeRecording(id: 'unassigned', title: 'unassigned'),
       ],
     );
     await pumpQueue(tester, controller, projects: projects);
@@ -330,14 +401,14 @@ void main() {
     await tester.pumpAndSettle();
     await tester.tap(find.text('Temporary').last);
     await tester.pumpAndSettle();
-    expect(find.text('unassigned.m4a'), findsNothing);
+    expect(find.text('unassigned'), findsNothing);
 
     await tester.runAsync(() => projects.delete(project.id));
     await tester.pump();
 
     expect(tester.takeException(), isNull);
-    expect(find.text('assigned.m4a'), findsOneWidget);
-    expect(find.text('unassigned.m4a'), findsOneWidget);
+    expect(find.text('assigned'), findsOneWidget);
+    expect(find.text('unassigned'), findsOneWidget);
   });
 
   testWidgets('a failed item offers retry and shows its error', (
@@ -536,26 +607,34 @@ void main() {
     expect(tester.takeException(), isNull);
   });
 
-  testWidgets(
-    'the reviewed toggle flips the card state through the controller',
-    (WidgetTester tester) async {
-      final RecordingsController controller = await buildRecordingsController(
-        appDir,
-        seed: <Recording>[makeRecording(id: 'x')],
-      );
-      await pumpQueue(tester, controller);
+  testWidgets('the reviewed toggle closes the row out of the default view', (
+    WidgetTester tester,
+  ) async {
+    final RecordingsController controller = await buildRecordingsController(
+      appDir,
+      seed: <Recording>[makeRecording(id: 'x')],
+    );
+    await pumpQueue(tester, controller);
 
-      await tester.tap(find.byIcon(Icons.radio_button_unchecked_rounded));
-      await tester.pumpAndSettle();
-      expect(controller.recordings.single.isProcessedByUser, isTrue);
+    await tester.tap(find.byIcon(Icons.radio_button_unchecked_rounded));
+    await tester.pumpAndSettle();
+    expect(controller.recordings.single.isProcessedByUser, isTrue);
 
-      // The toggle is async, so the notification lands after the settle above;
-      // pump again to render the state the controller now holds.
-      await tester.pumpAndSettle();
-      expect(find.byIcon(Icons.check_circle_rounded), findsOneWidget);
-      expect(find.byIcon(Icons.check_circle_outline_rounded), findsOneWidget);
-    },
-  );
+    // The toggle is async, so the notification lands after the settle above;
+    // pump again to render the state the controller now holds.
+    await tester.pumpAndSettle();
+
+    // The point of the review axis: closing an item *removes* it from the
+    // default view. Before, the queue held every capture ever taken and the
+    // toggle only restyled a row, so the list could never shrink.
+    expect(find.byIcon(Icons.check_circle_rounded), findsNothing);
+    expect(find.text('Inbox zero — everything is closed.'), findsOneWidget);
+
+    // And it is not lost — it moved to the other side of the same axis.
+    await tester.tap(find.text('DONE 1'));
+    await tester.pumpAndSettle();
+    expect(find.byIcon(Icons.check_circle_rounded), findsOneWidget);
+  });
 
   testWidgets('the reviewed strip counts reviewed against the whole queue', (
     WidgetTester tester,
@@ -570,7 +649,11 @@ void main() {
     );
     await pumpQueue(tester, controller);
 
-    expect(find.text('DONE'), findsOneWidget);
+    // The three review chips split the queue and the ratio still reads against
+    // the whole of it, not against whatever the chips currently show.
+    expect(find.text('INBOX 2'), findsOneWidget);
+    expect(find.text('DONE 1'), findsOneWidget);
+    expect(find.text('ANY 3'), findsOneWidget);
     expect(find.text('1 / 3'), findsOneWidget);
   });
 
@@ -645,6 +728,7 @@ void main() {
           onEnrich: () {},
           onEdit: () {},
           onToggleProcessed: () {},
+          onRoute: () {},
         ),
       ),
     );

@@ -28,6 +28,8 @@ class RecordingCard extends StatelessWidget {
     required this.onEnrich,
     required this.onEdit,
     required this.onToggleProcessed,
+    required this.onRoute,
+    this.canRoute = false,
   });
 
   /// Said in both places the action is offered — the poster and the button —
@@ -41,6 +43,10 @@ class RecordingCard extends StatelessWidget {
   /// the same reason as [openVideoLabel].
   static const String analyzingLabel =
       'analyzing text · title, category, summary, tags';
+
+  /// Names the destination, not the gesture: this is the one control that takes
+  /// a capture out of the app, and "route" alone says nothing about where.
+  static const String routeLabel = "Send to the project's inbox and close";
 
   final Recording recording;
   final bool isPlaying;
@@ -70,6 +76,14 @@ class RecordingCard extends StatelessWidget {
   final VoidCallback onEdit;
   final VoidCallback onToggleProcessed;
 
+  /// Sends the capture to its project's inbox and closes it in one gesture.
+  final VoidCallback onRoute;
+
+  /// Whether the item has a destination at all. False hides the control rather
+  /// than disabling it: a permanently greyed button on every capture of an
+  /// install with no projects is noise that never becomes an action.
+  final bool canRoute;
+
   @override
   Widget build(BuildContext context) {
     final bool failed = recording.status == RecordingStatus.failed;
@@ -81,9 +95,7 @@ class RecordingCard extends StatelessWidget {
         ? const _StatusVisual('ANALYZING', Console.cyan, pulse: true)
         : _statusVisual(recording.status);
     final String filename = File(recording.filePath).uri.pathSegments.last;
-    final String? title = recording.title?.trim();
-    final bool hasTitle = title != null && title.isNotEmpty;
-    final String displayName = hasTitle ? title : filename;
+    final String displayName = displayNameFor(recording);
     // Generic processor output: a transcription, OCR text or a note body.
     final String transcript = recording.transcript ?? '';
     final bool hasTranscript = transcript.trim().isNotEmpty;
@@ -243,6 +255,31 @@ class RecordingCard extends StatelessWidget {
               style: ConsoleText.micro.copyWith(color: Console.redSoft),
             ),
           ],
+          // Where it went, which is the fact `isProcessedByUser` could never
+          // carry on its own: the tick said the user was finished with the
+          // item, and nothing said what they had done with it. Only the latest
+          // delivery is shown — the card is not the audit trail.
+          if (recording.routes.isNotEmpty) ...<Widget>[
+            const SizedBox(height: 9),
+            Row(
+              children: <Widget>[
+                const Icon(
+                  Icons.subdirectory_arrow_right_rounded,
+                  size: 13,
+                  color: Console.green,
+                ),
+                const SizedBox(width: 5),
+                Expanded(
+                  child: Text(
+                    recording.routes.last.target,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: ConsoleText.micro.copyWith(color: Console.green),
+                  ),
+                ),
+              ],
+            ),
+          ],
           const SizedBox(height: 11),
           Row(
             children: <Widget>[
@@ -293,6 +330,16 @@ class RecordingCard extends StatelessWidget {
                   semanticLabel: RecordingCard.openVideoLabel,
                   size: 30,
                   iconSize: 18,
+                ),
+                const SizedBox(width: 7),
+              ],
+              if (canRoute && !reviewed) ...<Widget>[
+                ConsoleIconButton(
+                  icon: Icons.outbound_outlined,
+                  onTap: onRoute,
+                  semanticLabel: RecordingCard.routeLabel,
+                  size: 30,
+                  iconSize: 17,
                 ),
                 const SizedBox(width: 7),
               ],

@@ -140,6 +140,37 @@ class VerificationLine extends StatelessWidget {
   }
 }
 
+/// What the row calls itself when enrichment has not named it.
+///
+/// The slot used to fall straight through to the source filename, which is a
+/// uuid — the worst answer available, because a column of them is not merely
+/// uninformative but mutually *indistinguishable*: scanning, recognition and
+/// sorting-by-eye all stop working at once, and that is the state of every
+/// install with no enrichment profile configured. The transcript's opening
+/// words are always a better name than the file's, and a timestamp is better
+/// than a hash. The filename stays reachable in the meta line, where it is a
+/// diagnostic rather than a title.
+/// It is deliberately *not* the opening words of the transcript, which is the
+/// obvious alternative: the card already renders three lines of that text
+/// directly underneath, so a content-derived name would print the same sentence
+/// twice on every un-enriched row. `Voice note · 17:09` says what the row is
+/// and separates it from its neighbours by the one fact that always differs,
+/// while leaving the content to the excerpt that already carries it.
+String displayNameFor(Recording recording) {
+  final String? title = recording.title?.trim();
+  if (title != null && title.isNotEmpty) return title;
+  return '${typeLabelFor(recording.type)} · '
+      '${formatTimeOfDay(recording.createdAt)}';
+}
+
+String typeLabelFor(CaptureType type) => switch (type) {
+  CaptureType.audioRecording => 'Voice note',
+  CaptureType.audioUpload => 'Audio file',
+  CaptureType.image => 'Image',
+  CaptureType.text => 'Text note',
+  CaptureType.video => 'Video',
+};
+
 /// `10:24 · m4a · 2026-07-27 12:00` — duration only when the type has one, so
 /// an image or a note never claims `00:00`.
 String metaLineFor(Recording recording, String filename) {
