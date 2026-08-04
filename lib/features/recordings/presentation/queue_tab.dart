@@ -13,6 +13,7 @@ import 'card_parts.dart';
 import 'queue_metrics.dart';
 import 'recording_card.dart';
 import 'recording_editor.dart';
+import 'recording_row.dart';
 import 'recordings_controller.dart';
 
 /// The five buckets from the design. They **partition** the queue: every item
@@ -55,6 +56,9 @@ class _QueueTabState extends State<QueueTab> {
   String searchQuery = '';
   String? projectFilterId;
   final TextEditingController searchController = TextEditingController();
+
+  /// The one compact row currently opened for reading.
+  String? expandedId;
 
   /// The row currently in edit mode, if any.
   ///
@@ -135,150 +139,163 @@ class _QueueTabState extends State<QueueTab> {
     final int reviewedCount = all
         .where((Recording item) => item.isProcessedByUser)
         .length;
-
-    return _QueueShortcuts(
-      focusNode: listFocus,
-      // Rebuilt with the current `visible` list on every frame, so a shortcut
-      // can never act on a row that the filters have since removed.
-      onNext: () => _moveFocus(visible, 1),
-      onPrevious: () => _moveFocus(visible, -1),
-      onEdit: () => _onFocused(visible, (Recording item) {
-        setState(() => editingId = item.id);
-      }),
-      onToggleProcessed: () => _onFocused(
-        visible,
-        (Recording item) => controller.toggleProcessed(item.id),
-      ),
-      onTogglePlay: () => _onFocused(
-        visible,
-        (Recording item) => controller.togglePlayback(item.id),
-      ),
-      onRoute: () => _onFocused(visible, (Recording item) {
-        if (controller.canRoute(item)) controller.route(item.id);
-      }),
-      onSearch: () => searchFocus.requestFocus(),
-      onClearFocus: () => setState(() => focusedId = null),
-      child: SafeArea(
-        bottom: false,
-        child: Column(
-          children: <Widget>[
-            Padding(
-            padding: const EdgeInsets.fromLTRB(20, 14, 20, 0),
-            child: ConsoleHeader(
-              title: 'Queue',
-              trailing:
-                  '${all.length} ${all.length == 1 ? 'capture' : 'captures'}',
-            ),
+    return LayoutBuilder(
+      builder: (BuildContext context, BoxConstraints constraints) {
+        final bool compact = constraints.maxWidth < Console.compactBreakpoint;
+        return _QueueShortcuts(
+          focusNode: listFocus,
+          // Rebuilt with the current `visible` list on every frame, so a shortcut
+          // can never act on a row that the filters have since removed.
+          onNext: () => _moveFocus(visible, 1),
+          onPrevious: () => _moveFocus(visible, -1),
+          onEdit: () => _onFocused(visible, (Recording item) {
+            setState(() => editingId = item.id);
+          }),
+          onToggleProcessed: () => _onFocused(
+            visible,
+            (Recording item) => controller.toggleProcessed(item.id),
           ),
-          if (controller.error != null) ...<Widget>[
-            const SizedBox(height: 10),
-            ErrorBanner(message: controller.error!),
-          ],
-          // Pinned above the scroll area, not scrolled with it.
-          //
-          // These four are the screen's entire navigation, and as list children
-          // they left the screen on the first drag. The consequence is worse
-          // than the inconvenience: with the chips off-screen, "empty because a
-          // filter excludes everything" and "empty because there is nothing"
-          // become the same picture, and the user has no way to tell which one
-          // they are looking at without scrolling back up to check.
-          Padding(
-            padding: const EdgeInsets.fromLTRB(20, 14, 20, 0),
+          onTogglePlay: () => _onFocused(
+            visible,
+            (Recording item) => controller.togglePlayback(item.id),
+          ),
+          onRoute: () => _onFocused(visible, (Recording item) {
+            if (controller.canRoute(item)) controller.route(item.id);
+          }),
+          onSearch: () => searchFocus.requestFocus(),
+          onClearFocus: () => setState(() => focusedId = null),
+          child: SafeArea(
+            bottom: false,
             child: Column(
               children: <Widget>[
-                ReviewedStrip(
-                  total: all.length,
-                  reviewed: reviewedCount,
-                  filter: reviewFilter,
-                  onFilterChanged: (ReviewFilter value) {
-                    setState(() => reviewFilter = value);
-                  },
-                ),
-                const SizedBox(height: 10),
                 Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 4),
-                  child: _QueueControls(
-                    searchController: searchController,
-                    searchFocusNode: searchFocus,
-                    searchQuery: searchQuery,
-                    onSearchChanged: (String value) {
-                      setState(() => searchQuery = value);
-                    },
-                    projects: projects,
-                    selectedProjectId: effectiveProjectFilterId,
-                    onProjectChanged: (String? value) {
-                      setState(() => projectFilterId = value);
-                    },
-                    selectedFilter: selectedFilter,
-                    // Counted before the search is applied: the chips describe
-                    // the queue, not the current query — otherwise every count
-                    // would collapse to whatever the user last typed.
-                    counts: <RecordingFilter, int>{
-                      for (final RecordingFilter filter
-                          in RecordingFilter.values)
-                        filter: all
-                            .where((Recording item) => _matches(filter, item))
-                            .length,
-                    },
-                    onFilterSelected: (RecordingFilter value) {
-                      setState(() => selectedFilter = value);
-                    },
+                  padding: const EdgeInsets.fromLTRB(20, 14, 20, 0),
+                  child: ConsoleHeader(
+                    title: 'Queue',
+                    trailing:
+                        '${all.length} ${all.length == 1 ? 'capture' : 'captures'}',
+                  ),
+                ),
+                if (controller.error != null) ...<Widget>[
+                  const SizedBox(height: 10),
+                  ErrorBanner(message: controller.error!),
+                ],
+                // Pinned above the scroll area, not scrolled with it.
+                //
+                // These four are the screen's entire navigation, and as list children
+                // they left the screen on the first drag. The consequence is worse
+                // than the inconvenience: with the chips off-screen, "empty because a
+                // filter excludes everything" and "empty because there is nothing"
+                // become the same picture, and the user has no way to tell which one
+                // they are looking at without scrolling back up to check.
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(20, 14, 20, 0),
+                  child: Column(
+                    children: <Widget>[
+                      ReviewedStrip(
+                        total: all.length,
+                        reviewed: reviewedCount,
+                        filter: reviewFilter,
+                        onFilterChanged: (ReviewFilter value) {
+                          setState(() => reviewFilter = value);
+                        },
+                      ),
+                      const SizedBox(height: 10),
+                      Padding(
+                        padding: const EdgeInsets.symmetric(horizontal: 4),
+                        child: _QueueControls(
+                          searchController: searchController,
+                          searchFocusNode: searchFocus,
+                          searchQuery: searchQuery,
+                          onSearchChanged: (String value) {
+                            setState(() => searchQuery = value);
+                          },
+                          projects: projects,
+                          selectedProjectId: effectiveProjectFilterId,
+                          onProjectChanged: (String? value) {
+                            setState(() => projectFilterId = value);
+                          },
+                          selectedFilter: selectedFilter,
+                          // Counted before the search is applied: the chips describe
+                          // the queue, not the current query — otherwise every count
+                          // would collapse to whatever the user last typed.
+                          counts: <RecordingFilter, int>{
+                            for (final RecordingFilter filter
+                                in RecordingFilter.values)
+                              filter: all
+                                  .where(
+                                    (Recording item) => _matches(filter, item),
+                                  )
+                                  .length,
+                          },
+                          onFilterSelected: (RecordingFilter value) {
+                            setState(() => selectedFilter = value);
+                          },
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                Expanded(
+                  child: ListView(
+                    padding: EdgeInsets.fromLTRB(
+                      16,
+                      14,
+                      16,
+                      compact ? 24 : 190,
+                    ),
+                    children: <Widget>[
+                      if (visible.isEmpty)
+                        Padding(
+                          padding: const EdgeInsets.symmetric(horizontal: 4),
+                          child: EmptyPanel(
+                            // An empty list has two very different causes and they
+                            // look identical: nothing was captured, or a filter is
+                            // hiding what was. Naming the filter that emptied the
+                            // list is the whole difference between "you are done"
+                            // and "you cannot see your work".
+                            icon: all.isEmpty
+                                ? Icons.graphic_eq
+                                : Icons.inbox_outlined,
+                            title: _emptyLabel(
+                              selectedFilter,
+                              reviewFilter,
+                              hasAny: all.isNotEmpty,
+                            ),
+                            blurb: all.isEmpty
+                                ? 'Every capture is written to disk and verified '
+                                      'before processing is even attempted.'
+                                : 'Adjust the review, status, project, or search '
+                                      'filters to broaden the queue.',
+                          ),
+                        )
+                      else
+                        ...visible.map(
+                          (Recording recording) => Padding(
+                            padding: const EdgeInsets.fromLTRB(4, 0, 4, 10),
+                            // The row grows into the editor in place. Animating the
+                            // height is what keeps the rows below from jumping — the
+                            // edited item has to stay under the finger that opened it.
+                            child: AnimatedSize(
+                              duration: const Duration(milliseconds: 220),
+                              curve: Curves.easeOutCubic,
+                              alignment: Alignment.topCenter,
+                              child: recording.id == editingId
+                                  ? _buildEditor(recording)
+                                  : compact
+                                  ? _buildMobileRow(recording)
+                                  : _buildCard(recording),
+                            ),
+                          ),
+                        ),
+                    ],
                   ),
                 ),
               ],
             ),
           ),
-          Expanded(
-            child: ListView(
-              padding: const EdgeInsets.fromLTRB(16, 14, 16, 190),
-              children: <Widget>[
-                if (visible.isEmpty)
-                  Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 4),
-                    child: EmptyPanel(
-                      // An empty list has two very different causes and they
-                      // look identical: nothing was captured, or a filter is
-                      // hiding what was. Naming the filter that emptied the
-                      // list is the whole difference between "you are done"
-                      // and "you cannot see your work".
-                      icon: all.isEmpty
-                          ? Icons.graphic_eq
-                          : Icons.inbox_outlined,
-                      title: _emptyLabel(
-                        selectedFilter,
-                        reviewFilter,
-                        hasAny: all.isNotEmpty,
-                      ),
-                      blurb: all.isEmpty
-                          ? 'Every capture is written to disk and verified '
-                                'before processing is even attempted.'
-                          : 'Nothing is hidden — switch the row above to ALL '
-                                'to see everything you have already closed.',
-                    ),
-                  )
-                else
-                  ...visible.map(
-                    (Recording recording) => Padding(
-                      padding: const EdgeInsets.fromLTRB(4, 0, 4, 10),
-                      // The row grows into the editor in place. Animating the
-                      // height is what keeps the rows below from jumping — the
-                      // edited item has to stay under the finger that opened it.
-                      child: AnimatedSize(
-                        duration: const Duration(milliseconds: 220),
-                        curve: Curves.easeOutCubic,
-                        alignment: Alignment.topCenter,
-                        child: recording.id == editingId
-                            ? _buildEditor(recording)
-                            : _buildCard(recording),
-                      ),
-                    ),
-                  ),
-              ],
-            ),
-          ),
-          ],
-        ),
-      ),
+        );
+      },
     );
   }
 
@@ -349,6 +366,36 @@ class _QueueTabState extends State<QueueTab> {
     );
   }
 
+  /// Narrow layouts use an accordion row, while the desktop path above remains
+  /// the full card with its existing keyboard selection and action surface.
+  Widget _buildMobileRow(Recording recording) {
+    final RecordingsController controller = widget.controller;
+    return RecordingRow(
+      key: ValueKey<String>('row-${recording.id}'),
+      recording: recording,
+      expanded: recording.id == expandedId,
+      focused: recording.id == focusedId,
+      isPlaying: controller.playingId == recording.id,
+      isEnriching: controller.isEnriching(recording.id),
+      projectName: _projectName(recording.projectId),
+      canRoute: controller.canRoute(recording),
+      onTap: () => setState(() {
+        focusedId = recording.id;
+        expandedId = recording.id == expandedId ? null : recording.id;
+      }),
+      onTogglePlay: () => controller.togglePlayback(recording.id),
+      onOpen: () => controller.openSource(recording.id),
+      onRetry: () => controller.retryTranscription(recording.id),
+      onEnrich: () => controller.retryEnrichment(recording.id),
+      onEdit: () => setState(() => editingId = recording.id),
+      onRoute: () => controller.route(recording.id),
+      onToggleProcessed: () async {
+        unawaited(HapticFeedback.selectionClick());
+        await controller.toggleProcessed(recording.id);
+      },
+    );
+  }
+
   /// The same row, in edit mode.
   ///
   /// Every callback is fire-and-forget on purpose: each one persists on its
@@ -408,6 +455,7 @@ class _QueueTabState extends State<QueueTab> {
       // The selection is an id, and this one no longer resolves — leaving it
       // would point the keyboard layer at a row that is gone.
       if (focusedId == recording.id) focusedId = null;
+      if (expandedId == recording.id) expandedId = null;
     });
   }
 
@@ -821,6 +869,9 @@ String _emptyLabel(
   required bool hasAny,
 }) {
   if (!hasAny) return 'Nothing captured yet.';
+  if (filter != RecordingFilter.all && review != ReviewFilter.all) {
+    return 'Nothing matches the selected status and review filters.';
+  }
   if (filter == RecordingFilter.all) {
     return switch (review) {
       ReviewFilter.inbox => 'Inbox zero — everything is closed.',

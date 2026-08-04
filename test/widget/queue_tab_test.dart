@@ -137,10 +137,7 @@ void main() {
     expect(find.textContaining('Voice note · '), findsOneWidget);
     // The name does not repeat the excerpt: the transcript is rendered once,
     // in the body, which is why the fallback is not derived from it.
-    expect(
-      find.text('zobaczmy czy nadal działa ładowanie'),
-      findsOneWidget,
-    );
+    expect(find.text('zobaczmy czy nadal działa ładowanie'), findsOneWidget);
   });
 
   testWidgets('arrow keys move a selection and D closes the selected row', (
@@ -438,11 +435,7 @@ void main() {
     final RecordingsController controller = await buildRecordingsController(
       appDir,
       seed: <Recording>[
-        makeRecording(
-          id: 'assigned',
-          title: 'assigned',
-          projectId: project.id,
-        ),
+        makeRecording(id: 'assigned', title: 'assigned', projectId: project.id),
         makeRecording(id: 'unassigned', title: 'unassigned'),
       ],
     );
@@ -708,6 +701,26 @@ void main() {
     expect(find.text('DONE 1'), findsOneWidget);
     expect(find.text('ANY 3'), findsOneWidget);
     expect(find.text('1 / 3'), findsOneWidget);
+  });
+
+  testWidgets('empty panel names combined status and review filters', (
+    WidgetTester tester,
+  ) async {
+    final RecordingsController controller = await buildRecordingsController(
+      appDir,
+      seed: <Recording>[makeRecording(id: 'ready')],
+    );
+    await pumpQueue(tester, controller);
+
+    await tester.tap(find.text('DONE 0'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('FAILED 0'));
+    await tester.pumpAndSettle();
+
+    expect(
+      find.text('Nothing matches the selected status and review filters.'),
+      findsOneWidget,
+    );
   });
 
   testWidgets('a card shows its category and summary', (

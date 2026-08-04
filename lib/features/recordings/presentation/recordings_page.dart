@@ -42,6 +42,7 @@ import '../data/revisions_repository.dart';
 import '../data/system_media_opener.dart';
 import '../domain/capture_type.dart';
 import 'capture_dock.dart';
+import 'capture_nav_bar.dart';
 import 'queue_tab.dart';
 import 'recording_view.dart';
 import 'recordings_controller.dart';
@@ -62,6 +63,19 @@ class _RecordingsPageState extends State<RecordingsPage> {
   // NavigationBar itself.
   static const int queueIndex = 0;
   static const int modelsIndex = 2;
+
+  static const List<({IconData icon, String label, String shortLabel})>
+  destinations = <({IconData icon, String label, String shortLabel})>[
+    (
+      icon: Icons.format_list_bulleted_rounded,
+      label: 'QUEUE',
+      shortLabel: 'QUEUE',
+    ),
+    (icon: Icons.account_tree_outlined, label: 'PROJECTS', shortLabel: 'PROJ'),
+    (icon: Icons.memory_rounded, label: 'MODELS', shortLabel: 'MODELS'),
+    (icon: Icons.chevron_right_rounded, label: 'LOGS', shortLabel: 'LOGS'),
+    (icon: Icons.tune_rounded, label: 'CONFIG', shortLabel: 'CONFIG'),
+  ];
 
   final RecordingsRepository repository = RecordingsRepository();
   late final SettingsController settings;
@@ -96,7 +110,9 @@ class _RecordingsPageState extends State<RecordingsPage> {
         // Real keyring-backed cipher on every platform; ensureReady degrades
         // to the plaintext behaviour when no keyring answers (headless Linux,
         // locked Secret Service, test bindings).
-        cipher: AesGcmTokenCipher(keyStore: const SecureStorageMasterKeyStore()),
+        cipher: AesGcmTokenCipher(
+          keyStore: const SecureStorageMasterKeyStore(),
+        ),
       ),
     );
     logs = LogStore(archive: FileLogArchive());
@@ -376,115 +392,151 @@ class _RecordingsPageState extends State<RecordingsPage> {
     return AnimatedBuilder(
       animation: listenable,
       builder: (BuildContext context, Widget? child) {
-        final bool recording = controller.isRecording;
+        return LayoutBuilder(
+          builder: (BuildContext context, BoxConstraints constraints) {
+            final bool recording = controller.isRecording;
+            final bool compact =
+                constraints.maxWidth < Console.compactBreakpoint;
 
-        return Scaffold(
-          // No AppBar: each tab draws the design's own header (cyan eyebrow +
-          // large title) inside its scroll area, so the title scrolls with the
-          // content instead of sitting in a separate bar above it.
-          body: Stack(
-            children: <Widget>[
-              // IndexedStack so the Queue tab keeps its search text and filter
-              // while the user visits Models/Logs/Config.
-              //
-              // Wrapped here rather than inside each tab: five separate width
-              // caps would drift apart, and the dock below has to agree with
-              // whatever this one is or the record button stops lining up with
-              // the column it captures into.
-              ConsolePageWidth(
-                child: IndexedStack(
-                  index: navigationIndex,
-                  children: <Widget>[
-                    QueueTab(controller: controller, projects: projects),
-                    ProjectsTab(controller: projects),
-                    ModelsTab(controller: settings),
-                    LogsTab(store: logs),
-                    ConfigTab(
-                      controller: settings,
-                      storagePath: storagePath,
-                      recordingsCount: controller.recordings.length,
-                      logCount: logs.events.length,
-                      onOpenModels: () =>
-                          setState(() => navigationIndex = modelsIndex),
-                      // Reported on in the enrichment-context section: which
-                      // file each repository actually contributes, and which
-                      // paths are wrong. The tab never edits them.
-                      projects: projects.projects,
-                      showShortcuts: _isDesktop,
-                      rejectedShortcuts: rejectedShortcuts,
-                      runWithHotkeysSuspended: _runWithHotkeysSuspended,
-                    ),
-                  ],
-                ),
-              ),
-              if (navigationIndex == queueIndex && !recording)
-                Positioned(
-                  left: 0,
-                  right: 0,
-                  bottom: 0,
-                  child: ConsolePageWidth(
-                    child: CaptureDock(
-                      controller: controller,
-                      onOpenCaptureMenu: () => _openCaptureMenu(context),
-                    ),
-                  ),
-                ),
-              // Overlaid rather than swapped into the IndexedStack: the Queue
-              // underneath keeps its search text and scroll position for when
-              // the capture finishes.
-              if (recording)
-                Positioned.fill(
-                  child: ColoredBox(
-                    color: Console.background,
-                    child: RecordingView(
-                      controller: controller,
-                      projects: projects.projects,
-                    ),
-                  ),
-                ),
-            ],
-          ),
-          // Hidden while recording — the capture screen is a single-purpose
-          // view, and switching tabs mid-take is not a thing to invite.
-          bottomNavigationBar: recording
-              ? null
-              : DecoratedBox(
-                  decoration: const BoxDecoration(
-                    border: Border(top: BorderSide(color: Console.border)),
-                  ),
-                  child: NavigationBar(
-                    selectedIndex: navigationIndex,
-                    onDestinationSelected: (int value) {
-                      setState(() => navigationIndex = value);
-                    },
-                    destinations: <NavigationDestination>[
-                      const NavigationDestination(
-                        icon: Icon(Icons.format_list_bulleted_rounded),
-                        label: 'QUEUE',
-                      ),
-                      const NavigationDestination(
-                        icon: Icon(Icons.account_tree_outlined),
-                        label: 'PROJECTS',
-                      ),
-                      NavigationDestination(
-                        icon: _ProfileBadge(
-                          hasActiveProfile: settings.activeProfile != null,
+            return Scaffold(
+              // No AppBar: each tab draws the design's own header (cyan eyebrow +
+              // large title) inside its scroll area, so the title scrolls with the
+              // content instead of sitting in a separate bar above it.
+              body: Stack(
+                children: <Widget>[
+                  // IndexedStack so the Queue tab keeps its search text and filter
+                  // while the user visits Models/Logs/Config.
+                  //
+                  // Wrapped here rather than inside each tab: five separate width
+                  // caps would drift apart, and the dock below has to agree with
+                  // whatever this one is or the record button stops lining up with
+                  // the column it captures into.
+                  ConsolePageWidth(
+                    child: IndexedStack(
+                      index: navigationIndex,
+                      children: <Widget>[
+                        QueueTab(controller: controller, projects: projects),
+                        ProjectsTab(controller: projects),
+                        ModelsTab(controller: settings),
+                        LogsTab(store: logs),
+                        ConfigTab(
+                          controller: settings,
+                          storagePath: storagePath,
+                          recordingsCount: controller.recordings.length,
+                          logCount: logs.events.length,
+                          onOpenModels: () =>
+                              setState(() => navigationIndex = modelsIndex),
+                          // Reported on in the enrichment-context section: which
+                          // file each repository actually contributes, and which
+                          // paths are wrong. The tab never edits them.
+                          projects: projects.projects,
+                          showShortcuts: _isDesktop,
+                          rejectedShortcuts: rejectedShortcuts,
+                          runWithHotkeysSuspended: _runWithHotkeysSuspended,
                         ),
-                        label: 'MODELS',
-                      ),
-                      const NavigationDestination(
-                        icon: Icon(Icons.chevron_right_rounded),
-                        label: 'LOGS',
-                      ),
-                      const NavigationDestination(
-                        icon: Icon(Icons.tune_rounded),
-                        label: 'CONFIG',
-                      ),
-                    ],
+                      ],
+                    ),
                   ),
-                ),
+                  // The compact bar carries capture actions itself. Wider windows
+                  // keep the existing floating Queue dock unchanged.
+                  if (!compact && navigationIndex == queueIndex && !recording)
+                    Positioned(
+                      left: 0,
+                      right: 0,
+                      bottom: 0,
+                      child: ConsolePageWidth(
+                        child: CaptureDock(
+                          controller: controller,
+                          onOpenCaptureMenu: () => _openCaptureMenu(context),
+                        ),
+                      ),
+                    ),
+                  // Overlaid rather than swapped into the IndexedStack: the Queue
+                  // underneath keeps its search text and scroll position for when
+                  // the capture finishes.
+                  if (recording)
+                    Positioned.fill(
+                      child: ColoredBox(
+                        color: Console.background,
+                        child: RecordingView(
+                          controller: controller,
+                          projects: projects.projects,
+                        ),
+                      ),
+                    ),
+                ],
+              ),
+              // Hidden while recording — the capture screen is a single-purpose
+              // view, and switching tabs mid-take is not a thing to invite.
+              bottomNavigationBar: recording
+                  ? null
+                  : compact
+                  ? CaptureNavBar(
+                      destinations: <CaptureNavDestination>[
+                        for (
+                          int index = 0;
+                          index < destinations.length;
+                          index++
+                        )
+                          CaptureNavDestination(
+                            icon: destinations[index].icon,
+                            label: destinations[index].label,
+                            shortLabel: destinations[index].shortLabel,
+                            warn:
+                                index == modelsIndex &&
+                                settings.activeProfile == null,
+                          ),
+                      ],
+                      selectedIndex: navigationIndex,
+                      onSelected: (int value) =>
+                          setState(() => navigationIndex = value),
+                      busy: controller.isBusy,
+                      onRecord: controller.startRecording,
+                      onOpenCaptureMenu: () => _openCaptureMenu(context),
+                    )
+                  : _buildDesktopNavigationBar(),
+            );
+          },
         );
       },
+    );
+  }
+
+  Widget _buildDesktopNavigationBar() {
+    return DecoratedBox(
+      decoration: const BoxDecoration(
+        border: Border(top: BorderSide(color: Console.border)),
+      ),
+      child: NavigationBar(
+        selectedIndex: navigationIndex,
+        onDestinationSelected: (int value) {
+          setState(() => navigationIndex = value);
+        },
+        destinations: <NavigationDestination>[
+          const NavigationDestination(
+            icon: Icon(Icons.format_list_bulleted_rounded),
+            label: 'QUEUE',
+          ),
+          const NavigationDestination(
+            icon: Icon(Icons.account_tree_outlined),
+            label: 'PROJECTS',
+          ),
+          NavigationDestination(
+            icon: _ProfileBadge(
+              hasActiveProfile: settings.activeProfile != null,
+            ),
+            label: 'MODELS',
+          ),
+          const NavigationDestination(
+            icon: Icon(Icons.chevron_right_rounded),
+            label: 'LOGS',
+          ),
+          const NavigationDestination(
+            icon: Icon(Icons.tune_rounded),
+            label: 'CONFIG',
+          ),
+        ],
+      ),
     );
   }
 }
