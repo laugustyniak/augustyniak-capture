@@ -1145,9 +1145,8 @@ class RecordingsController extends ChangeNotifier {
       // invisible: a title that improved after a CLAUDE.md was written is not
       // something the queue can show, and this is the only place that says
       // which file the model was actually given.
-      final String source = context.projectSource == null
-          ? ''
-          : ' \u00b7 context: ${context.projectSource}';
+      final String? layers = context.sourceSummary;
+      final String source = layers == null ? '' : ' \u00b7 context: $layers';
       _logSink.log(
         'Enriched \u00b7 ${result.category.name}$source',
         recordingId: id,
