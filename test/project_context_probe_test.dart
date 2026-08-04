@@ -19,7 +19,7 @@ void main() {
 
   Project project({String? repoPath, String? description}) => Project(
     id: 'p1',
-    name: 'Audivoa',
+    name: 'Augustyniak Capture',
     repoPath: repoPath ?? repo.path,
     description: description,
   );

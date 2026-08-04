@@ -78,8 +78,12 @@ void main() {
   late Directory pickDir;
 
   setUp(() {
-    appDir = Directory.systemTemp.createTempSync('audivoa_clip_app_');
-    pickDir = Directory.systemTemp.createTempSync('audivoa_clip_pick_');
+    appDir = Directory.systemTemp.createTempSync(
+      'augustyniak_capture_clip_app_',
+    );
+    pickDir = Directory.systemTemp.createTempSync(
+      'augustyniak_capture_clip_pick_',
+    );
   });
 
   tearDown(() {
