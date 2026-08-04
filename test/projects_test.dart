@@ -1,19 +1,19 @@
 import 'dart:convert';
 import 'dart:io';
 
-import 'package:audivoa_core/features/projects/data/projects_repository.dart';
-import 'package:audivoa_core/features/projects/domain/project.dart';
+import 'package:augustyniak_capture/features/projects/data/projects_repository.dart';
+import 'package:augustyniak_capture/features/projects/domain/project.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {
   group('Project', () {
     test('JSON round-trip preserves launch context', () {
       const Project original = Project(
-        id: 'audivoa',
-        name: 'Audivoa',
-        repoPath: '/work/audivoa',
+        id: 'augustyniak-capture',
+        name: 'Augustyniak Capture',
+        repoPath: '/work/augustyniak-capture',
         description: 'Voice capture workflow',
-        sessionName: 'audivoa',
+        sessionName: 'augustyniak-capture',
         defaultAgent: AgentKind.codex,
         agentSettings: <AgentKind, AgentSettings>{
           AgentKind.codex: AgentSettings(
@@ -107,7 +107,7 @@ void main() {
 
     setUp(() async {
       temporaryDirectory = await Directory.systemTemp.createTemp(
-        'audivoa-projects-test-',
+        'augustyniak-capture-projects-test-',
       );
       repository = ProjectsRepository(
         directoryProvider: () async => temporaryDirectory,

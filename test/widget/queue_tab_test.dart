@@ -5,17 +5,17 @@ import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:path/path.dart' as p;
-import 'package:audivoa_core/app/ui_kit.dart';
-import 'package:audivoa_core/features/recordings/domain/capture_category.dart';
-import 'package:audivoa_core/features/recordings/domain/capture_type.dart';
-import 'package:audivoa_core/features/recordings/domain/recording.dart';
-import 'package:audivoa_core/features/recordings/presentation/queue_tab.dart';
-import 'package:audivoa_core/features/recordings/presentation/recording_card.dart';
-import 'package:audivoa_core/features/recordings/presentation/recording_editor.dart';
-import 'package:audivoa_core/features/recordings/presentation/recordings_controller.dart';
-import 'package:audivoa_core/features/projects/data/projects_repository.dart';
-import 'package:audivoa_core/features/projects/domain/project.dart';
-import 'package:audivoa_core/features/projects/presentation/projects_controller.dart';
+import 'package:augustyniak_capture/app/ui_kit.dart';
+import 'package:augustyniak_capture/features/recordings/domain/capture_category.dart';
+import 'package:augustyniak_capture/features/recordings/domain/capture_type.dart';
+import 'package:augustyniak_capture/features/recordings/domain/recording.dart';
+import 'package:augustyniak_capture/features/recordings/presentation/queue_tab.dart';
+import 'package:augustyniak_capture/features/recordings/presentation/recording_card.dart';
+import 'package:augustyniak_capture/features/recordings/presentation/recording_editor.dart';
+import 'package:augustyniak_capture/features/recordings/presentation/recordings_controller.dart';
+import 'package:augustyniak_capture/features/projects/data/projects_repository.dart';
+import 'package:augustyniak_capture/features/projects/domain/project.dart';
+import 'package:augustyniak_capture/features/projects/presentation/projects_controller.dart';
 
 import '../support/harness.dart';
 
@@ -38,17 +38,56 @@ final Uint8List _pixel = base64Decode(
 void main() {
   late Directory appDir;
 
-  setUp(() => appDir = Directory.systemTemp.createTempSync('audivoa_queue_'));
+  setUp(
+    () => appDir = Directory.systemTemp.createTempSync(
+      'augustyniak-capture_queue_',
+    ),
+  );
   tearDown(() => appDir.deleteSync(recursive: true));
 
+  /// Pumps the **desktop** queue: a header bar over a card grid.
+  ///
+  /// Almost everything in this file is about what a `RecordingCard` renders and
+  /// which controls it offers, and the card is the desktop form — the phone
+  /// draws a `RecordingRow` instead, which is a summary until it is tapped. So
+  /// the default host is the wide one, and the phone form has its own group at
+  /// the bottom of the file.
   Future<void> pumpQueue(
     WidgetTester tester,
     RecordingsController controller, {
     ProjectsController? projects,
   }) async {
+    tester.view.physicalSize = const Size(1400, 1000);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
     await tester.pumpWidget(
       hostTab(
-        () => QueueTab(controller: controller, projects: projects),
+        () => QueueTab(controller: controller, projects: projects, wide: true),
+        listenable: projects == null
+            ? controller
+            : Listenable.merge(<Listenable>[controller, projects]),
+      ),
+    );
+    await tester.pump();
+  }
+
+  /// Pumps the **phone** queue at the design's 393 px width.
+  Future<void> pumpMobile(
+    WidgetTester tester,
+    RecordingsController controller, {
+    ProjectsController? projects,
+    VoidCallback? onOpenCaptureMenu,
+  }) async {
+    tester.view.physicalSize = const Size(393, 852);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+    await tester.pumpWidget(
+      hostTab(
+        () => QueueTab(
+          controller: controller,
+          projects: projects,
+          onOpenCaptureMenu: onOpenCaptureMenu,
+        ),
         listenable: projects == null
             ? controller
             : Listenable.merge(<Listenable>[controller, projects]),
@@ -79,7 +118,7 @@ void main() {
     await pumpQueue(tester, controller);
 
     expect(find.text('Nothing captured yet.'), findsOneWidget);
-    expect(find.text('0 captures'), findsOneWidget);
+    expect(find.text('0 shown'), findsOneWidget);
   });
 
   testWidgets('the default All filter lists every item', (
@@ -96,7 +135,7 @@ void main() {
 
     expect(find.textContaining('done'), findsOneWidget);
     expect(find.textContaining('waiting'), findsOneWidget);
-    expect(find.text('2 captures'), findsOneWidget);
+    expect(find.text('2 shown'), findsOneWidget);
   });
 
   testWidgets('the chip counts partition the queue, and All is their sum', (
@@ -506,14 +545,110 @@ void main() {
       // The toggle is async, so the notification lands after the settle above;
       // pump again to render the state the controller now holds.
       await tester.pumpAndSettle();
+
+      // The queue opens on INBOX, so marking an item done takes it *out* of the
+      // list. That is the whole point of the review switch rather than a side
+      // effect of it — the counts move with it.
+      expect(find.byIcon(Icons.check_circle_rounded), findsNothing);
+      expect(find.text('INBOX 0'), findsOneWidget);
+      expect(find.text('DONE 1'), findsOneWidget);
+
+      await tester.tap(find.text('DONE 1'));
+      await tester.pumpAndSettle();
       expect(find.byIcon(Icons.check_circle_rounded), findsOneWidget);
       expect(find.byIcon(Icons.check_circle_outline_rounded), findsOneWidget);
     },
   );
 
-  testWidgets('the reviewed strip counts reviewed against the whole queue', (
+  testWidgets('the review switch and the status chips narrow independently', (
     WidgetTester tester,
   ) async {
+    // The two axes are the two states `Recording` has always kept apart:
+    // where the pipeline got to, and whether the user has dealt with the item.
+    // Each control's counts describe the whole queue, so neither one's numbers
+    // move when the other is used.
+    final RecordingsController controller = await buildRecordingsController(
+      appDir,
+      seed: <Recording>[
+        makeRecording(id: 'done-ready', isProcessedByUser: true),
+        makeRecording(id: 'open-ready'),
+        makeRecording(id: 'open-failed', status: RecordingStatus.failed),
+      ],
+    );
+    await pumpQueue(tester, controller);
+
+    expect(find.text('INBOX 2'), findsOneWidget);
+    expect(find.text('DONE 1'), findsOneWidget);
+    expect(find.text('ANY 3'), findsOneWidget);
+    expect(find.textContaining('done-ready'), findsNothing);
+
+    await tester.tap(find.text('FAILED 1'));
+    await tester.pumpAndSettle();
+
+    expect(find.textContaining('open-failed'), findsOneWidget);
+    expect(find.textContaining('open-ready'), findsNothing);
+    // Still counted over the whole queue, not over what the chips left.
+    expect(find.text('INBOX 2'), findsOneWidget);
+
+    await tester.tap(find.text('ANY 3'));
+    await tester.pumpAndSettle();
+
+    // Both axes apply at once: ANY widens the review side, FAILED still holds.
+    expect(find.textContaining('open-failed'), findsOneWidget);
+    expect(find.textContaining('done-ready'), findsNothing);
+    expect(find.text('FAILED 1'), findsOneWidget);
+  });
+
+  testWidgets('the wide layout lays the queue out as a card grid', (
+    WidgetTester tester,
+  ) async {
+    // The two layouts are different trees, not one restyled: the desktop puts a
+    // fixed header bar over columns of `RecordingCard`, the phone puts a
+    // collapsible header over a dense list of `RecordingRow`. This case pins
+    // the column arithmetic, which is the only part of either that is a
+    // calculation rather than a composition.
+    tester.view.physicalSize = const Size(1440, 900);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+
+    final RecordingsController controller = await buildRecordingsController(
+      appDir,
+      seed: <Recording>[
+        makeRecording(id: 'first'),
+        makeRecording(id: 'second'),
+        makeRecording(id: 'third'),
+      ],
+    );
+    await tester.pumpWidget(
+      hostTab(
+        () => QueueTab(controller: controller, wide: true),
+        listenable: controller,
+      ),
+    );
+    await tester.pump();
+
+    // The header bar's own counter, which counts what survived the filters
+    // rather than what is in the index.
+    expect(find.text('Queue'), findsOneWidget);
+    expect(find.text('3 shown'), findsOneWidget);
+    // `minmax(430px, 1fr)` over 1440 px fits three columns, so all three cards
+    // share one row — which is the property the manual row-building exists for.
+    final double top = tester.getTopLeft(find.text('first.m4a')).dy;
+    expect(tester.getTopLeft(find.text('second.m4a')).dy, top);
+    expect(tester.getTopLeft(find.text('third.m4a')).dy, top);
+    expect(
+      tester.getTopLeft(find.text('second.m4a')).dx,
+      greaterThan(tester.getTopLeft(find.text('first.m4a')).dx),
+    );
+  });
+
+  testWidgets('the review counts describe the whole queue, in both layouts', (
+    WidgetTester tester,
+  ) async {
+    // What `ReviewedStrip` used to say (`DONE 1 / 3`) now rides on the review
+    // switch itself, which both layouts draw — the strip is gone, and the
+    // desktop rail carries the same two numbers as a progress bar. The counts
+    // are taken over the index, not over what the current filters left.
     final RecordingsController controller = await buildRecordingsController(
       appDir,
       seed: <Recording>[
@@ -524,8 +659,9 @@ void main() {
     );
     await pumpQueue(tester, controller);
 
-    expect(find.text('DONE'), findsOneWidget);
-    expect(find.text('1 / 3'), findsOneWidget);
+    expect(find.text('DONE 1'), findsOneWidget);
+    expect(find.text('INBOX 2'), findsOneWidget);
+    expect(find.text('ANY 3'), findsOneWidget);
   });
 
   testWidgets('a card shows its category and summary', (
@@ -732,8 +868,20 @@ void main() {
     await pumpQueue(tester, controller);
 
     await tester.tap(find.byIcon(Icons.edit_outlined));
-    await tester.pump();
-    await tester.tap(find.text('—').last);
+    await tester.pump(const Duration(milliseconds: 300));
+    // Invoked rather than tapped, like the tag controls above: inside a grid
+    // cell the grown editor runs past the viewport's clip, and `—` is the
+    // first chip of the row furthest down it — `ensureVisible` cannot bring it
+    // into a hit-testable position. What the case is about is that the chip is
+    // wired to `setCategory(null)`, which this still proves.
+    tester
+        .widget<InkWell>(
+          find.ancestor(
+            of: find.text('—').last,
+            matching: find.byType(InkWell),
+          ),
+        )
+        .onTap!();
     await settleIo(tester);
 
     expect(controller.recordings.single.category, isNull);
@@ -853,5 +1001,216 @@ void main() {
     // Edit mode left with the row it belonged to, rather than lingering on an
     // id nothing in the queue answers to any more.
     expect(find.byIcon(Icons.delete_outline_rounded), findsNothing);
+  });
+
+  group('phone layout', () {
+    testWidgets('a row is a summary until it is tapped', (
+      WidgetTester tester,
+    ) async {
+      final RecordingsController controller = await buildRecordingsController(
+        appDir,
+        seed: <Recording>[
+          makeRecording(
+            id: 'note',
+            transcript: 'zadzwonic do klienta w piatek',
+            tags: <String>['client'],
+            sizeBytes: 2048,
+          ),
+        ],
+      );
+      await pumpMobile(tester, controller);
+
+      // Collapsed: what identifies the capture, and the control that files it.
+      expect(find.text('note.m4a'), findsOneWidget);
+      expect(find.bySemanticsLabel('Mark as done'), findsOneWidget);
+      // Everything else is behind the tap.
+      expect(find.textContaining('zadzwonic do klienta'), findsNothing);
+      expect(find.text('#client'), findsNothing);
+      expect(find.textContaining('file verified'), findsNothing);
+      expect(find.bySemanticsLabel('Play recording'), findsNothing);
+
+      await tester.tap(find.text('note.m4a'));
+      await tester.pumpAndSettle();
+
+      expect(find.textContaining('zadzwonic do klienta'), findsOneWidget);
+      expect(find.text('#client'), findsOneWidget);
+      // The durability guarantee survives the density — it just costs the tap.
+      expect(find.text('file verified · 2 KB · persisted'), findsOneWidget);
+      expect(find.bySemanticsLabel('Play recording'), findsOneWidget);
+    });
+
+    testWidgets('only one row is open at a time', (WidgetTester tester) async {
+      final RecordingsController controller = await buildRecordingsController(
+        appDir,
+        seed: <Recording>[
+          makeRecording(id: 'first', transcript: 'pierwszy tekst'),
+          makeRecording(id: 'second', transcript: 'drugi tekst'),
+        ],
+      );
+      await pumpMobile(tester, controller);
+
+      await tester.tap(find.text('first.m4a'));
+      await tester.pumpAndSettle();
+      expect(find.textContaining('pierwszy tekst'), findsOneWidget);
+
+      await tester.tap(find.text('second.m4a'));
+      await tester.pumpAndSettle();
+
+      // An accordion, not a set of checkboxes: opening the second closes the
+      // first, which is what keeps a long list scannable.
+      expect(find.textContaining('drugi tekst'), findsOneWidget);
+      expect(find.textContaining('pierwszy tekst'), findsNothing);
+
+      await tester.tap(find.text('second.m4a'));
+      await tester.pumpAndSettle();
+      expect(find.textContaining('drugi tekst'), findsNothing);
+    });
+
+    testWidgets('the collapsed row shows one badge, the most urgent one', (
+      WidgetTester tester,
+    ) async {
+      final RecordingsController controller = await buildRecordingsController(
+        appDir,
+        seed: <Recording>[
+          makeRecording(
+            id: 'enriched',
+            status: RecordingStatus.completed,
+            category: CaptureCategory.task,
+          ),
+          makeRecording(id: 'bad', status: RecordingStatus.failed),
+        ],
+      );
+      await pumpMobile(tester, controller);
+
+      // A finished item shows what it was routed to; an unfinished one shows
+      // where the pipeline stopped. Never both — the title needs the width.
+      expect(find.text('TASK'), findsOneWidget);
+      expect(find.text('READY'), findsNothing);
+      expect(find.text('FAILED'), findsOneWidget);
+    });
+
+    testWidgets('the review toggle is reachable without opening the row', (
+      WidgetTester tester,
+    ) async {
+      // The design has INBOX/DONE tabs but no control that moves an item
+      // between them. Filing a capture is the loop the phone exists for, so it
+      // must not cost a tap to reveal.
+      final RecordingsController controller = await buildRecordingsController(
+        appDir,
+        seed: <Recording>[makeRecording(id: 'x')],
+      );
+      await pumpMobile(tester, controller);
+
+      await tester.tap(find.bySemanticsLabel('Mark as done'));
+      await tester.pumpAndSettle();
+
+      expect(controller.recordings.single.isProcessedByUser, isTrue);
+      expect(find.text('INBOX 0'), findsOneWidget);
+      expect(find.text('x.m4a'), findsNothing);
+    });
+
+    testWidgets('search is behind a toggle, and closing it clears the query', (
+      WidgetTester tester,
+    ) async {
+      final RecordingsController controller = await buildRecordingsController(
+        appDir,
+        seed: <Recording>[
+          makeRecording(id: 'a', transcript: 'buy milk'),
+          makeRecording(id: 'b', transcript: 'call the dentist'),
+        ],
+      );
+      await pumpMobile(tester, controller);
+
+      expect(find.byType(TextField), findsNothing);
+
+      await tester.tap(find.bySemanticsLabel('Search'));
+      // Never `pumpAndSettle` past this point: the field autofocuses, and a
+      // blinking cursor never stops scheduling frames.
+      await tester.pump(const Duration(milliseconds: 300));
+      await tester.enterText(find.byType(TextField), 'dentist');
+      await tester.pump(const Duration(milliseconds: 300));
+
+      expect(find.text('b.m4a'), findsOneWidget);
+      expect(find.text('a.m4a'), findsNothing);
+
+      await tester.tap(find.bySemanticsLabel('Search'));
+      await tester.pump(const Duration(milliseconds: 300));
+
+      // A collapsed field still filtering would leave the queue looking broken
+      // with nothing on screen explaining why half of it is gone.
+      expect(find.byType(TextField), findsNothing);
+      expect(find.text('a.m4a'), findsOneWidget);
+      expect(find.text('b.m4a'), findsOneWidget);
+    });
+
+    testWidgets('the filters panel is behind a toggle and stays flagged', (
+      WidgetTester tester,
+    ) async {
+      final RecordingsController controller = await buildRecordingsController(
+        appDir,
+        seed: <Recording>[
+          makeRecording(id: 'done', status: RecordingStatus.completed),
+          makeRecording(id: 'bad', status: RecordingStatus.failed),
+        ],
+      );
+      await pumpMobile(tester, controller);
+
+      expect(find.text('ALL 2'), findsNothing);
+
+      await tester.tap(find.bySemanticsLabel('Filters'));
+      await tester.pumpAndSettle();
+      expect(find.text('ALL 2'), findsOneWidget);
+
+      await tester.tap(find.text('FAILED 1'));
+      await tester.pumpAndSettle();
+      expect(find.text('bad.m4a'), findsOneWidget);
+      expect(find.text('done.m4a'), findsNothing);
+
+      await tester.tap(find.bySemanticsLabel('Filters'));
+      await tester.pumpAndSettle();
+
+      // Panel closed, filter still on. The toggle stays lit so the header
+      // cannot silently hide why the list is short.
+      expect(find.text('ALL 2'), findsNothing);
+      expect(find.text('bad.m4a'), findsOneWidget);
+      expect(find.text('done.m4a'), findsNothing);
+    });
+
+    testWidgets('the capture button is absent when the host offers none', (
+      WidgetTester tester,
+    ) async {
+      final RecordingsController controller = await buildRecordingsController(
+        appDir,
+      );
+      await pumpMobile(tester, controller);
+      expect(find.bySemanticsLabel('New note or upload'), findsNothing);
+
+      int opened = 0;
+      await pumpMobile(tester, controller, onOpenCaptureMenu: () => opened++);
+      await tester.tap(find.bySemanticsLabel('New note or upload'));
+      await tester.pump();
+
+      expect(opened, 1);
+    });
+
+    testWidgets('the pencil opens the editor in place of the row', (
+      WidgetTester tester,
+    ) async {
+      final RecordingsController controller = await buildRecordingsController(
+        appDir,
+        seed: <Recording>[makeRecording(id: 'x', transcript: 'tekst')],
+      );
+      await pumpMobile(tester, controller);
+
+      await tester.tap(find.text('x.m4a'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byIcon(Icons.edit_outlined));
+      await tester.pump(const Duration(milliseconds: 300));
+
+      // Reading and editing are separate states, and the editor replaces the
+      // row rather than sitting inside the opened one.
+      expect(find.byType(RecordingEditor), findsOneWidget);
+      expect(find.bySemanticsLabel('Mark as done'), findsNothing);
+    });
   });
 }

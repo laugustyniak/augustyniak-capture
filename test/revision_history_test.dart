@@ -1,15 +1,15 @@
 import 'dart:io';
 
-import 'package:audivoa_core/features/enrichment/domain/enrichment_context.dart';
-import 'package:audivoa_core/features/enrichment/domain/enrichment_result.dart';
-import 'package:audivoa_core/features/enrichment/domain/enrichment_service.dart';
-import 'package:audivoa_core/features/recordings/data/recordings_repository.dart';
-import 'package:audivoa_core/features/recordings/data/revisions_repository.dart';
-import 'package:audivoa_core/features/recordings/domain/capture_category.dart';
-import 'package:audivoa_core/features/recordings/domain/recording.dart';
-import 'package:audivoa_core/features/recordings/domain/recording_revision.dart';
-import 'package:audivoa_core/features/recordings/presentation/recordings_controller.dart';
-import 'package:audivoa_core/features/transcription/data/transcription_service.dart';
+import 'package:augustyniak_capture/features/enrichment/domain/enrichment_context.dart';
+import 'package:augustyniak_capture/features/enrichment/domain/enrichment_result.dart';
+import 'package:augustyniak_capture/features/enrichment/domain/enrichment_service.dart';
+import 'package:augustyniak_capture/features/recordings/data/recordings_repository.dart';
+import 'package:augustyniak_capture/features/recordings/data/revisions_repository.dart';
+import 'package:augustyniak_capture/features/recordings/domain/capture_category.dart';
+import 'package:augustyniak_capture/features/recordings/domain/recording.dart';
+import 'package:augustyniak_capture/features/recordings/domain/recording_revision.dart';
+import 'package:augustyniak_capture/features/recordings/presentation/recordings_controller.dart';
+import 'package:augustyniak_capture/features/transcription/data/transcription_service.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 

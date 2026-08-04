@@ -1,8 +1,8 @@
 import 'dart:io';
 
-import 'package:audivoa_core/features/projects/data/projects_repository.dart';
-import 'package:audivoa_core/features/projects/presentation/projects_controller.dart';
-import 'package:audivoa_core/features/projects/presentation/projects_tab.dart';
+import 'package:augustyniak_capture/features/projects/data/projects_repository.dart';
+import 'package:augustyniak_capture/features/projects/presentation/projects_controller.dart';
+import 'package:augustyniak_capture/features/projects/presentation/projects_tab.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
@@ -11,12 +11,17 @@ void main() {
   late ProjectsController controller;
 
   setUp(() async {
-    directory = await Directory.systemTemp.createTemp('audivoa-projects-ui-');
+    directory = await Directory.systemTemp.createTemp(
+      'augustyniak-capture-projects-ui-',
+    );
     controller = ProjectsController(
       repository: ProjectsRepository(directoryProvider: () async => directory),
     );
     await controller.initialize();
-    await controller.create(name: 'Audivoa', repoPath: '/work/audivoa');
+    await controller.create(
+      name: 'Augustyniak Capture',
+      repoPath: '/work/augustyniak-capture',
+    );
   });
 
   tearDown(() async {
@@ -40,8 +45,8 @@ void main() {
       ),
     );
 
-    expect(find.text('Audivoa'), findsOneWidget);
-    expect(find.text('/work/audivoa'), findsOneWidget);
+    expect(find.text('Augustyniak Capture'), findsOneWidget);
+    expect(find.text('/work/augustyniak-capture'), findsOneWidget);
     expect(find.text('ACTIVE'), findsOneWidget);
     expect(find.text('CODEX'), findsOneWidget);
     expect(find.text('CLAUDE CODE'), findsOneWidget);

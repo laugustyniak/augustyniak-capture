@@ -1,9 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:audivoa_core/app/ui_kit.dart';
-import 'package:audivoa_core/features/settings/domain/provider_profile.dart';
-import 'package:audivoa_core/features/settings/presentation/models_tab.dart';
-import 'package:audivoa_core/features/settings/presentation/settings_controller.dart';
+import 'package:augustyniak_capture/app/ui_kit.dart';
+import 'package:augustyniak_capture/features/settings/domain/provider_profile.dart';
+import 'package:augustyniak_capture/features/settings/presentation/models_tab.dart';
+import 'package:augustyniak_capture/features/settings/presentation/settings_controller.dart';
 
 import '../support/harness.dart';
 

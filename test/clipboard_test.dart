@@ -4,13 +4,13 @@ import 'package:audioplayers/audioplayers.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:path/path.dart' as p;
 import 'package:record/record.dart';
-import 'package:audivoa_core/features/recordings/data/media_picker.dart';
-import 'package:audivoa_core/features/recordings/data/recordings_repository.dart';
-import 'package:audivoa_core/features/recordings/domain/capture_type.dart';
-import 'package:audivoa_core/features/recordings/domain/clipboard_sink.dart';
-import 'package:audivoa_core/features/recordings/domain/recording.dart';
-import 'package:audivoa_core/features/recordings/presentation/recordings_controller.dart';
-import 'package:audivoa_core/features/transcription/data/transcription_service.dart';
+import 'package:augustyniak_capture/features/recordings/data/media_picker.dart';
+import 'package:augustyniak_capture/features/recordings/data/recordings_repository.dart';
+import 'package:augustyniak_capture/features/recordings/domain/capture_type.dart';
+import 'package:augustyniak_capture/features/recordings/domain/clipboard_sink.dart';
+import 'package:augustyniak_capture/features/recordings/domain/recording.dart';
+import 'package:augustyniak_capture/features/recordings/presentation/recordings_controller.dart';
+import 'package:augustyniak_capture/features/transcription/data/transcription_service.dart';
 
 class _FakeRepository extends RecordingsRepository {
   _FakeRepository(this.directory);
@@ -78,8 +78,12 @@ void main() {
   late Directory pickDir;
 
   setUp(() {
-    appDir = Directory.systemTemp.createTempSync('audivoa_clip_app_');
-    pickDir = Directory.systemTemp.createTempSync('audivoa_clip_pick_');
+    appDir = Directory.systemTemp.createTempSync(
+      'augustyniak-capture_clip_app_',
+    );
+    pickDir = Directory.systemTemp.createTempSync(
+      'augustyniak-capture_clip_pick_',
+    );
   });
 
   tearDown(() {

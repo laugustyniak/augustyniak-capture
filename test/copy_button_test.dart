@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:audivoa_core/app/ui_kit.dart';
+import 'package:augustyniak_capture/app/ui_kit.dart';
 
 /// The only widget test in the suite: `CopyButton` is the one piece of UI whose
 /// contract (what lands on the clipboard) cannot be checked in pure Dart.

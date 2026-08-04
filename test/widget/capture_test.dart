@@ -5,12 +5,12 @@ import 'package:audioplayers/audioplayers.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:record/record.dart';
-import 'package:audivoa_core/features/recordings/presentation/capture_dock.dart';
-import 'package:audivoa_core/features/recordings/presentation/recording_view.dart';
-import 'package:audivoa_core/features/recordings/presentation/recordings_controller.dart';
-import 'package:audivoa_core/features/recordings/presentation/text_note_sheet.dart';
-import 'package:audivoa_core/features/settings/domain/audio_config.dart';
-import 'package:audivoa_core/features/transcription/data/transcription_service.dart';
+import 'package:augustyniak_capture/features/recordings/presentation/capture_nav_bar.dart';
+import 'package:augustyniak_capture/features/recordings/presentation/recording_view.dart';
+import 'package:augustyniak_capture/features/recordings/presentation/recordings_controller.dart';
+import 'package:augustyniak_capture/features/recordings/presentation/text_note_sheet.dart';
+import 'package:augustyniak_capture/features/settings/domain/audio_config.dart';
+import 'package:augustyniak_capture/features/transcription/data/transcription_service.dart';
 
 import '../support/harness.dart';
 
@@ -64,7 +64,11 @@ class _FakePlayer implements AudioPlayer {
 void main() {
   late Directory appDir;
 
-  setUp(() => appDir = Directory.systemTemp.createTempSync('audivoa_capture_'));
+  setUp(
+    () => appDir = Directory.systemTemp.createTempSync(
+      'augustyniak-capture_capture_',
+    ),
+  );
   tearDown(() => appDir.deleteSync(recursive: true));
 
   /// Lets filesystem work started from inside the fake-async zone (a button
@@ -107,14 +111,34 @@ void main() {
       .map((AnimatedContainer bar) => bar.constraints!.maxHeight)
       .toList();
 
-  group('CaptureDock', () {
+  group('CaptureNavBar', () {
+    /// The five destinations the shell hands it. Their identity does not
+    /// matter here — only that the record button still works with a full row
+    /// of them beside it, which is the arrangement the mobile design merged
+    /// the old floating dock into.
+    List<NavBarDestination> destinations() => const <NavBarDestination>[
+      NavBarDestination(
+        icon: Icons.format_list_bulleted_rounded,
+        label: 'QUEUE',
+      ),
+      NavBarDestination(icon: Icons.account_tree_outlined, label: 'PROJECTS'),
+      NavBarDestination(icon: Icons.memory_rounded, label: 'MODELS'),
+      NavBarDestination(icon: Icons.chevron_right_rounded, label: 'LOGS'),
+      NavBarDestination(icon: Icons.tune_rounded, label: 'CONFIG'),
+    ];
+
     testWidgets('the record button starts a recording', (
       WidgetTester tester,
     ) async {
       final RecordingsController controller = buildController();
       await tester.pumpWidget(
         hostTab(
-          () => CaptureDock(controller: controller, onOpenCaptureMenu: () {}),
+          () => CaptureNavBar(
+            controller: controller,
+            destinations: destinations(),
+            selectedIndex: 0,
+            onSelected: (int _) {},
+          ),
           listenable: controller,
         ),
       );
@@ -130,25 +154,25 @@ void main() {
       await settleIo(tester);
     });
 
-    testWidgets('the secondary button opens the capture menu', (
-      WidgetTester tester,
-    ) async {
+    testWidgets('a destination reports its index', (WidgetTester tester) async {
       final RecordingsController controller = buildController();
-      int opened = 0;
+      int? selected;
       await tester.pumpWidget(
         hostTab(
-          () => CaptureDock(
+          () => CaptureNavBar(
             controller: controller,
-            onOpenCaptureMenu: () => opened++,
+            destinations: destinations(),
+            selectedIndex: 0,
+            onSelected: (int value) => selected = value,
           ),
           listenable: controller,
         ),
       );
 
-      await tester.tap(find.bySemanticsLabel('New note or upload'));
+      await tester.tap(find.text('CONFIG'));
       await tester.pump();
 
-      expect(opened, 1);
+      expect(selected, 4);
     });
   });
 

@@ -1,8 +1,8 @@
 import 'dart:io';
 
-import 'package:audivoa_core/features/projects/data/ghostty_zellij_agent_session_launcher.dart';
-import 'package:audivoa_core/features/projects/data/process_runner.dart';
-import 'package:audivoa_core/features/projects/domain/agent_session_launcher.dart';
+import 'package:augustyniak_capture/features/projects/data/ghostty_zellij_agent_session_launcher.dart';
+import 'package:augustyniak_capture/features/projects/data/process_runner.dart';
+import 'package:augustyniak_capture/features/projects/domain/agent_session_launcher.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 class _Invocation {
@@ -39,7 +39,7 @@ void main() {
   late Directory repo;
 
   setUp(() {
-    repo = Directory.systemTemp.createTempSync('audivoa_project_');
+    repo = Directory.systemTemp.createTempSync('augustyniak-capture_project_');
   });
 
   tearDown(() {
@@ -74,7 +74,10 @@ void main() {
         request(arguments: <String>['--model', 'x; touch /tmp/not-run']),
       );
 
-      expect(result.sessionName, 'audivoa-client-legal-pilot-550e8400-codex');
+      expect(
+        result.sessionName,
+        'augustyniak-capture-client-legal-pilot-550e8400-codex',
+      );
       expect(result.attachedToExistingSession, isFalse);
       expect(runner.invocations.first.executable, 'zellij');
       expect(runner.invocations.first.arguments, const <String>[
@@ -138,7 +141,8 @@ void main() {
   test(
     'attaches without starting a second agent when session exists',
     () async {
-      const String session = 'audivoa-client-legal-pilot-550e8400-claude';
+      const String session =
+          'augustyniak-capture-client-legal-pilot-550e8400-claude';
       final _FakeProcessRunner runner = _FakeProcessRunner(<CommandResult>[
         const CommandResult(exitCode: 0, stdout: '$session\n', stderr: ''),
         _success,
