@@ -12,12 +12,17 @@ void main() {
   late ProjectsController controller;
 
   setUp(() async {
-    directory = await Directory.systemTemp.createTemp('audivoa-projects-ui-');
+    directory = await Directory.systemTemp.createTemp(
+      'augustyniak-capture-projects-ui-',
+    );
     controller = ProjectsController(
       repository: ProjectsRepository(directoryProvider: () async => directory),
     );
     await controller.initialize();
-    await controller.create(name: 'Audivoa', repoPath: '/work/audivoa');
+    await controller.create(
+      name: 'Augustyniak Capture',
+      repoPath: '/work/augustyniak-capture',
+    );
   });
 
   tearDown(() async {
@@ -41,8 +46,8 @@ void main() {
       ),
     );
 
-    expect(find.text('Audivoa'), findsOneWidget);
-    expect(find.text('/work/audivoa'), findsOneWidget);
+    expect(find.text('Augustyniak Capture'), findsOneWidget);
+    expect(find.text('/work/augustyniak-capture'), findsOneWidget);
     expect(find.text('ACTIVE'), findsOneWidget);
     expect(find.text('CODEX'), findsOneWidget);
     expect(find.text('CLAUDE CODE'), findsOneWidget);
@@ -98,7 +103,7 @@ void main() {
     );
     await tester.pump();
 
-    expect(picker.initialDirectories, <String?>['/work/audivoa']);
+    expect(picker.initialDirectories, <String?>['/work/augustyniak-capture']);
     final TextFormField field = tester.widget<TextFormField>(
       find.byKey(const ValueKey<String>('project-repo-path-field')),
     );

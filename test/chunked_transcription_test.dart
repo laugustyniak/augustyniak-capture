@@ -40,7 +40,9 @@ class _CountingSplitter implements AudioSplitter {
   Future<AudioSegments> split(File audio, Duration maxSegment) async {
     if (count <= 1) return AudioSegments.whole(audio);
 
-    final Directory dir = await Directory.systemTemp.createTemp('audivoa_seg_');
+    final Directory dir = await Directory.systemTemp.createTemp(
+      'augustyniak_capture_seg_',
+    );
     tempDir = dir;
     final List<File> parts = <File>[];
     for (int index = 0; index < count; index++) {
@@ -59,7 +61,7 @@ void main() {
   late File source;
 
   setUp(() async {
-    appDir = Directory.systemTemp.createTempSync('audivoa_chunk_');
+    appDir = Directory.systemTemp.createTempSync('augustyniak_capture_chunk_');
     source = File(p.join(appDir.path, 'capture.m4a'));
     await source.writeAsString('whole recording');
   });

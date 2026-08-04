@@ -38,7 +38,11 @@ final Uint8List _pixel = base64Decode(
 void main() {
   late Directory appDir;
 
-  setUp(() => appDir = Directory.systemTemp.createTempSync('audivoa_queue_'));
+  setUp(
+    () => appDir = Directory.systemTemp.createTempSync(
+      'augustyniak_capture_queue_',
+    ),
+  );
   tearDown(() => appDir.deleteSync(recursive: true));
 
   Future<void> pumpQueue(

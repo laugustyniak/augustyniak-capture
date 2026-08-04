@@ -160,7 +160,11 @@ void main() {
   group('the cap ends the recording', () {
     late Directory appDir;
 
-    setUp(() => appDir = Directory.systemTemp.createTempSync('audivoa_cap_'));
+    setUp(
+      () => appDir = Directory.systemTemp.createTempSync(
+        'augustyniak_capture_cap_',
+      ),
+    );
     tearDown(() => appDir.deleteSync(recursive: true));
 
     RecordingsController build({AudioRecorder? recorder}) =>

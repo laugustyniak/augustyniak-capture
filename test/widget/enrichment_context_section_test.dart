@@ -80,12 +80,12 @@ void main() {
     await pumpSection(
       tester,
       projects: <Project>[
-        Project(id: 'p1', name: 'Audivoa', repoPath: repo.path),
+        Project(id: 'p1', name: 'Augustyniak Capture', repoPath: repo.path),
       ],
     );
     await settleIo(tester);
 
-    expect(find.text('AUDIVOA'), findsOneWidget);
+    expect(find.text('AUGUSTYNIAK CAPTURE'), findsOneWidget);
     expect(find.text('CLAUDE.md · 5 chars'), findsOneWidget);
   });
 

@@ -45,7 +45,11 @@ class _FakePlayer implements AudioPlayer {
 void main() {
   late Directory appDir;
 
-  setUp(() => appDir = Directory.systemTemp.createTempSync('audivoa_tick_'));
+  setUp(
+    () => appDir = Directory.systemTemp.createTempSync(
+      'augustyniak_capture_tick_',
+    ),
+  );
   tearDown(() => appDir.deleteSync(recursive: true));
 
   test(

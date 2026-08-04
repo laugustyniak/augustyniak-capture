@@ -9,18 +9,18 @@
 # that most Flutter guides still show: JKS is a proprietary format and current
 # keytool prints a migration warning every time it touches one.
 #
-#   keytool -genkeypair -v -keystore ~/.android/audivoa-upload.p12 \
+#   keytool -genkeypair -v -keystore ~/.android/augustyniak-capture-upload.p12 \
 #     -storetype PKCS12 -keyalg RSA -keysize 2048 -validity 10000 -alias upload
 #
 # BACK THE KEYSTORE UP, somewhere that is not this machine. It is the only
 # artifact here that cannot be regenerated: lose it and no future build can
-# update an app already published under com.audivoa.core — the store would only
+# update an app already published under ai.augustyniak.capture — the store would only
 # accept a new listing under a new identifier, and existing installs could never
 # upgrade to it. (Google Play App Signing softens this: enrol, and this key is
 # only the *upload* key, which Google can reset for you. The signing key Play
 # holds is still unrecoverable.)
 
-storeFile=/absolute/path/to/audivoa-upload.p12
+storeFile=/absolute/path/to/augustyniak-capture-upload.p12
 storePassword=
 keyAlias=upload
 keyPassword=

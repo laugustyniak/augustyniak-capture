@@ -12,7 +12,7 @@ void main() {
 
   setUp(() async {
     directory = await Directory.systemTemp.createTemp(
-      'audivoa-projects-controller-',
+      'augustyniak-capture-projects-controller-',
     );
     repository = ProjectsRepository(directoryProvider: () async => directory);
   });
@@ -28,8 +28,8 @@ void main() {
     await controller.initialize();
 
     final Project first = await controller.create(
-      name: '  Audivoa  ',
-      repoPath: '  /work/audivoa  ',
+      name: '  Augustyniak Capture  ',
+      repoPath: '  /work/augustyniak-capture  ',
       description: '  Voice workflow  ',
       defaultAgent: AgentKind.codex,
     );
@@ -52,7 +52,7 @@ void main() {
       project: first,
       name: 'Augustyniak Capture',
       repoPath: first.repoPath,
-      sessionName: 'audivoa',
+      sessionName: 'augustyniak-capture',
       defaultAgent: AgentKind.gemini,
     );
     await controller.delete(second.id);
@@ -60,8 +60,8 @@ void main() {
     final List<Project> stored = await repository.loadAll();
     expect(stored, hasLength(1));
     expect(stored.single.name, 'Augustyniak Capture');
-    expect(stored.single.repoPath, '/work/audivoa');
-    expect(stored.single.sessionName, 'audivoa');
+    expect(stored.single.repoPath, '/work/augustyniak-capture');
+    expect(stored.single.sessionName, 'augustyniak-capture');
     expect(stored.single.defaultAgent, AgentKind.gemini);
     expect(controller.activeProjectId, isNull);
   });
@@ -73,10 +73,10 @@ void main() {
       launcher: launcher,
     );
     const Project project = Project(
-      id: 'audivoa',
-      name: 'Audivoa',
-      repoPath: '/work/audivoa',
-      sessionName: 'audivoa-work',
+      id: 'augustyniak-capture',
+      name: 'Augustyniak Capture',
+      repoPath: '/work/augustyniak-capture',
+      sessionName: 'augustyniak-capture-work',
       agentSettings: <AgentKind, AgentSettings>{
         AgentKind.claudeCode: AgentSettings(
           additionalArgs: <String>['--model', 'sonnet'],
@@ -88,10 +88,10 @@ void main() {
     await controller.launch(project, AgentKind.claudeCode);
 
     final AgentSessionLaunchRequest request = launcher.requests.single;
-    expect(request.projectId, 'audivoa');
-    expect(request.projectName, 'Audivoa');
-    expect(request.repoPath, '/work/audivoa');
-    expect(request.sessionName, 'audivoa-work');
+    expect(request.projectId, 'augustyniak-capture');
+    expect(request.projectName, 'Augustyniak Capture');
+    expect(request.repoPath, '/work/augustyniak-capture');
+    expect(request.sessionName, 'augustyniak-capture-work');
     expect(request.agent, ProjectAgent.claude);
     expect(request.arguments, <String>['--model', 'sonnet', 'Read AGENTS.md.']);
     expect(controller.isLaunching(project.id, AgentKind.claudeCode), isFalse);
@@ -104,7 +104,10 @@ void main() {
     await controller.initialize();
 
     await expectLater(
-      controller.create(name: 'Audivoa', repoPath: '/work/audivoa'),
+      controller.create(
+        name: 'Augustyniak Capture',
+        repoPath: '/work/augustyniak-capture',
+      ),
       throwsA(isA<FileSystemException>()),
     );
 
