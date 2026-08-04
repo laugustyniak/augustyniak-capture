@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 
 import 'package:audioplayers/audioplayers.dart';
@@ -40,6 +41,19 @@ class _GrantingRecorder implements AudioRecorder {
   dynamic noSuchMethod(Invocation invocation) async => null;
 }
 
+/// A recorder that *does* report amplitude, which the plain fake above never
+/// does. That gap is why the level meter shipped throwing on every sample: the
+/// listener it dies in is only ever reached under a real microphone, so the
+/// whole suite passed while the bars sat flat and the console filled with
+/// `Cannot remove from a fixed-length list`.
+class _MeteringRecorder extends _GrantingRecorder {
+  final StreamController<Amplitude> levels =
+      StreamController<Amplitude>.broadcast();
+
+  @override
+  Stream<Amplitude> onAmplitudeChanged(Duration interval) => levels.stream;
+}
+
 class _FakePlayer implements AudioPlayer {
   @override
   Stream<void> get onPlayerComplete => const Stream<void>.empty();
@@ -66,17 +80,32 @@ void main() {
     }
   }
 
-  RecordingsController buildController() {
+  RecordingsController buildController({AudioRecorder? recorder}) {
     final RecordingsController controller = RecordingsController(
       repository: FakeRecordingsRepository(appDir),
       transcriptionService: const DisabledTranscriptionService(),
-      recorder: _GrantingRecorder(),
+      recorder: recorder ?? _GrantingRecorder(),
       player: _FakePlayer(),
       audioConfig: const AudioConfig(sampleRate: 16000, bitRate: 64000),
     );
     addTearDown(controller.dispose);
     return controller;
   }
+
+  /// The meter's bars, left to right. Identified by their animation duration
+  /// and tight height — the two things no other animated box on this screen
+  /// shares — rather than by the private widget that owns them.
+  List<double> barHeights(WidgetTester tester) => tester
+      .widgetList<AnimatedContainer>(
+        find.byWidgetPredicate(
+          (Widget widget) =>
+              widget is AnimatedContainer &&
+              widget.duration == const Duration(milliseconds: 120) &&
+              widget.constraints?.hasTightHeight == true,
+        ),
+      )
+      .map((AnimatedContainer bar) => bar.constraints!.maxHeight)
+      .toList();
 
   group('CaptureDock', () {
     testWidgets('the record button starts a recording', (
@@ -179,6 +208,48 @@ void main() {
       // Measured during the same check that proved the file is non-empty.
       expect(controller.recordings.single.sizeBytes, 3);
       expect(controller.error, isNull);
+    });
+
+    testWidgets('the meter scrolls in the levels the recorder reports', (
+      WidgetTester tester,
+    ) async {
+      final _MeteringRecorder recorder = _MeteringRecorder();
+      addTearDown(recorder.levels.close);
+      final RecordingsController controller = buildController(
+        recorder: recorder,
+      );
+      await tester.runAsync(controller.startRecording);
+
+      await tester.pumpWidget(
+        hostTab(
+          () => RecordingView(controller: controller),
+          listenable: controller,
+        ),
+      );
+      await tester.pump();
+
+      // Silence: 33 bars, all at the resting height.
+      expect(barHeights(tester), hasLength(33));
+      expect(barHeights(tester).toSet(), <double>{6});
+
+      // −5 dBFS is loud; the controller normalises it into the top of the meter.
+      await tester.runAsync(() async {
+        recorder.levels.add(Amplitude(current: -5, max: 0));
+        await Future<void>.delayed(const Duration(milliseconds: 10));
+      });
+      await tester.pump();
+
+      // The bug this covers threw here, on every single sample, and left the
+      // meter flat for the whole recording.
+      expect(tester.takeException(), isNull);
+
+      final List<double> heights = barHeights(tester);
+      expect(heights, hasLength(33)); // the window never grows or shrinks
+      expect(heights.last, greaterThan(6)); // newest sample on the right
+      expect(heights.first, 6); // and the history scrolled rather than filled
+
+      await tester.runAsync(controller.stopRecording);
+      await settleIo(tester);
     });
 
     testWidgets('a recorder that reports no level still records', (
