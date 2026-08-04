@@ -371,7 +371,7 @@ class _Field extends StatelessWidget {
         Text(
           label,
           style: ConsoleText.chip.copyWith(
-            color: dirty ? Console.amber : Console.dim,
+            color: dirty ? Console.amber : Console.dimText,
             letterSpacing: 1.1,
           ),
         ),
