@@ -45,7 +45,7 @@ class _EchoProcessor implements Processor {
 
 class _FakeEnrichment implements EnrichmentService {
   _FakeEnrichment(this.result);
-  final EnrichmentResult result;
+  EnrichmentResult result;
   int calls = 0;
   String? lastText;
 
@@ -195,9 +195,9 @@ void main() {
 
     // The correction is what an export will read, so a re-run must not undo it.
     expect(c.recordings.single.category, CaptureCategory.idea);
-    // Derived summary is refreshed. Existing tags are retained because tags
-    // are user-editable and a retry must not undo a manual assignment.
+    // `summary` has no editor, so it is pure derived output and refreshes.
     expect(c.recordings.single.summary, 'Ustalenia ze spotkania.');
+    // Tags are fill-only, and this item already has some, so they stand.
     expect(c.recordings.single.tags, <String>['klient', 'oferta']);
   });
 
@@ -219,7 +219,72 @@ void main() {
     await c.retryTranscription(id);
     await c.waitForProcessing();
 
+    // Exactly what the user set, normalised — the model adds nothing to a list
+    // that already exists, and nothing survives from the run before the edit.
     expect(c.recordings.single.tags, <String>['project:acme', 'legal']);
+  });
+
+  test('a retry leaves an existing tag list alone', () async {
+    final Directory dir = await _tmp();
+    addTearDown(() => dir.delete(recursive: true));
+    final _FakeEnrichment enrichment = _FakeEnrichment(verdict);
+    final RecordingsController c = _controller(
+      _FakeRepo(dir),
+      enrichment: enrichment,
+    );
+    addTearDown(c.dispose);
+
+    await c.addTextNote('spotkanie z klientem');
+    await c.waitForProcessing();
+    final String id = c.recordings.single.id;
+    await c.setTags(id, <String>['legal']);
+
+    enrichment.result = const EnrichmentResult(
+      title: 'ignored because already filled',
+      category: CaptureCategory.task,
+      summary: 'New summary',
+      tags: <String>['follow-up'],
+    );
+    await c.retryTranscription(id);
+    await c.waitForProcessing();
+
+    // Without provenance there is no "model layer" to refresh: a re-run that
+    // merged its own tags in would keep resurrecting ones the user deleted.
+    expect(c.recordings.single.tags, <String>['legal']);
+    // The field that genuinely has no editor still refreshes.
+    expect(c.recordings.single.summary, 'New summary');
+  });
+
+  test('clearing the tags asks the next run for a fresh set', () async {
+    final Directory dir = await _tmp();
+    addTearDown(() => dir.delete(recursive: true));
+    final _FakeEnrichment enrichment = _FakeEnrichment(verdict);
+    final RecordingsController c = _controller(
+      _FakeRepo(dir),
+      enrichment: enrichment,
+    );
+    addTearDown(c.dispose);
+
+    await c.addTextNote('spotkanie z klientem');
+    await c.waitForProcessing();
+    final String id = c.recordings.single.id;
+
+    // Emptying the list is the one way back to model-suggested tags, exactly
+    // as clearing the category is the way to ask for a re-classification.
+    await c.setTags(id, <String>[]);
+    expect(c.recordings.single.tags, isEmpty);
+
+    enrichment.result = const EnrichmentResult(
+      title: 'ignored because already filled',
+      category: CaptureCategory.task,
+      summary: 'New summary',
+      tags: <String>['follow-up', 'Follow-Up', ' '],
+    );
+    await c.retryTranscription(id);
+    await c.waitForProcessing();
+
+    // Normalised on the way in, like anything the user could have typed.
+    expect(c.recordings.single.tags, <String>['follow-up']);
   });
 
   test('a cleared category is filled again by the next run', () async {

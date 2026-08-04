@@ -44,6 +44,7 @@ class Console {
 
   static const Color green = Color(0xFF3DDC97);
   static const Color amber = Color(0xFFFBBF24);
+  static const Color violet = Color(0xFFA78BFA);
   static const Color red = Color(0xFFFF7A7A);
   static const Color redSoft = Color(0xFFFF9B9B);
 
@@ -240,10 +241,7 @@ class _PulseDotState extends State<PulseDot>
       child: Container(
         width: widget.size,
         height: widget.size,
-        decoration: BoxDecoration(
-          color: widget.color,
-          shape: BoxShape.circle,
-        ),
+        decoration: BoxDecoration(color: widget.color, shape: BoxShape.circle),
       ),
     );
   }
@@ -523,8 +521,7 @@ class ConsolePosterTile extends StatelessWidget {
             // Keeps the previous frame while a re-extracted poster decodes,
             // instead of blinking back to the background.
             gaplessPlayback: true,
-            errorBuilder: (BuildContext _, Object _, StackTrace? _) =>
-                fallback,
+            errorBuilder: (BuildContext _, Object _, StackTrace? _) => fallback,
           ),
         ),
       ),
@@ -577,6 +574,89 @@ class ConsoleIconButton extends StatelessWidget {
       ),
     );
   }
+}
+
+/// The app's one text input. Every field the user types into — the queue's
+/// search box, the note composer, the inline card editor — is this shape: a
+/// filled `surfaceDeep` well inside the same translucent hairline every other
+/// control uses, going cyan on focus.
+///
+/// It exists because the theme carries no `inputDecorationTheme`: without it
+/// each tab re-declared its own `OutlineInputBorder` and the three drifted. The
+/// decoration is deliberately borderless *inside* — the container draws the
+/// border — so a multi-line field and a one-line field are the same object at
+/// two heights rather than two similar-looking widgets.
+class ConsoleField extends StatelessWidget {
+  const ConsoleField({
+    super.key,
+    required this.controller,
+    this.focusNode,
+    this.hintText,
+    this.maxLines = 1,
+    this.minLines,
+    this.autofocus = false,
+    this.textInputAction,
+    this.onSubmitted,
+    this.onChanged,
+    this.fontSize = 13,
+    this.monospace = false,
+  });
+
+  final TextEditingController controller;
+  final FocusNode? focusNode;
+  final String? hintText;
+  final int? maxLines;
+  final int? minLines;
+  final bool autofocus;
+  final TextInputAction? textInputAction;
+  final ValueChanged<String>? onSubmitted;
+  final ValueChanged<String>? onChanged;
+  final double fontSize;
+
+  /// Machine-ish content (a tag, an endpoint) reads in JetBrains Mono; prose
+  /// and names stay in the display face, like everywhere else in the app.
+  final bool monospace;
+
+  @override
+  Widget build(BuildContext context) {
+    return TextField(
+      controller: controller,
+      focusNode: focusNode,
+      autofocus: autofocus,
+      maxLines: maxLines,
+      minLines: minLines,
+      textInputAction: textInputAction,
+      onSubmitted: onSubmitted,
+      onChanged: onChanged,
+      cursorColor: Console.cyan,
+      cursorWidth: 1.6,
+      style: TextStyle(
+        fontFamily: monospace ? ConsoleFont.mono : ConsoleFont.display,
+        color: Console.text,
+        fontSize: fontSize,
+        height: 1.45,
+      ),
+      decoration: InputDecoration(
+        isDense: true,
+        filled: true,
+        fillColor: Console.surfaceDeep,
+        hintText: hintText,
+        hintStyle: TextStyle(color: Console.dim, fontSize: fontSize),
+        contentPadding: const EdgeInsets.symmetric(
+          horizontal: 11,
+          vertical: 10,
+        ),
+        border: _border(Console.border),
+        enabledBorder: _border(Console.border),
+        focusedBorder: _border(Console.cyan.withValues(alpha: .55)),
+      ),
+    );
+  }
+
+  static OutlineInputBorder _border(Color color) => OutlineInputBorder(
+    borderRadius: const BorderRadius.all(Radius.circular(9)),
+    borderSide: BorderSide(color: color),
+  );
 }
 
 /// Confirmation for an action the user cannot undo. Returns false on dismiss,
@@ -920,8 +1000,7 @@ class InfoRow extends StatelessWidget {
                 // Everything factual already reads as mono; the flag now only
                 // decides whether the *value* joins it or stays in the display
                 // face (a provider name, a free-text note).
-                fontFamily:
-                    monospace ? ConsoleFont.mono : ConsoleFont.display,
+                fontFamily: monospace ? ConsoleFont.mono : ConsoleFont.display,
               ),
             ),
           ),
@@ -932,10 +1011,14 @@ class InfoRow extends StatelessWidget {
 }
 
 String formatDuration(Duration duration) {
-  final String minutes =
-      duration.inMinutes.remainder(60).toString().padLeft(2, '0');
-  final String seconds =
-      duration.inSeconds.remainder(60).toString().padLeft(2, '0');
+  final String minutes = duration.inMinutes
+      .remainder(60)
+      .toString()
+      .padLeft(2, '0');
+  final String seconds = duration.inSeconds
+      .remainder(60)
+      .toString()
+      .padLeft(2, '0');
   return '$minutes:$seconds';
 }
 

@@ -1,5 +1,6 @@
 import 'capture_category.dart';
 import 'capture_type.dart';
+import 'recording_tag.dart';
 
 /// Generic processing state, not transcription-specific: `pendingTranscription`
 /// and `transcribing` mean "queued" and "running" for whichever processor the
@@ -32,6 +33,7 @@ class Recording {
     this.category,
     this.summary,
     this.tags = const <String>[],
+    this.projectId,
     this.error,
     this.isProcessedByUser = false,
     this.processedAt,
@@ -87,9 +89,13 @@ class Recording {
   /// One-line gist from the enrichment stage. Null until enriched.
   final String? summary;
 
-  /// Lowercase tags assigned by the user or suggested by enrichment. Empty on
-  /// legacy rows. User edits take precedence over later enrichment runs.
+  /// The capture's tags: one normalized list, no provenance. Enrichment may
+  /// propose it and the user may rewrite it — see [RecordingTags].
   final List<String> tags;
+
+  /// Optional executable context. Null keeps legacy and unassigned captures
+  /// fully valid; projects live in their own store and are never embedded here.
+  final String? projectId;
 
   final String? error;
 
@@ -109,6 +115,8 @@ class Recording {
     String? summary,
     bool clearSummary = false,
     List<String>? tags,
+    String? projectId,
+    bool clearProjectId = false,
     String? error,
     bool clearError = false,
     bool? isProcessedByUser,
@@ -129,7 +137,8 @@ class Recording {
       title: clearTitle ? null : (title ?? this.title),
       category: clearCategory ? null : (category ?? this.category),
       summary: clearSummary ? null : (summary ?? this.summary),
-      tags: tags ?? this.tags,
+      tags: RecordingTags.normalize(tags ?? this.tags),
+      projectId: clearProjectId ? null : (projectId ?? this.projectId),
       error: clearError ? null : (error ?? this.error),
       isProcessedByUser: isProcessedByUser ?? this.isProcessedByUser,
       processedAt: clearProcessedAt ? null : (processedAt ?? this.processedAt),
@@ -151,6 +160,7 @@ class Recording {
     'category': category?.name,
     'summary': summary,
     'tags': tags,
+    'projectId': projectId,
     'error': error,
     'isProcessedByUser': isProcessedByUser,
     'processedAt': processedAt?.toIso8601String(),
@@ -188,12 +198,13 @@ class Recording {
           ? CaptureCategory.fromName(json['category'] as String)
           : null,
       summary: json['summary'] is String ? json['summary'] as String : null,
-      // Type-filtered rather than cast: a hand-edited recordings.json holding a
-      // non-list, or a list with a stray number in it, would otherwise throw out
-      // of the whole load and take every other recording with it.
-      tags: json['tags'] is List<dynamic>
-          ? (json['tags'] as List<dynamic>).whereType<String>().toList()
-          : const <String>[],
+      // Reads the plain string list *and* the retired `{value, source}` form,
+      // which is already on disk. Invalid entries degrade individually rather
+      // than taking down the index.
+      tags: RecordingTags.fromJson(json['tags']),
+      projectId: json['projectId'] is String
+          ? json['projectId'] as String
+          : null,
       error: json['error'] as String?,
       isProcessedByUser: json['isProcessedByUser'] as bool? ?? false,
       processedAt: json['processedAt'] == null

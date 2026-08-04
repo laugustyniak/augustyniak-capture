@@ -34,8 +34,10 @@ class RecordingView extends StatelessWidget {
               children: <Widget>[
                 const Text('AUDIVOA CORE', style: ConsoleText.eyebrow),
                 Container(
-                  padding:
-                      const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 12,
+                    vertical: 6,
+                  ),
                   decoration: BoxDecoration(
                     color: Console.red.withValues(alpha: .1),
                     borderRadius: BorderRadius.circular(999),
@@ -80,7 +82,10 @@ class RecordingView extends StatelessWidget {
               style: ConsoleText.micro,
             ),
             const SizedBox(height: 14),
-            _SaveButton(onTap: controller.stopRecording, busy: controller.isBusy),
+            _SaveButton(
+              onTap: controller.stopRecording,
+              busy: controller.isBusy,
+            ),
           ],
         ),
       ),
