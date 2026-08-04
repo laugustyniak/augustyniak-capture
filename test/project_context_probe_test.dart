@@ -1,7 +1,7 @@
 import 'dart:io';
 
-import 'package:audivoa_core/features/projects/data/project_context_probe.dart';
-import 'package:audivoa_core/features/projects/domain/project.dart';
+import 'package:augustyniak_capture/features/projects/data/project_context_probe.dart';
+import 'package:augustyniak_capture/features/projects/domain/project.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {

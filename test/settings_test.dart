@@ -1,15 +1,15 @@
 import 'package:flutter_test/flutter_test.dart';
-import 'package:audivoa_core/features/settings/data/settings_repository.dart';
-import 'package:audivoa_core/features/settings/domain/app_settings.dart';
-import 'package:audivoa_core/features/settings/domain/audio_config.dart';
-import 'package:audivoa_core/features/settings/domain/provider_profile.dart';
-import 'package:audivoa_core/features/settings/presentation/settings_controller.dart';
-import 'package:audivoa_core/features/enrichment/data/http_chat_enrichment_service.dart';
-import 'package:audivoa_core/features/enrichment/domain/enrichment_defaults.dart';
-import 'package:audivoa_core/features/enrichment/domain/enrichment_service.dart';
-import 'package:audivoa_core/features/processing/data/http_vision_ocr_service.dart';
-import 'package:audivoa_core/features/processing/data/ocr_service.dart';
-import 'package:audivoa_core/features/transcription/data/transcription_service.dart';
+import 'package:augustyniak_capture/features/settings/data/settings_repository.dart';
+import 'package:augustyniak_capture/features/settings/domain/app_settings.dart';
+import 'package:augustyniak_capture/features/settings/domain/audio_config.dart';
+import 'package:augustyniak_capture/features/settings/domain/provider_profile.dart';
+import 'package:augustyniak_capture/features/settings/presentation/settings_controller.dart';
+import 'package:augustyniak_capture/features/enrichment/data/http_chat_enrichment_service.dart';
+import 'package:augustyniak_capture/features/enrichment/domain/enrichment_defaults.dart';
+import 'package:augustyniak_capture/features/enrichment/domain/enrichment_service.dart';
+import 'package:augustyniak_capture/features/processing/data/http_vision_ocr_service.dart';
+import 'package:augustyniak_capture/features/processing/data/ocr_service.dart';
+import 'package:augustyniak_capture/features/transcription/data/transcription_service.dart';
 
 /// In-memory stand-in so controller tests need no path_provider bindings.
 /// Extends the real repository and overrides only the IO methods, so

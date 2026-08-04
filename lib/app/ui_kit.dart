@@ -93,7 +93,7 @@ class ConsoleFont {
 class ConsoleText {
   const ConsoleText._();
 
-  /// `AUDIVOA CORE` above a page title.
+  /// `AUGUSTYNIAK CAPTURE` above a page title.
   static const TextStyle eyebrow = TextStyle(
     fontFamily: ConsoleFont.mono,
     fontSize: 10,
@@ -174,7 +174,7 @@ class ConsoleHeader extends StatelessWidget {
     super.key,
     required this.title,
     this.trailing,
-    this.eyebrow = 'AUDIVOA CORE',
+    this.eyebrow = 'AUGUSTYNIAK CAPTURE',
   });
 
   final String title;

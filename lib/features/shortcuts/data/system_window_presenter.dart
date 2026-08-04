@@ -42,7 +42,7 @@ class SystemWindowPresenter implements WindowPresenter {
   /// `xdotool` installed means the window merely blinks in the taskbar, and
   /// everything else — the capture itself — is unaffected.
   ///
-  /// Matched on pid *and* title so a second Audivoa window, or an unrelated
+  /// Matched on pid *and* title so a second Augustyniak Capture window, or an unrelated
   /// window that happens to share the name, cannot be yanked forward instead.
   /// The title is the `MaterialApp` title in `app/app.dart`; changing it there
   /// silently costs the raise (the shortcut still captures), so keep the two in
@@ -55,7 +55,7 @@ class SystemWindowPresenter implements WindowPresenter {
         '--pid',
         '$pid',
         '--name',
-        r'^Audivoa Core$',
+        r'^Augustyniak Capture$',
         'windowactivate',
         '%@',
       ]);

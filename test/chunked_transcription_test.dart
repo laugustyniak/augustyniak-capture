@@ -2,9 +2,9 @@ import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:path/path.dart' as p;
-import 'package:audivoa_core/features/transcription/data/audio_splitter.dart';
-import 'package:audivoa_core/features/transcription/data/chunked_transcription_service.dart';
-import 'package:audivoa_core/features/transcription/data/transcription_service.dart';
+import 'package:augustyniak_capture/features/transcription/data/audio_splitter.dart';
+import 'package:augustyniak_capture/features/transcription/data/chunked_transcription_service.dart';
+import 'package:augustyniak_capture/features/transcription/data/transcription_service.dart';
 
 /// Records what it was handed, so a test can assert the decorator sent the parts
 /// rather than the whole file — and in which order.

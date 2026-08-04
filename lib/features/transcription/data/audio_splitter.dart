@@ -97,7 +97,7 @@ class FfmpegAudioSplitter implements AudioSplitter {
     // accepts, and the one they came from already is.
     final String extension = p.extension(audio.path);
     final Directory tempDir = await Directory.systemTemp.createTemp(
-      'audivoa_split',
+      'augustyniak_split',
     );
     final List<String> args = <String>[
       '-y',

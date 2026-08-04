@@ -33,7 +33,7 @@ class RecordingView extends StatelessWidget {
             Row(
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: <Widget>[
-                const Text('AUDIVOA CORE', style: ConsoleText.eyebrow),
+                const Text('AUGUSTYNIAK CAPTURE', style: ConsoleText.eyebrow),
                 Container(
                   padding: const EdgeInsets.symmetric(
                     horizontal: 12,

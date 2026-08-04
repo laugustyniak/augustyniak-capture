@@ -1,8 +1,8 @@
 import 'dart:io';
 
-import 'package:audivoa_core/features/projects/data/projects_repository.dart';
-import 'package:audivoa_core/features/projects/presentation/projects_controller.dart';
-import 'package:audivoa_core/features/projects/presentation/projects_tab.dart';
+import 'package:augustyniak_capture/features/projects/data/projects_repository.dart';
+import 'package:augustyniak_capture/features/projects/presentation/projects_controller.dart';
+import 'package:augustyniak_capture/features/projects/presentation/projects_tab.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 

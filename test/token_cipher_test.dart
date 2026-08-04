@@ -1,8 +1,8 @@
 import 'dart:convert';
 
 import 'package:flutter_test/flutter_test.dart';
-import 'package:audivoa_core/features/settings/domain/token_cipher.dart';
-import 'package:audivoa_core/features/settings/data/aes_gcm_token_cipher.dart';
+import 'package:augustyniak_capture/features/settings/domain/token_cipher.dart';
+import 'package:augustyniak_capture/features/settings/data/aes_gcm_token_cipher.dart';
 
 /// In-memory keyring stand-in, same hand-written-fake convention as
 /// `_FakeSettingsRepository` in settings_test.dart.

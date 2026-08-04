@@ -1,10 +1,10 @@
 import 'dart:io';
 
-import 'package:audivoa_core/features/enrichment/data/composed_enrichment_context_source.dart';
-import 'package:audivoa_core/features/enrichment/domain/enrichment_context.dart';
-import 'package:audivoa_core/features/enrichment/domain/enrichment_prompt.dart';
-import 'package:audivoa_core/features/projects/data/project_context_reader.dart';
-import 'package:audivoa_core/features/projects/domain/project.dart';
+import 'package:augustyniak_capture/features/enrichment/data/composed_enrichment_context_source.dart';
+import 'package:augustyniak_capture/features/enrichment/domain/enrichment_context.dart';
+import 'package:augustyniak_capture/features/enrichment/domain/enrichment_prompt.dart';
+import 'package:augustyniak_capture/features/projects/data/project_context_reader.dart';
+import 'package:augustyniak_capture/features/projects/domain/project.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 Project _project({
