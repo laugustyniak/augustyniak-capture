@@ -249,6 +249,98 @@ class _PulseDotState extends State<PulseDot>
   }
 }
 
+/// A soft band of light sweeping along a hairline — "this is being read right
+/// now". Used for the enrichment pass, where the item is already `completed`
+/// and durable and the only thing still running is a model looking at the text.
+///
+/// Deliberately *not* a `LinearProgressIndicator`: that one promises a job with
+/// a beginning and an end that the queue is waiting on, which is what the
+/// transcribing bar means. This one is a heartbeat, like [PulseDot] — it says
+/// something is happening, never how far along it is.
+///
+/// Same caveat as [PulseDot]: it repeats forever, so a screen containing one
+/// never reaches "no frames scheduled" and `pumpAndSettle` on it hangs. Pump
+/// explicit frames instead.
+class ScanLine extends StatefulWidget {
+  const ScanLine({
+    super.key,
+    this.color = Console.cyan,
+    this.height = 4,
+    this.period = const Duration(milliseconds: 1400),
+  });
+
+  final Color color;
+  final double height;
+  final Duration period;
+
+  @override
+  State<ScanLine> createState() => _ScanLineState();
+}
+
+class _ScanLineState extends State<ScanLine>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _controller = AnimationController(
+    vsync: this,
+    duration: widget.period,
+  )..repeat();
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(2),
+      child: SizedBox(
+        height: widget.height,
+        width: double.infinity,
+        // The rail is drawn separately because `BoxDecoration` ignores `color`
+        // as soon as a gradient is set — one decoration cannot carry both.
+        child: ColoredBox(
+          color: Console.track,
+          child: AnimatedBuilder(
+            animation: _controller,
+            builder: (BuildContext context, Widget? _) {
+              // The head travels past both edges, so the band slides in and out
+              // rather than materialising at the ends — and the wrap from 1.4
+              // back to -.4 happens while it is off-rail, so the loop is
+              // seamless without needing a reversing curve.
+              final double head = -.4 + 1.8 * _controller.value;
+              return DecoratedBox(
+                decoration: BoxDecoration(
+                  // Five stops, not three: a bright core inside a wide soft
+                  // halo. A single ramp fades so gradually that at 4 px the
+                  // whole thing reads as a slightly uneven separator rather
+                  // than as something moving.
+                  gradient: LinearGradient(
+                    colors: <Color>[
+                      widget.color.withValues(alpha: 0),
+                      widget.color.withValues(alpha: .35),
+                      widget.color,
+                      widget.color.withValues(alpha: .35),
+                      widget.color.withValues(alpha: 0),
+                    ],
+                    stops: <double>[
+                      (head - .3).clamp(0.0, 1.0),
+                      (head - .09).clamp(0.0, 1.0),
+                      head.clamp(0.0, 1.0),
+                      (head + .09).clamp(0.0, 1.0),
+                      (head + .3).clamp(0.0, 1.0),
+                    ],
+                  ),
+                ),
+              );
+            },
+          ),
+        ),
+      ),
+    );
+  }
+}
+
 /// Selectable pill used by every filter row (queue status, log level, audio
 /// parameters). [selectedColor] is overridable because the log levels colour
 /// their own chip.
