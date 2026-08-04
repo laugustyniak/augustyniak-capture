@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter/services.dart';
@@ -56,6 +57,23 @@ class _FakeEnrichment implements EnrichmentService {
   }
 }
 
+/// Holds the call open until the test lets go, so "the model is reading it
+/// right now" is a state the test can stand in rather than a moment it has to
+/// catch. A delay would work too, and would race the scheduler for it.
+class _GatedEnrichment implements EnrichmentService {
+  _GatedEnrichment(this.result);
+  final EnrichmentResult result;
+  final Completer<void> started = Completer<void>();
+  final Completer<void> release = Completer<void>();
+
+  @override
+  Future<EnrichmentResult> enrich(String text) async {
+    if (!started.isCompleted) started.complete();
+    await release.future;
+    return result;
+  }
+}
+
 class _ThrowingEnrichment implements EnrichmentService {
   int calls = 0;
 
@@ -79,15 +97,14 @@ RecordingsController _controller(
   _FakeRepo repo, {
   EnrichmentService? enrichment,
   Processor processor = const _EchoProcessor(),
-}) =>
-    RecordingsController(
-      repository: repo,
-      transcriptionService: const DisabledTranscriptionService(),
-      enrichmentService: enrichment ?? const DisabledEnrichmentService(),
-      processorRegistry: ProcessorRegistry(<CaptureType, Processor>{
-        CaptureType.text: processor,
-      }),
-    );
+}) => RecordingsController(
+  repository: repo,
+  transcriptionService: const DisabledTranscriptionService(),
+  enrichmentService: enrichment ?? const DisabledEnrichmentService(),
+  processorRegistry: ProcessorRegistry(<CaptureType, Processor>{
+    CaptureType.text: processor,
+  }),
+);
 
 Future<Directory> _tmp() => Directory.systemTemp.createTemp('enrich_ctrl');
 
@@ -101,7 +118,9 @@ void main() {
     'xyz.luan/audioplayers.global',
   ]) {
     messenger.setMockMethodCallHandler(
-        MethodChannel(name), (MethodCall call) async => null);
+      MethodChannel(name),
+      (MethodCall call) async => null,
+    );
   }
 
   const EnrichmentResult verdict = EnrichmentResult(
@@ -115,8 +134,10 @@ void main() {
     final Directory dir = await _tmp();
     addTearDown(() => dir.delete(recursive: true));
     final _FakeEnrichment enrichment = _FakeEnrichment(verdict);
-    final RecordingsController c =
-        _controller(_FakeRepo(dir), enrichment: enrichment);
+    final RecordingsController c = _controller(
+      _FakeRepo(dir),
+      enrichment: enrichment,
+    );
     addTearDown(c.dispose);
 
     await c.addTextNote('spotkanie z klientem');
@@ -135,8 +156,10 @@ void main() {
     final Directory dir = await _tmp();
     addTearDown(() => dir.delete(recursive: true));
     final _FakeEnrichment enrichment = _FakeEnrichment(verdict);
-    final RecordingsController c =
-        _controller(_FakeRepo(dir), enrichment: enrichment);
+    final RecordingsController c = _controller(
+      _FakeRepo(dir),
+      enrichment: enrichment,
+    );
     addTearDown(c.dispose);
 
     await c.addTextNote('spotkanie z klientem');
@@ -156,8 +179,10 @@ void main() {
     final Directory dir = await _tmp();
     addTearDown(() => dir.delete(recursive: true));
     final _FakeEnrichment enrichment = _FakeEnrichment(verdict);
-    final RecordingsController c =
-        _controller(_FakeRepo(dir), enrichment: enrichment);
+    final RecordingsController c = _controller(
+      _FakeRepo(dir),
+      enrichment: enrichment,
+    );
     addTearDown(c.dispose);
 
     await c.addTextNote('spotkanie z klientem');
@@ -170,16 +195,40 @@ void main() {
 
     // The correction is what an export will read, so a re-run must not undo it.
     expect(c.recordings.single.category, CaptureCategory.idea);
-    // Summary and tags have no editor, so they are refreshed.
+    // Derived summary is refreshed. Existing tags are retained because tags
+    // are user-editable and a retry must not undo a manual assignment.
     expect(c.recordings.single.summary, 'Ustalenia ze spotkania.');
     expect(c.recordings.single.tags, <String>['klient', 'oferta']);
+  });
+
+  test('never overwrites user-set tags', () async {
+    final Directory dir = await _tmp();
+    addTearDown(() => dir.delete(recursive: true));
+    final _FakeEnrichment enrichment = _FakeEnrichment(verdict);
+    final RecordingsController c = _controller(
+      _FakeRepo(dir),
+      enrichment: enrichment,
+    );
+    addTearDown(c.dispose);
+
+    await c.addTextNote('spotkanie z klientem');
+    await c.waitForProcessing();
+
+    final String id = c.recordings.single.id;
+    await c.setTags(id, <String>[' Project:Acme ', 'LEGAL', 'legal', '']);
+    await c.retryTranscription(id);
+    await c.waitForProcessing();
+
+    expect(c.recordings.single.tags, <String>['project:acme', 'legal']);
   });
 
   test('a cleared category is filled again by the next run', () async {
     final Directory dir = await _tmp();
     addTearDown(() => dir.delete(recursive: true));
-    final RecordingsController c =
-        _controller(_FakeRepo(dir), enrichment: _FakeEnrichment(verdict));
+    final RecordingsController c = _controller(
+      _FakeRepo(dir),
+      enrichment: _FakeEnrichment(verdict),
+    );
     addTearDown(c.dispose);
 
     await c.addTextNote('spotkanie z klientem');
@@ -198,8 +247,10 @@ void main() {
     final Directory dir = await _tmp();
     addTearDown(() => dir.delete(recursive: true));
     final _ThrowingEnrichment enrichment = _ThrowingEnrichment();
-    final RecordingsController c =
-        _controller(_FakeRepo(dir), enrichment: enrichment);
+    final RecordingsController c = _controller(
+      _FakeRepo(dir),
+      enrichment: enrichment,
+    );
     addTearDown(c.dispose);
 
     await c.addTextNote('treść');
@@ -249,8 +300,10 @@ void main() {
     addTearDown(() => dir.delete(recursive: true));
     final _ThrowingEnrichment first = _ThrowingEnrichment();
     final _FakeEnrichment second = _FakeEnrichment(verdict);
-    final RecordingsController c =
-        _controller(_FakeRepo(dir), enrichment: first);
+    final RecordingsController c = _controller(
+      _FakeRepo(dir),
+      enrichment: first,
+    );
     addTearDown(c.dispose);
 
     await c.addTextNote('pierwsza');
@@ -266,12 +319,72 @@ void main() {
     expect(c.recordings.last.category, isNull);
   });
 
+  test(
+    'the item is flagged as enriching only while the call is open',
+    () async {
+      final Directory dir = await _tmp();
+      addTearDown(() => dir.delete(recursive: true));
+      final _GatedEnrichment enrichment = _GatedEnrichment(verdict);
+      final RecordingsController c = _controller(
+        _FakeRepo(dir),
+        enrichment: enrichment,
+      );
+      addTearDown(c.dispose);
+
+      await c.addTextNote('spotkanie z klientem');
+      await enrichment.started.future;
+
+      final Recording midway = c.recordings.single;
+      expect(c.isEnriching(midway.id), isTrue);
+      // The flag is a view fact laid over an item that is already whole: the
+      // status, the text and the file are all durable before enrichment starts.
+      expect(midway.status, RecordingStatus.completed);
+      expect(midway.transcript, 'spotkanie z klientem');
+
+      enrichment.release.complete();
+      await c.waitForProcessing();
+
+      expect(c.isEnriching(midway.id), isFalse);
+      expect(c.recordings.single.title, 'Notatka o kliencie');
+    },
+  );
+
+  test('a failing enrichment still clears the flag', () async {
+    final Directory dir = await _tmp();
+    addTearDown(() => dir.delete(recursive: true));
+    final RecordingsController c = _controller(
+      _FakeRepo(dir),
+      enrichment: _ThrowingEnrichment(),
+    );
+    addTearDown(c.dispose);
+
+    await c.addTextNote('treść');
+    await c.waitForProcessing();
+
+    // A stuck flag would leave a card animating for the rest of the session.
+    expect(c.isEnriching(c.recordings.single.id), isFalse);
+  });
+
+  test('the disabled service leaves nothing flagged', () async {
+    final Directory dir = await _tmp();
+    addTearDown(() => dir.delete(recursive: true));
+    final RecordingsController c = _controller(_FakeRepo(dir));
+    addTearDown(c.dispose);
+
+    await c.addTextNote('treść');
+    await c.waitForProcessing();
+
+    expect(c.isEnriching(c.recordings.single.id), isFalse);
+  });
+
   test('setCategory overwrites the model verdict and persists', () async {
     final Directory dir = await _tmp();
     addTearDown(() => dir.delete(recursive: true));
     final _FakeRepo repo = _FakeRepo(dir);
-    final RecordingsController c =
-        _controller(repo, enrichment: _FakeEnrichment(verdict));
+    final RecordingsController c = _controller(
+      repo,
+      enrichment: _FakeEnrichment(verdict),
+    );
     addTearDown(c.dispose);
 
     await c.addTextNote('spotkanie');
@@ -285,8 +398,10 @@ void main() {
   test('setCategory(null) clears the category', () async {
     final Directory dir = await _tmp();
     addTearDown(() => dir.delete(recursive: true));
-    final RecordingsController c =
-        _controller(_FakeRepo(dir), enrichment: _FakeEnrichment(verdict));
+    final RecordingsController c = _controller(
+      _FakeRepo(dir),
+      enrichment: _FakeEnrichment(verdict),
+    );
     addTearDown(c.dispose);
 
     await c.addTextNote('spotkanie');
