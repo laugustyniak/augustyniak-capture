@@ -255,6 +255,8 @@ class _QueueTabState extends State<QueueTab> {
       // off the controller's in-flight set rather than off the item.
       isEnriching: controller.isEnriching(recording.id),
       projectName: _projectName(recording.projectId),
+      canRoute: controller.canRoute(recording),
+      onRoute: () => controller.route(recording.id),
       onTogglePlay: () => controller.togglePlayback(recording.id),
       onOpen: () => controller.openSource(recording.id),
       onRetry: () => controller.retryTranscription(recording.id),

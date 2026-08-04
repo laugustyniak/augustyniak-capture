@@ -681,6 +681,7 @@ void main() {
           onRetry: () {},
           onEdit: () {},
           onToggleProcessed: () {},
+          onRoute: () {},
         ),
       ),
     );
