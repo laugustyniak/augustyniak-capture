@@ -27,6 +27,7 @@ import '../domain/clipboard_sink.dart';
 import '../domain/media_opener.dart';
 import '../domain/recording.dart';
 import '../domain/recording_revision.dart';
+import '../domain/recording_tag.dart';
 
 class RecordingsController extends ChangeNotifier {
   RecordingsController({
@@ -125,6 +126,10 @@ class RecordingsController extends ChangeNotifier {
   String? _activeFilePath;
   String? _activeId;
   String? _playingId;
+
+  /// Project inherited by captures created from this point onward. The
+  /// projects controller owns selection; this is only its capture-time mirror.
+  String? activeProjectId;
   String? _error;
 
   // Background processing queue. Capture enqueues an already-persisted item and
@@ -278,7 +283,8 @@ class RecordingsController extends ChangeNotifier {
       // empty list, and the first `_update` would then persist that emptiness
       // over the history it failed to load. So: refuse to write, say so, stop.
       _indexUnreadable = true;
-      _error = 'Could not read the recordings index — writes are disabled to '
+      _error =
+          'Could not read the recordings index — writes are disabled to '
           'protect it. $exception';
       _logSink.log(_error!, level: LogLevel.error);
       notifyListeners();
@@ -289,7 +295,8 @@ class RecordingsController extends ChangeNotifier {
     // Supporting evidence, never a precondition: a history that will not load
     // costs the edit sheet's HISTORY section, not the queue.
     try {
-      _revisions = await _revisionsRepository?.load() ??
+      _revisions =
+          await _revisionsRepository?.load() ??
           <String, List<RecordingRevision>>{};
     } catch (exception) {
       _logSink.log(
@@ -342,11 +349,15 @@ class RecordingsController extends ChangeNotifier {
   Future<void> recoverOrphans() async {
     if (_indexUnreadable || _disposed) return;
     try {
-      final List<Recording> orphans = await _repository.findOrphans(_recordings);
+      final List<Recording> orphans = await _repository.findOrphans(
+        _recordings,
+      );
       if (orphans.isEmpty || _disposed) return;
 
-      _recordings = <Recording>[..._recordings, ...orphans]
-        ..sort((Recording a, Recording b) => b.createdAt.compareTo(a.createdAt));
+      _recordings = <Recording>[
+        ..._recordings,
+        ...orphans,
+      ]..sort((Recording a, Recording b) => b.createdAt.compareTo(a.createdAt));
       await _persistAll();
       _logSink.log(
         'Recovered ${orphans.length} capture(s) with no index entry — '
@@ -354,10 +365,7 @@ class RecordingsController extends ChangeNotifier {
         level: LogLevel.warn,
       );
     } catch (exception) {
-      _logSink.log(
-        'Orphan recovery failed: $exception',
-        level: LogLevel.warn,
-      );
+      _logSink.log('Orphan recovery failed: $exception', level: LogLevel.warn);
     }
   }
 
@@ -505,6 +513,7 @@ class RecordingsController extends ChangeNotifier {
         sizeBytes: sizeBytes,
         status: RecordingStatus.saved,
         type: CaptureType.audioRecording,
+        projectId: activeProjectId,
       );
 
       // Critical invariant: persist metadata only after the audio file exists.
@@ -569,6 +578,7 @@ class RecordingsController extends ChangeNotifier {
         status: RecordingStatus.saved,
         type: CaptureType.text,
         sourceMimeType: 'text/plain',
+        projectId: activeProjectId,
       );
 
       // Critical invariant: index the note only after the .txt exists on disk.
@@ -604,13 +614,14 @@ class RecordingsController extends ChangeNotifier {
       if (picked == null) return; // user cancelled
 
       final String id = const Uuid().v4();
-      final Recording saved = await _importer.importFile(
+      final Recording imported = await _importer.importFile(
         id: id,
         type: type,
         source: picked.file,
         mimeType: picked.mimeType,
         createdAt: DateTime.now(),
       );
+      final Recording saved = imported.copyWith(projectId: activeProjectId);
 
       // Critical invariant: index only after the source is copied and verified.
       _recordings = <Recording>[saved, ..._recordings];
@@ -720,16 +731,35 @@ class RecordingsController extends ChangeNotifier {
     );
   }
 
+  Future<void> setProject(String id, String? projectId) async {
+    final String? normalized = projectId?.trim();
+    await _update(
+      id,
+      (Recording item) => item.copyWith(
+        projectId: normalized,
+        clearProjectId: normalized == null || normalized.isEmpty,
+      ),
+      source: RevisionSource.user,
+    );
+    _logSink.log(
+      normalized == null || normalized.isEmpty
+          ? 'Project cleared.'
+          : 'Project assigned.',
+      recordingId: id,
+    );
+  }
+
   /// Replace an item's user-visible tags. Values are trimmed, lowercased and
   /// de-duplicated while preserving their first-seen order. Passing only blank
   /// values clears the tags.
+  /// Replace the item's tags with exactly what the editor hands over.
+  ///
+  /// Authoritative, not additive: the list that arrives is the list that is
+  /// stored. This is what lets the user delete a tag the model proposed —
+  /// under the old provenance model the editor could only rewrite its own
+  /// layer, so a model tag was undeletable by construction.
   Future<void> setTags(String id, Iterable<String> tags) async {
-    final Set<String> seen = <String>{};
-    final List<String> normalized = <String>[];
-    for (final String value in tags) {
-      final String tag = value.trim().toLowerCase();
-      if (tag.isNotEmpty && seen.add(tag)) normalized.add(tag);
-    }
+    final List<String> normalized = RecordingTags.normalize(tags);
     await _update(
       id,
       (Recording item) => item.copyWith(tags: normalized),
@@ -1029,7 +1059,12 @@ class RecordingsController extends ChangeNotifier {
           title: (item.title ?? '').trim().isEmpty ? result.title : null,
           category: item.category ?? result.category,
           summary: result.summary,
-          tags: item.tags.isEmpty ? result.tags : null,
+          // Fill-only, like `title` and `category`, now that a tag carries no
+          // owner: with nothing marking which tags came from a model, a refresh
+          // could only refresh *all* of them, and a re-run would keep
+          // resurrecting tags the user had deleted. Clearing the list is how
+          // you ask for a fresh set.
+          tags: item.tags.isEmpty ? RecordingTags.normalize(result.tags) : null,
         ),
         // The reason this feature exists: `summary` has no editor and is
         // refreshed wholesale on every re-run, so without a record the previous
