@@ -1,5 +1,6 @@
 import 'dart:io';
 
+import 'package:audivoa_core/features/enrichment/domain/enrichment_context.dart';
 import 'package:audivoa_core/features/enrichment/domain/enrichment_result.dart';
 import 'package:audivoa_core/features/enrichment/domain/enrichment_service.dart';
 import 'package:audivoa_core/features/recordings/data/recordings_repository.dart';
@@ -51,7 +52,10 @@ class _StubEnrichment implements EnrichmentService {
   _StubEnrichment(this.result);
   final EnrichmentResult result;
   @override
-  Future<EnrichmentResult> enrich(String text) async => result;
+  Future<EnrichmentResult> enrich(
+    String text, {
+    EnrichmentContext context = EnrichmentContext.none,
+  }) async => result;
 }
 
 Recording _seed({

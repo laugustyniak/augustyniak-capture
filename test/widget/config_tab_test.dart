@@ -38,8 +38,10 @@ void main() {
 
     expect(find.text('AUDIO CAPTURE'), findsOneWidget);
     expect(find.text('AAC-LC · .m4a (fixed)'), findsOneWidget);
-    expect(find.text('16 kHz'), findsOneWidget);
-    expect(find.text('64 kbps'), findsOneWidget);
+    // The defaults name themselves — the Config tab marks the values the
+    // pipeline was tuned for rather than leaving four equal-looking options.
+    expect(find.text('16 kHz (Recommended)'), findsOneWidget);
+    expect(find.text('64 kbps (Recommended)'), findsOneWidget);
     expect(find.text('Mono'), findsOneWidget);
   });
 
@@ -77,11 +79,11 @@ void main() {
     await pumpConfig(tester, controller);
 
     TextButton resetButton() => tester.widget<TextButton>(
-          find.ancestor(
-            of: find.text('RESTORE DEFAULTS'),
-            matching: find.byType(TextButton),
-          ),
-        );
+      find.ancestor(
+        of: find.text('RESTORE DEFAULTS'),
+        matching: find.byType(TextButton),
+      ),
+    );
 
     expect(resetButton().onPressed, isNull);
 
@@ -101,6 +103,14 @@ void main() {
     await controller.initialize();
     await pumpConfig(tester, controller);
 
+    // Below the fold since the capture card grew its guidance text, and a
+    // ListView does not build children it has not scrolled to.
+    await tester.scrollUntilVisible(
+      find.text('None — transcription off'),
+      300,
+      scrollable: find.byType(Scrollable).first,
+    );
+
     expect(find.text('None — transcription off'), findsOneWidget);
     expect(find.text('none'), findsOneWidget); // token
   });
@@ -117,6 +127,11 @@ void main() {
       bearerToken: 'sk-super-secret',
     );
     await pumpConfig(tester, controller);
+    await tester.scrollUntilVisible(
+      find.text('OpenAI'),
+      300,
+      scrollable: find.byType(Scrollable).first,
+    );
 
     expect(find.text('OpenAI'), findsOneWidget);
     expect(find.text('whisper-1'), findsOneWidget);

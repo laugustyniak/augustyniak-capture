@@ -16,7 +16,7 @@ import '../domain/provider_profile.dart';
 /// `RecordingsController` rewrites the whole recordings index.
 class SettingsController extends ChangeNotifier {
   SettingsController({SettingsRepository? repository})
-      : _repository = repository ?? SettingsRepository();
+    : _repository = repository ?? SettingsRepository();
 
   static const String openAiEndpoint =
       'https://api.openai.com/v1/audio/transcriptions';
@@ -48,6 +48,7 @@ class SettingsController extends ChangeNotifier {
       .where((ProviderProfile item) => item.kind == kind)
       .toList();
   AudioConfig get audio => _settings.audio;
+  String? get enrichmentInstructions => _settings.enrichmentInstructions;
   String? get error => _error;
 
   /// The service the recordings controller should use right now. No active
@@ -183,8 +184,9 @@ class SettingsController extends ChangeNotifier {
     await _persist(
       _settings.copyWith(
         profiles: _settings.profiles
-            .map((ProviderProfile item) =>
-                item.id == updated.id ? updated : item)
+            .map(
+              (ProviderProfile item) => item.id == updated.id ? updated : item,
+            )
             .toList(),
       ),
     );
@@ -210,8 +212,10 @@ class SettingsController extends ChangeNotifier {
       return null;
     }
 
-    final String? nextActive =
-        resolve(_settings.activeProfileId, ProfileKind.transcription);
+    final String? nextActive = resolve(
+      _settings.activeProfileId,
+      ProfileKind.transcription,
+    );
     final String? nextEnrichment = resolve(
       _settings.activeEnrichmentProfileId,
       ProfileKind.enrichment,
@@ -230,10 +234,7 @@ class SettingsController extends ChangeNotifier {
 
   Future<void> setActiveProfile(String? id) async {
     await _persist(
-      _settings.copyWith(
-        activeProfileId: id,
-        clearActiveProfileId: id == null,
-      ),
+      _settings.copyWith(activeProfileId: id, clearActiveProfileId: id == null),
     );
   }
 
@@ -242,6 +243,23 @@ class SettingsController extends ChangeNotifier {
       _settings.copyWith(
         activeEnrichmentProfileId: id,
         clearActiveEnrichmentProfileId: id == null,
+      ),
+    );
+  }
+
+  /// Replace the user's enrichment profile text. Blank clears it.
+  ///
+  /// Note there is no service cache to invalidate here, unlike every other
+  /// setting on this controller: the instructions travel as a per-call argument
+  /// to `EnrichmentService.enrich`, not as constructor state, so a change takes
+  /// effect on the very next capture without rebuilding the `http.Client`.
+  Future<void> setEnrichmentInstructions(String? value) async {
+    final String trimmed = value?.trim() ?? '';
+    if (trimmed == (_settings.enrichmentInstructions ?? '')) return;
+    await _persist(
+      _settings.copyWith(
+        enrichmentInstructions: trimmed.isEmpty ? null : trimmed,
+        clearEnrichmentInstructions: trimmed.isEmpty,
       ),
     );
   }
@@ -262,8 +280,10 @@ class SettingsController extends ChangeNotifier {
     if (!binding.isValid) return;
     final Map<ShortcutAction, HotkeyBinding> next =
         Map<ShortcutAction, HotkeyBinding>.from(_settings.shortcuts)
-          ..removeWhere((ShortcutAction other, HotkeyBinding existing) =>
-              other != action && existing == binding)
+          ..removeWhere(
+            (ShortcutAction other, HotkeyBinding existing) =>
+                other != action && existing == binding,
+          )
           ..[action] = binding;
     await _persist(_settings.copyWith(shortcuts: next));
   }
@@ -296,11 +316,14 @@ class SettingsController extends ChangeNotifier {
   ///   flutter run --dart-define=TRANSCRIPTION_TOKEN=sk-... \
   ///               --dart-define=TRANSCRIPTION_MODEL=whisper-1
   static AppSettings _seedFromEnvironment() {
-    const String endpointDefine =
-        String.fromEnvironment('TRANSCRIPTION_ENDPOINT');
+    const String endpointDefine = String.fromEnvironment(
+      'TRANSCRIPTION_ENDPOINT',
+    );
     const String token = String.fromEnvironment('TRANSCRIPTION_TOKEN');
-    const String model =
-        String.fromEnvironment('TRANSCRIPTION_MODEL', defaultValue: 'whisper-1');
+    const String model = String.fromEnvironment(
+      'TRANSCRIPTION_MODEL',
+      defaultValue: 'whisper-1',
+    );
     const String language = String.fromEnvironment('TRANSCRIPTION_LANGUAGE');
 
     final String endpoint = endpointDefine.isNotEmpty

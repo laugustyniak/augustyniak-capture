@@ -34,8 +34,8 @@ The processor **only reads** the source file — it never modifies or deletes it
 - editing an item's title and its output text,
 - durable projects with repository paths, per-agent launch settings and one-click
   Codex, Claude Code or Gemini sessions on macOS,
-- separate AI and human tag provenance, with editable human tags and promotion
-  of useful AI suggestions,
+- tags as individual chips: add, remove and reuse the vocabulary already on
+  other captures,
 - finished output is handed to the system clipboard, so a clipboard manager
   keeps it in history,
 - system-wide global shortcuts on desktop,
@@ -310,11 +310,11 @@ done never touches its transcript. Both persist in `recordings.json`.
 - full history retention: done items stay visible,
 - no "Inbox Zero" celebration or empty-inbox pressure.
 
-Tags are persisted per capture with explicit provenance. Human tags are cyan,
-editable chips; AI tags are violet suggestions that can be promoted to human
-with one tap. Values are normalized to lowercase and de-duplicated, render on
-the card, and participate in Queue search. Enrichment refreshes only the AI
-layer, so a retry cannot overwrite a manual tag.
+Tags are one list per capture, with no notion of who wrote them: a value the
+model proposed and one typed by hand are the same tag. Values are normalized to
+lowercase and de-duplicated, render on the card, and participate in Queue
+search. Enrichment fills the list only when it is empty, so a retry cannot
+overwrite tags you have set; clearing them asks the next run for a fresh set.
 
 Projects are a separate durable model rather than a naming convention hidden
 inside tags. Each project stores a repository path, description, optional

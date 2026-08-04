@@ -7,6 +7,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 
 import '../../../app/ui_kit.dart';
+import '../../enrichment/data/composed_enrichment_context_source.dart';
 import '../../logs/data/log_store.dart';
 import '../../logs/presentation/logs_tab.dart';
 import '../../processing/data/ocr_service.dart';
@@ -14,6 +15,7 @@ import '../../processing/data/video_audio_extractor.dart';
 import '../../processing/data/video_poster_extractor.dart';
 import '../../projects/data/ghostty_zellij_agent_session_launcher.dart';
 import '../../projects/data/projects_repository.dart';
+import '../../projects/domain/project.dart';
 import '../../projects/presentation/projects_controller.dart';
 import '../../projects/presentation/projects_tab.dart';
 import '../../settings/presentation/config_tab.dart';
@@ -90,6 +92,18 @@ class _RecordingsPageState extends State<RecordingsPage> {
       // reason — `_applySettings` pushes both once `settings.initialize()` has
       // notified.
       transcriptionService: const DisabledTranscriptionService(),
+      // Reads through to the two controllers on every enrichment rather than
+      // capturing their state now: the user can edit their profile text, or
+      // repoint a project at another repository, long after this runs.
+      enrichmentContextSource: ComposedEnrichmentContextSource(
+        profile: () => settings.enrichmentInstructions,
+        projectById: (String id) {
+          for (final Project project in projects.projects) {
+            if (project.id == id) return project;
+          }
+          return null;
+        },
+      ),
       ocrService: _buildOcrService(),
       videoAudioExtractor: _buildVideoAudioExtractor(),
       videoPosterExtractor: _buildVideoPosterExtractor(),

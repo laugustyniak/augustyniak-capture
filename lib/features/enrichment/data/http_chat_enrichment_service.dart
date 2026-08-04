@@ -4,6 +4,7 @@ import 'dart:io';
 import 'package:http/http.dart' as http;
 
 import '../../recordings/domain/capture_category.dart';
+import '../domain/enrichment_context.dart';
 import '../domain/enrichment_prompt.dart';
 import '../domain/enrichment_result.dart';
 import '../domain/enrichment_service.dart';
@@ -34,14 +35,20 @@ class HttpChatEnrichmentService implements EnrichmentService {
   static const int _maxTags = 5;
 
   @override
-  Future<EnrichmentResult> enrich(String text) async {
+  Future<EnrichmentResult> enrich(
+    String text, {
+    EnrichmentContext context = EnrichmentContext.none,
+  }) async {
     final Map<String, dynamic> payload = <String, dynamic>{
       if (model != null && model!.isNotEmpty) 'model': model,
       'response_format': <String, String>{'type': 'json_object'},
       'messages': <Map<String, String>>[
         <String, String>{
           'role': 'system',
-          'content': buildEnrichmentSystemPrompt(),
+          // The context rides the system message, not the user one: it must
+          // outrank the captured text, which is arbitrary dictation that could
+          // itself read as an instruction.
+          'content': buildEnrichmentSystemPrompt(context: context),
         },
         <String, String>{
           'role': 'user',
@@ -86,12 +93,15 @@ class HttpChatEnrichmentService implements EnrichmentService {
     }
 
     final dynamic choices = envelope['choices'];
-    final dynamic first =
-        choices is List<dynamic> && choices.isNotEmpty ? choices.first : null;
-    final dynamic message =
-        first is Map<String, dynamic> ? first['message'] : null;
-    final dynamic content =
-        message is Map<String, dynamic> ? message['content'] : null;
+    final dynamic first = choices is List<dynamic> && choices.isNotEmpty
+        ? choices.first
+        : null;
+    final dynamic message = first is Map<String, dynamic>
+        ? first['message']
+        : null;
+    final dynamic content = message is Map<String, dynamic>
+        ? message['content']
+        : null;
     if (content is! String) {
       throw const FormatException('Response contains no message content.');
     }

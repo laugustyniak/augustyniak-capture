@@ -5,6 +5,7 @@ import '../../shortcuts/domain/shortcut_action.dart';
 import '../../shortcuts/presentation/shortcuts_section.dart';
 import '../domain/audio_config.dart';
 import '../domain/provider_profile.dart';
+import 'enrichment_context_section.dart';
 import 'settings_controller.dart';
 
 /// Runtime settings: capture parameters plus a read-only view of where data
@@ -39,7 +40,7 @@ class ConfigTab extends StatelessWidget {
   /// Releases the global registrations around the key-capture sheet — otherwise
   /// the OS would swallow the very combination the user is trying to rebind.
   final Future<void> Function(Future<void> Function() action)
-      runWithHotkeysSuspended;
+  runWithHotkeysSuspended;
 
   @override
   Widget build(BuildContext context) {
@@ -65,18 +66,51 @@ class ConfigTab extends StatelessWidget {
                   label: 'SAMPLE RATE',
                   value: audio.sampleRate,
                   options: AudioConfig.sampleRateOptions,
-                  labelFor: (int value) => '${value ~/ 1000} kHz',
-                  onChanged: (int value) => controller
-                      .updateAudio(audio.copyWith(sampleRate: value)),
+                  labelFor: (int value) {
+                    final String label = '${value ~/ 1000} kHz';
+                    if (value == AudioConfig.defaults.sampleRate) {
+                      return '$label (Recommended)';
+                    }
+                    return label;
+                  },
+                  onChanged: (int value) =>
+                      controller.updateAudio(audio.copyWith(sampleRate: value)),
+                ),
+                const SizedBox(height: 4),
+                const Text(
+                  'Whisper models are trained on 16kHz audio. Higher sample '
+                  'rates do not improve transcription quality and increase '
+                  'file size.',
+                  style: TextStyle(
+                    color: Console.mutedSoft,
+                    fontSize: 10,
+                    height: 1.45,
+                  ),
                 ),
                 const SizedBox(height: 10),
                 _ChoiceRow<int>(
                   label: 'BITRATE',
                   value: audio.bitRate,
                   options: AudioConfig.bitRateOptions,
-                  labelFor: (int value) => '${value ~/ 1000} kbps',
+                  labelFor: (int value) {
+                    final String label = '${value ~/ 1000} kbps';
+                    if (value == AudioConfig.defaults.bitRate) {
+                      return '$label (Recommended)';
+                    }
+                    return label;
+                  },
                   onChanged: (int value) =>
                       controller.updateAudio(audio.copyWith(bitRate: value)),
+                ),
+                const SizedBox(height: 4),
+                const Text(
+                  '64 kbps offers a good balance between audio quality and file '
+                  'size, based on our experiments.',
+                  style: TextStyle(
+                    color: Console.mutedSoft,
+                    fontSize: 10,
+                    height: 1.45,
+                  ),
                 ),
                 const SizedBox(height: 10),
                 _ChoiceRow<int>(
@@ -84,13 +118,15 @@ class ConfigTab extends StatelessWidget {
                   value: audio.numChannels,
                   options: const <int>[1, 2],
                   labelFor: (int value) => value == 1 ? 'Mono' : 'Stereo',
-                  onChanged: (int value) =>
-                      controller.updateAudio(audio.copyWith(numChannels: value)),
+                  onChanged: (int value) => controller.updateAudio(
+                    audio.copyWith(numChannels: value),
+                  ),
                 ),
                 const Divider(color: Console.border, height: 22),
                 InfoRow(
                   label: 'SIZE',
-                  value: '~${_megabytesPerHour(audio).toStringAsFixed(0)} MB '
+                  value:
+                      '~${_megabytesPerHour(audio).toStringAsFixed(0)} MB '
                       'per hour of recording',
                 ),
                 const SizedBox(height: 6),
@@ -142,8 +178,9 @@ class ConfigTab extends StatelessWidget {
                   value: active?.bearerToken == null
                       ? 'none'
                       : '•••• set (plaintext on disk)',
-                  valueColor:
-                      active?.bearerToken == null ? Console.mutedSoft : Console.amber,
+                  valueColor: active?.bearerToken == null
+                      ? Console.mutedSoft
+                      : Console.amber,
                 ),
                 const SizedBox(height: 10),
                 Align(
@@ -157,6 +194,8 @@ class ConfigTab extends StatelessWidget {
               ],
             ),
           ),
+          const SizedBox(height: 22),
+          EnrichmentContextSection(controller: controller),
           if (showShortcuts) ...<Widget>[
             const SizedBox(height: 22),
             ShortcutsSection(
@@ -177,7 +216,10 @@ class ConfigTab extends StatelessWidget {
                   value: storagePath ?? 'resolving…',
                   monospace: true,
                 ),
-                InfoRow(label: 'RECORDINGS', value: '$recordingsCount .m4a files'),
+                InfoRow(
+                  label: 'RECORDINGS',
+                  value: '$recordingsCount .m4a files',
+                ),
                 InfoRow(label: 'INDEX', value: 'recordings.json'),
                 InfoRow(label: 'SETTINGS', value: 'settings.json'),
                 InfoRow(label: 'LOGS', value: 'logs.json · $logCount events'),

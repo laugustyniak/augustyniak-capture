@@ -110,8 +110,6 @@ void main() {
 
     expect(restored.category, CaptureCategory.meetingNote);
     expect(restored.summary, 'Ustalenia ze spotkania.');
-    // First-seen order, kept as written: the list is the user's, so a save
-    // must not reorder it.
     expect(restored.tags, <String>['klient', 'oferta']);
     expect(restored.projectId, 'audivoa');
   });
@@ -130,6 +128,34 @@ void main() {
     expect(restored.category, isNull);
     expect(restored.summary, isNull);
     expect(restored.tags, isEmpty);
+  });
+
+  test('tags written with the retired provenance shape still load', () {
+    // Rows in this shape are already on disk from the builds that stored an
+    // owner per tag. Dropping the reader would not look like a regression — it
+    // would silently empty every tagged capture on the next load.
+    final Recording restored = Recording.fromJson(<String, dynamic>{
+      'id': 'provenance-era',
+      'filePath': '/tmp/provenance.m4a',
+      'createdAt': '2026-01-01T00:00:00.000',
+      'durationMs': 1000,
+      'status': 'completed',
+      'tags': <dynamic>[
+        <String, dynamic>{'value': 'klient', 'source': 'ai'},
+        <String, dynamic>{'value': 'oferta', 'source': 'human'},
+        // A mixed file is possible: the two formats overlapped in time.
+        'legal',
+        // Duplicate across the shapes collapses to one tag.
+        <String, dynamic>{'value': 'LEGAL', 'source': 'ai'},
+      ],
+    });
+
+    // The retired `{value, source}` shape still loads — those rows are on disk
+    // — but the owner is dropped, and a duplicate across the two shapes
+    // collapses to one tag.
+    expect(restored.tags, <String>['klient', 'oferta', 'legal']);
+    // What goes back out is the plain list again.
+    expect(restored.toJson()['tags'], everyElement(isA<String>()));
   });
 
   test('a category name from a newer build degrades to capture', () {

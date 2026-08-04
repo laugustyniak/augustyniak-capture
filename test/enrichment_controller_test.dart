@@ -3,6 +3,7 @@ import 'dart:io';
 
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:audivoa_core/features/enrichment/domain/enrichment_context.dart';
 import 'package:audivoa_core/features/enrichment/domain/enrichment_result.dart';
 import 'package:audivoa_core/features/enrichment/domain/enrichment_service.dart';
 import 'package:audivoa_core/features/processing/domain/processor.dart';
@@ -48,11 +49,16 @@ class _FakeEnrichment implements EnrichmentService {
   EnrichmentResult result;
   int calls = 0;
   String? lastText;
+  EnrichmentContext? lastContext;
 
   @override
-  Future<EnrichmentResult> enrich(String text) async {
+  Future<EnrichmentResult> enrich(
+    String text, {
+    EnrichmentContext context = EnrichmentContext.none,
+  }) async {
     calls++;
     lastText = text;
+    lastContext = context;
     return result;
   }
 }
@@ -67,7 +73,10 @@ class _GatedEnrichment implements EnrichmentService {
   final Completer<void> release = Completer<void>();
 
   @override
-  Future<EnrichmentResult> enrich(String text) async {
+  Future<EnrichmentResult> enrich(
+    String text, {
+    EnrichmentContext context = EnrichmentContext.none,
+  }) async {
     if (!started.isCompleted) started.complete();
     await release.future;
     return result;
@@ -78,7 +87,10 @@ class _ThrowingEnrichment implements EnrichmentService {
   int calls = 0;
 
   @override
-  Future<EnrichmentResult> enrich(String text) async {
+  Future<EnrichmentResult> enrich(
+    String text, {
+    EnrichmentContext context = EnrichmentContext.none,
+  }) async {
     calls++;
     throw StateError('boom');
   }
@@ -93,14 +105,38 @@ class _BlankProcessor implements Processor {
   Future<String> process(Recording item) async => '   ';
 }
 
+/// Answers a fixed context and records which project it was asked about, so a
+/// test can prove the item's own project — not the one active right now —
+/// decided what the model was told.
+class _FakeContextSource implements EnrichmentContextSource {
+  _FakeContextSource(this.context);
+  final EnrichmentContext context;
+  final List<String?> requestedFor = <String?>[];
+
+  @override
+  Future<EnrichmentContext> contextFor(String? projectId) async {
+    requestedFor.add(projectId);
+    return context;
+  }
+}
+
+class _ThrowingContextSource implements EnrichmentContextSource {
+  @override
+  Future<EnrichmentContext> contextFor(String? projectId) async =>
+      throw StateError('repo is gone');
+}
+
 RecordingsController _controller(
   _FakeRepo repo, {
   EnrichmentService? enrichment,
+  EnrichmentContextSource? contextSource,
   Processor processor = const _EchoProcessor(),
 }) => RecordingsController(
   repository: repo,
   transcriptionService: const DisabledTranscriptionService(),
   enrichmentService: enrichment ?? const DisabledEnrichmentService(),
+  enrichmentContextSource:
+      contextSource ?? const EmptyEnrichmentContextSource(),
   processorRegistry: ProcessorRegistry(<CaptureType, Processor>{
     CaptureType.text: processor,
   }),
@@ -152,6 +188,56 @@ void main() {
     expect(enrichment.lastText, 'spotkanie z klientem');
   });
 
+  test('the context reaches the model, resolved from the item project',
+      () async {
+    final Directory dir = await _tmp();
+    addTearDown(() => dir.delete(recursive: true));
+    final _FakeEnrichment enrichment = _FakeEnrichment(verdict);
+    final _FakeContextSource source = _FakeContextSource(
+      const EnrichmentContext(
+        profile: 'I collect specs.',
+        project: 'Offline-first recorder.',
+        projectSource: 'CLAUDE.md',
+      ),
+    );
+    final RecordingsController c = _controller(
+      _FakeRepo(dir),
+      enrichment: enrichment,
+      contextSource: source,
+    );
+    addTearDown(c.dispose);
+
+    c.activeProjectId = 'p1';
+    await c.addTextNote('spotkanie z klientem');
+    await c.waitForProcessing();
+
+    expect(source.requestedFor, <String?>['p1']);
+    expect(enrichment.lastContext?.profile, 'I collect specs.');
+    expect(enrichment.lastContext?.projectSource, 'CLAUDE.md');
+  });
+
+  test('an unresolvable context costs a better title, never the enrichment',
+      () async {
+    final Directory dir = await _tmp();
+    addTearDown(() => dir.delete(recursive: true));
+    final _FakeEnrichment enrichment = _FakeEnrichment(verdict);
+    final RecordingsController c = _controller(
+      _FakeRepo(dir),
+      enrichment: enrichment,
+      contextSource: _ThrowingContextSource(),
+    );
+    addTearDown(c.dispose);
+
+    await c.addTextNote('spotkanie z klientem');
+    await c.waitForProcessing();
+
+    // The item is still enriched, with an empty context rather than none at all.
+    expect(enrichment.calls, 1);
+    expect(enrichment.lastContext?.isEmpty, isTrue);
+    expect(c.recordings.single.title, 'Notatka o kliencie');
+    expect(c.recordings.single.status, RecordingStatus.completed);
+  });
+
   test('never overwrites a user-set title', () async {
     final Directory dir = await _tmp();
     addTearDown(() => dir.delete(recursive: true));
@@ -197,7 +283,6 @@ void main() {
     expect(c.recordings.single.category, CaptureCategory.idea);
     // `summary` has no editor, so it is pure derived output and refreshes.
     expect(c.recordings.single.summary, 'Ustalenia ze spotkania.');
-    // Tags are fill-only, and this item already has some, so they stand.
     expect(c.recordings.single.tags, <String>['klient', 'oferta']);
   });
 
@@ -219,8 +304,9 @@ void main() {
     await c.retryTranscription(id);
     await c.waitForProcessing();
 
-    // Exactly what the user set, normalised — the model adds nothing to a list
-    // that already exists, and nothing survives from the run before the edit.
+    // A tag set by hand is the whole list: `_enrich` fills `tags` only when
+    // they are empty, so a re-run leaves a corrected set alone rather than
+    // appending its own suggestions beside it.
     expect(c.recordings.single.tags, <String>['project:acme', 'legal']);
   });
 
@@ -248,8 +334,6 @@ void main() {
     await c.retryTranscription(id);
     await c.waitForProcessing();
 
-    // Without provenance there is no "model layer" to refresh: a re-run that
-    // merged its own tags in would keep resurrecting ones the user deleted.
     expect(c.recordings.single.tags, <String>['legal']);
     // The field that genuinely has no editor still refreshes.
     expect(c.recordings.single.summary, 'New summary');
@@ -269,8 +353,6 @@ void main() {
     await c.waitForProcessing();
     final String id = c.recordings.single.id;
 
-    // Emptying the list is the one way back to model-suggested tags, exactly
-    // as clearing the category is the way to ask for a re-classification.
     await c.setTags(id, <String>[]);
     expect(c.recordings.single.tags, isEmpty);
 
@@ -283,7 +365,7 @@ void main() {
     await c.retryTranscription(id);
     await c.waitForProcessing();
 
-    // Normalised on the way in, like anything the user could have typed.
+    // Clearing the field is how you ask for it to be filled again.
     expect(c.recordings.single.tags, <String>['follow-up']);
   });
 
