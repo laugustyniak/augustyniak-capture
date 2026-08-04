@@ -319,14 +319,19 @@ void main() {
     expect(find.textContaining('endpoint is not responding'), findsOneWidget);
   });
 
-  testWidgets('a completed item offers no retry', (WidgetTester tester) async {
+  testWidgets('a completed item offers LLM enrichment, not processing retry', (
+    WidgetTester tester,
+  ) async {
     final RecordingsController controller = await buildRecordingsController(
       appDir,
-      seed: <Recording>[makeRecording(id: 'ok')],
+      seed: <Recording>[
+        makeRecording(id: 'ok', transcript: 'persisted note text'),
+      ],
     );
     await pumpQueue(tester, controller);
 
     expect(find.text('RETRY'), findsNothing);
+    expect(find.text('ENRICH'), findsOneWidget);
     expect(find.text('READY'), findsOneWidget);
   });
 
@@ -596,6 +601,7 @@ void main() {
           onTogglePlay: () {},
           onOpen: () {},
           onRetry: () {},
+          onEnrich: () {},
           onEdit: () {},
           onToggleProcessed: () {},
         ),
@@ -621,6 +627,7 @@ void main() {
     // The item is already durable, and the card still says so.
     expect(find.textContaining('file verified'), findsOneWidget);
     expect(find.text('RETRY'), findsNothing);
+    expect(find.text('ENRICH'), findsOneWidget);
 
     // A few frames of the animation, to prove it drives without throwing.
     await tester.pump(const Duration(milliseconds: 400));
@@ -636,6 +643,7 @@ void main() {
     expect(find.text('READY'), findsOneWidget);
     expect(find.byType(ScanLine), findsNothing);
     expect(find.text(RecordingCard.analyzingLabel), findsNothing);
+    expect(find.text('ENRICH'), findsOneWidget);
   });
 
   testWidgets('the inline editor corrects a wrong category', (
