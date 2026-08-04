@@ -53,7 +53,9 @@ class _EnrichmentContextSectionState extends State<EnrichmentContextSection> {
     sendLimit: EnrichmentContext.maxProjectChars,
   );
 
-  String get _stored => widget.controller.enrichmentInstructions ?? '';
+  /// Never null — an untouched install resolves to the shipped default, so the
+  /// box is populated on first run rather than empty.
+  String get _stored => widget.controller.enrichmentInstructions;
   bool get _dirty => _field.text.trim() != _synced.trim();
 
   @override
@@ -140,6 +142,19 @@ class _EnrichmentContextSectionState extends State<EnrichmentContextSection> {
     });
   }
 
+  /// Throw away the user's text and adopt the shipped default again.
+  ///
+  /// `_synced` is set from the controller *after* the write, not from the
+  /// constant, so the field agrees with whatever settings actually resolved to.
+  Future<void> _restoreDefault() async {
+    await widget.controller.resetEnrichmentInstructions();
+    if (!mounted) return;
+    setState(() {
+      _synced = _stored;
+      _field.text = _synced;
+    });
+  }
+
   /// One project, and what its repository currently contributes.
   ///
   /// Uses [InfoRow] so it reads as the same kind of fact as the endpoint and
@@ -170,15 +185,35 @@ class _EnrichmentContextSectionState extends State<EnrichmentContextSection> {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: <Widget>[
-              const Text(
-                'Who you are and what you collect. Sent with every capture so '
-                'titles, categories and tags match how you actually file '
-                'things. Leave it empty and nothing is sent.',
-                style: TextStyle(
-                  color: Console.mutedSoft,
-                  fontSize: 10,
-                  height: 1.45,
-                ),
+              Row(
+                children: <Widget>[
+                  const Expanded(
+                    child: Text(
+                      'Who you are and what you collect. Sent with every '
+                      'capture so titles, categories and tags match how you '
+                      'actually file things.',
+                      style: TextStyle(
+                        color: Console.mutedSoft,
+                        fontSize: 10,
+                        height: 1.45,
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 10),
+                  // Which of the two is on screen. Without it a default that
+                  // reads like someone's own words is indistinguishable from
+                  // text the user wrote and forgot.
+                  Text(
+                    widget.controller.hasCustomEnrichmentInstructions
+                        ? 'CUSTOM'
+                        : 'DEFAULT',
+                    style: ConsoleText.micro.copyWith(
+                      color: widget.controller.hasCustomEnrichmentInstructions
+                          ? Console.cyan
+                          : Console.dim,
+                    ),
+                  ),
+                ],
               ),
               const SizedBox(height: 10),
               ConsoleField(
@@ -221,7 +256,16 @@ class _EnrichmentContextSectionState extends State<EnrichmentContextSection> {
                     const SizedBox(width: 10),
                     TextButton(onPressed: _revert, child: const Text('REVERT')),
                     TextButton(onPressed: _commit, child: const Text('SAVE')),
-                  ],
+                  ] else
+                    TextButton.icon(
+                      // Disabled while the default is already in force, like
+                      // the audio card's own restore button.
+                      onPressed: widget.controller.hasCustomEnrichmentInstructions
+                          ? _restoreDefault
+                          : null,
+                      icon: const Icon(Icons.restart_alt, size: 15),
+                      label: const Text('RESTORE DEFAULT'),
+                    ),
                 ],
               ),
               const Divider(color: Console.border, height: 26),
