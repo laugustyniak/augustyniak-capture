@@ -9,9 +9,13 @@ import 'package:audivoa_core/app/ui_kit.dart';
 import 'package:audivoa_core/features/recordings/domain/capture_category.dart';
 import 'package:audivoa_core/features/recordings/domain/capture_type.dart';
 import 'package:audivoa_core/features/recordings/domain/recording.dart';
+import 'package:audivoa_core/features/recordings/domain/recording_tag.dart';
 import 'package:audivoa_core/features/recordings/presentation/queue_tab.dart';
 import 'package:audivoa_core/features/recordings/presentation/recording_card.dart';
 import 'package:audivoa_core/features/recordings/presentation/recordings_controller.dart';
+import 'package:audivoa_core/features/projects/data/projects_repository.dart';
+import 'package:audivoa_core/features/projects/domain/project.dart';
+import 'package:audivoa_core/features/projects/presentation/projects_controller.dart';
 
 import '../support/harness.dart';
 
@@ -39,10 +43,16 @@ void main() {
 
   Future<void> pumpQueue(
     WidgetTester tester,
-    RecordingsController controller,
-  ) async {
+    RecordingsController controller, {
+    ProjectsController? projects,
+  }) async {
     await tester.pumpWidget(
-      hostTab(() => QueueTab(controller: controller), listenable: controller),
+      hostTab(
+        () => QueueTab(controller: controller, projects: projects),
+        listenable: projects == null
+            ? controller
+            : Listenable.merge(<Listenable>[controller, projects]),
+      ),
     );
     await tester.pump();
   }
@@ -169,6 +179,129 @@ void main() {
 
     expect(find.textContaining('acme.m4a'), findsOneWidget);
     expect(find.textContaining('other.m4a'), findsNothing);
+  });
+
+  testWidgets('AI and human tags have distinct colors and AI can be promoted', (
+    WidgetTester tester,
+  ) async {
+    final RecordingsController controller = await buildRecordingsController(
+      appDir,
+      seed: <Recording>[
+        makeRecording(
+          id: 'tagged',
+          tags: <String>['manual'],
+          aiTags: <String>['suggested'],
+        ),
+      ],
+    );
+    await pumpQueue(tester, controller);
+
+    expect(
+      tester.widget<Text>(find.text('#manual')).style?.color,
+      Console.cyan,
+    );
+    expect(
+      tester.widget<Text>(find.text('#suggested')).style?.color,
+      Console.violet,
+    );
+
+    await tester.tap(find.byIcon(Icons.edit_outlined));
+    await tester.pump();
+
+    final Finder aiTagText = find.text('#suggested');
+    tester
+        .widget<InkWell>(
+          find.ancestor(of: aiTagText, matching: find.byType(InkWell)),
+        )
+        .onTap!();
+    await settleIo(tester);
+
+    expect(controller.recordings.single.aiTags, isEmpty);
+    expect(
+      controller.recordings.single.humanTags.map(
+        (RecordingTag tag) => tag.value,
+      ),
+      <String>['manual', 'suggested'],
+    );
+  });
+
+  testWidgets('filters and assigns captures by project', (
+    WidgetTester tester,
+  ) async {
+    final ProjectsController projects = ProjectsController(
+      repository: ProjectsRepository(directoryProvider: () async => appDir),
+    );
+    addTearDown(projects.dispose);
+    final List<Project> projectFixtures = (await tester.runAsync(() async {
+      await projects.initialize();
+      return <Project>[
+        await projects.create(name: 'Acme', repoPath: '/work/acme'),
+        await projects.create(name: 'Other', repoPath: '/work/other'),
+      ];
+    }))!;
+    final Project acme = projectFixtures[0];
+    final Project other = projectFixtures[1];
+    final RecordingsController controller = await buildRecordingsController(
+      appDir,
+      seed: <Recording>[
+        makeRecording(id: 'acme-recording', projectId: acme.id),
+        makeRecording(id: 'other-recording', projectId: other.id),
+        makeRecording(id: 'unassigned'),
+      ],
+    );
+    await pumpQueue(tester, controller, projects: projects);
+
+    await tester.tap(find.byType(DropdownButtonFormField<String?>));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Acme').last);
+    await tester.pumpAndSettle();
+    expect(find.textContaining('acme-recording'), findsOneWidget);
+    expect(find.textContaining('other-recording'), findsNothing);
+
+    await tester.tap(find.byIcon(Icons.edit_outlined));
+    await tester.pump();
+    final Finder otherProjectChip = find.text('Other').last;
+    tester
+        .widget<InkWell>(
+          find.ancestor(of: otherProjectChip, matching: find.byType(InkWell)),
+        )
+        .onTap!();
+    await settleIo(tester);
+    expect(controller.recordings.first.projectId, other.id);
+  });
+
+  testWidgets('deleting the selected project resets the Queue filter', (
+    WidgetTester tester,
+  ) async {
+    final ProjectsController projects = ProjectsController(
+      repository: ProjectsRepository(directoryProvider: () async => appDir),
+    );
+    addTearDown(projects.dispose);
+    final Project project = (await tester.runAsync(() async {
+      await projects.initialize();
+      return projects.create(name: 'Temporary', repoPath: '/work/temporary');
+    }))!;
+    final RecordingsController controller = await buildRecordingsController(
+      appDir,
+      seed: <Recording>[
+        makeRecording(id: 'assigned', projectId: project.id),
+        makeRecording(id: 'unassigned'),
+      ],
+    );
+    await pumpQueue(tester, controller, projects: projects);
+
+    await tester.tap(find.byType(DropdownButtonFormField<String?>));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Temporary').last);
+    await tester.pumpAndSettle();
+    expect(find.text('unassigned.m4a'), findsNothing);
+
+    await tester.runAsync(() => projects.delete(project.id));
+    await tester.pump();
+
+    expect(tester.takeException(), isNull);
+    expect(find.text('assigned.m4a'), findsOneWidget);
+    expect(find.text('unassigned.m4a'), findsOneWidget);
   });
 
   testWidgets('a failed item offers retry and shows its error', (
@@ -510,7 +643,7 @@ void main() {
     expect(find.text(RecordingCard.analyzingLabel), findsNothing);
   });
 
-  testWidgets('the edit sheet corrects a wrong category', (
+  testWidgets('the inline editor corrects a wrong category', (
     WidgetTester tester,
   ) async {
     final RecordingsController controller = await buildRecordingsController(
@@ -528,21 +661,15 @@ void main() {
     await pumpQueue(tester, controller);
 
     await tester.tap(find.byIcon(Icons.edit_outlined));
-    await tester.pumpAndSettle();
-    // The model's verdict is what the dropdown opens on.
-    expect(find.text('Category'), findsOneWidget);
-
-    await tester.tap(find.byType(DropdownButtonFormField<CaptureCategory?>));
-    await tester.pumpAndSettle();
+    await tester.pump();
+    expect(find.text('CATEGORY'), findsOneWidget);
     await tester.tap(find.text('IDEA').last);
-    await tester.pumpAndSettle();
-    await tester.tap(find.text('SAVE'));
-    await tester.pumpAndSettle();
+    await settleIo(tester);
 
     expect(controller.recordings.single.category, CaptureCategory.idea);
   });
 
-  testWidgets('the edit sheet creates and clears tags', (
+  testWidgets('the inline editor creates and clears human tags', (
     WidgetTester tester,
   ) async {
     final RecordingsController controller = await buildRecordingsController(
@@ -554,31 +681,46 @@ void main() {
     await pumpQueue(tester, controller);
 
     await tester.tap(find.byIcon(Icons.edit_outlined));
-    await tester.pumpAndSettle();
+    await tester.pump();
+    final Finder oldTag = find.bySemanticsLabel('Remove tag old');
+    tester
+        .widget<InkResponse>(
+          find.descendant(of: oldTag, matching: find.byType(InkResponse)),
+        )
+        .onTap!();
+    await settleIo(tester);
     await tester.enterText(
-      find.widgetWithText(TextField, 'Tags'),
+      find.widgetWithText(TextField, '+ add tag'),
       ' Project:Acme, client, CLIENT,  ',
     );
-    await tester.tap(find.text('SAVE'));
-    await tester.pumpAndSettle();
+    await settleIo(tester);
 
-    expect(controller.recordings.single.tags, <String>[
+    expect(controller.recordings.single.tagValues, <String>[
       'project:acme',
       'client',
     ]);
     expect(find.text('#project:acme'), findsOneWidget);
     expect(find.text('#client'), findsOneWidget);
 
-    await tester.tap(find.byIcon(Icons.edit_outlined));
-    await tester.pumpAndSettle();
-    await tester.enterText(find.widgetWithText(TextField, 'Tags'), '');
-    await tester.tap(find.text('SAVE'));
-    await tester.pumpAndSettle();
+    final Finder projectTag = find.bySemanticsLabel('Remove tag project:acme');
+    tester
+        .widget<InkResponse>(
+          find.descendant(of: projectTag, matching: find.byType(InkResponse)),
+        )
+        .onTap!();
+    await settleIo(tester);
+    final Finder clientTag = find.bySemanticsLabel('Remove tag client');
+    tester
+        .widget<InkResponse>(
+          find.descendant(of: clientTag, matching: find.byType(InkResponse)),
+        )
+        .onTap!();
+    await settleIo(tester);
 
     expect(controller.recordings.single.tags, isEmpty);
   });
 
-  testWidgets('the edit sheet clears a category back to unclassified', (
+  testWidgets('the inline editor clears a category back to unclassified', (
     WidgetTester tester,
   ) async {
     final RecordingsController controller = await buildRecordingsController(
@@ -595,13 +737,9 @@ void main() {
     await pumpQueue(tester, controller);
 
     await tester.tap(find.byIcon(Icons.edit_outlined));
-    await tester.pumpAndSettle();
-    await tester.tap(find.byType(DropdownButtonFormField<CaptureCategory?>));
-    await tester.pumpAndSettle();
+    await tester.pump();
     await tester.tap(find.text('—').last);
-    await tester.pumpAndSettle();
-    await tester.tap(find.text('SAVE'));
-    await tester.pumpAndSettle();
+    await settleIo(tester);
 
     expect(controller.recordings.single.category, isNull);
   });

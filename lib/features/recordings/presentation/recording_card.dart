@@ -5,6 +5,8 @@ import 'package:flutter/material.dart';
 import '../../../app/ui_kit.dart';
 import '../domain/capture_type.dart';
 import '../domain/recording.dart';
+import '../domain/recording_tag.dart';
+import 'card_parts.dart';
 
 /// One queue item, in the design's "console card" form.
 ///
@@ -20,6 +22,7 @@ class RecordingCard extends StatelessWidget {
     required this.recording,
     required this.isPlaying,
     this.isEnriching = false,
+    this.projectName,
     required this.onTogglePlay,
     required this.onOpen,
     required this.onRetry,
@@ -48,6 +51,12 @@ class RecordingCard extends StatelessWidget {
   /// considers finished — a card in this state stays in the READY bucket and
   /// keeps every control it had.
   final bool isEnriching;
+
+  /// Resolved name of the item's project, or null when it has none. Resolved by
+  /// the caller rather than looked up here: the card never reaches past the
+  /// item it was handed, and a dangling id is the queue's problem to name.
+  final String? projectName;
+
   final VoidCallback onTogglePlay;
 
   /// Hands the source to the platform's own player/viewer. Deliberately not
@@ -79,281 +88,216 @@ class RecordingCard extends StatelessWidget {
     final bool hasTranscript = transcript.trim().isNotEmpty;
     final bool openable = recording.type == CaptureType.video;
 
-    return AnimatedContainer(
-      duration: const Duration(milliseconds: 420),
-      curve: Curves.easeOutCubic,
-      decoration: BoxDecoration(
-        color: Console.surface,
-        borderRadius: BorderRadius.circular(12),
-        // The border is the one place status colours the whole item: a failure
-        // and a reviewed item both have to be findable while scrolling.
-        border: Border.all(
-          color: failed
-              ? Console.red.withValues(alpha: .35)
-              : reviewed
-              ? Console.cyan.withValues(alpha: .35)
-              : Console.border,
-        ),
-      ),
-      child: Padding(
-        padding: const EdgeInsets.fromLTRB(14, 13, 14, 13),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: <Widget>[
-            Row(
-              children: <Widget>[
-                _LeadingTile(
-                  recording: recording,
-                  failed: failed,
-                  onOpen: openable ? onOpen : null,
-                ),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: <Widget>[
-                      Row(
-                        children: <Widget>[
-                          Flexible(
-                            child: Text(
-                              displayName,
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                              style: ConsoleText.cardTitle,
-                            ),
-                          ),
-                          if (reviewed) ...<Widget>[
-                            const SizedBox(width: 7),
-                            const Icon(
-                              Icons.check_circle_outline_rounded,
-                              size: 14,
-                              color: Console.cyan,
-                            ),
-                          ],
-                        ],
-                      ),
-                      const SizedBox(height: 3),
-                      Text(
-                        _metaLine(recording, filename),
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: ConsoleText.cardMeta,
-                      ),
-                    ],
-                  ),
-                ),
-                const SizedBox(width: 8),
-                // Two pills, one row: what the item *is* and where it is in the
-                // pipeline. Reuses StatusPill rather than adding a widget — the
-                // colour is what tells them apart. The category is absent until
-                // enrichment has run, so an install with no enrichment profile
-                // renders exactly the card it rendered before.
-                Wrap(
-                  spacing: 6,
-                  runSpacing: 6,
-                  crossAxisAlignment: WrapCrossAlignment.center,
+    return RecordingCardShell(
+      borderColor: failed
+          ? Console.red.withValues(alpha: .35)
+          : reviewed
+          ? Console.cyan.withValues(alpha: .35)
+          : Console.border,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: <Widget>[
+          Row(
+            children: <Widget>[
+              RecordingLeadingTile(
+                recording: recording,
+                failed: failed,
+                onOpen: openable ? onOpen : null,
+                semanticLabel: RecordingCard.openVideoLabel,
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
                   children: <Widget>[
-                    if (recording.category != null)
-                      StatusPill(
-                        label: recording.category!.label,
-                        color: Console.mutedSoft,
-                      ),
-                    // Cross-faded rather than swapped: READY → ANALYZING →
-                    // READY happens twice within a couple of seconds, and a
-                    // hard cut at that rate reads as the card glitching.
-                    AnimatedSwitcher(
-                      duration: const Duration(milliseconds: 260),
-                      child: StatusPill(
-                        key: ValueKey<String>(visual.label),
-                        label: visual.label,
-                        color: visual.color,
-                        pulse: visual.pulse,
-                      ),
+                    Row(
+                      children: <Widget>[
+                        Flexible(
+                          child: Text(
+                            displayName,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: ConsoleText.cardTitle,
+                          ),
+                        ),
+                        if (reviewed) ...<Widget>[
+                          const SizedBox(width: 7),
+                          const Icon(
+                            Icons.check_circle_outline_rounded,
+                            size: 14,
+                            color: Console.cyan,
+                          ),
+                        ],
+                      ],
+                    ),
+                    const SizedBox(height: 3),
+                    Text(
+                      metaLineFor(recording, filename),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: ConsoleText.cardMeta,
                     ),
                   ],
                 ),
-              ],
-            ),
-            if ((recording.summary ?? '').trim().isNotEmpty) ...<Widget>[
-              const SizedBox(height: 9),
-              Text(
-                recording.summary!.trim(),
-                maxLines: 2,
-                overflow: TextOverflow.ellipsis,
-                style: ConsoleText.cardMeta.copyWith(color: Console.textSoft),
               ),
-            ],
-            if (recording.tags.isNotEmpty) ...<Widget>[
-              const SizedBox(height: 9),
+              const SizedBox(width: 8),
+              // Two pills, one row: what the item *is* and where it is in the
+              // pipeline. Reuses StatusPill rather than adding a widget — the
+              // colour is what tells them apart. The category is absent until
+              // enrichment has run, so an install with no enrichment profile
+              // renders exactly the card it rendered before.
               Wrap(
                 spacing: 6,
-                runSpacing: 5,
+                runSpacing: 6,
+                crossAxisAlignment: WrapCrossAlignment.center,
                 children: <Widget>[
-                  for (final String tag in recording.tags)
-                    _TagLabel(label: tag),
-                ],
-              ),
-            ],
-            if (recording.status == RecordingStatus.transcribing) ...<Widget>[
-              const SizedBox(height: 12),
-              const ClipRRect(
-                borderRadius: BorderRadius.all(Radius.circular(2)),
-                child: LinearProgressIndicator(
-                  minHeight: 3,
-                  color: Console.cyan,
-                  backgroundColor: Console.track,
-                ),
-              ),
-            ],
-            // Sits above the excerpt on purpose: it is a statement about the
-            // text underneath it — the model is reading exactly that.
-            if (isEnriching) ...<Widget>[
-              const SizedBox(height: 12),
-              const _EnrichingStrip(),
-            ],
-            if (hasTranscript) ...<Widget>[
-              const SizedBox(height: 11),
-              Row(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: <Widget>[
-                  Expanded(
-                    child: Text(
-                      transcript,
-                      maxLines: 3,
-                      overflow: TextOverflow.ellipsis,
-                      style: ConsoleText.body,
+                  if (projectName != null)
+                    StatusPill(label: projectName!, color: Console.violet),
+                  if (recording.category != null)
+                    StatusPill(
+                      label: recording.category!.label,
+                      color: Console.mutedSoft,
+                    ),
+                  // Cross-faded rather than swapped: READY → ANALYZING →
+                  // READY happens twice within a couple of seconds, and a
+                  // hard cut at that rate reads as the card glitching.
+                  AnimatedSwitcher(
+                    duration: const Duration(milliseconds: 260),
+                    child: StatusPill(
+                      key: ValueKey<String>(visual.label),
+                      label: visual.label,
+                      color: visual.color,
+                      pulse: visual.pulse,
                     ),
                   ),
-                  const SizedBox(width: 8),
-                  // Copies the whole text, not the three lines rendered above.
-                  CopyButton(
-                    text: transcript,
-                    tooltip: 'Copy text',
-                    semanticLabel: 'Copy text to clipboard',
-                  ),
                 ],
               ),
             ],
-            if (recording.error != null) ...<Widget>[
-              const SizedBox(height: 10),
-              Text(
-                recording.error!,
-                maxLines: 2,
-                overflow: TextOverflow.ellipsis,
-                style: ConsoleText.micro.copyWith(color: Console.redSoft),
-              ),
-            ],
-            const SizedBox(height: 11),
-            Row(
+          ),
+          if ((recording.summary ?? '').trim().isNotEmpty) ...<Widget>[
+            const SizedBox(height: 9),
+            Text(
+              recording.summary!.trim(),
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
+              style: ConsoleText.cardMeta.copyWith(color: Console.textSoft),
+            ),
+          ],
+          if (recording.tags.isNotEmpty) ...<Widget>[
+            const SizedBox(height: 9),
+            Wrap(
+              spacing: 6,
+              runSpacing: 5,
               children: <Widget>[
-                Expanded(child: _VerificationLine(recording: recording)),
-                const SizedBox(width: 8),
-                if (failed) ...<Widget>[
-                  _GhostButton(
-                    icon: Icons.refresh_rounded,
-                    label: 'RETRY',
-                    onTap: onRetry,
-                  ),
-                  const SizedBox(width: 8),
-                ],
-                // In-app playback is audio-only; text and image items have no
-                // track at all.
-                if (recording.type.isPlayableAudio) ...<Widget>[
-                  ConsoleIconButton(
-                    icon: isPlaying
-                        ? Icons.stop_rounded
-                        : Icons.play_arrow_rounded,
-                    onTap: onTogglePlay,
-                    semanticLabel: isPlaying
-                        ? 'Stop playback'
-                        : 'Play recording',
-                    active: isPlaying,
-                    size: 30,
-                    iconSize: 18,
-                  ),
-                  const SizedBox(width: 7),
-                ]
-                // A video leaves the app to play: there is no in-process video
-                // widget on the desktop targets, so this hands the file to
-                // whatever the user already has. Nothing to stop afterwards,
-                // hence no `active` state and a fixed icon.
-                else if (openable) ...<Widget>[
-                  ConsoleIconButton(
-                    icon: Icons.play_arrow_rounded,
-                    onTap: onOpen,
-                    semanticLabel: RecordingCard.openVideoLabel,
-                    size: 30,
-                    iconSize: 18,
-                  ),
-                  const SizedBox(width: 7),
-                ],
-                ConsoleIconButton(
-                  icon: Icons.edit_outlined,
-                  onTap: onEdit,
-                  semanticLabel: 'Edit title and text',
-                  size: 30,
-                  iconSize: 16,
-                ),
-                const SizedBox(width: 7),
-                _ReviewToggle(reviewed: reviewed, onTap: onToggleProcessed),
+                for (final RecordingTag tag in recording.tags)
+                  _TagLabel(tag: tag),
               ],
             ),
           ],
-        ),
+          if (recording.status == RecordingStatus.transcribing) ...<Widget>[
+            const SizedBox(height: 12),
+            const ClipRRect(
+              borderRadius: BorderRadius.all(Radius.circular(2)),
+              child: LinearProgressIndicator(
+                minHeight: 3,
+                color: Console.cyan,
+                backgroundColor: Console.track,
+              ),
+            ),
+          ],
+          // Sits above the excerpt on purpose: it is a statement about the
+          // text underneath it — the model is reading exactly that.
+          if (isEnriching) ...<Widget>[
+            const SizedBox(height: 12),
+            const _EnrichingStrip(),
+          ],
+          if (hasTranscript) ...<Widget>[
+            const SizedBox(height: 11),
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: <Widget>[
+                Expanded(
+                  child: Text(
+                    transcript,
+                    maxLines: 3,
+                    overflow: TextOverflow.ellipsis,
+                    style: ConsoleText.body,
+                  ),
+                ),
+                const SizedBox(width: 8),
+                // Copies the whole text, not the three lines rendered above.
+                CopyButton(
+                  text: transcript,
+                  tooltip: 'Copy text',
+                  semanticLabel: 'Copy text to clipboard',
+                ),
+              ],
+            ),
+          ],
+          if (recording.error != null) ...<Widget>[
+            const SizedBox(height: 10),
+            Text(
+              recording.error!,
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
+              style: ConsoleText.micro.copyWith(color: Console.redSoft),
+            ),
+          ],
+          const SizedBox(height: 11),
+          Row(
+            children: <Widget>[
+              Expanded(child: VerificationLine(recording: recording)),
+              const SizedBox(width: 8),
+              if (failed) ...<Widget>[
+                _GhostButton(
+                  icon: Icons.refresh_rounded,
+                  label: 'RETRY',
+                  onTap: onRetry,
+                ),
+                const SizedBox(width: 8),
+              ],
+              // In-app playback is audio-only; text and image items have no
+              // track at all.
+              if (recording.type.isPlayableAudio) ...<Widget>[
+                ConsoleIconButton(
+                  icon: isPlaying
+                      ? Icons.stop_rounded
+                      : Icons.play_arrow_rounded,
+                  onTap: onTogglePlay,
+                  semanticLabel: isPlaying ? 'Stop playback' : 'Play recording',
+                  active: isPlaying,
+                  size: 30,
+                  iconSize: 18,
+                ),
+                const SizedBox(width: 7),
+              ]
+              // A video leaves the app to play: there is no in-process video
+              // widget on the desktop targets, so this hands the file to
+              // whatever the user already has. Nothing to stop afterwards,
+              // hence no `active` state and a fixed icon.
+              else if (openable) ...<Widget>[
+                ConsoleIconButton(
+                  icon: Icons.play_arrow_rounded,
+                  onTap: onOpen,
+                  semanticLabel: RecordingCard.openVideoLabel,
+                  size: 30,
+                  iconSize: 18,
+                ),
+                const SizedBox(width: 7),
+              ],
+              ConsoleIconButton(
+                icon: Icons.edit_outlined,
+                onTap: onEdit,
+                semanticLabel: 'Edit title and text',
+                size: 30,
+                iconSize: 16,
+              ),
+              const SizedBox(width: 7),
+              _ReviewToggle(reviewed: reviewed, onTap: onToggleProcessed),
+            ],
+          ),
+        ],
       ),
-    );
-  }
-}
-
-/// The card's leading badge: the video's own poster frame when one was
-/// extracted, the capture-type icon otherwise.
-///
-/// [onOpen] is non-null only for a type the app can hand to the system, which
-/// makes the poster a second tap target for the same action the play button
-/// runs. The tap target stops here on purpose — the card body stays
-/// non-tappable, because "tap anywhere" would make the edit and review
-/// controls inside it ambiguous.
-class _LeadingTile extends StatelessWidget {
-  const _LeadingTile({
-    required this.recording,
-    required this.failed,
-    required this.onOpen,
-  });
-
-  final Recording recording;
-  final bool failed;
-  final VoidCallback? onOpen;
-
-  @override
-  Widget build(BuildContext context) {
-    final Color color = failed ? Console.red : Console.cyan;
-    final Color background = failed
-        ? Console.red.withValues(alpha: .1)
-        : Console.iconTile;
-    final String? poster = recording.thumbPath;
-
-    final Widget tile = poster == null
-        ? ConsoleIconTile(
-            animate: true,
-            icon: _typeIcon(recording.type),
-            color: color,
-            background: background,
-          )
-        // A poster path is only ever a *claim* that a frame was extracted; the
-        // file may since have been cleaned up, so the tile falls back to the
-        // icon above rather than trusting it.
-        : ConsolePosterTile(
-            poster: File(poster),
-            fallbackIcon: _typeIcon(recording.type),
-            color: color,
-            background: background,
-          );
-
-    if (onOpen == null) return tile;
-    return Semantics(
-      button: true,
-      label: RecordingCard.openVideoLabel,
-      child: InkResponse(onTap: onOpen, radius: 25, child: tile),
     );
   }
 }
@@ -393,40 +337,6 @@ class _EnrichingStrip extends StatelessWidget {
         ),
         const SizedBox(height: 7),
         const ScanLine(),
-      ],
-    );
-  }
-}
-
-/// `✓ file verified · 6.8 MB · persisted` — the durability guarantee, stated on
-/// every card. The size segment disappears on legacy rows, which never recorded
-/// one, rather than printing a made-up `0 B`.
-class _VerificationLine extends StatelessWidget {
-  const _VerificationLine({required this.recording});
-
-  final Recording recording;
-
-  @override
-  Widget build(BuildContext context) {
-    final String? size = formatBytes(recording.sizeBytes);
-    final String text = <String>[
-      'file verified',
-      ?size,
-      'persisted',
-    ].join(' · ');
-
-    return Row(
-      children: <Widget>[
-        const Icon(Icons.check_rounded, size: 12, color: Console.green),
-        const SizedBox(width: 6),
-        Expanded(
-          child: Text(
-            text,
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
-            style: ConsoleText.micro,
-          ),
-        ),
       ],
     );
   }
@@ -517,49 +427,45 @@ class _ReviewToggle extends StatelessWidget {
   }
 }
 
+/// Provenance is visible at a glance: human tags are cyan and AI suggestions
+/// are violet, with matching person/sparkle icons.
 class _TagLabel extends StatelessWidget {
-  const _TagLabel({required this.label});
+  const _TagLabel({required this.tag});
 
-  final String label;
+  final RecordingTag tag;
 
   @override
   Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-      decoration: BoxDecoration(
-        color: Console.cyan.withValues(alpha: .07),
-        borderRadius: BorderRadius.circular(999),
-        border: Border.all(color: Console.cyan.withValues(alpha: .2)),
-      ),
-      child: Text(
-        '#$label',
-        style: ConsoleText.micro.copyWith(color: Console.cyan),
+    final bool human = tag.source == RecordingTagSource.human;
+    final Color color = human ? Console.cyan : Console.violet;
+    return Semantics(
+      label: human ? 'Human tag ${tag.value}' : 'AI suggested tag ${tag.value}',
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+        decoration: BoxDecoration(
+          color: color.withValues(alpha: .07),
+          borderRadius: BorderRadius.circular(999),
+          border: Border.all(color: color.withValues(alpha: .22)),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: <Widget>[
+            Icon(
+              human ? Icons.person_outline_rounded : Icons.auto_awesome,
+              size: 10,
+              color: color,
+            ),
+            const SizedBox(width: 4),
+            Text(
+              '#${tag.value}',
+              style: ConsoleText.micro.copyWith(color: color),
+            ),
+          ],
+        ),
       ),
     );
   }
 }
-
-/// `10:24 · m4a · 2026-07-27 12:00` — duration only when the type has one, so
-/// an image or a note never claims `00:00`.
-String _metaLine(Recording recording, String filename) {
-  final String extension = filename.contains('.')
-      ? filename.split('.').last.toLowerCase()
-      : recording.type.name;
-  return <String>[
-    if (recording.type.hasDuration && recording.durationMs > 0)
-      formatDuration(Duration(milliseconds: recording.durationMs)),
-    extension,
-    formatDateTime(recording.createdAt),
-  ].join(' · ');
-}
-
-IconData _typeIcon(CaptureType type) => switch (type) {
-  CaptureType.audioRecording => Icons.mic_none_rounded,
-  CaptureType.audioUpload => Icons.audio_file_outlined,
-  CaptureType.image => Icons.image_outlined,
-  CaptureType.text => Icons.description_outlined,
-  CaptureType.video => Icons.movie_outlined,
-};
 
 class _StatusVisual {
   const _StatusVisual(this.label, this.color, {this.pulse = false});

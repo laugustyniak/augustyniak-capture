@@ -144,9 +144,9 @@ class _TextNoteSheetState extends State<TextNoteSheet> {
   }
 
   OutlineInputBorder _fieldBorder(Color color) => OutlineInputBorder(
-        borderRadius: BorderRadius.circular(12),
-        borderSide: BorderSide(color: color),
-      );
+    borderRadius: BorderRadius.circular(12),
+    borderSide: BorderSide(color: color),
+  );
 }
 
 /// Sheet footer button. Primary is the cyan fill, secondary the outline —
@@ -179,9 +179,7 @@ class _SheetButton extends StatelessWidget {
                 ? (enabled ? Console.cyan : Console.surfaceRaised)
                 : Colors.transparent,
             borderRadius: BorderRadius.circular(12),
-            border: primary
-                ? null
-                : Border.all(color: Console.borderStrong),
+            border: primary ? null : Border.all(color: Console.borderStrong),
           ),
           child: Text(
             label,

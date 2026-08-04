@@ -5,10 +5,14 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import '../../../app/ui_kit.dart';
+import '../../projects/domain/project.dart';
+import '../../projects/presentation/projects_controller.dart';
+import '../domain/capture_category.dart';
 import '../domain/recording.dart';
-import 'edit_sheet.dart';
+import '../domain/recording_tag.dart';
 import 'queue_metrics.dart';
 import 'recording_card.dart';
+import 'recording_editor.dart';
 import 'recordings_controller.dart';
 
 /// The five buckets from the design. They **partition** the queue: every item
@@ -20,9 +24,10 @@ enum RecordingFilter { all, queue, ready, failed, raw }
 /// and the capture list. Owns only view state; every mutation goes through
 /// [RecordingsController].
 class QueueTab extends StatefulWidget {
-  const QueueTab({super.key, required this.controller});
+  const QueueTab({super.key, required this.controller, this.projects});
 
   final RecordingsController controller;
+  final ProjectsController? projects;
 
   @override
   State<QueueTab> createState() => _QueueTabState();
@@ -31,7 +36,17 @@ class QueueTab extends StatefulWidget {
 class _QueueTabState extends State<QueueTab> {
   RecordingFilter selectedFilter = RecordingFilter.all;
   String searchQuery = '';
+  String? projectFilterId;
   final TextEditingController searchController = TextEditingController();
+
+  /// The row currently in edit mode, if any.
+  ///
+  /// Kept here rather than inside the row because the controller notifies on
+  /// every pipeline tick — a flag living in the card would survive that, but a
+  /// card scrolled out of the list would not, and the mode would silently end.
+  /// One id also enforces the rule that only one row is editable at a time,
+  /// which keeps "where is my keyboard focus" answerable.
+  String? editingId;
 
   @override
   void dispose() {
@@ -43,7 +58,13 @@ class _QueueTabState extends State<QueueTab> {
   Widget build(BuildContext context) {
     final RecordingsController controller = widget.controller;
     final List<Recording> all = controller.recordings;
-    final List<Recording> visible = _filter(all);
+    final List<Project> projects =
+        widget.projects?.projects ?? const <Project>[];
+    final String? effectiveProjectFilterId =
+        projects.any((Project project) => project.id == projectFilterId)
+        ? projectFilterId
+        : null;
+    final List<Recording> visible = _filter(all, effectiveProjectFilterId);
     final int reviewedCount = all
         .where((Recording item) => item.isProcessedByUser)
         .length;
@@ -87,6 +108,16 @@ class _QueueTabState extends State<QueueTab> {
                   ),
                 ),
                 const SizedBox(height: 12),
+                if (projects.isNotEmpty) ...<Widget>[
+                  _ProjectFilter(
+                    projects: projects,
+                    selectedId: effectiveProjectFilterId,
+                    onChanged: (String? value) {
+                      setState(() => projectFilterId = value);
+                    },
+                  ),
+                  const SizedBox(height: 12),
+                ],
                 _FilterRow(
                   selected: selectedFilter,
                   // Counted before the search is applied: the chips describe
@@ -118,27 +149,16 @@ class _QueueTabState extends State<QueueTab> {
                   ...visible.map(
                     (Recording recording) => Padding(
                       padding: const EdgeInsets.fromLTRB(4, 0, 4, 10),
-                      child: RecordingCard(
-                        recording: recording,
-                        isPlaying: controller.playingId == recording.id,
-                        // View-only: the enrichment stage has no persisted
-                        // status, so this comes off the controller's in-flight
-                        // set rather than off the item.
-                        isEnriching: controller.isEnriching(recording.id),
-                        onTogglePlay: () =>
-                            controller.togglePlayback(recording.id),
-                        onOpen: () => controller.openSource(recording.id),
-                        onRetry: () =>
-                            controller.retryTranscription(recording.id),
-                        onEdit: () => _openEditSheet(context, recording),
-                        onToggleProcessed: () async {
-                          // Fire-and-forget: the haptic is cosmetic and must
-                          // not gate a durable state write. Awaiting it means
-                          // the review flag waits on the platform answering —
-                          // which, on a host that never does, is forever.
-                          unawaited(HapticFeedback.selectionClick());
-                          await controller.toggleProcessed(recording.id);
-                        },
+                      // The row grows into the editor in place. Animating the
+                      // height is what keeps the rows below from jumping — the
+                      // edited item has to stay under the finger that opened it.
+                      child: AnimatedSize(
+                        duration: const Duration(milliseconds: 220),
+                        curve: Curves.easeOutCubic,
+                        alignment: Alignment.topCenter,
+                        child: recording.id == editingId
+                            ? _buildEditor(recording)
+                            : _buildCard(recording),
                       ),
                     ),
                   ),
@@ -150,9 +170,17 @@ class _QueueTabState extends State<QueueTab> {
     );
   }
 
-  List<Recording> _filter(List<Recording> recordings) {
+  List<Recording> _filter(
+    List<Recording> recordings,
+    String? effectiveProjectFilterId,
+  ) {
     final List<Recording> byStatus = recordings
-        .where((Recording item) => _matches(selectedFilter, item))
+        .where(
+          (Recording item) =>
+              _matches(selectedFilter, item) &&
+              (effectiveProjectFilterId == null ||
+                  item.projectId == effectiveProjectFilterId),
+        )
         .toList();
     final String query = searchQuery.trim().toLowerCase();
     if (query.isEmpty) {
@@ -162,7 +190,7 @@ class _QueueTabState extends State<QueueTab> {
       final String haystack = <String?>[
         item.transcript,
         item.title,
-        ...item.tags,
+        ...item.tagValues,
         item.filePath.split(Platform.pathSeparator).last,
         item.id,
       ].whereType<String>().join(' ').toLowerCase();
@@ -170,20 +198,125 @@ class _QueueTabState extends State<QueueTab> {
     }).toList();
   }
 
-  /// Inline editor for an item's title and processor-output text. Uses a bottom
-  /// sheet (like the note composer) — the app has no dialogs/snackbars.
-  Future<void> _openEditSheet(BuildContext context, Recording recording) async {
-    final EditResult? result = await showModalBottomSheet<EditResult>(
-      context: context,
-      isScrollControlled: true,
-      backgroundColor: Console.background,
-      builder: (BuildContext _) => EditSheet(recording: recording),
+  Widget _buildCard(Recording recording) {
+    final RecordingsController controller = widget.controller;
+    return RecordingCard(
+      recording: recording,
+      isPlaying: controller.playingId == recording.id,
+      // View-only: the enrichment stage has no persisted status, so this comes
+      // off the controller's in-flight set rather than off the item.
+      isEnriching: controller.isEnriching(recording.id),
+      projectName: _projectName(recording.projectId),
+      onTogglePlay: () => controller.togglePlayback(recording.id),
+      onOpen: () => controller.openSource(recording.id),
+      onRetry: () => controller.retryTranscription(recording.id),
+      onEdit: () => setState(() => editingId = recording.id),
+      onToggleProcessed: () async {
+        // Fire-and-forget: the haptic is cosmetic and must not gate a durable
+        // state write. Awaiting it means the review flag waits on the platform
+        // answering — which, on a host that never does, is forever.
+        unawaited(HapticFeedback.selectionClick());
+        await controller.toggleProcessed(recording.id);
+      },
     );
-    if (result == null) return; // cancelled
-    await widget.controller.setTitle(recording.id, result.title);
-    await widget.controller.editTranscript(recording.id, result.transcript);
-    await widget.controller.setCategory(recording.id, result.category);
-    await widget.controller.setTags(recording.id, result.tags);
+  }
+
+  /// The same row, in edit mode.
+  ///
+  /// Every callback is fire-and-forget on purpose: each one persists on its
+  /// own and the controller notifies when it lands, so awaiting here would only
+  /// hold a keystroke behind a disk write. The keyed subtree is what makes the
+  /// editor's own state (its text controllers, its dirty flags) belong to *this
+  /// item* — without it, editing one row and then another would inherit the
+  /// first row's fields.
+  Widget _buildEditor(Recording recording) {
+    final RecordingsController controller = widget.controller;
+    return RecordingEditor(
+      key: ValueKey<String>('editor-${recording.id}'),
+      recording: recording,
+      revisions: controller.revisionsFor(recording.id),
+      tagSuggestions: _tagSuggestions(recording),
+      projects: widget.projects?.projects ?? const <Project>[],
+      onTitleChanged: (String value) =>
+          controller.setTitle(recording.id, value),
+      onTextChanged: (String value) =>
+          controller.editTranscript(recording.id, value),
+      onCategoryChanged: (CaptureCategory? value) =>
+          controller.setCategory(recording.id, value),
+      onTagsChanged: (List<String> values) =>
+          controller.setTags(recording.id, values),
+      onProjectChanged: (String? value) =>
+          controller.setProject(recording.id, value),
+      onDone: () => setState(() => editingId = null),
+    );
+  }
+
+  /// The vocabulary already in use elsewhere, most-used first, excluding this
+  /// item's own tags. Offered as one-tap chips so tagging converges on a set of
+  /// words instead of accumulating near-duplicates.
+  List<String> _tagSuggestions(Recording current) {
+    final Map<String, int> uses = <String, int>{};
+    for (final Recording item in widget.controller.recordings) {
+      if (item.id == current.id) continue;
+      for (final RecordingTag tag in item.tags) {
+        uses[tag.value] = (uses[tag.value] ?? 0) + 1;
+      }
+    }
+    final List<String> values = uses.keys.toList()
+      ..sort((String a, String b) => uses[b]!.compareTo(uses[a]!));
+    return values;
+  }
+
+  String? _projectName(String? id) {
+    if (id == null) return null;
+    for (final Project project
+        in widget.projects?.projects ?? const <Project>[]) {
+      if (project.id == id) return project.name;
+    }
+    return 'Missing project';
+  }
+}
+
+class _ProjectFilter extends StatelessWidget {
+  const _ProjectFilter({
+    required this.projects,
+    required this.selectedId,
+    required this.onChanged,
+  });
+
+  final List<Project> projects;
+  final String? selectedId;
+  final ValueChanged<String?> onChanged;
+
+  @override
+  Widget build(BuildContext context) {
+    return DropdownButtonFormField<String?>(
+      // FormField owns its selected value internally. Recreate that state when
+      // the controlled selection or project vocabulary changes; otherwise a
+      // deleted project can remain as a dangling Dropdown value for one frame.
+      key: ValueKey<String>(
+        'project-filter:${selectedId ?? 'all'}:'
+        '${projects.map((Project project) => project.id).join(',')}',
+      ),
+      initialValue: selectedId,
+      dropdownColor: Console.surfaceRaised,
+      decoration: const InputDecoration(
+        prefixIcon: Icon(Icons.account_tree_outlined, size: 18),
+        labelText: 'Project',
+      ),
+      items: <DropdownMenuItem<String?>>[
+        const DropdownMenuItem<String?>(
+          value: null,
+          child: Text('All projects'),
+        ),
+        for (final Project project in projects)
+          DropdownMenuItem<String?>(
+            value: project.id,
+            child: Text(project.name),
+          ),
+      ],
+      onChanged: onChanged,
+    );
   }
 }
 
