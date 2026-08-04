@@ -35,18 +35,28 @@ class ModelsTab extends StatelessWidget {
           const SizedBox(height: 22),
           ..._section(context, ProfileKind.enrichment),
           const SizedBox(height: 14),
-          const ConsoleCard(
+          ConsoleCard(
             child: Row(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: <Widget>[
-                Icon(Icons.lock_outline, size: 16, color: Console.amber),
-                SizedBox(width: 10),
+                Icon(
+                  Icons.lock_outline,
+                  size: 16,
+                  color: controller.tokenEncryptionActive
+                      ? Console.cyan
+                      : Console.amber,
+                ),
+                const SizedBox(width: 10),
                 Expanded(
                   child: Text(
-                    'Tokens are stored as plaintext in the app documents '
-                    'directory (settings.json). Encryption is planned for a '
-                    'later phase.',
-                    style: TextStyle(
+                    controller.tokenEncryptionActive
+                        ? 'Tokens are encrypted at rest (AES-256-GCM). The '
+                            'key lives in your system keyring, never in '
+                            'settings.json.'
+                        : 'Tokens are stored as plaintext in the app '
+                            'documents directory (settings.json) — system '
+                            'keyring unavailable.',
+                    style: const TextStyle(
                       color: Console.mutedSoft,
                       fontSize: 11,
                       height: 1.45,
