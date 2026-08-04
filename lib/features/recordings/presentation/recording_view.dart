@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 
 import '../../../app/ui_kit.dart';
 import '../../settings/domain/audio_config.dart';
+import '../../transcription/domain/transcription_limits.dart';
 import 'recordings_controller.dart';
 
 /// The capture screen, shown in place of the Queue while the mic is live.
@@ -152,10 +153,94 @@ class _ElapsedReadout extends StatelessWidget {
               ].join(' · '),
               style: ConsoleText.cardMeta.copyWith(fontWeight: FontWeight.w500),
             ),
+            if (controller.recordingLimit != null) ...<Widget>[
+              const SizedBox(height: 16),
+              _LimitReadout(
+                limit: controller.recordingLimit!,
+                elapsed: elapsed,
+              ),
+            ],
           ],
         );
       },
     );
+  }
+}
+
+/// The remaining time before the capture saves itself, and the reason there is
+/// a ceiling at all.
+///
+/// Shown only where one applies — that is, where the audio cannot be split
+/// before it is sent, so the whole file has to survive a single request. On a
+/// platform that splits, this is absent rather than reading "unlimited": a line
+/// that never changes is a line people stop seeing.
+///
+/// The point of drawing it is that the automatic save must never be a surprise.
+/// The failure it replaces was worse than an interrupted recording — it was a
+/// twenty-minute dictation coming back as nine minutes of text, with nothing
+/// anywhere saying so.
+class _LimitReadout extends StatelessWidget {
+  const _LimitReadout({required this.limit, required this.elapsed});
+
+  final TranscriptionCeiling limit;
+  final Duration elapsed;
+
+  /// When the pill turns amber. A minute is enough to finish the sentence and
+  /// stop deliberately, which is the only reason to show a countdown at all.
+  static const Duration _warnAt = Duration(minutes: 1);
+
+  @override
+  Widget build(BuildContext context) {
+    final Duration left = limit.limit - elapsed;
+    final Duration remaining = left.isNegative ? Duration.zero : left;
+    final bool near = remaining <= _warnAt;
+    final Color color = near ? Console.amber : Console.mutedSoft;
+
+    return Column(
+      children: <Widget>[
+        Container(
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+          decoration: BoxDecoration(
+            color: color.withValues(alpha: near ? .12 : .06),
+            borderRadius: BorderRadius.circular(999),
+            border: Border.all(color: color.withValues(alpha: near ? .45 : .25)),
+          ),
+          child: Text(
+            '${_format(remaining)} LEFT · MAX ${_format(limit.limit)}',
+            style: ConsoleText.pill.copyWith(
+              fontSize: 11,
+              fontWeight: FontWeight.w700,
+              color: color,
+            ),
+          ),
+        ),
+        const SizedBox(height: 8),
+        Text(
+          'saves automatically at the limit — ${limit.reason}',
+          textAlign: TextAlign.center,
+          style: ConsoleText.micro,
+        ),
+      ],
+    );
+  }
+
+  /// `08:00`, `52:00`, `1:44:00`.
+  ///
+  /// Not [formatDuration]: that one folds hours away with `remainder(60)`,
+  /// which is right for a running capture clock and wrong for a ceiling — a low
+  /// bitrate puts the 25 MB limit past an hour, and `1:44:00` would have been
+  /// drawn as `44:00`.
+  static String _format(Duration duration) {
+    final String minutes = duration.inMinutes
+        .remainder(60)
+        .toString()
+        .padLeft(2, '0');
+    final String seconds = duration.inSeconds
+        .remainder(60)
+        .toString()
+        .padLeft(2, '0');
+    if (duration.inHours > 0) return '${duration.inHours}:$minutes:$seconds';
+    return '$minutes:$seconds';
   }
 }
 

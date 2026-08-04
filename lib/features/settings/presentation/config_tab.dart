@@ -6,6 +6,7 @@ import '../../shortcuts/domain/shortcut_action.dart';
 import '../../shortcuts/presentation/shortcuts_section.dart';
 import '../domain/audio_config.dart';
 import '../domain/provider_profile.dart';
+import '../domain/token_cipher.dart';
 import 'enrichment_context_section.dart';
 import 'settings_controller.dart';
 
@@ -182,12 +183,11 @@ class ConfigTab extends StatelessWidget {
                 InfoRow(label: 'LANGUAGE', value: active?.language ?? 'auto'),
                 InfoRow(
                   label: 'TOKEN',
-                  value: active?.bearerToken == null
-                      ? 'none'
-                      : '•••• set (plaintext on disk)',
-                  valueColor: active?.bearerToken == null
-                      ? Console.mutedSoft
-                      : Console.amber,
+                  value: _tokenStatus(active, controller.tokenEncryptionActive),
+                  valueColor: _tokenColor(
+                    active,
+                    controller.tokenEncryptionActive,
+                  ),
                 ),
                 const SizedBox(height: 10),
                 Align(
@@ -254,6 +254,22 @@ class ConfigTab extends StatelessWidget {
   /// AAC bitrate is constant, so hourly size follows straight from it.
   double _megabytesPerHour(AudioConfig audio) =>
       audio.bitRate * 3600 / 8 / 1024 / 1024;
+}
+
+String _tokenStatus(ProviderProfile? active, bool encrypted) {
+  final String? token = active?.bearerToken;
+  if (token == null) return 'none';
+  if (TokenCipher.isSealed(token)) {
+    return '•••• unreadable — keyring unavailable';
+  }
+  return encrypted ? '•••• encrypted at rest' : '•••• set (plaintext on disk)';
+}
+
+Color _tokenColor(ProviderProfile? active, bool encrypted) {
+  final String? token = active?.bearerToken;
+  if (token == null) return Console.mutedSoft;
+  if (TokenCipher.isSealed(token)) return Console.amber;
+  return encrypted ? Console.text : Console.amber;
 }
 
 class _ChoiceRow<T> extends StatelessWidget {

@@ -16,6 +16,9 @@ import '../../processing/data/video_poster_extractor.dart';
 import '../../projects/data/ghostty_zellij_agent_session_launcher.dart';
 import '../../projects/data/projects_repository.dart';
 import '../../projects/domain/project.dart';
+import '../../settings/data/aes_gcm_token_cipher.dart';
+import '../../settings/data/secure_storage_master_key_store.dart';
+import '../../settings/data/settings_repository.dart';
 import '../../projects/presentation/projects_controller.dart';
 import '../../projects/presentation/projects_tab.dart';
 import '../../settings/presentation/config_tab.dart';
@@ -28,7 +31,10 @@ import '../../shortcuts/domain/hotkey_registrar.dart';
 import '../../shortcuts/domain/shortcut_action.dart';
 import '../../shortcuts/domain/window_presenter.dart';
 import '../../shortcuts/presentation/shortcuts_coordinator.dart';
+import '../../transcription/data/audio_splitter.dart';
+import '../../transcription/data/chunked_transcription_service.dart';
 import '../../transcription/data/transcription_service.dart';
+import '../../transcription/domain/transcription_limits.dart';
 import '../data/recordings_repository.dart';
 import '../data/system_clipboard_sink.dart';
 import '../data/revisions_repository.dart';
@@ -74,7 +80,14 @@ class _RecordingsPageState extends State<RecordingsPage> {
   @override
   void initState() {
     super.initState();
-    settings = SettingsController();
+    settings = SettingsController(
+      repository: SettingsRepository(
+        // Real keyring-backed cipher on every platform; ensureReady degrades
+        // to the plaintext behaviour when no keyring answers (headless Linux,
+        // locked Secret Service, test bindings).
+        cipher: AesGcmTokenCipher(keyStore: const SecureStorageMasterKeyStore()),
+      ),
+    );
     logs = LogStore(archive: FileLogArchive());
     projects = ProjectsController(
       repository: ProjectsRepository(),
@@ -177,6 +190,23 @@ class _RecordingsPageState extends State<RecordingsPage> {
     return const UnavailableVideoPosterExtractor();
   }
 
+  /// Desktop cuts long audio into per-request pieces with the system `ffmpeg`
+  /// before sending, so no recording length is unsafe there. Mobile has no
+  /// ffmpeg yet, so the whole file has to survive one request — which is
+  /// precisely why the length cap in [_applySettings] is set only there.
+  ///
+  /// Built once and held, because two questions read this object — what wraps
+  /// the transcription service, and whether recordings need a cap — and they
+  /// must not be able to disagree.
+  final AudioSplitter _audioSplitter = _buildAudioSplitter();
+
+  static AudioSplitter _buildAudioSplitter() {
+    if (_isDesktop) {
+      return const FfmpegAudioSplitter();
+    }
+    return const UnavailableAudioSplitter();
+  }
+
   /// Desktop is where the system `tesseract`/`ffmpeg` binaries and OS-wide
   /// hotkeys exist. Mobile gets the disabled/no-op seams instead, so those
   /// features cost nothing there and the Config tab hides the shortcuts section.
@@ -220,7 +250,26 @@ class _RecordingsPageState extends State<RecordingsPage> {
   /// Push provider + audio changes into the recordings controller. Only affects
   /// work started after the swap.
   void _applySettings() {
-    controller.transcriptionService = settings.transcriptionService;
+    // Wrapped, not replaced: the profile still builds the service that talks to
+    // the endpoint, and this only decides how much audio each request carries.
+    // Where nothing can be split the wrapper is a pass-through, so mobile keeps
+    // exactly the request it made before.
+    controller.transcriptionService = ChunkedTranscriptionService(
+      settings.transcriptionService,
+      _audioSplitter,
+      logSink: logs,
+    );
+    // A cap only where the whole file must fit one request. Derived from the
+    // active profile's model and the audio bitrate rather than fixed, because
+    // the binding ceiling moves with both: `gpt-4o-transcribe` truncates at
+    // roughly eight minutes, while whisper-1 only has 25 MB to spend — nearly an
+    // hour at 64 kbps, half that at 128.
+    controller.recordingLimit = _audioSplitter.isAvailable
+        ? null
+        : TranscriptionLimits.forRequest(
+            model: settings.activeProfile?.model,
+            audio: settings.audio,
+          );
     controller.enrichmentService = settings.enrichmentService;
     // OCR rides the enrichment profile (vision-capable chat endpoint). With no
     // profile active it falls back to the platform default — tesseract on

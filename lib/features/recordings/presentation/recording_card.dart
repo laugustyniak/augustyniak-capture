@@ -188,7 +188,7 @@ class RecordingCard extends StatelessWidget {
               spacing: 6,
               runSpacing: 5,
               children: <Widget>[
-                for (final String tag in recording.tags) _TagLabel(label: tag),
+                for (final String tag in recording.tags) _TagLabel(tag: tag),
               ],
             ),
           ],
@@ -430,9 +430,9 @@ class _ReviewToggle extends StatelessWidget {
 /// same way. Two colours here used to mean two owners, which made the reader
 /// answer "who typed this?" before they could read the word.
 class _TagLabel extends StatelessWidget {
-  const _TagLabel({required this.label});
+  const _TagLabel({required this.tag});
 
-  final String label;
+  final String tag;
 
   @override
   Widget build(BuildContext context) {
@@ -441,10 +441,10 @@ class _TagLabel extends StatelessWidget {
       decoration: BoxDecoration(
         color: Console.cyan.withValues(alpha: .07),
         borderRadius: BorderRadius.circular(999),
-        border: Border.all(color: Console.cyan.withValues(alpha: .2)),
+        border: Border.all(color: Console.cyan.withValues(alpha: .22)),
       ),
       child: Text(
-        '#$label',
+        '#$tag',
         style: ConsoleText.micro.copyWith(color: Console.cyan),
       ),
     );

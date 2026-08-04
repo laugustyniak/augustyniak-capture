@@ -51,6 +51,10 @@ class SettingsController extends ChangeNotifier {
   String? get enrichmentInstructions => _settings.enrichmentInstructions;
   String? get error => _error;
 
+  /// Whether tokens written to disk are actually encrypted. False on the
+  /// plaintext fallback (no keyring) so the Models/Config tabs can say so.
+  bool get tokenEncryptionActive => _repository.encryptsTokens;
+
   /// The service the recordings controller should use right now. No active
   /// profile means transcription reports "not configured" — same as a fresh
   /// install with no `--dart-define`.

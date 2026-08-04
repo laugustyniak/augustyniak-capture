@@ -32,3 +32,6 @@ android/key.properties
 
 # Superpowers brainstorm tooling state
 .superpowers/
+
+# Worktrees created by Claude Code sessions — each is its own git repo.
+.claude/worktrees/
