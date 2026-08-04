@@ -101,39 +101,32 @@ class _QueueTabState extends State<QueueTab> {
                 const SizedBox(height: 10),
                 Padding(
                   padding: const EdgeInsets.symmetric(horizontal: 4),
-                  child: _SearchField(
-                    controller: searchController,
-                    value: searchQuery,
-                    onChanged: (String value) {
+                  child: _QueueControls(
+                    searchController: searchController,
+                    searchQuery: searchQuery,
+                    onSearchChanged: (String value) {
                       setState(() => searchQuery = value);
                     },
-                  ),
-                ),
-                const SizedBox(height: 12),
-                if (projects.isNotEmpty) ...<Widget>[
-                  _ProjectFilter(
                     projects: projects,
-                    selectedId: effectiveProjectFilterId,
-                    onChanged: (String? value) {
+                    selectedProjectId: effectiveProjectFilterId,
+                    onProjectChanged: (String? value) {
                       setState(() => projectFilterId = value);
                     },
+                    selectedFilter: selectedFilter,
+                    // Counted before the search is applied: the chips describe
+                    // the queue, not the current query — otherwise every count
+                    // would collapse to whatever the user last typed.
+                    counts: <RecordingFilter, int>{
+                      for (final RecordingFilter filter
+                          in RecordingFilter.values)
+                        filter: all
+                            .where((Recording item) => _matches(filter, item))
+                            .length,
+                    },
+                    onFilterSelected: (RecordingFilter value) {
+                      setState(() => selectedFilter = value);
+                    },
                   ),
-                  const SizedBox(height: 12),
-                ],
-                _FilterRow(
-                  selected: selectedFilter,
-                  // Counted before the search is applied: the chips describe
-                  // the queue, not the current query — otherwise every count
-                  // would collapse to whatever the user last typed.
-                  counts: <RecordingFilter, int>{
-                    for (final RecordingFilter filter in RecordingFilter.values)
-                      filter: all
-                          .where((Recording item) => _matches(filter, item))
-                          .length,
-                  },
-                  onSelected: (RecordingFilter value) {
-                    setState(() => selectedFilter = value);
-                  },
                 ),
                 const SizedBox(height: 14),
                 if (visible.isEmpty)
@@ -286,16 +279,126 @@ class _QueueTabState extends State<QueueTab> {
   }
 }
 
+/// Search, project and status filters — one strip, laid out by how much room
+/// the queue actually has.
+///
+/// Wide enough (a desktop window) and the three sit on a single line, which is
+/// what keeps the first card near the top of the screen instead of three rows
+/// down. Narrower and they stack the way they always did: below
+/// [_singleLineWidth] the project selector and the five chips cannot both keep
+/// a legible search box beside them, and a search field squeezed to a few
+/// characters is worse than a second row.
+class _QueueControls extends StatelessWidget {
+  const _QueueControls({
+    required this.searchController,
+    required this.searchQuery,
+    required this.onSearchChanged,
+    required this.projects,
+    required this.selectedProjectId,
+    required this.onProjectChanged,
+    required this.selectedFilter,
+    required this.counts,
+    required this.onFilterSelected,
+  });
+
+  /// Below this the strip stacks. Derived from what the row needs rather than
+  /// from a device class: the project selector is fixed at
+  /// [_projectFilterWidth], the chips take up to half the width, and what is
+  /// left has to stay wide enough to type a query into.
+  static const double _singleLineWidth = 860;
+  static const double _projectFilterWidth = 210;
+
+  final TextEditingController searchController;
+  final String searchQuery;
+  final ValueChanged<String> onSearchChanged;
+  final List<Project> projects;
+  final String? selectedProjectId;
+  final ValueChanged<String?> onProjectChanged;
+  final RecordingFilter selectedFilter;
+  final Map<RecordingFilter, int> counts;
+  final ValueChanged<RecordingFilter> onFilterSelected;
+
+  @override
+  Widget build(BuildContext context) {
+    return LayoutBuilder(
+      builder: (BuildContext context, BoxConstraints constraints) {
+        final bool singleLine = constraints.maxWidth >= _singleLineWidth;
+        final Widget search = _SearchField(
+          controller: searchController,
+          value: searchQuery,
+          onChanged: onSearchChanged,
+        );
+        final Widget? projectFilter = projects.isEmpty
+            ? null
+            : _ProjectFilter(
+                projects: projects,
+                selectedId: selectedProjectId,
+                onChanged: onProjectChanged,
+                compact: singleLine,
+              );
+        final Widget filters = _FilterRow(
+          selected: selectedFilter,
+          counts: counts,
+          onSelected: onFilterSelected,
+        );
+
+        if (!singleLine) {
+          return Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: <Widget>[
+              search,
+              if (projectFilter != null) ...<Widget>[
+                const SizedBox(height: 12),
+                projectFilter,
+              ],
+              const SizedBox(height: 12),
+              filters,
+            ],
+          );
+        }
+
+        return Row(
+          children: <Widget>[
+            if (projectFilter != null) ...<Widget>[
+              SizedBox(width: _projectFilterWidth, child: projectFilter),
+              const SizedBox(width: 10),
+            ],
+            // The only flex child: the chips and the selector claim their
+            // natural width first, and the search box takes whatever is left.
+            Expanded(child: search),
+            const SizedBox(width: 10),
+            ConstrainedBox(
+              // A bounded box rather than a flex one, so the chips shrink to a
+              // scroller only once their labels genuinely outgrow half the
+              // strip — a longer count (`READY 1204`) must not start stealing
+              // room from the query field.
+              constraints: BoxConstraints(maxWidth: constraints.maxWidth / 2),
+              child: filters,
+            ),
+          ],
+        );
+      },
+    );
+  }
+}
+
 class _ProjectFilter extends StatelessWidget {
   const _ProjectFilter({
     required this.projects,
     required this.selectedId,
     required this.onChanged,
+    this.compact = false,
   });
 
   final List<Project> projects;
   final String? selectedId;
   final ValueChanged<String?> onChanged;
+
+  /// Drops the floating label and adopts the search box's filled outline, so
+  /// the two read as one control beside each other on the single-line strip.
+  /// The stacked layout keeps the label — there it has a row to itself and
+  /// nothing else names the field.
+  final bool compact;
 
   @override
   Widget build(BuildContext context) {
@@ -309,10 +412,32 @@ class _ProjectFilter extends StatelessWidget {
       ),
       initialValue: selectedId,
       dropdownColor: Console.surfaceRaised,
-      decoration: const InputDecoration(
-        prefixIcon: Icon(Icons.account_tree_outlined, size: 18),
-        labelText: 'Project',
-      ),
+      isDense: compact,
+      // A project name is free text and the selector has a fixed width on the
+      // single-line strip, so the label has to be allowed to ellipsize. Without
+      // this the dropdown's own row overflows — and it overflows while laying
+      // out the *menu* items offstage, so the visible control looks correct and
+      // only the debug stripes say otherwise.
+      isExpanded: true,
+      // Matched to the search box's 18 px prefix icon: the default 24 would
+      // make the dropdown the taller of the two and break the line.
+      iconSize: compact ? 18 : 24,
+      style: compact
+          ? const TextStyle(color: Console.text, fontSize: 13)
+          : null,
+      decoration: compact
+          ? _fieldDecoration.copyWith(
+              hintText: 'All projects',
+              prefixIcon: const Icon(
+                Icons.account_tree_outlined,
+                color: Console.dim,
+                size: 18,
+              ),
+            )
+          : const InputDecoration(
+              prefixIcon: Icon(Icons.account_tree_outlined, size: 18),
+              labelText: 'Project',
+            ),
       items: <DropdownMenuItem<String?>>[
         const DropdownMenuItem<String?>(
           value: null,
@@ -342,6 +467,31 @@ bool _matches(RecordingFilter filter, Recording item) => switch (filter) {
   RecordingFilter.raw => item.status == RecordingStatus.saved,
 };
 
+const OutlineInputBorder _fieldBorder = OutlineInputBorder(
+  borderRadius: BorderRadius.all(Radius.circular(10)),
+  borderSide: BorderSide(color: Console.border),
+);
+
+/// The strip's shared field shape. Search and the compact project selector are
+/// different widgets on one line, so the decoration has to come from a single
+/// place — two hand-copied `OutlineInputBorder`s is exactly how the tabs drifted
+/// before `ConsoleField` existed.
+const InputDecoration _fieldDecoration = InputDecoration(
+  isDense: true,
+  contentPadding: EdgeInsets.symmetric(vertical: 13),
+  hintStyle: TextStyle(color: Console.dim, fontSize: 13),
+  prefixIconConstraints: BoxConstraints(minWidth: 42),
+  filled: true,
+  fillColor: Console.surface,
+  border: _fieldBorder,
+  enabledBorder: _fieldBorder,
+  disabledBorder: _fieldBorder,
+  focusedBorder: OutlineInputBorder(
+    borderRadius: BorderRadius.all(Radius.circular(10)),
+    borderSide: BorderSide(color: Console.borderStrong),
+  ),
+);
+
 class _SearchField extends StatelessWidget {
   const _SearchField({
     required this.controller,
@@ -355,40 +505,29 @@ class _SearchField extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    const OutlineInputBorder border = OutlineInputBorder(
-      borderRadius: BorderRadius.all(Radius.circular(10)),
-      borderSide: BorderSide(color: Console.border),
-    );
     return TextField(
       controller: controller,
       onChanged: onChanged,
       style: const TextStyle(color: Console.text, fontSize: 13),
-      decoration: InputDecoration(
-        isDense: true,
-        contentPadding: const EdgeInsets.symmetric(vertical: 13),
+      decoration: _fieldDecoration.copyWith(
         hintText: 'Search captures',
-        hintStyle: const TextStyle(color: Console.dimText, fontSize: 13),
         prefixIcon: const Icon(Icons.search, color: Console.dimText, size: 18),
-        prefixIconConstraints: const BoxConstraints(minWidth: 42),
         suffixIcon: value.isEmpty
             ? null
             : IconButton(
                 tooltip: 'Clear search',
+                // Constrained so the clear button cannot make the search box
+                // taller than the controls beside it on the single-line strip:
+                // an IconButton's default 48 px minimum would do exactly that,
+                // and the row would jump the moment the user types.
+                constraints: const BoxConstraints(minWidth: 38, minHeight: 38),
+                padding: EdgeInsets.zero,
                 icon: const Icon(Icons.close, color: Console.dimText, size: 18),
                 onPressed: () {
                   controller.clear();
                   onChanged('');
                 },
               ),
-        filled: true,
-        fillColor: Console.surface,
-        border: border,
-        enabledBorder: border,
-        disabledBorder: border,
-        focusedBorder: const OutlineInputBorder(
-          borderRadius: BorderRadius.all(Radius.circular(10)),
-          borderSide: BorderSide(color: Console.borderStrong),
-        ),
       ),
     );
   }
@@ -409,7 +548,6 @@ class _FilterRow extends StatelessWidget {
   Widget build(BuildContext context) {
     return SingleChildScrollView(
       scrollDirection: Axis.horizontal,
-      padding: const EdgeInsets.symmetric(horizontal: 4),
       child: Row(
         children: RecordingFilter.values.map((RecordingFilter item) {
           return Padding(
