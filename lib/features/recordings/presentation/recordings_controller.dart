@@ -551,6 +551,133 @@ class RecordingsController extends ChangeNotifier {
     }
   }
 
+  /// Abandon the recording in progress: stop the recorder and delete the file
+  /// it was writing, without ever indexing it.
+  ///
+  /// The counterpart to [stopRecording], and the *only* capture path that ends
+  /// with no item. It does not break the persist-before-process invariant, and
+  /// the reason is the ordering that invariant describes: nothing has been
+  /// written to `recordings.json` yet, so there is no row to contradict and no
+  /// index to rewrite. The guarantee this app makes is about captures it has
+  /// accepted — a capture the user cancels before it is accepted was never one.
+  ///
+  /// Deleting the partial `.m4a` is the point rather than a tidy-up: leaving it
+  /// on disk would let [recoverOrphans] adopt it on the next launch, which is
+  /// exactly the take the user just said they did not want.
+  Future<void> discardRecording() async {
+    if (!_isRecording || _isBusy) return;
+    _isBusy = true;
+    notifyListeners();
+
+    final String? id = _activeId;
+    try {
+      final String? stoppedPath = await _recorder.stop();
+      _timer?.cancel();
+      unawaited(_amplitudeSub?.cancel());
+      _amplitudeSub = null;
+      _levelTicker.value = 0;
+      _stopwatch.stop();
+      _isRecording = false;
+
+      final String? path = stoppedPath ?? _activeFilePath;
+      if (path != null) {
+        final File file = File(path);
+        if (await file.exists()) await file.delete();
+      }
+      _logSink.log(
+        'Recording discarded before it was indexed — nothing was persisted.',
+        level: LogLevel.warn,
+        recordingId: id,
+      );
+    } catch (exception) {
+      // The recording is gone either way; what can still fail here is the
+      // delete, which leaves a file the orphan sweep would re-adopt. Say so.
+      _error = exception.toString();
+      _logSink.log(
+        'Failed to discard recording: $exception',
+        level: LogLevel.error,
+        recordingId: id,
+      );
+    } finally {
+      _isRecording = false;
+      _isBusy = false;
+      _activeFilePath = null;
+      _activeId = null;
+      notifyListeners();
+    }
+  }
+
+  /// Remove a capture for good: its source file, its poster, and its index row.
+  ///
+  /// The one operation in this app that destroys a persisted capture, so the
+  /// order is the reverse of the capture pipeline's and is load-bearing:
+  /// **files first, index second.** Dropping the row first and then failing to
+  /// delete the file would leave a source with no index entry — which is
+  /// precisely what [recoverOrphans] exists to re-adopt, so the item would walk
+  /// back into the queue on the next launch and the delete would look broken.
+  /// Failing the other way round leaves a row pointing at a file that is gone:
+  /// visible, honest, and deletable again.
+  ///
+  /// Refused outright while the index is unreadable, for the same reason every
+  /// other write is: `saveAll` rewrites the whole file, and a delete is the one
+  /// write that is *supposed* to lose rows, so the shrink guard would not catch
+  /// it either.
+  Future<void> deleteRecording(String id) async {
+    if (_indexUnreadable) {
+      _error =
+          'Deletion is disabled — the recordings index could not be read, so '
+          'the rest of the queue cannot be rewritten safely.';
+      _logSink.log(_error!, level: LogLevel.error, recordingId: id);
+      notifyListeners();
+      return;
+    }
+
+    final int index = _recordings.indexWhere((Recording item) => item.id == id);
+    if (index < 0) return;
+    final Recording item = _recordings[index];
+
+    // Anything still pointing at this item has to let go first. Queued work is
+    // dropped here; a job already *running* is left alone deliberately — the
+    // drain re-reads the list at every step and simply finds nothing, and
+    // `_update` no-ops on an id that is gone.
+    _processingQueue.remove(id);
+    if (_playingId == id) {
+      try {
+        await _player.stop();
+      } catch (_) {
+        // A player that will not stop must not keep a capture undeletable.
+      }
+      _playingId = null;
+    }
+
+    try {
+      await _repository.deleteArtifacts(item);
+    } catch (exception) {
+      // Index untouched on purpose: the row is the only thing that still knows
+      // where the file is, so it stays until the file is actually gone.
+      _error = 'Could not delete the source file: $exception';
+      _logSink.log(_error!, level: LogLevel.error, recordingId: id);
+      notifyListeners();
+      return;
+    }
+
+    _recordings = _recordings
+        .where((Recording current) => current.id != id)
+        .toList();
+    // The change history is append-only by design, so the rows on disk stay —
+    // dropping the in-memory entry only stops a later capture that happens to
+    // reuse the id from inheriting them, which `uuid.v4()` makes theoretical.
+    _revisions.remove(id);
+    await _persistAll(expectShrink: true);
+    _logSink.log(
+      'Capture deleted · ${item.type.name} · source and index row '
+      'removed.',
+      level: LogLevel.warn,
+      recordingId: id,
+    );
+    notifyListeners();
+  }
+
   /// Save a typed text note. Follows the exact ordering of [stopRecording]:
   /// write the `.txt` source, verify it exists with length > 0, build the item
   /// with status `saved`, persist the index, and only then process it. The
@@ -871,9 +998,14 @@ class RecordingsController extends ChangeNotifier {
       );
       _logSink.log('Processing started.', recordingId: id);
 
-      final Recording recording = _recordings.firstWhere(
+      // Re-read rather than trust the id: the item can be deleted in the await
+      // above, and `firstWhere` would then throw out of a loop that runs
+      // unawaited — an unhandled async error with the queue left mid-flight.
+      final int index = _recordings.indexWhere(
         (Recording item) => item.id == id,
       );
+      if (index < 0) return;
+      final Recording recording = _recordings[index];
       // Pin the processor for this job: a runtime swap (Models tab) during the
       // await gaps above must not redirect a job that already started.
       final Processor processor = _registry.forType(recording.type);
@@ -1213,7 +1345,12 @@ class RecordingsController extends ChangeNotifier {
     // the transform. Every mutation in this class funnels through here, which
     // is what makes the history impossible to bypass by adding a new setter.
     final int index = _recordings.indexWhere((Recording item) => item.id == id);
-    final Recording? before = index < 0 ? null : _recordings[index];
+    // Updating an id that is no longer in the list is a no-op, not a write. The
+    // case is real: a job can be deleted while it is running, and persisting an
+    // unchanged list here would cost a disk write per pipeline step of an item
+    // nobody is waiting for.
+    if (index < 0) return;
+    final Recording before = _recordings[index];
 
     _recordings = _recordings
         .map((Recording item) => item.id == id ? transform(item) : item)
@@ -1228,9 +1365,7 @@ class RecordingsController extends ChangeNotifier {
     // change that never reached `recordings.json` would describe a state no
     // file ever held. Recording it here means the history can only ever lag the
     // index, never lead it.
-    if (before != null) {
-      await _recordRevisions(before, _recordings[index], source);
-    }
+    await _recordRevisions(before, _recordings[index], source);
     // Notifying does not. `_processOne` awaits a processor, so dispose can land
     // inside that gap; a disposed ChangeNotifier throws from notifyListeners,
     // and the drain runs unawaited, so the error would surface as an unhandled
@@ -1242,7 +1377,11 @@ class RecordingsController extends ChangeNotifier {
   /// a single shared `.tmp` file, so two concurrent calls would corrupt it — and
   /// with processing now off the `_isBusy` lock, a capture/retry save can race a
   /// drain save. Wait for any in-flight write, then persist the latest state.
-  Future<void> _persistAll() async {
+  ///
+  /// [expectShrink] announces a deliberate deletion to the repository's
+  /// shrinking-index guard. Set *after* the wait below, so an older, longer
+  /// list finishing its write cannot reset the expectation we just declared.
+  Future<void> _persistAll({bool expectShrink = false}) async {
     // The one place a refusal is worth more than a write. Every mutation in
     // this class funnels through here, so this single guard is what makes the
     // "unreadable index is never overwritten" promise unbypassable.
@@ -1257,6 +1396,7 @@ class RecordingsController extends ChangeNotifier {
     while (_saveInFlight != null) {
       await _saveInFlight;
     }
+    if (expectShrink) _repository.expectRowCount(_recordings.length);
     final Future<void> mine = _repository.saveAll(_recordings);
     _saveInFlight = mine;
     try {

@@ -55,6 +55,50 @@ class RecordingsRepository {
   /// save, so a repository that has never seen the index never guesses.
   int? _knownCount;
 
+  /// Tell the guard above that the *next* save is meant to hold [count] rows.
+  ///
+  /// The one legitimate way an index shrinks is a deliberate delete, and the
+  /// caller knows that before it writes. Without this every deletion would drop
+  /// a `recordings.shrank-<ts>.json` beside the index — a backup of a state the
+  /// user asked to be rid of, which turns the guard into litter and buries the
+  /// one copy that would ever matter.
+  ///
+  /// Deliberately a separate call rather than a parameter on [saveAll]: the test
+  /// suites subclass this repository and override `saveAll` with the current
+  /// signature, and a fake that silently stops matching the base method is a
+  /// worse failure than an extra line at the one call site that needs it.
+  void expectRowCount(int count) => _knownCount = count;
+
+  /// Remove an item's files: the source artifact and, for a video, its poster.
+  ///
+  /// The only method in this class that destroys anything, and the counterpart
+  /// to the rule every [Processor] obeys — a processor reads the source and
+  /// never writes it, so a file leaving disk is always a user's decision and
+  /// never a pipeline's. Absent files are not an error: an item whose source was
+  /// already removed by hand must still be deletable from the queue.
+  ///
+  /// The conventional poster path is swept alongside the recorded one because
+  /// `thumbPath` is only ever a *claim* that a frame was written: the extractor
+  /// writes the file before the index learns about it, so a kill in that window
+  /// leaves a `<id>.thumb.jpg` no row points at. [findOrphans] skips posters by
+  /// design, so nothing else would ever notice it again.
+  ///
+  /// The conventional path is derived from the source's own directory rather
+  /// than from [recordingsDirectory], which would create the folder as a side
+  /// effect of a deletion and would reach past whatever directory the item
+  /// actually lives in.
+  Future<void> deleteArtifacts(Recording recording) async {
+    for (final String? path in <String?>[
+      recording.filePath,
+      recording.thumbPath,
+      p.join(p.dirname(recording.filePath), '${recording.id}.thumb.jpg'),
+    ]) {
+      if (path == null || path.isEmpty) continue;
+      final File file = File(path);
+      if (await file.exists()) await file.delete();
+    }
+  }
+
   Future<Directory> recordingsDirectory() async {
     final Directory appDirectory = await getApplicationDocumentsDirectory();
     final Directory directory = Directory(
@@ -148,10 +192,12 @@ class RecordingsRepository {
   Future<void> saveAll(List<Recording> recordings) async {
     final File index = await _indexFile();
 
-    // No path in this app deletes an item, so an index that is about to lose
-    // rows is an anomaly rather than a user action — and it is precisely the
-    // moment history would be destroyed. Cheap because it never fires in normal
-    // use: one copy at the exact instant something is going wrong.
+    // An index about to lose rows is an anomaly unless someone announced it:
+    // the single deliberate path (`deleteRecording`) calls [expectRowCount]
+    // first, so anything still reaching this branch is a shrink nobody asked
+    // for — and that is precisely the moment history would be destroyed. Cheap
+    // because it never fires in normal use: one copy at the exact instant
+    // something is going wrong.
     final int? previous = _knownCount;
     if (previous != null &&
         recordings.length < previous &&
