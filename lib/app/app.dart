@@ -57,7 +57,7 @@ class AugustyniakCaptureApp extends StatelessWidget {
             (Set<WidgetState> states) => ConsoleText.navLabel.copyWith(
               color: states.contains(WidgetState.selected)
                   ? Console.cyan
-                  : Console.dim,
+                  : Console.dimText,
             ),
           ),
           iconTheme: WidgetStateProperty.resolveWith<IconThemeData>(
@@ -65,7 +65,7 @@ class AugustyniakCaptureApp extends StatelessWidget {
               size: 20,
               color: states.contains(WidgetState.selected)
                   ? Console.cyan
-                  : Console.dim,
+                  : Console.dimText,
             ),
           ),
         ),

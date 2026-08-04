@@ -627,6 +627,10 @@ class _ProfileEditorSheetState extends State<_ProfileEditorSheet> {
                 hint: _matchedPreset?.tokenHint ?? 'Bearer token (optional)',
                 obscure: _obscureToken,
                 suffix: IconButton(
+                  // The only control that decides whether a secret is on
+                  // screen, and it was the one button in the app with no label
+                  // of any kind — a screen reader announced a bare "button".
+                  tooltip: _obscureToken ? 'Show token' : 'Hide token',
                   icon: Icon(
                     _obscureToken
                         ? Icons.visibility_outlined

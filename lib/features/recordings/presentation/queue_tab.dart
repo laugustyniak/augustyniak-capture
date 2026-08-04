@@ -511,17 +511,18 @@ class _SearchField extends StatelessWidget {
       style: const TextStyle(color: Console.text, fontSize: 13),
       decoration: _fieldDecoration.copyWith(
         hintText: 'Search captures',
-        prefixIcon: const Icon(Icons.search, color: Console.dim, size: 18),
+        prefixIcon: const Icon(Icons.search, color: Console.dimText, size: 18),
         suffixIcon: value.isEmpty
             ? null
             : IconButton(
+                tooltip: 'Clear search',
                 // Constrained so the clear button cannot make the search box
                 // taller than the controls beside it on the single-line strip:
                 // an IconButton's default 48 px minimum would do exactly that,
                 // and the row would jump the moment the user types.
                 constraints: const BoxConstraints(minWidth: 38, minHeight: 38),
                 padding: EdgeInsets.zero,
-                icon: const Icon(Icons.close, color: Console.dim, size: 18),
+                icon: const Icon(Icons.close, color: Console.dimText, size: 18),
                 onPressed: () {
                   controller.clear();
                   onChanged('');
