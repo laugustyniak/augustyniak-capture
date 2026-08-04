@@ -35,6 +35,7 @@ import '../../transcription/data/audio_splitter.dart';
 import '../../transcription/data/chunked_transcription_service.dart';
 import '../../transcription/data/transcription_service.dart';
 import '../../transcription/domain/transcription_limits.dart';
+import '../data/project_inbox_router.dart';
 import '../data/recordings_repository.dart';
 import '../data/system_clipboard_sink.dart';
 import '../data/revisions_repository.dart';
@@ -77,6 +78,16 @@ class _RecordingsPageState extends State<RecordingsPage> {
   /// refused instead of leaving it silently dead.
   Set<ShortcutAction> rejectedShortcuts = const <ShortcutAction>{};
 
+  /// One lookup, shared by the enrichment context and the router: both resolve
+  /// a capture's `projectId` against the live list, and a project deleted after
+  /// the capture was filed leaves a dangling id on the item either way.
+  Project? _projectById(String id) {
+    for (final Project project in projects.projects) {
+      if (project.id == id) return project;
+    }
+    return null;
+  }
+
   @override
   void initState() {
     super.initState();
@@ -110,13 +121,12 @@ class _RecordingsPageState extends State<RecordingsPage> {
       // repoint a project at another repository, long after this runs.
       enrichmentContextSource: ComposedEnrichmentContextSource(
         profile: () => settings.enrichmentInstructions,
-        projectById: (String id) {
-          for (final Project project in projects.projects) {
-            if (project.id == id) return project;
-          }
-          return null;
-        },
+        projectById: _projectById,
       ),
+      // The queue's only way out. Reads the project list live for the same
+      // reason the enrichment context does: a project can be created, renamed
+      // or repointed long after this runs, and the destination must follow.
+      captureRouter: ProjectInboxRouter(projectById: _projectById),
       ocrService: _buildOcrService(),
       videoAudioExtractor: _buildVideoAudioExtractor(),
       videoPosterExtractor: _buildVideoPosterExtractor(),
