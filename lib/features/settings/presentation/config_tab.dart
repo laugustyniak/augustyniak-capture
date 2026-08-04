@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../../../app/ui_kit.dart';
+import '../../projects/domain/project.dart';
 import '../../shortcuts/domain/shortcut_action.dart';
 import '../../shortcuts/presentation/shortcuts_section.dart';
 import '../domain/audio_config.dart';
@@ -18,6 +19,7 @@ class ConfigTab extends StatelessWidget {
     required this.recordingsCount,
     required this.logCount,
     required this.onOpenModels,
+    this.projects = const <Project>[],
     this.showShortcuts = false,
     this.rejectedShortcuts = const <ShortcutAction>{},
     this.runWithHotkeysSuspended = _runDirectly,
@@ -31,6 +33,11 @@ class ConfigTab extends StatelessWidget {
   final int recordingsCount;
   final int logCount;
   final VoidCallback onOpenModels;
+
+  /// Reported on, never edited here — the Projects tab owns them. Empty by
+  /// default so a caller with no projects controller (and every existing test)
+  /// renders a tab that touches no disk.
+  final List<Project> projects;
 
   /// Global hotkeys are desktop-only; the shell does the platform check, this
   /// tab just renders what it is told — same split as the OCR/video services.
@@ -195,7 +202,10 @@ class ConfigTab extends StatelessWidget {
             ),
           ),
           const SizedBox(height: 22),
-          EnrichmentContextSection(controller: controller),
+          EnrichmentContextSection(
+            controller: controller,
+            projects: projects,
+          ),
           if (showShortcuts) ...<Widget>[
             const SizedBox(height: 22),
             ShortcutsSection(
