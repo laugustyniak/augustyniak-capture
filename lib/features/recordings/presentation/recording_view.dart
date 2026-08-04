@@ -168,6 +168,12 @@ class _LevelMeter extends StatefulWidget {
 class _LevelMeterState extends State<_LevelMeter> {
   static const int _barCount = 33;
 
+  /// Fixed length on purpose: [build] indexes every slot, so the meter's shape
+  /// must never depend on how many samples have arrived yet. The window is
+  /// therefore shifted in place — `removeAt`/`add` both throw on a list built
+  /// this way, which is how the meter once shipped dead: a fake recorder
+  /// reports no amplitude at all, so nothing but a real microphone reaches the
+  /// listener that would have raised it.
   final List<double> _history = List<double>.filled(_barCount, 0);
 
   @override
@@ -185,8 +191,10 @@ class _LevelMeterState extends State<_LevelMeter> {
   void _onLevel() {
     if (!mounted) return;
     setState(() {
-      _history.removeAt(0);
-      _history.add(widget.level.value);
+      // Drop the oldest sample and append the newest without resizing: every
+      // slot moves one place left, and the freed last slot takes the new value.
+      _history.setRange(0, _barCount - 1, _history, 1);
+      _history[_barCount - 1] = widget.level.value;
     });
   }
 
