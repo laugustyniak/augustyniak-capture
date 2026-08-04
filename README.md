@@ -53,7 +53,8 @@ Image and video processing shells out to system binaries, the same way
 types to work:
 
 ```bash
-sudo apt-get install tesseract-ocr tesseract-ocr-pol ffmpeg
+sudo apt-get install tesseract-ocr tesseract-ocr-pol ffmpeg   # Debian/Ubuntu
+brew install tesseract tesseract-lang ffmpeg                  # macOS
 ```
 
 On mobile — and on a desktop missing those binaries — the item is still
@@ -66,13 +67,44 @@ The repo contains the application code, but the platform directories are best
 filled in with a local Flutter SDK:
 
 ```bash
-flutter create --platforms=android,ios .
+flutter create --platforms=android,ios,macos .
 flutter pub get
 flutter run
 ```
 
 `flutter create .` keeps the files under `lib/` intact while generating the full
-Gradle/Xcode files required by your local Flutter version.
+Gradle/Xcode files required by your local Flutter version. It does, however,
+**add `test/widget_test.dart`** — the counter-app template, which imports a
+`MyApp` this project does not have. Delete it, or both `flutter analyze` and
+`flutter test` fail on a file nobody wrote. It also rewrites `.metadata` so that
+only the platforms named on the command line remain listed; restore the others
+if you regenerate a single platform.
+
+### macOS: the App Sandbox is deliberately off
+
+`macos/Runner/{Release,DebugProfile}.entitlements` both set
+`com.apple.security.app-sandbox` to `false`. Three shipped features shell out to
+system binaries — `tesseract` (OCR), `ffmpeg` (video audio and poster) and
+`open` (opening a source file) — and a sandboxed process passes its sandbox down
+to everything it spawns, so all three break under it. They break *quietly*: the
+item just lands `failed` with its source intact, which reads like a missing
+binary rather than a sandbox denial. Re-enabling the sandbox is a Mac App Store
+prerequisite and needs in-process replacements for those three first; the
+entitlements file lists what else it would require.
+
+Local builds are **ad-hoc signed** (`CODE_SIGN_IDENTITY = "-"`), which needs no
+Apple certificate. The consequence to expect: macOS ties microphone consent to
+the code signature, so a rebuild can make the app ask for the microphone again.
+
+Install it as a standalone app with:
+
+```bash
+flutter build macos --release
+cp -R build/macos/Build/Products/Release/"Audivoa Core.app" /Applications/
+```
+
+Recordings land in `~/Documents/recordings/` — without the sandbox that is where
+`getApplicationDocumentsDirectory()` points, rather than inside a container.
 
 ### Linux: `keybinder-3.0` and `libsecret-1-dev` required
 
@@ -253,7 +285,7 @@ The interface implements the **console cards** design direction:
   offline-first app must not need the network to render its own text,
 - no app bar: each tab draws its own header inside its scroll area, so the
   title scrolls with the content,
-- a review-progress strip above the list; the per-status counts live on the
+- a done-progress strip above the list; the per-status counts live on the
   filter chips, where they are actionable,
 - the local-file verification line on every card, including failed ones,
 - a dedicated capture screen while recording,
@@ -264,16 +296,23 @@ The interface implements the **console cards** design direction:
 Capture remains local-first throughout: stop → verify the file → persist the
 metadata → queue → process.
 
-## Reviewed state
+## Done state and tags
 
 Each capture has a durable `isProcessedByUser` flag and an optional
 `processedAt` timestamp. This axis is entirely independent of processing
 status: nothing in the pipeline ever sets or clears it, and marking an item
-reviewed never touches its transcript. Both persist in `recordings.json`.
+done never touches its transcript. Both persist in `recordings.json`.
 
 - the toggle animates, the card border picks up the accent and a check appears
   next to the name,
 - selection haptic feedback on toggle,
-- the reviewed counter and its progress bar animate to the new value,
-- full history retention: reviewed items stay visible,
+- the done counter and its progress bar animate to the new value,
+- full history retention: done items stay visible,
 - no "Inbox Zero" celebration or empty-inbox pressure.
+
+Tags are also persisted per capture. They can be edited as a comma-separated
+list, are normalized to lowercase and de-duplicated, render directly on the
+card, and participate in Queue search. A `project:<name>` tag provides a
+lightweight project assignment without introducing a separate project model.
+When enrichment suggests tags it only fills an empty list, so a retry cannot
+overwrite a manual assignment.

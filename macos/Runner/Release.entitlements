@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<!-- The App Sandbox is deliberately OFF, and that is load-bearing rather
+	     than an oversight. Three shipped features shell out to system binaries
+	     via `Process.run` — `tesseract` (OcrService), `ffmpeg` (video audio and
+	     poster extraction) and `open` (SystemMediaOpener). A sandboxed process
+	     hands its sandbox down to every child it spawns, so those binaries
+	     could not read the recordings directory and `open` could not reach
+	     LaunchServices at all. The failures would be the clean, retryable kind
+	     the desktop seams are built for, which is exactly what makes them easy
+	     to misread: the item just lands `failed` with its source intact, and
+	     nothing points at the sandbox.
+
+	     Re-enabling it is a Mac App Store prerequisite, not a security fix to
+	     apply casually. It needs, at minimum:
+	       com.apple.security.device.audio-input             (record)
+	       com.apple.security.network.client                 (HTTP providers)
+	       com.apple.security.files.user-selected.read-only  (file_picker)
+	     and even then the three shell-outs stay broken until they have real
+	     in-process replacements (Vision for OCR, AVFoundation for video,
+	     NSWorkspace for opening a file). Keep this in sync with
+	     DebugProfile.entitlements — a sandbox that differs between debug and
+	     release means `flutter run` cannot reproduce an installed-app bug. -->
+	<key>com.apple.security.app-sandbox</key>
+	<false/>
+</dict>
+</plist>

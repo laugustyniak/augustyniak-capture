@@ -11,6 +11,7 @@ class EditResult {
     required this.title,
     required this.transcript,
     required this.category,
+    required this.tags,
   });
 
   final String title;
@@ -19,6 +20,9 @@ class EditResult {
   /// The corrected category, or null for "unclassified". A wrong category is
   /// worse than none, because an export will read this field.
   final CaptureCategory? category;
+
+  /// User-entered tags, normalized by the controller before persistence.
+  final List<String> tags;
 }
 
 /// Two-field editor: title (optional) and the processor-output text. Prefilled
@@ -33,16 +37,22 @@ class EditSheet extends StatefulWidget {
 }
 
 class EditSheetState extends State<EditSheet> {
-  late final TextEditingController _title =
-      TextEditingController(text: widget.recording.title ?? '');
-  late final TextEditingController _text =
-      TextEditingController(text: widget.recording.transcript ?? '');
+  late final TextEditingController _title = TextEditingController(
+    text: widget.recording.title ?? '',
+  );
+  late final TextEditingController _text = TextEditingController(
+    text: widget.recording.transcript ?? '',
+  );
+  late final TextEditingController _tags = TextEditingController(
+    text: widget.recording.tags.join(', '),
+  );
   late CaptureCategory? _category = widget.recording.category;
 
   @override
   void dispose() {
     _title.dispose();
     _text.dispose();
+    _tags.dispose();
     super.dispose();
   }
 
@@ -101,20 +111,17 @@ class EditSheetState extends State<EditSheet> {
               hintText: 'Transcript / OCR text / note',
             ),
           ),
-          if (widget.recording.tags.isNotEmpty) ...<Widget>[
-            const SizedBox(height: 12),
-            Wrap(
-              spacing: 6,
-              runSpacing: 6,
-              children: <Widget>[
-                for (final String tag in widget.recording.tags)
-                  // Read-only: tags come from the model and this sheet has no
-                  // tag editor. A no-op tap keeps the app's visual language
-                  // without implying an affordance that does not exist.
-                  ConsoleChip(label: tag, selected: false, onSelected: () {}),
-              ],
+          const SizedBox(height: 12),
+          TextField(
+            controller: _tags,
+            textInputAction: TextInputAction.done,
+            style: const TextStyle(color: Console.text, fontSize: 13),
+            decoration: const InputDecoration(
+              labelText: 'Tags',
+              hintText: 'project:acme, client, published',
+              helperText: 'Separate tags with commas',
             ),
-          ],
+          ),
           const SizedBox(height: 14),
           Row(
             mainAxisAlignment: MainAxisAlignment.end,
@@ -130,6 +137,7 @@ class EditSheetState extends State<EditSheet> {
                     title: _title.text,
                     transcript: _text.text,
                     category: _category,
+                    tags: _tags.text.split(','),
                   ),
                 ),
                 child: const Text('SAVE'),

@@ -44,8 +44,9 @@ class _QueueTabState extends State<QueueTab> {
     final RecordingsController controller = widget.controller;
     final List<Recording> all = controller.recordings;
     final List<Recording> visible = _filter(all);
-    final int reviewedCount =
-        all.where((Recording item) => item.isProcessedByUser).length;
+    final int reviewedCount = all
+        .where((Recording item) => item.isProcessedByUser)
+        .length;
 
     return SafeArea(
       bottom: false,
@@ -108,7 +109,8 @@ class _QueueTabState extends State<QueueTab> {
                     child: EmptyPanel(
                       icon: Icons.graphic_eq,
                       title: _emptyLabel(selectedFilter),
-                      blurb: 'Every capture is written to disk and verified '
+                      blurb:
+                          'Every capture is written to disk and verified '
                           'before processing is even attempted.',
                     ),
                   )
@@ -119,6 +121,10 @@ class _QueueTabState extends State<QueueTab> {
                       child: RecordingCard(
                         recording: recording,
                         isPlaying: controller.playingId == recording.id,
+                        // View-only: the enrichment stage has no persisted
+                        // status, so this comes off the controller's in-flight
+                        // set rather than off the item.
+                        isEnriching: controller.isEnriching(recording.id),
                         onTogglePlay: () =>
                             controller.togglePlayback(recording.id),
                         onOpen: () => controller.openSource(recording.id),
@@ -156,6 +162,7 @@ class _QueueTabState extends State<QueueTab> {
       final String haystack = <String?>[
         item.transcript,
         item.title,
+        ...item.tags,
         item.filePath.split(Platform.pathSeparator).last,
         item.id,
       ].whereType<String>().join(' ').toLowerCase();
@@ -176,21 +183,22 @@ class _QueueTabState extends State<QueueTab> {
     await widget.controller.setTitle(recording.id, result.title);
     await widget.controller.editTranscript(recording.id, result.transcript);
     await widget.controller.setCategory(recording.id, result.category);
+    await widget.controller.setTags(recording.id, result.tags);
   }
 }
 
 /// Single definition of what each bucket contains — used both to filter the
 /// list and to count the chips, so the two can never disagree.
 bool _matches(RecordingFilter filter, Recording item) => switch (filter) {
-      RecordingFilter.all => true,
-      RecordingFilter.queue =>
-        item.status == RecordingStatus.pendingTranscription ||
-            item.status == RecordingStatus.transcribing,
-      RecordingFilter.ready => item.status == RecordingStatus.completed,
-      RecordingFilter.failed => item.status == RecordingStatus.failed,
-      // Persisted and verified, but not handed to a processor yet.
-      RecordingFilter.raw => item.status == RecordingStatus.saved,
-    };
+  RecordingFilter.all => true,
+  RecordingFilter.queue =>
+    item.status == RecordingStatus.pendingTranscription ||
+        item.status == RecordingStatus.transcribing,
+  RecordingFilter.ready => item.status == RecordingStatus.completed,
+  RecordingFilter.failed => item.status == RecordingStatus.failed,
+  // Persisted and verified, but not handed to a processor yet.
+  RecordingFilter.raw => item.status == RecordingStatus.saved,
+};
 
 class _SearchField extends StatelessWidget {
   const _SearchField({
@@ -277,9 +285,9 @@ class _FilterRow extends StatelessWidget {
 }
 
 String _emptyLabel(RecordingFilter filter) => switch (filter) {
-      RecordingFilter.all => 'Nothing captured yet.',
-      RecordingFilter.queue => 'The processing queue is empty.',
-      RecordingFilter.ready => 'No finished output yet.',
-      RecordingFilter.failed => 'No failed jobs.',
-      RecordingFilter.raw => 'Nothing waiting to be queued.',
-    };
+  RecordingFilter.all => 'Nothing captured yet.',
+  RecordingFilter.queue => 'The processing queue is empty.',
+  RecordingFilter.ready => 'No finished output yet.',
+  RecordingFilter.failed => 'No failed jobs.',
+  RecordingFilter.raw => 'Nothing waiting to be queued.',
+};

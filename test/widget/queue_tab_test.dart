@@ -63,8 +63,9 @@ void main() {
   testWidgets('empty index shows the empty panel, not a list', (
     WidgetTester tester,
   ) async {
-    final RecordingsController controller =
-        await buildRecordingsController(appDir);
+    final RecordingsController controller = await buildRecordingsController(
+      appDir,
+    );
     await pumpQueue(tester, controller);
 
     expect(find.text('Nothing captured yet.'), findsOneWidget);
@@ -151,6 +152,23 @@ void main() {
     expect(find.textContaining('buy milk'), findsNothing);
     // The chip still describes the queue, not the query.
     expect(find.text('ALL 2'), findsOneWidget);
+  });
+
+  testWidgets('search matches tags', (WidgetTester tester) async {
+    final RecordingsController controller = await buildRecordingsController(
+      appDir,
+      seed: <Recording>[
+        makeRecording(id: 'acme', tags: <String>['project:acme']),
+        makeRecording(id: 'other', tags: <String>['project:other']),
+      ],
+    );
+    await pumpQueue(tester, controller);
+
+    await tester.enterText(find.byType(TextField).first, 'project:acme');
+    await tester.pumpAndSettle();
+
+    expect(find.textContaining('acme.m4a'), findsOneWidget);
+    expect(find.textContaining('other.m4a'), findsNothing);
   });
 
   testWidgets('a failed item offers retry and shows its error', (
@@ -242,9 +260,7 @@ void main() {
   ) async {
     final RecordingsController controller = await buildRecordingsController(
       appDir,
-      seed: <Recording>[
-        makeRecording(id: 'clip', type: CaptureType.video),
-      ],
+      seed: <Recording>[makeRecording(id: 'clip', type: CaptureType.video)],
     );
     await pumpQueue(tester, controller);
 
@@ -346,24 +362,26 @@ void main() {
     expect(tester.takeException(), isNull);
   });
 
-  testWidgets('the reviewed toggle flips the card state through the controller',
-      (WidgetTester tester) async {
-    final RecordingsController controller = await buildRecordingsController(
-      appDir,
-      seed: <Recording>[makeRecording(id: 'x')],
-    );
-    await pumpQueue(tester, controller);
+  testWidgets(
+    'the reviewed toggle flips the card state through the controller',
+    (WidgetTester tester) async {
+      final RecordingsController controller = await buildRecordingsController(
+        appDir,
+        seed: <Recording>[makeRecording(id: 'x')],
+      );
+      await pumpQueue(tester, controller);
 
-    await tester.tap(find.byIcon(Icons.radio_button_unchecked_rounded));
-    await tester.pumpAndSettle();
-    expect(controller.recordings.single.isProcessedByUser, isTrue);
+      await tester.tap(find.byIcon(Icons.radio_button_unchecked_rounded));
+      await tester.pumpAndSettle();
+      expect(controller.recordings.single.isProcessedByUser, isTrue);
 
-    // The toggle is async, so the notification lands after the settle above;
-    // pump again to render the state the controller now holds.
-    await tester.pumpAndSettle();
-    expect(find.byIcon(Icons.check_circle_rounded), findsOneWidget);
-    expect(find.byIcon(Icons.check_circle_outline_rounded), findsOneWidget);
-  });
+      // The toggle is async, so the notification lands after the settle above;
+      // pump again to render the state the controller now holds.
+      await tester.pumpAndSettle();
+      expect(find.byIcon(Icons.check_circle_rounded), findsOneWidget);
+      expect(find.byIcon(Icons.check_circle_outline_rounded), findsOneWidget);
+    },
+  );
 
   testWidgets('the reviewed strip counts reviewed against the whole queue', (
     WidgetTester tester,
@@ -378,7 +396,7 @@ void main() {
     );
     await pumpQueue(tester, controller);
 
-    expect(find.text('REVIEWED'), findsOneWidget);
+    expect(find.text('DONE'), findsOneWidget);
     expect(find.text('1 / 3'), findsOneWidget);
   });
 
@@ -402,6 +420,8 @@ void main() {
 
     expect(find.text('TASK'), findsOneWidget);
     expect(find.text('Call the client on Friday.'), findsOneWidget);
+    expect(find.text('#client'), findsOneWidget);
+    expect(find.text('#call'), findsOneWidget);
     // The pipeline pill is still there beside it.
     expect(find.text('READY'), findsOneWidget);
   });
@@ -425,6 +445,69 @@ void main() {
     for (final CaptureCategory value in CaptureCategory.values) {
       expect(find.text(value.label), findsNothing);
     }
+  });
+
+  /// Renders one card on its own. The enrichment stage has no persisted status
+  /// — it is a flag the controller only holds while an HTTP call is open — so
+  /// driving the card directly is what makes that window observable without
+  /// standing up a gated fake service behind the whole queue.
+  Future<void> pumpCard(
+    WidgetTester tester, {
+    required bool isEnriching,
+  }) async {
+    await tester.pumpWidget(
+      hostTab(
+        () => RecordingCard(
+          recording: makeRecording(
+            id: 'fresh',
+            status: RecordingStatus.completed,
+            transcript: 'zadzwonić do klienta w piątek',
+          ),
+          isPlaying: false,
+          isEnriching: isEnriching,
+          onTogglePlay: () {},
+          onOpen: () {},
+          onRetry: () {},
+          onEdit: () {},
+          onToggleProcessed: () {},
+        ),
+      ),
+    );
+    // Never `pumpAndSettle` here: both `ScanLine` and the pill's `PulseDot`
+    // repeat forever, so "no frames scheduled" is a state this card never
+    // reaches.
+    await tester.pump();
+  }
+
+  testWidgets('a card being enriched says so and runs the scan line', (
+    WidgetTester tester,
+  ) async {
+    await pumpCard(tester, isEnriching: true);
+
+    expect(find.text('ANALYZING'), findsOneWidget);
+    expect(find.byType(ScanLine), findsOneWidget);
+    expect(find.text(RecordingCard.analyzingLabel), findsOneWidget);
+    // The resting label is gone while the model is working, so the two states
+    // are never on screen at once.
+    expect(find.text('READY'), findsNothing);
+    // The item is already durable, and the card still says so.
+    expect(find.textContaining('file verified'), findsOneWidget);
+    expect(find.text('RETRY'), findsNothing);
+
+    // A few frames of the animation, to prove it drives without throwing.
+    await tester.pump(const Duration(milliseconds: 400));
+    await tester.pump(const Duration(milliseconds: 400));
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('a card that is not being enriched shows the resting state', (
+    WidgetTester tester,
+  ) async {
+    await pumpCard(tester, isEnriching: false);
+
+    expect(find.text('READY'), findsOneWidget);
+    expect(find.byType(ScanLine), findsNothing);
+    expect(find.text(RecordingCard.analyzingLabel), findsNothing);
   });
 
   testWidgets('the edit sheet corrects a wrong category', (
@@ -457,6 +540,42 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(controller.recordings.single.category, CaptureCategory.idea);
+  });
+
+  testWidgets('the edit sheet creates and clears tags', (
+    WidgetTester tester,
+  ) async {
+    final RecordingsController controller = await buildRecordingsController(
+      appDir,
+      seed: <Recording>[
+        makeRecording(id: 'taggable', tags: <String>['old']),
+      ],
+    );
+    await pumpQueue(tester, controller);
+
+    await tester.tap(find.byIcon(Icons.edit_outlined));
+    await tester.pumpAndSettle();
+    await tester.enterText(
+      find.widgetWithText(TextField, 'Tags'),
+      ' Project:Acme, client, CLIENT,  ',
+    );
+    await tester.tap(find.text('SAVE'));
+    await tester.pumpAndSettle();
+
+    expect(controller.recordings.single.tags, <String>[
+      'project:acme',
+      'client',
+    ]);
+    expect(find.text('#project:acme'), findsOneWidget);
+    expect(find.text('#client'), findsOneWidget);
+
+    await tester.tap(find.byIcon(Icons.edit_outlined));
+    await tester.pumpAndSettle();
+    await tester.enterText(find.widgetWithText(TextField, 'Tags'), '');
+    await tester.tap(find.text('SAVE'));
+    await tester.pumpAndSettle();
+
+    expect(controller.recordings.single.tags, isEmpty);
   });
 
   testWidgets('the edit sheet clears a category back to unclassified', (

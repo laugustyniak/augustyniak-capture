@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<!-- Off for the same reasons as Release.entitlements — see the note there.
+	     The two must agree: a debug build that sandboxes differently from the
+	     installed one cannot reproduce its bugs. -->
+	<key>com.apple.security.app-sandbox</key>
+	<false/>
+	<!-- Both are required by the Dart VM service (hot reload, DevTools) under
+	     the hardened runtime; they are what makes a debug build debuggable. -->
+	<key>com.apple.security.cs.allow-jit</key>
+	<true/>
+	<key>com.apple.security.network.server</key>
+	<true/>
+</dict>
+</plist>
