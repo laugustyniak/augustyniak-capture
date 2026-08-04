@@ -32,7 +32,7 @@ class Recording {
     this.title,
     this.category,
     this.summary,
-    this.tags = const <String>[],
+    this.tags = const <RecordingTag>[],
     this.projectId,
     this.error,
     this.isProcessedByUser = false,
@@ -89,9 +89,20 @@ class Recording {
   /// One-line gist from the enrichment stage. Null until enriched.
   final String? summary;
 
-  /// The capture's tags: one normalized list, no provenance. Enrichment may
-  /// propose it and the user may rewrite it — see [RecordingTags].
-  final List<String> tags;
+  /// Normalized tags with persisted ownership. AI may refresh only its own
+  /// suggestions; human tags change only through an explicit user edit.
+  final List<RecordingTag> tags;
+
+  List<RecordingTag> get aiTags => tags
+      .where((RecordingTag tag) => tag.source == RecordingTagSource.ai)
+      .toList(growable: false);
+
+  List<RecordingTag> get humanTags => tags
+      .where((RecordingTag tag) => tag.source == RecordingTagSource.human)
+      .toList(growable: false);
+
+  List<String> get tagValues =>
+      tags.map((RecordingTag tag) => tag.value).toList(growable: false);
 
   /// Optional executable context. Null keeps legacy and unassigned captures
   /// fully valid; projects live in their own store and are never embedded here.
@@ -114,7 +125,7 @@ class Recording {
     bool clearCategory = false,
     String? summary,
     bool clearSummary = false,
-    List<String>? tags,
+    List<RecordingTag>? tags,
     String? projectId,
     bool clearProjectId = false,
     String? error,
@@ -137,7 +148,7 @@ class Recording {
       title: clearTitle ? null : (title ?? this.title),
       category: clearCategory ? null : (category ?? this.category),
       summary: clearSummary ? null : (summary ?? this.summary),
-      tags: RecordingTags.normalize(tags ?? this.tags),
+      tags: RecordingTag.normalize(tags ?? this.tags),
       projectId: clearProjectId ? null : (projectId ?? this.projectId),
       error: clearError ? null : (error ?? this.error),
       isProcessedByUser: isProcessedByUser ?? this.isProcessedByUser,
@@ -159,7 +170,7 @@ class Recording {
     'title': title,
     'category': category?.name,
     'summary': summary,
-    'tags': tags,
+    'tags': tags.map((RecordingTag tag) => tag.toJson()).toList(),
     'projectId': projectId,
     'error': error,
     'isProcessedByUser': isProcessedByUser,
@@ -198,10 +209,15 @@ class Recording {
           ? CaptureCategory.fromName(json['category'] as String)
           : null,
       summary: json['summary'] is String ? json['summary'] as String : null,
-      // Reads the plain string list *and* the retired `{value, source}` form,
-      // which is already on disk. Invalid entries degrade individually rather
-      // than taking down the index.
-      tags: RecordingTags.fromJson(json['tags']),
+      // Both legacy strings and provenance-aware objects load. Bad entries
+      // degrade individually rather than taking down the index.
+      tags: json['tags'] is List<dynamic>
+          ? RecordingTag.normalize(
+              (json['tags'] as List<dynamic>)
+                  .map(RecordingTag.fromJson)
+                  .whereType<RecordingTag>(),
+            )
+          : const <RecordingTag>[],
       projectId: json['projectId'] is String
           ? json['projectId'] as String
           : null,

@@ -12,6 +12,7 @@ import 'package:audivoa_core/features/recordings/domain/capture_category.dart';
 import 'package:audivoa_core/features/recordings/domain/capture_type.dart';
 import 'package:audivoa_core/features/recordings/domain/media_opener.dart';
 import 'package:audivoa_core/features/recordings/domain/recording.dart';
+import 'package:audivoa_core/features/recordings/domain/recording_tag.dart';
 import 'package:audivoa_core/features/recordings/presentation/recordings_controller.dart';
 import 'package:audivoa_core/features/settings/data/settings_repository.dart';
 import 'package:audivoa_core/features/settings/domain/app_settings.dart';
@@ -164,6 +165,7 @@ Recording makeRecording({
   CaptureCategory? category,
   String? summary,
   List<String> tags = const <String>[],
+  List<String> aiTags = const <String>[],
   String? projectId,
   String? error,
   int durationMs = 1500,
@@ -185,7 +187,12 @@ Recording makeRecording({
     title: title,
     category: category,
     summary: summary,
-    tags: tags,
+    tags: <RecordingTag>[
+      for (final String value in tags)
+        RecordingTag(value: value, source: RecordingTagSource.human),
+      for (final String value in aiTags)
+        RecordingTag(value: value, source: RecordingTagSource.ai),
+    ],
     projectId: projectId,
     error: error,
     isProcessedByUser: isProcessedByUser,

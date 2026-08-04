@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import '../../../app/ui_kit.dart';
 import '../domain/capture_type.dart';
 import '../domain/recording.dart';
+import '../domain/recording_tag.dart';
 import 'card_parts.dart';
 
 /// One queue item, in the design's "console card" form.
@@ -188,7 +189,7 @@ class RecordingCard extends StatelessWidget {
               spacing: 6,
               runSpacing: 5,
               children: <Widget>[
-                for (final String tag in recording.tags)
+                for (final RecordingTag tag in recording.tags)
                   _TagLabel(tag: tag),
               ],
             ),
@@ -426,29 +427,41 @@ class _ReviewToggle extends StatelessWidget {
   }
 }
 
-/// One tag, drawn the same whoever put it there.
-///
-/// This used to render in two colours with two icons, keyed on whether a model
-/// or the user supplied the word. Both halves are gone with the provenance
-/// field: a tag is a tag, and the card no longer asks the reader to decode a
-/// palette to find that out.
+/// Provenance is visible at a glance: human tags are cyan and AI suggestions
+/// are violet, with matching person/sparkle icons.
 class _TagLabel extends StatelessWidget {
   const _TagLabel({required this.tag});
 
-  final String tag;
+  final RecordingTag tag;
 
   @override
   Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-      decoration: BoxDecoration(
-        color: Console.cyan.withValues(alpha: .07),
-        borderRadius: BorderRadius.circular(999),
-        border: Border.all(color: Console.cyan.withValues(alpha: .22)),
-      ),
-      child: Text(
-        '#$tag',
-        style: ConsoleText.micro.copyWith(color: Console.cyan),
+    final bool human = tag.source == RecordingTagSource.human;
+    final Color color = human ? Console.cyan : Console.violet;
+    return Semantics(
+      label: human ? 'Human tag ${tag.value}' : 'AI suggested tag ${tag.value}',
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+        decoration: BoxDecoration(
+          color: color.withValues(alpha: .07),
+          borderRadius: BorderRadius.circular(999),
+          border: Border.all(color: color.withValues(alpha: .22)),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: <Widget>[
+            Icon(
+              human ? Icons.person_outline_rounded : Icons.auto_awesome,
+              size: 10,
+              color: color,
+            ),
+            const SizedBox(width: 4),
+            Text(
+              '#${tag.value}',
+              style: ConsoleText.micro.copyWith(color: color),
+            ),
+          ],
+        ),
       ),
     );
   }

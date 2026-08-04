@@ -1,6 +1,7 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:audivoa_core/features/recordings/domain/capture_category.dart';
 import 'package:audivoa_core/features/recordings/domain/recording.dart';
+import 'package:audivoa_core/features/recordings/domain/recording_tag.dart';
 
 void main() {
   test('recording JSON round-trip preserves AI and user processing state', () {
@@ -102,7 +103,10 @@ void main() {
       status: RecordingStatus.completed,
       category: CaptureCategory.meetingNote,
       summary: 'Ustalenia ze spotkania.',
-      tags: const <String>['klient', 'oferta'],
+      tags: const <RecordingTag>[
+        RecordingTag(value: 'klient', source: RecordingTagSource.ai),
+        RecordingTag(value: 'oferta', source: RecordingTagSource.human),
+      ],
       projectId: 'audivoa',
     );
 
@@ -110,10 +114,10 @@ void main() {
 
     expect(restored.category, CaptureCategory.meetingNote);
     expect(restored.summary, 'Ustalenia ze spotkania.');
-    // First-seen order, kept as written: the list is the user's, so a save
-    // must not reorder it.
-    expect(restored.tags, <String>['klient', 'oferta']);
+    expect(restored.tagValues, <String>['oferta', 'klient']);
     expect(restored.projectId, 'audivoa');
+    expect(restored.aiTags.single.value, 'klient');
+    expect(restored.humanTags.single.value, 'oferta');
   });
 
   test('legacy JSON has no category, summary or tags', () {
@@ -178,7 +182,8 @@ void main() {
       'tags': 'klient',
     });
 
-    expect(broken.tags, <String>['ok']);
+    expect(broken.tagValues, <String>['ok']);
+    expect(broken.humanTags, hasLength(1));
     expect(wrongType.tags, isEmpty);
   });
 
@@ -244,7 +249,9 @@ void main() {
       status: RecordingStatus.completed,
       category: CaptureCategory.task,
       summary: 'coś',
-      tags: const <String>['a'],
+      tags: const <RecordingTag>[
+        RecordingTag(value: 'a', source: RecordingTagSource.human),
+      ],
     );
 
     final Recording cleared = item.copyWith(
@@ -255,6 +262,6 @@ void main() {
     expect(cleared.category, isNull);
     expect(cleared.summary, isNull);
     // Tags are not cleared by those flags — they have their own replacement.
-    expect(cleared.tags, <String>['a']);
+    expect(cleared.tagValues, <String>['a']);
   });
 }

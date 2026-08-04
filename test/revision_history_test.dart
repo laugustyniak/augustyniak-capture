@@ -6,6 +6,7 @@ import 'package:audivoa_core/features/recordings/data/recordings_repository.dart
 import 'package:audivoa_core/features/recordings/data/revisions_repository.dart';
 import 'package:audivoa_core/features/recordings/domain/capture_category.dart';
 import 'package:audivoa_core/features/recordings/domain/recording.dart';
+import 'package:audivoa_core/features/recordings/domain/recording_tag.dart';
 import 'package:audivoa_core/features/recordings/domain/recording_revision.dart';
 import 'package:audivoa_core/features/recordings/presentation/recordings_controller.dart';
 import 'package:audivoa_core/features/transcription/data/transcription_service.dart';
@@ -70,7 +71,10 @@ Recording _seed({
   transcript: transcript,
   category: category,
   summary: summary,
-  tags: tags,
+  tags: <RecordingTag>[
+    for (final String value in tags)
+      RecordingTag(value: value, source: RecordingTagSource.human),
+  ],
 );
 
 void main() {

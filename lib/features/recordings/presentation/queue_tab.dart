@@ -9,6 +9,7 @@ import '../../projects/domain/project.dart';
 import '../../projects/presentation/projects_controller.dart';
 import '../domain/capture_category.dart';
 import '../domain/recording.dart';
+import '../domain/recording_tag.dart';
 import 'queue_metrics.dart';
 import 'recording_card.dart';
 import 'recording_editor.dart';
@@ -189,7 +190,7 @@ class _QueueTabState extends State<QueueTab> {
       final String haystack = <String?>[
         item.transcript,
         item.title,
-        ...item.tags,
+        ...item.tagValues,
         item.filePath.split(Platform.pathSeparator).last,
         item.id,
       ].whereType<String>().join(' ').toLowerCase();
@@ -257,8 +258,8 @@ class _QueueTabState extends State<QueueTab> {
     final Map<String, int> uses = <String, int>{};
     for (final Recording item in widget.controller.recordings) {
       if (item.id == current.id) continue;
-      for (final String tag in item.tags) {
-        uses[tag] = (uses[tag] ?? 0) + 1;
+      for (final RecordingTag tag in item.tags) {
+        uses[tag.value] = (uses[tag.value] ?? 0) + 1;
       }
     }
     final List<String> values = uses.keys.toList()
