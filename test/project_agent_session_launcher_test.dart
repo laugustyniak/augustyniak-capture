@@ -39,7 +39,7 @@ void main() {
   late Directory repo;
 
   setUp(() {
-    repo = Directory.systemTemp.createTempSync('audivoa_project_');
+    repo = Directory.systemTemp.createTempSync('augustyniak_capture_project_');
   });
 
   tearDown(() {

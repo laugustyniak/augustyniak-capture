@@ -167,7 +167,9 @@ void main() {
   );
 
   setUp(() {
-    appDir = Directory.systemTemp.createTempSync('audivoa_shortcuts_');
+    appDir = Directory.systemTemp.createTempSync(
+      'augustyniak_capture_shortcuts_',
+    );
     repository = _FakeRepository(appDir);
     picker = _FakePicker();
     recordings = RecordingsController(

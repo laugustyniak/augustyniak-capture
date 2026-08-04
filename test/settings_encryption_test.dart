@@ -108,7 +108,9 @@ void main() {
     late Directory tempDir;
 
     setUp(() async {
-      tempDir = await Directory.systemTemp.createTemp('audivoa_settings_test');
+      tempDir = await Directory.systemTemp.createTemp(
+        'augustyniak_capture_settings_test',
+      );
     });
 
     tearDown(() async {

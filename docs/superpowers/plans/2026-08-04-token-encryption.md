@@ -96,7 +96,7 @@ Create `test/token_cipher_test.dart`:
 
 ```dart
 import 'package:flutter_test/flutter_test.dart';
-import 'package:audivoa_core/features/settings/domain/token_cipher.dart';
+import 'package:augustyniak_capture/features/settings/domain/token_cipher.dart';
 
 void main() {
   group('TokenCipher.isSealed', () {
@@ -227,7 +227,7 @@ Refs #30"
 Append to `test/token_cipher_test.dart` (add the import at the top of the file):
 
 ```dart
-import 'package:audivoa_core/features/settings/data/aes_gcm_token_cipher.dart';
+import 'package:augustyniak_capture/features/settings/data/aes_gcm_token_cipher.dart';
 ```
 
 ```dart
@@ -534,8 +534,8 @@ Create `test/settings_encryption_test.dart`:
 
 ```dart
 import 'package:flutter_test/flutter_test.dart';
-import 'package:audivoa_core/features/settings/domain/provider_profile.dart';
-import 'package:audivoa_core/features/transcription/data/transcription_service.dart';
+import 'package:augustyniak_capture/features/settings/domain/provider_profile.dart';
+import 'package:augustyniak_capture/features/transcription/data/transcription_service.dart';
 
 void main() {
   group('ProviderProfile.usableBearerToken', () {
@@ -671,10 +671,10 @@ Append to `test/settings_encryption_test.dart`. Add imports at the top:
 import 'dart:convert';
 import 'dart:io';
 
-import 'package:audivoa_core/features/settings/data/aes_gcm_token_cipher.dart';
-import 'package:audivoa_core/features/settings/data/settings_repository.dart';
-import 'package:audivoa_core/features/settings/domain/app_settings.dart';
-import 'package:audivoa_core/features/settings/domain/token_cipher.dart';
+import 'package:augustyniak_capture/features/settings/data/aes_gcm_token_cipher.dart';
+import 'package:augustyniak_capture/features/settings/data/settings_repository.dart';
+import 'package:augustyniak_capture/features/settings/domain/app_settings.dart';
+import 'package:augustyniak_capture/features/settings/domain/token_cipher.dart';
 ```
 
 Add the fakes (below `main`'s closing brace or above `main`, matching the file's layout):
@@ -727,7 +727,7 @@ group('SettingsRepository token encryption', () {
   late Directory tempDir;
 
   setUp(() async {
-    tempDir = await Directory.systemTemp.createTemp('audivoa_settings_test');
+    tempDir = await Directory.systemTemp.createTemp('augustyniak_capture_settings_test');
   });
 
   tearDown(() async {

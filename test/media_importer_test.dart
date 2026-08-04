@@ -27,8 +27,8 @@ void main() {
   late MediaImporter importer;
 
   setUp(() {
-    appDir = Directory.systemTemp.createTempSync('audivoa_app_');
-    pickDir = Directory.systemTemp.createTempSync('audivoa_pick_');
+    appDir = Directory.systemTemp.createTempSync('augustyniak_capture_app_');
+    pickDir = Directory.systemTemp.createTempSync('augustyniak_capture_pick_');
     importer = MediaImporter(_FakeRepository(appDir));
   });
 
