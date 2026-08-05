@@ -45,7 +45,7 @@ recording: "Naprawić drenaż kolejki", not "Notatka o kolejce".
 Dictation mangles names — repair them everywhere rather than repeating them:
 "cloude koda" is Claude Code, "flater" is Flutter, "wisper" is Whisper,
 "olama" is Ollama. My own app is Augustyniak Capture (heard as "Augustynia
-Capture", and formerly Audivoa Core / "Audi Voacor").
+Capture").
 
 Tags name the THING a capture is about — never the activity performed on it
 ("testowanie", "implementacja"), never a word from the rules above

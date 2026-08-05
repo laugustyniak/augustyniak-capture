@@ -36,7 +36,7 @@
 - [ ] **Step 1: Create the worktree and enable hooks**
 
 ```bash
-cd /home/laugustyniak/github/tools/Audivoa-Core
+cd /home/laugustyniak/github/apps/augustyniak-capture
 git worktree add .worktrees/feat-30-token-encryption -b feat/30-token-encryption
 cd .worktrees/feat-30-token-encryption
 git config core.hooksPath .githooks
