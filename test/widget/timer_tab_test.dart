@@ -3,6 +3,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:augustyniak_capture/features/settings/presentation/settings_controller.dart';
 import 'package:augustyniak_capture/features/timer/domain/alarm_player.dart';
 import 'package:augustyniak_capture/features/timer/domain/alarm_sound.dart';
+import 'package:augustyniak_capture/features/timer/domain/focus_session.dart';
 import 'package:augustyniak_capture/features/timer/presentation/focus_timer_controller.dart';
 import 'package:augustyniak_capture/features/timer/presentation/timer_tab.dart';
 
@@ -47,6 +48,7 @@ void main() {
   Future<({FocusTimerController timer, SettingsController settings})> pumpTimer(
     WidgetTester tester, {
     _FakeClock? clock,
+    FocusSessionLog? sessionLog,
   }) async {
     tester.view.physicalSize = const Size(1000, 2600);
     tester.view.devicePixelRatio = 1;
@@ -56,9 +58,11 @@ void main() {
     await settings.initialize();
     final FocusTimerController timer = FocusTimerController(
       alarmPlayer: alarm,
+      sessionLog: sessionLog ?? const NoopFocusSessionLog(),
       clock: clock?.call,
     );
     addTearDown(timer.dispose);
+    await timer.initialize();
     void apply() {
       timer.configure(settings.timerDuration);
       timer.setAlarmSound(settings.timerAlarm);
@@ -289,4 +293,314 @@ void main() {
     expect(alarm.played, <AlarmSound>[AlarmSound.chime]);
     expect(find.text('START AGAIN'), findsOneWidget);
   });
+
+  group('completed sessions panel', () {
+    /// A log holding a fixed history, so the panel is asserted against data the
+    /// test chose rather than against sessions it had to run in real time.
+    FocusSessionLog logWith(List<FocusSession> rows) => _StubSessionLog(rows);
+
+    testWidgets('an install with no finished sessions says so plainly', (
+      WidgetTester tester,
+    ) async {
+      await pumpTimer(tester);
+
+      expect(find.text('SESSIONS DONE'), findsOneWidget);
+      expect(
+        find.textContaining('No sessions finished yet'),
+        findsOneWidget,
+      );
+    });
+
+    testWidgets("today's count leads the panel", (WidgetTester tester) async {
+      final _FakeClock clock = _FakeClock();
+      await pumpTimer(
+        tester,
+        clock: clock,
+        sessionLog: logWith(<FocusSession>[
+          FocusSession(
+            completedAt: DateTime(2026, 8, 5, 9),
+            duration: const Duration(minutes: 40),
+          ),
+          FocusSession(
+            completedAt: DateTime(2026, 8, 5, 11),
+            duration: const Duration(minutes: 25),
+          ),
+          FocusSession(
+            completedAt: DateTime(2026, 8, 2, 11),
+            duration: const Duration(minutes: 40),
+          ),
+        ]),
+      );
+
+      // Specifically the headline, not any '2' on screen: the 5 Aug day bar
+      // renders one too, so a bare `find.text('2')` passed off the bar alone
+      // and a headline regressed to 0 or 3 would have gone unnoticed. The
+      // 34 px display size is what identifies it.
+      expect(
+        find.byWidgetPredicate(
+          (Widget widget) =>
+              widget is Text &&
+              widget.data == '2' &&
+              widget.style?.fontSize == 34,
+        ),
+        findsOneWidget,
+      );
+      expect(find.text('today'), findsWidgets);
+      expect(find.text('65 min'), findsOneWidget);
+      expect(find.text('3 total'), findsOneWidget);
+    });
+
+    testWidgets('the window switches between the week and the month', (
+      WidgetTester tester,
+    ) async {
+      final _FakeClock clock = _FakeClock();
+      await pumpTimer(
+        tester,
+        clock: clock,
+        sessionLog: logWith(<FocusSession>[
+          FocusSession(
+            completedAt: DateTime(2026, 8, 5, 9),
+            duration: const Duration(minutes: 40),
+          ),
+          // Three weeks back: inside the month, outside the week.
+          FocusSession(
+            completedAt: DateTime(2026, 7, 20, 9),
+            duration: const Duration(minutes: 40),
+          ),
+        ]),
+      );
+
+      expect(find.text('1 in 7 days'), findsOneWidget);
+
+      await tester.tap(find.text('30 DAYS'));
+      await tester.pump();
+
+      expect(find.text('2 in 30 days'), findsOneWidget);
+      // The month view is a shaded grid, which needs its scale named.
+      expect(find.text('less'), findsOneWidget);
+      expect(find.text('more'), findsOneWidget);
+    });
+
+    testWidgets('the project split names where the time went', (
+      WidgetTester tester,
+    ) async {
+      final _FakeClock clock = _FakeClock();
+      await pumpTimer(
+        tester,
+        clock: clock,
+        sessionLog: logWith(<FocusSession>[
+          FocusSession(
+            completedAt: DateTime(2026, 8, 5, 9),
+            duration: const Duration(minutes: 40),
+            projectId: 'p1',
+            projectName: 'Acme',
+          ),
+          FocusSession(
+            completedAt: DateTime(2026, 8, 4, 9),
+            duration: const Duration(minutes: 40),
+            projectId: 'p1',
+            projectName: 'Acme',
+          ),
+          // Unattributed time keeps a row of its own rather than vanishing.
+          FocusSession(
+            completedAt: DateTime(2026, 8, 4, 12),
+            duration: const Duration(minutes: 25),
+          ),
+        ]),
+      );
+
+      expect(find.text('WHERE IT WENT'), findsOneWidget);
+      expect(find.text('Acme'), findsOneWidget);
+      expect(find.text('2 · 80m'), findsOneWidget);
+      expect(find.text('No project'), findsOneWidget);
+    });
+  });
+
+  group('completed sessions panel — regressions', () {
+    FocusSessionLog logWith(List<FocusSession> rows) => _StubSessionLog(rows);
+
+    testWidgets('the chosen window survives a session finishing', (
+      WidgetTester tester,
+    ) async {
+      final _FakeClock clock = _FakeClock();
+      final ({FocusTimerController timer, SettingsController settings}) host =
+          await pumpTimer(
+        tester,
+        clock: clock,
+        sessionLog: logWith(<FocusSession>[
+          FocusSession(
+            completedAt: DateTime(2026, 8, 5, 9),
+            duration: const Duration(minutes: 40),
+          ),
+        ]),
+      );
+
+      await tester.ensureVisible(find.text('30 DAYS'));
+      await tester.tap(find.text('30 DAYS'));
+      await tester.pump();
+      expect(find.text('1 in 30 days'), findsOneWidget);
+
+      // Finishing a session inserts the DONE panel above this card. In a
+      // keyless ListView that shifts every later child by two and throws the
+      // panel's state away, collapsing the month view back to a week at exactly
+      // the moment the user is looking at it.
+      host.timer.start();
+      clock.advance(const Duration(minutes: 41));
+      host.timer.tick();
+      await tester.pump();
+
+      expect(host.timer.isFinished, isTrue);
+      expect(find.text('1 in 7 days'), findsNothing);
+      expect(find.textContaining('in 30 days'), findsOneWidget);
+    });
+
+    testWidgets('the month grid draws every day of the window', (
+      WidgetTester tester,
+    ) async {
+      final _FakeClock clock = _FakeClock();
+      await pumpTimer(
+        tester,
+        clock: clock,
+        sessionLog: logWith(<FocusSession>[
+          FocusSession(
+            completedAt: DateTime(2026, 8, 5, 9),
+            duration: const Duration(minutes: 40),
+          ),
+        ]),
+      );
+
+      await tester.ensureVisible(find.text('30 DAYS'));
+      await tester.tap(find.text('30 DAYS'));
+      await tester.pump();
+
+      // Thirty cells, empty days included. This is what a column count derived
+      // from `Duration.inDays` got wrong across spring-forward: it dropped one,
+      // and the one it dropped was today.
+      expect(
+        find.byWidgetPredicate(
+          (Widget widget) =>
+              widget is Tooltip &&
+              widget.triggerMode == TooltipTriggerMode.tap,
+        ),
+        findsNWidgets(30),
+      );
+      // Today carries the count, and the label is the only place the grid's
+      // numbers exist at all.
+      expect(
+        find.byTooltip('5/8 · 1 session · 40 min'),
+        findsOneWidget,
+      );
+      expect(
+        find.byTooltip('4/8 · nothing finished'),
+        findsOneWidget,
+      );
+    });
+
+    testWidgets('projects beyond the fourth are summed, not dropped', (
+      WidgetTester tester,
+    ) async {
+      final _FakeClock clock = _FakeClock();
+      await pumpTimer(
+        tester,
+        clock: clock,
+        sessionLog: logWith(<FocusSession>[
+          // Six projects, descending so the tail is deterministic.
+          for (int index = 0; index < 6; index++)
+            for (int repeat = 0; repeat <= (6 - index); repeat++)
+              FocusSession(
+                completedAt: DateTime(2026, 8, 5, 9),
+                // Distinct per project, so the remainder's figure cannot
+                // collide with a named row's and pass by accident.
+                duration: Duration(minutes: 10 + index),
+                projectId: 'p$index',
+                projectName: 'Project $index',
+              ),
+        ]),
+      );
+
+      // Four named rows, then one honest remainder — reporting sessions and
+      // minutes like the rows above it, so the minute column still sums.
+      expect(find.text('Project 0'), findsOneWidget);
+      expect(find.text('Project 3'), findsOneWidget);
+      expect(find.text('Project 4'), findsNothing);
+      expect(find.text('2 more projects'), findsOneWidget);
+      // Projects 4 and 5 hold 3 + 2 sessions of ten minutes each.
+      expect(find.text('5 · 72m'), findsOneWidget);
+    });
+
+    testWidgets('an unreadable history says so instead of claiming zero', (
+      WidgetTester tester,
+    ) async {
+      await pumpTimer(tester, sessionLog: const _BrokenStubLog());
+
+      expect(find.textContaining('could not be read'), findsOneWidget);
+      expect(find.textContaining('No sessions finished yet'), findsNothing);
+    });
+
+    testWidgets('the panel fits a phone without overflowing', (
+      WidgetTester tester,
+    ) async {
+      tester.view.physicalSize = const Size(360, 800);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.reset);
+
+      final _FakeClock clock = _FakeClock();
+      final SettingsController settings = buildSettingsController();
+      await settings.initialize();
+      final FocusTimerController timer = FocusTimerController(
+        alarmPlayer: alarm,
+        sessionLog: logWith(<FocusSession>[
+          FocusSession(
+            completedAt: DateTime(2026, 8, 5, 9),
+            duration: const Duration(minutes: 40),
+            projectId: 'p1',
+            projectName: 'A project with a fairly long name',
+          ),
+        ]),
+        clock: clock.call,
+      );
+      addTearDown(timer.dispose);
+      await timer.initialize();
+
+      await tester.pumpWidget(
+        hostTab(
+          () => TimerTab(controller: timer, settings: settings),
+          listenable: Listenable.merge(<Listenable>[timer, settings]),
+        ),
+      );
+      await tester.pump();
+      await tester.ensureVisible(find.text('30 DAYS'));
+      await tester.tap(find.text('30 DAYS'));
+      await tester.pump();
+
+      // A `Spacer` in the chips row throws `RenderFlex overflowed` rather than
+      // degrading, and the grid is a fixed-width Row — neither may blow up at
+      // the narrowest width this tab is ever drawn at.
+      expect(tester.takeException(), isNull);
+    });
+  });
+}
+
+/// Serves a fixed history and refuses nothing — the panel under test only reads.
+class _StubSessionLog implements FocusSessionLog {
+  const _StubSessionLog(this.rows);
+
+  final List<FocusSession> rows;
+
+  @override
+  Future<List<FocusSession>> load() async => rows;
+
+  @override
+  Future<void> append(FocusSession session) async {}
+}
+
+/// A history that cannot be read, so the panel has to say so.
+class _BrokenStubLog implements FocusSessionLog {
+  const _BrokenStubLog();
+
+  @override
+  Future<List<FocusSession>> load() async => throw StateError('unreadable');
+
+  @override
+  Future<void> append(FocusSession session) async {}
 }
