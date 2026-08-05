@@ -151,10 +151,7 @@ class ProjectsController extends ChangeNotifier {
           repoPath: project.repoPath,
           agent: _launcherAgent(agent),
           sessionName: project.sessionName,
-          arguments: <String>[
-            ...settings.additionalArgs,
-            if (settings.initialPrompt != null) settings.initialPrompt!,
-          ],
+          arguments: _launchArguments(agent, settings),
         ),
       );
     } catch (exception) {
@@ -200,6 +197,17 @@ class ProjectsController extends ChangeNotifier {
   static ProjectAgent _launcherAgent(AgentKind agent) => switch (agent) {
     AgentKind.codex => ProjectAgent.codex,
     AgentKind.claudeCode => ProjectAgent.claude,
-    AgentKind.gemini => ProjectAgent.gemini,
+    AgentKind.antigravity => ProjectAgent.antigravity,
   };
+
+  static List<String> _launchArguments(
+    AgentKind agent,
+    AgentSettings settings,
+  ) => <String>[
+    ...settings.additionalArgs,
+    if (settings.initialPrompt case final String prompt)
+      ...agent == AgentKind.antigravity
+          ? <String>['--prompt-interactive', prompt]
+          : <String>[prompt],
+  ];
 }

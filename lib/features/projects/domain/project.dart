@@ -2,7 +2,7 @@
 enum AgentKind {
   codex,
   claudeCode,
-  gemini;
+  antigravity;
 
   /// Returns null for values written by a newer app version.
   ///
@@ -10,6 +10,7 @@ enum AgentKind {
   /// launcher can simply omit an action it does not understand yet.
   static AgentKind? fromName(String? name) {
     if (name == 'claude') return AgentKind.claudeCode;
+    if (name == 'gemini') return AgentKind.antigravity;
     return AgentKind.values.asNameMap()[name];
   }
 }

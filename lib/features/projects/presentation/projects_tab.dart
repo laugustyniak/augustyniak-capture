@@ -52,7 +52,7 @@ class ProjectsTab extends StatelessWidget {
               title: 'No projects yet.',
               blurb:
                   'Register a repository once, then open Codex, Claude Code '
-                  'or Gemini with the right working directory and context.',
+                  'or Antigravity with the right working directory and context.',
             )
           else
             ...projects.map(
@@ -655,13 +655,13 @@ class _ProjectDraft {
 String _agentLabel(AgentKind agent) => switch (agent) {
   AgentKind.codex => 'Codex',
   AgentKind.claudeCode => 'Claude Code',
-  AgentKind.gemini => 'Gemini',
+  AgentKind.antigravity => 'Antigravity',
 };
 
 IconData _agentIcon(AgentKind agent) => switch (agent) {
   AgentKind.codex => Icons.code,
   AgentKind.claudeCode => Icons.terminal,
-  AgentKind.gemini => Icons.auto_awesome,
+  AgentKind.antigravity => Icons.auto_awesome,
 };
 
 void _showFailure(BuildContext context, Object exception) {

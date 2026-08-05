@@ -33,7 +33,7 @@ The processor **only reads** the source file — it never modifies or deletes it
 - retry for failed processing,
 - editing an item's title and its output text,
 - durable projects with repository paths, per-agent launch settings and one-click
-  Codex, Claude Code or Gemini sessions on macOS,
+  Codex, Claude Code or Antigravity (`agy`) sessions on macOS,
 - tags as individual chips: add, remove and reuse the vocabulary already on
   other captures,
 - finished output is handed to the system clipboard, so a clipboard manager
@@ -335,5 +335,7 @@ inside tags. Each project stores a repository path, description, optional
 Zellij session name, default agent, and per-agent arguments/prompt. Selecting an
 active project assigns subsequent captures automatically; existing captures
 can be reassigned or filtered in Queue. On macOS the Projects tab can open a
-named Ghostty/Zellij session for Codex, Claude Code or Gemini without invoking a
-shell or interpolating a command string.
+named Ghostty/Zellij session for Codex, Claude Code or Antigravity (`agy`)
+without invoking a shell or interpolating a command string. See
+[Agent sessions](docs/agent-sessions.md) for prerequisites and a project setup
+walkthrough.

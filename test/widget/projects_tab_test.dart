@@ -51,7 +51,7 @@ void main() {
     expect(find.text('ACTIVE'), findsOneWidget);
     expect(find.text('CODEX'), findsOneWidget);
     expect(find.text('CLAUDE CODE'), findsOneWidget);
-    expect(find.text('GEMINI'), findsOneWidget);
+    expect(find.text('ANTIGRAVITY'), findsOneWidget);
 
     await tester.tap(find.byKey(const ValueKey<String>('add-project')));
     // The autofocus cursor blinks forever, so this sheet never settles.
