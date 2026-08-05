@@ -100,9 +100,11 @@ class ProjectsTab extends StatelessWidget {
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(22)),
       ),
-      builder: (BuildContext context) => _ProjectEditorSheet(
-        existing: existing,
-        directoryPicker: directoryPicker,
+      builder: (BuildContext context) => ConsolePaletteScope(
+        builder: (BuildContext context) => _ProjectEditorSheet(
+          existing: existing,
+          directoryPicker: directoryPicker,
+        ),
       ),
     );
     // Persisting belongs to the controller and does not require a live widget

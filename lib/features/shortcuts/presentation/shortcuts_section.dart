@@ -96,8 +96,10 @@ class ShortcutsSection extends StatelessWidget {
     return runWithHotkeysSuspended(() async {
       final HotkeyBinding? binding = await showModalBottomSheet<HotkeyBinding>(
         context: context,
-        backgroundColor: Console.background,
-        builder: (BuildContext context) => _HotkeyCaptureSheet(action: action),
+        builder: (BuildContext context) => ConsolePaletteScope(
+          builder: (BuildContext context) =>
+              _HotkeyCaptureSheet(action: action),
+        ),
       );
       if (binding != null) {
         await controller.setShortcut(action, binding);
