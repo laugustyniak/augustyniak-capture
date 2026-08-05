@@ -4,6 +4,7 @@ import '../../../app/ui_kit.dart';
 import '../../projects/domain/project.dart';
 import '../../shortcuts/domain/shortcut_action.dart';
 import '../../shortcuts/presentation/shortcuts_section.dart';
+import '../domain/app_theme_mode.dart';
 import '../domain/audio_config.dart';
 import '../domain/provider_profile.dart';
 import '../domain/token_cipher.dart';
@@ -59,17 +60,44 @@ class ConfigTab extends StatelessWidget {
       child: ListView(
         padding: const EdgeInsets.fromLTRB(18, 14, 18, 40),
         children: <Widget>[
-          const ConsoleHeader(title: 'Config', trailing: 'local only'),
+          ConsoleHeader(title: 'Config', trailing: 'local only'),
           const SizedBox(height: 18),
           if (controller.error != null) ErrorBanner(message: controller.error!),
-          const SectionHeader(title: 'AUDIO CAPTURE'),
+          SectionHeader(title: 'APPEARANCE'),
           const SizedBox(height: 12),
           ConsoleCard(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: <Widget>[
-                const InfoRow(label: 'CODEC', value: 'AAC-LC · .m4a (fixed)'),
-                const Divider(color: Console.border, height: 22),
+                _ChoiceRow<AppThemeMode>(
+                  label: 'THEME',
+                  value: controller.themeMode,
+                  options: AppThemeMode.values,
+                  labelFor: (AppThemeMode mode) => mode.label,
+                  onChanged: controller.setThemeMode,
+                ),
+                const SizedBox(height: 6),
+                Text(
+                  'SYSTEM follows the operating system and changes with it. '
+                  'DARK and LIGHT pin the app to one palette regardless.',
+                  style: TextStyle(
+                    color: Console.mutedSoft,
+                    fontSize: 10,
+                    height: 1.45,
+                  ),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 22),
+          SectionHeader(title: 'AUDIO CAPTURE'),
+          const SizedBox(height: 12),
+          ConsoleCard(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: <Widget>[
+                InfoRow(label: 'CODEC', value: 'AAC-LC · .m4a (fixed)'),
+                Divider(color: Console.border, height: 22),
                 _ChoiceRow<int>(
                   label: 'SAMPLE RATE',
                   value: audio.sampleRate,
@@ -85,7 +113,7 @@ class ConfigTab extends StatelessWidget {
                       controller.updateAudio(audio.copyWith(sampleRate: value)),
                 ),
                 const SizedBox(height: 4),
-                const Text(
+                Text(
                   'Whisper models are trained on 16kHz audio. Higher sample '
                   'rates do not improve transcription quality and increase '
                   'file size.',
@@ -111,7 +139,7 @@ class ConfigTab extends StatelessWidget {
                       controller.updateAudio(audio.copyWith(bitRate: value)),
                 ),
                 const SizedBox(height: 4),
-                const Text(
+                Text(
                   '64 kbps offers a good balance between audio quality and file '
                   'size, based on our experiments.',
                   style: TextStyle(
@@ -130,7 +158,7 @@ class ConfigTab extends StatelessWidget {
                     audio.copyWith(numChannels: value),
                   ),
                 ),
-                const Divider(color: Console.border, height: 22),
+                Divider(color: Console.border, height: 22),
                 InfoRow(
                   label: 'SIZE',
                   value:
@@ -138,7 +166,7 @@ class ConfigTab extends StatelessWidget {
                       'per hour of recording',
                 ),
                 const SizedBox(height: 6),
-                const Text(
+                Text(
                   'Changes apply to later recordings. Files already saved '
                   'stay as they are.',
                   style: TextStyle(
@@ -162,10 +190,10 @@ class ConfigTab extends StatelessWidget {
             ),
           ),
           const SizedBox(height: 22),
-          const SectionHeader(title: 'TRANSCRIPTION'),
+          SectionHeader(title: 'TRANSCRIPTION'),
           const SizedBox(height: 12),
           ConsoleCard(
-            accent: active == null ? Console.border : Console.cyan,
+            accent: active == null ? Console.border : Console.accent,
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: <Widget>[
@@ -202,10 +230,7 @@ class ConfigTab extends StatelessWidget {
             ),
           ),
           const SizedBox(height: 22),
-          EnrichmentContextSection(
-            controller: controller,
-            projects: projects,
-          ),
+          EnrichmentContextSection(controller: controller, projects: projects),
           if (showShortcuts) ...<Widget>[
             const SizedBox(height: 22),
             ShortcutsSection(
@@ -215,7 +240,7 @@ class ConfigTab extends StatelessWidget {
             ),
           ],
           const SizedBox(height: 22),
-          const SectionHeader(title: 'STORAGE'),
+          SectionHeader(title: 'STORAGE'),
           const SizedBox(height: 12),
           ConsoleCard(
             child: Column(
@@ -234,7 +259,7 @@ class ConfigTab extends StatelessWidget {
                 InfoRow(label: 'SETTINGS', value: 'settings.json'),
                 InfoRow(label: 'LOGS', value: 'logs.json · $logCount events'),
                 const SizedBox(height: 10),
-                const Text(
+                Text(
                   'Every write is atomic: a .tmp file, then rename. '
                   'The app never deletes recordings.',
                   style: TextStyle(
@@ -273,7 +298,7 @@ Color _tokenColor(ProviderProfile? active, bool encrypted) {
 }
 
 class _ChoiceRow<T> extends StatelessWidget {
-  const _ChoiceRow({
+  _ChoiceRow({
     required this.label,
     required this.value,
     required this.options,
@@ -294,7 +319,7 @@ class _ChoiceRow<T> extends StatelessWidget {
       children: <Widget>[
         Text(
           label,
-          style: const TextStyle(
+          style: TextStyle(
             color: Console.muted,
             fontSize: 9,
             fontWeight: FontWeight.w800,

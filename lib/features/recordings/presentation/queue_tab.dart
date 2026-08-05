@@ -10,6 +10,7 @@ import '../../projects/presentation/projects_controller.dart';
 import '../domain/capture_category.dart';
 import '../domain/recording.dart';
 import 'card_parts.dart';
+import 'compact_queue_header.dart';
 import 'queue_metrics.dart';
 import 'recording_card.dart';
 import 'recording_editor.dart';
@@ -30,12 +31,17 @@ enum RecordingFilter { all, queue, ready, failed, raw }
 /// claim a relationship between the two that does not exist. So they are two
 /// rows that compose by intersection.
 ///
-/// It exists because the header already promoted `DONE 27 / 28` to the biggest
-/// number on the screen while offering no way to act on it: the queue held
-/// every capture ever taken, and ticking one off changed a progress bar and
-/// nothing else. [inbox] is the default for that reason — it is what turns the
-/// review toggle from decoration into the control that empties the list.
-enum ReviewFilter { inbox, done, all }
+/// It exists because the header already promoted `CLEAR 27 / 28` to the
+/// biggest number on the screen while offering no way to act on it: the queue
+/// held every capture ever taken, and ticking one off changed a progress bar
+/// and nothing else. [desk] is the default for that reason — it is what turns
+/// the review toggle from decoration into the control that empties the list.
+///
+/// The names are the delegation vocabulary, not mail: a capture sits on the
+/// user's [desk] until they decide who executes it, and leaves as [handedOff].
+/// An inbox is what the world puts on you; this queue only ever holds your own
+/// thoughts, so the arrow points the other way.
+enum ReviewFilter { desk, handedOff, all }
 
 /// The original Phase-1 screen: header, review progress, search, status filters
 /// and the capture list. Owns only view state; every mutation goes through
@@ -52,7 +58,7 @@ class QueueTab extends StatefulWidget {
 
 class _QueueTabState extends State<QueueTab> {
   RecordingFilter selectedFilter = RecordingFilter.all;
-  ReviewFilter reviewFilter = ReviewFilter.inbox;
+  ReviewFilter reviewFilter = ReviewFilter.desk;
   String searchQuery = '';
   String? projectFilterId;
   final TextEditingController searchController = TextEditingController();
@@ -80,6 +86,15 @@ class _QueueTabState extends State<QueueTab> {
   /// re-sorts and re-filters under the user, and an index would silently move
   /// the selection onto whatever item slid into that slot.
   String? focusedId;
+
+  /// Whether the compact header's two panels are open *by the user's hand*.
+  ///
+  /// Not the whole answer: a panel whose control is engaged is forced open
+  /// regardless, so a query or a status filter can never be the invisible reason
+  /// the list is short. See [CompactQueueHeader]. Both are ignored in the wide
+  /// forms, where the controls are always on screen.
+  bool searchPanelOpen = false;
+  bool filterPanelOpen = false;
 
   final FocusNode searchFocus = FocusNode();
 
@@ -142,6 +157,22 @@ class _QueueTabState extends State<QueueTab> {
     return LayoutBuilder(
       builder: (BuildContext context, BoxConstraints constraints) {
         final bool compact = constraints.maxWidth < Console.compactBreakpoint;
+        // Counted before the search is applied: the chips describe the queue,
+        // not the current query — otherwise every count would collapse to
+        // whatever the user last typed.
+        final Map<RecordingFilter, int> counts = <RecordingFilter, int>{
+          for (final RecordingFilter filter in RecordingFilter.values)
+            filter: all
+                .where((Recording item) => _matches(filter, item))
+                .length,
+        };
+        // A panel the user did not open, but cannot be allowed to miss: with the
+        // control off screen its effect on the list is unexplainable.
+        final bool searchOpen = searchPanelOpen || searchQuery.isNotEmpty;
+        final bool filtersOpen =
+            filterPanelOpen ||
+            selectedFilter != RecordingFilter.all ||
+            effectiveProjectFilterId != null;
         return _QueueShortcuts(
           focusNode: listFocus,
           // Rebuilt with the current `visible` list on every frame, so a shortcut
@@ -162,20 +193,32 @@ class _QueueTabState extends State<QueueTab> {
           onRoute: () => _onFocused(visible, (Recording item) {
             if (controller.canRoute(item)) controller.route(item.id);
           }),
-          onSearch: () => searchFocus.requestFocus(),
+          // `Ctrl+F` and `/` have to reveal the box before they can focus it —
+          // on a phone it is behind the header's search button.
+          onSearch: () {
+            setState(() => searchPanelOpen = true);
+            searchFocus.requestFocus();
+          },
           onClearFocus: () => setState(() => focusedId = null),
           child: SafeArea(
             bottom: false,
             child: Column(
               children: <Widget>[
-                Padding(
-                  padding: const EdgeInsets.fromLTRB(20, 14, 20, 0),
-                  child: ConsoleHeader(
-                    title: 'Queue',
-                    trailing:
-                        '${all.length} ${all.length == 1 ? 'capture' : 'captures'}',
+                // No page title on a phone. It is the one screen that can spare
+                // none: the header, the progress strip and the always-open
+                // controls took roughly a third of a 393x852 device before the
+                // first capture was drawn, and Queue is the tab the app opens
+                // on. The four other tabs keep theirs — they are destinations
+                // the user navigated to, and each needs to say what it is.
+                if (!compact)
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(20, 14, 20, 0),
+                    child: ConsoleHeader(
+                      title: 'Queue',
+                      trailing:
+                          '${all.length} ${all.length == 1 ? 'capture' : 'captures'}',
+                    ),
                   ),
-                ),
                 if (controller.error != null) ...<Widget>[
                   const SizedBox(height: 10),
                   ErrorBanner(message: controller.error!),
@@ -188,62 +231,106 @@ class _QueueTabState extends State<QueueTab> {
                 // filter excludes everything" and "empty because there is nothing"
                 // become the same picture, and the user has no way to tell which one
                 // they are looking at without scrolling back up to check.
-                Padding(
-                  padding: const EdgeInsets.fromLTRB(20, 14, 20, 0),
-                  child: Column(
-                    children: <Widget>[
-                      ReviewedStrip(
-                        total: all.length,
-                        reviewed: reviewedCount,
-                        filter: reviewFilter,
-                        onFilterChanged: (ReviewFilter value) {
-                          setState(() => reviewFilter = value);
-                        },
-                      ),
-                      const SizedBox(height: 10),
-                      Padding(
-                        padding: const EdgeInsets.symmetric(horizontal: 4),
-                        child: _QueueControls(
-                          searchController: searchController,
-                          searchFocusNode: searchFocus,
-                          searchQuery: searchQuery,
-                          onSearchChanged: (String value) {
-                            setState(() => searchQuery = value);
-                          },
-                          projects: projects,
-                          selectedProjectId: effectiveProjectFilterId,
-                          onProjectChanged: (String? value) {
-                            setState(() => projectFilterId = value);
-                          },
-                          selectedFilter: selectedFilter,
-                          // Counted before the search is applied: the chips describe
-                          // the queue, not the current query — otherwise every count
-                          // would collapse to whatever the user last typed.
-                          counts: <RecordingFilter, int>{
-                            for (final RecordingFilter filter
-                                in RecordingFilter.values)
-                              filter: all
-                                  .where(
-                                    (Recording item) => _matches(filter, item),
-                                  )
-                                  .length,
-                          },
-                          onFilterSelected: (RecordingFilter value) {
+                if (compact)
+                  CompactQueueHeader(
+                    total: all.length,
+                    reviewed: reviewedCount,
+                    filter: reviewFilter,
+                    onFilterChanged: (ReviewFilter value) {
+                      setState(() => reviewFilter = value);
+                    },
+                    searchOpen: searchOpen,
+                    // Toggles the user's own flag, never the resolved one: a
+                    // panel forced open by a live filter must stay open, and
+                    // folding the two together would also make "clear the
+                    // filter" close the panel out from under the finger that
+                    // cleared it.
+                    onToggleSearch: () {
+                      setState(() => searchPanelOpen = !searchPanelOpen);
+                      if (searchPanelOpen) searchFocus.requestFocus();
+                    },
+                    search: _SearchField(
+                      controller: searchController,
+                      focusNode: searchFocus,
+                      value: searchQuery,
+                      onChanged: (String value) {
+                        setState(() => searchQuery = value);
+                      },
+                    ),
+                    filtersOpen: filtersOpen,
+                    onToggleFilters: () {
+                      setState(() => filterPanelOpen = !filterPanelOpen);
+                    },
+                    filters: Column(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: <Widget>[
+                        if (projects.isNotEmpty) ...<Widget>[
+                          _ProjectFilter(
+                            projects: projects,
+                            selectedId: effectiveProjectFilterId,
+                            onChanged: (String? value) {
+                              setState(() => projectFilterId = value);
+                            },
+                          ),
+                          const SizedBox(height: 10),
+                        ],
+                        _FilterRow(
+                          selected: selectedFilter,
+                          counts: counts,
+                          onSelected: (RecordingFilter value) {
                             setState(() => selectedFilter = value);
                           },
                         ),
-                      ),
-                    ],
+                      ],
+                    ),
+                  )
+                else
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(20, 14, 20, 0),
+                    child: Column(
+                      children: <Widget>[
+                        ReviewedStrip(
+                          total: all.length,
+                          reviewed: reviewedCount,
+                          filter: reviewFilter,
+                          onFilterChanged: (ReviewFilter value) {
+                            setState(() => reviewFilter = value);
+                          },
+                        ),
+                        const SizedBox(height: 10),
+                        Padding(
+                          padding: const EdgeInsets.symmetric(horizontal: 4),
+                          child: _QueueControls(
+                            searchController: searchController,
+                            searchFocusNode: searchFocus,
+                            searchQuery: searchQuery,
+                            onSearchChanged: (String value) {
+                              setState(() => searchQuery = value);
+                            },
+                            projects: projects,
+                            selectedProjectId: effectiveProjectFilterId,
+                            onProjectChanged: (String? value) {
+                              setState(() => projectFilterId = value);
+                            },
+                            selectedFilter: selectedFilter,
+                            counts: counts,
+                            onFilterSelected: (RecordingFilter value) {
+                              setState(() => selectedFilter = value);
+                            },
+                          ),
+                        ),
+                      ],
+                    ),
                   ),
-                ),
                 Expanded(
                   child: ListView(
-                    padding: EdgeInsets.fromLTRB(
-                      16,
-                      14,
-                      16,
-                      compact ? 24 : 190,
-                    ),
+                    // Tighter on a phone, and starting closer to the header:
+                    // the compact row draws its own margin and its own border,
+                    // so a wide gutter here only shrinks the one column of text
+                    // the screen exists to show.
+                    padding: compact
+                        ? const EdgeInsets.fromLTRB(10, 6, 10, 24)
+                        : const EdgeInsets.fromLTRB(16, 14, 16, 190),
                     children: <Widget>[
                       if (visible.isEmpty)
                         Padding(
@@ -633,13 +720,11 @@ class _ProjectFilter extends StatelessWidget {
       // Matched to the search box's 18 px prefix icon: the default 24 would
       // make the dropdown the taller of the two and break the line.
       iconSize: compact ? 18 : 24,
-      style: compact
-          ? const TextStyle(color: Console.text, fontSize: 13)
-          : null,
+      style: compact ? TextStyle(color: Console.text, fontSize: 13) : null,
       decoration: compact
           ? _fieldDecoration.copyWith(
               hintText: 'All projects',
-              prefixIcon: const Icon(
+              prefixIcon: Icon(
                 Icons.account_tree_outlined,
                 color: Console.dim,
                 size: 18,
@@ -682,8 +767,8 @@ bool _matches(RecordingFilter filter, Recording item) => switch (filter) {
 /// the chip counts and the list must be answering the same question.
 bool _matchesReview(ReviewFilter filter, Recording item) => switch (filter) {
   ReviewFilter.all => true,
-  ReviewFilter.inbox => !item.isProcessedByUser,
-  ReviewFilter.done => item.isProcessedByUser,
+  ReviewFilter.desk => !item.isProcessedByUser,
+  ReviewFilter.handedOff => item.isProcessedByUser,
 };
 
 /// Keyboard control for the queue.
@@ -757,8 +842,13 @@ class _QueueShortcuts extends StatelessWidget {
   }
 }
 
-const OutlineInputBorder _fieldBorder = OutlineInputBorder(
-  borderRadius: BorderRadius.all(Radius.circular(10)),
+/// Getters, not top-level variables. A `final`-in-effect module variable is
+/// initialised lazily **once**, so the first field ever built would pin that
+/// theme's colours into every field for the rest of the process — the same
+/// staleness a `const` widget causes, one level up and with no compiler error
+/// to announce it. `test/theme_test.dart` scans for both.
+OutlineInputBorder get _fieldBorder => OutlineInputBorder(
+  borderRadius: const BorderRadius.all(Radius.circular(10)),
   borderSide: BorderSide(color: Console.border),
 );
 
@@ -766,19 +856,22 @@ const OutlineInputBorder _fieldBorder = OutlineInputBorder(
 /// different widgets on one line, so the decoration has to come from a single
 /// place — two hand-copied `OutlineInputBorder`s is exactly how the tabs drifted
 /// before `ConsoleField` existed.
-const InputDecoration _fieldDecoration = InputDecoration(
+InputDecoration get _fieldDecoration => InputDecoration(
   isDense: true,
-  contentPadding: EdgeInsets.symmetric(vertical: 13),
+  contentPadding: const EdgeInsets.symmetric(vertical: 13),
   hintStyle: TextStyle(color: Console.dimText, fontSize: 13),
-  prefixIconConstraints: BoxConstraints(minWidth: 42),
+  prefixIconConstraints: const BoxConstraints(minWidth: 42),
   filled: true,
-  fillColor: Console.surface,
+  // `surfaceRaised` (`--muted`), not `surface`: the field is a *well* inside a
+  // panel, and with `surface` it would be a white box on a white card in the
+  // light theme.
+  fillColor: Console.surfaceRaised,
   border: _fieldBorder,
   enabledBorder: _fieldBorder,
   disabledBorder: _fieldBorder,
   focusedBorder: OutlineInputBorder(
-    borderRadius: BorderRadius.all(Radius.circular(10)),
-    borderSide: BorderSide(color: Console.cyan),
+    borderRadius: const BorderRadius.all(Radius.circular(10)),
+    borderSide: BorderSide(color: Console.accent),
   ),
 );
 
@@ -801,10 +894,10 @@ class _SearchField extends StatelessWidget {
       controller: controller,
       focusNode: focusNode,
       onChanged: onChanged,
-      style: const TextStyle(color: Console.text, fontSize: 13),
+      style: TextStyle(color: Console.text, fontSize: 13),
       decoration: _fieldDecoration.copyWith(
         hintText: 'Search captures',
-        prefixIcon: const Icon(Icons.search, color: Console.dimText, size: 18),
+        prefixIcon: Icon(Icons.search, color: Console.dimText, size: 18),
         suffixIcon: value.isEmpty
             ? null
             : IconButton(
@@ -815,7 +908,7 @@ class _SearchField extends StatelessWidget {
                 // and the row would jump the moment the user types.
                 constraints: const BoxConstraints(minWidth: 38, minHeight: 38),
                 padding: EdgeInsets.zero,
-                icon: const Icon(Icons.close, color: Console.dimText, size: 18),
+                icon: Icon(Icons.close, color: Console.dimText, size: 18),
                 onPressed: () {
                   controller.clear();
                   onChanged('');
@@ -861,7 +954,7 @@ class _FilterRow extends StatelessWidget {
 /// [hasAny] separates "this install has captured nothing" from "the filters
 /// excluded everything", which is the same fact the panel's icon and blurb
 /// switch on. The review axis wins the wording when it is the one narrowing the
-/// list, because reaching inbox zero is an outcome worth naming rather than an
+/// list, because clearing the desk is an outcome worth naming rather than an
 /// absence to apologise for.
 String _emptyLabel(
   RecordingFilter filter,
@@ -874,8 +967,8 @@ String _emptyLabel(
   }
   if (filter == RecordingFilter.all) {
     return switch (review) {
-      ReviewFilter.inbox => 'Inbox zero — everything is closed.',
-      ReviewFilter.done => 'Nothing closed yet.',
+      ReviewFilter.desk => "Desk clear — it's all with someone.",
+      ReviewFilter.handedOff => 'Nothing handed off yet.',
       ReviewFilter.all => 'Nothing matches the current filters.',
     };
   }

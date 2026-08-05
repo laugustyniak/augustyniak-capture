@@ -4,3 +4,10 @@ linter:
   rules:
     avoid_print: true
     prefer_final_locals: true
+    # Off deliberately, and only because of the palette. `Console`'s colours are
+    # getters over the theme in force, so a widget in `ui_kit.dart` that paints
+    # one is *not* constant: Flutter skips rebuilding a child identical to the
+    # previous one, and a `const` constructor there would keep the old theme on
+    # screen after a swap. The rule would ask for exactly that bug back, on
+    # thirteen constructors, every time the file is touched.
+    prefer_const_constructors_in_immutables: false

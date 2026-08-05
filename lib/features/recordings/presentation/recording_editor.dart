@@ -217,152 +217,153 @@ class _RecordingEditorState extends State<RecordingEditor> {
       child: Focus(
         autofocus: true,
         child: RecordingCardShell(
-          borderColor: Console.cyan.withValues(alpha: .55),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: <Widget>[
-            Row(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: <Widget>[
-                RecordingLeadingTile(
-                  recording: recording,
-                  failed: recording.status == RecordingStatus.failed,
-                ),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: <Widget>[
-                      Row(
-                        children: <Widget>[
-                          Expanded(
-                            child: ConsoleField(
-                              controller: _title,
-                              focusNode: _titleFocus,
-                              // Deliberately *not* autofocused. Editing usually
-                              // starts at a chip rather than at the name, and on
-                              // a phone an automatic keyboard would cover the
-                              // very row being edited. It also keeps a freshly
-                              // opened editor free of a blinking cursor — an
-                              // animation that never ends, which is the same
-                              // trap PulseDot and ScanLine set for
-                              // `pumpAndSettle`.
-                              fontSize: 14,
-                              hintText: filename,
-                              textInputAction: TextInputAction.done,
-                              onSubmitted: (String _) => _commitTitle(),
-                              onChanged: (String _) => setState(() {}),
-                            ),
-                          ),
-                          if (_titleDirty) ...<Widget>[
-                            const SizedBox(width: 6),
-                            _RevertButton(
-                              semanticLabel: RecordingEditor.revertTitleLabel,
-                              onTap: _revertTitle,
-                            ),
-                          ],
-                        ],
-                      ),
-                      const SizedBox(height: 5),
-                      Text(
-                        metaLineFor(recording, filename),
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: ConsoleText.cardMeta,
-                      ),
-                    ],
-                  ),
-                ),
-                const SizedBox(width: 8),
-                const StatusPill(label: 'EDITING', color: Console.cyan),
-              ],
-            ),
-            const _EditorRule(),
-            _Field(
-              label: 'CATEGORY',
-              child: Wrap(
-                spacing: 6,
-                runSpacing: 6,
+          borderColor: Console.accent.withValues(alpha: .55),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: <Widget>[
+              Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
                 children: <Widget>[
-                  // `—` and a real category mean different things on this item:
-                  // null is "never classified", `capture` is "classified as
-                  // unplaceable". The chip row keeps both reachable, which the
-                  // dropdown did too — but here the whole vocabulary is visible
-                  // at once instead of hidden behind a tap.
-                  ConsoleChip(
-                    label: '—',
-                    selected: recording.category == null,
-                    onSelected: () => widget.onCategoryChanged(null),
+                  RecordingLeadingTile(
+                    recording: recording,
+                    failed: recording.status == RecordingStatus.failed,
                   ),
-                  for (final CaptureCategory value in CaptureCategory.values)
-                    ConsoleChip(
-                      label: value.label,
-                      selected: recording.category == value,
-                      onSelected: () => widget.onCategoryChanged(value),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: <Widget>[
+                        Row(
+                          children: <Widget>[
+                            Expanded(
+                              child: ConsoleField(
+                                controller: _title,
+                                focusNode: _titleFocus,
+                                // Deliberately *not* autofocused. Editing usually
+                                // starts at a chip rather than at the name, and on
+                                // a phone an automatic keyboard would cover the
+                                // very row being edited. It also keeps a freshly
+                                // opened editor free of a blinking cursor — an
+                                // animation that never ends, which is the same
+                                // trap PulseDot and ScanLine set for
+                                // `pumpAndSettle`.
+                                fontSize: 14,
+                                hintText: filename,
+                                textInputAction: TextInputAction.done,
+                                onSubmitted: (String _) => _commitTitle(),
+                                onChanged: (String _) => setState(() {}),
+                              ),
+                            ),
+                            if (_titleDirty) ...<Widget>[
+                              const SizedBox(width: 6),
+                              _RevertButton(
+                                semanticLabel: RecordingEditor.revertTitleLabel,
+                                onTap: _revertTitle,
+                              ),
+                            ],
+                          ],
+                        ),
+                        const SizedBox(height: 5),
+                        Text(
+                          metaLineFor(recording, filename),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: ConsoleText.cardMeta,
+                        ),
+                      ],
                     ),
+                  ),
+                  const SizedBox(width: 8),
+                  StatusPill(label: 'EDITING', color: Console.accent),
                 ],
               ),
-            ),
-            if (widget.projects.isNotEmpty && widget.onProjectChanged != null)
+              _EditorRule(),
               _Field(
-                label: 'PROJECT',
+                label: 'CATEGORY',
                 child: Wrap(
                   spacing: 6,
                   runSpacing: 6,
                   children: <Widget>[
+                    // `—` and a real category mean different things on this item:
+                    // null is "never classified", `capture` is "classified as
+                    // unplaceable". The chip row keeps both reachable, which the
+                    // dropdown did too — but here the whole vocabulary is visible
+                    // at once instead of hidden behind a tap.
                     ConsoleChip(
                       label: '—',
-                      selected: recording.projectId == null,
-                      onSelected: () => widget.onProjectChanged!(null),
+                      selected: recording.category == null,
+                      onSelected: () => widget.onCategoryChanged(null),
                     ),
-                    for (final Project project in widget.projects)
+                    for (final CaptureCategory value in CaptureCategory.values)
                       ConsoleChip(
-                        label: project.name,
-                        selected: recording.projectId == project.id,
-                        onSelected: () => widget.onProjectChanged!(project.id),
+                        label: value.label,
+                        selected: recording.category == value,
+                        onSelected: () => widget.onCategoryChanged(value),
                       ),
                   ],
                 ),
               ),
-            _Field(
-              label: 'TAGS',
-              child: TagEditor(
-                tags: recording.tags,
-                suggestions: widget.tagSuggestions,
-                onChanged: widget.onTagsChanged,
+              if (widget.projects.isNotEmpty && widget.onProjectChanged != null)
+                _Field(
+                  label: 'PROJECT',
+                  child: Wrap(
+                    spacing: 6,
+                    runSpacing: 6,
+                    children: <Widget>[
+                      ConsoleChip(
+                        label: '—',
+                        selected: recording.projectId == null,
+                        onSelected: () => widget.onProjectChanged!(null),
+                      ),
+                      for (final Project project in widget.projects)
+                        ConsoleChip(
+                          label: project.name,
+                          selected: recording.projectId == project.id,
+                          onSelected: () =>
+                              widget.onProjectChanged!(project.id),
+                        ),
+                    ],
+                  ),
+                ),
+              _Field(
+                label: 'TAGS',
+                child: TagEditor(
+                  tags: recording.tags,
+                  suggestions: widget.tagSuggestions,
+                  onChanged: widget.onTagsChanged,
+                ),
               ),
-            ),
-            _Field(
-              label: 'TEXT',
-              dirty: _textDirty,
-              onRevert: _revertText,
-              revertSemanticLabel: RecordingEditor.revertTextLabel,
-              child: ConsoleField(
-                controller: _text,
-                focusNode: _textFocus,
-                minLines: 4,
-                maxLines: 12,
-                hintText: 'Transcript / OCR text / note',
-                onChanged: (String _) => setState(() {}),
+              _Field(
+                label: 'TEXT',
+                dirty: _textDirty,
+                onRevert: _revertText,
+                revertSemanticLabel: RecordingEditor.revertTextLabel,
+                child: ConsoleField(
+                  controller: _text,
+                  focusNode: _textFocus,
+                  minLines: 4,
+                  maxLines: 12,
+                  hintText: 'Transcript / OCR text / note',
+                  onChanged: (String _) => setState(() {}),
+                ),
               ),
-            ),
-            if (widget.revisions.isNotEmpty) ...<Widget>[
-              const SizedBox(height: 4),
-              RevisionHistorySection(revisions: widget.revisions),
-            ],
-            const _EditorRule(),
-            Row(
-              children: <Widget>[
-                Expanded(child: VerificationLine(recording: recording)),
-                const SizedBox(width: 8),
-                if (widget.onDelete != null) ...<Widget>[
-                  _DeleteButton(onTap: widget.onDelete!),
-                  const SizedBox(width: 7),
-                ],
-                _DoneButton(onTap: _finish),
+              if (widget.revisions.isNotEmpty) ...<Widget>[
+                const SizedBox(height: 4),
+                RevisionHistorySection(revisions: widget.revisions),
               ],
-            ),
-          ],
+              _EditorRule(),
+              Row(
+                children: <Widget>[
+                  Expanded(child: VerificationLine(recording: recording)),
+                  const SizedBox(width: 8),
+                  if (widget.onDelete != null) ...<Widget>[
+                    _DeleteButton(onTap: widget.onDelete!),
+                    const SizedBox(width: 7),
+                  ],
+                  _DoneButton(onTap: _finish),
+                ],
+              ),
+            ],
           ),
         ),
       ),
@@ -472,7 +473,7 @@ class _RevertButton extends StatelessWidget {
       child: InkResponse(
         onTap: onTap,
         radius: 16,
-        child: const Padding(
+        child: Padding(
           padding: EdgeInsets.all(3),
           child: Icon(Icons.undo_rounded, size: 14, color: Console.amber),
         ),
@@ -512,7 +513,7 @@ class _DeleteButton extends StatelessWidget {
           child: Row(
             mainAxisSize: MainAxisSize.min,
             children: <Widget>[
-              const Icon(
+              Icon(
                 Icons.delete_outline_rounded,
                 size: 13,
                 color: Console.redSoft,
@@ -549,18 +550,18 @@ class _DoneButton extends StatelessWidget {
         child: Container(
           padding: const EdgeInsets.symmetric(horizontal: 13, vertical: 7),
           decoration: BoxDecoration(
-            color: Console.cyan.withValues(alpha: .16),
+            color: Console.accent.withValues(alpha: .16),
             borderRadius: BorderRadius.circular(8),
-            border: Border.all(color: Console.cyan.withValues(alpha: .45)),
+            border: Border.all(color: Console.accent.withValues(alpha: .45)),
           ),
           child: Row(
             mainAxisSize: MainAxisSize.min,
             children: <Widget>[
-              const Icon(Icons.check_rounded, size: 13, color: Console.cyan),
+              Icon(Icons.check_rounded, size: 13, color: Console.accent),
               const SizedBox(width: 6),
               Text(
                 'DONE',
-                style: ConsoleText.chip.copyWith(color: Console.cyan),
+                style: ConsoleText.chip.copyWith(color: Console.accent),
               ),
             ],
           ),
@@ -577,7 +578,7 @@ class _EditorRule extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return const Padding(
+    return Padding(
       padding: EdgeInsets.symmetric(vertical: 12),
       child: SizedBox(
         height: 1,

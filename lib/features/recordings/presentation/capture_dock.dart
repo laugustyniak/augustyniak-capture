@@ -5,10 +5,10 @@ import 'recordings_controller.dart';
 
 /// The capture controls that float over the bottom of the Queue.
 ///
-/// Two buttons, deliberately unequal: recording is one tap on a 64 px cyan
+/// Two buttons, deliberately unequal: recording is one tap on a 64 px accent
 /// target, everything else is one tap on a smaller neutral one. The gradient
 /// underneath is what makes that readable — without it the list scrolls into
-/// the buttons and the cyan disc lands on top of a card.
+/// the buttons and the accent disc lands on top of a card.
 class CaptureDock extends StatelessWidget {
   const CaptureDock({
     super.key,
@@ -92,7 +92,7 @@ class _SecondaryCaptureButton extends StatelessWidget {
               color: Console.surfaceRaised,
               shape: BoxShape.circle,
               border: Border.all(color: Console.borderStrong),
-              boxShadow: const <BoxShadow>[
+              boxShadow: <BoxShadow>[
                 BoxShadow(
                   color: Console.shadow,
                   blurRadius: 18,
@@ -112,7 +112,7 @@ class _SecondaryCaptureButton extends StatelessWidget {
   }
 }
 
-/// The 64 px cyan record disc. Starting a recording swaps the whole screen for
+/// The 64 px accent record disc. Starting a recording swaps the whole screen for
 /// the capture view, so this button only ever has to say "start" — the stop and
 /// save affordance lives there, where it cannot be mistaken for anything else.
 class _RecordButton extends StatelessWidget {
@@ -135,30 +135,26 @@ class _RecordButton extends StatelessWidget {
           height: 64,
           alignment: Alignment.center,
           decoration: BoxDecoration(
-            color: busy ? Console.surfaceRaised : Console.cyan,
+            color: busy ? Console.surfaceRaised : Console.accent,
             shape: BoxShape.circle,
             boxShadow: <BoxShadow>[
               BoxShadow(
-                color: Console.cyan.withValues(alpha: busy ? 0 : .35),
+                color: Console.accent.withValues(alpha: busy ? 0 : .35),
                 blurRadius: 28,
                 offset: const Offset(0, 8),
               ),
             ],
           ),
           child: busy
-              ? const SizedBox(
+              ? SizedBox(
                   width: 22,
                   height: 22,
                   child: CircularProgressIndicator(
                     strokeWidth: 2.4,
-                    color: Console.cyan,
+                    color: Console.accent,
                   ),
                 )
-              : const Icon(
-                  Icons.mic_none_rounded,
-                  size: 26,
-                  color: Console.ink,
-                ),
+              : Icon(Icons.mic_none_rounded, size: 26, color: Console.ink),
         ),
       ),
     );

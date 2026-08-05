@@ -11,9 +11,10 @@ import 'queue_tab.dart';
 /// how much of the queue the user has actually read.
 ///
 /// It also *is* the review filter. The number and the control belong together:
-/// the strip used to state a goal (`DONE 27 / 28`) that nothing on screen could
-/// act on, which is the definition of a vanity metric — the one remaining item
-/// had to be found by eye, among twenty-seven finished ones that never left.
+/// the strip used to state a goal (`CLEAR 27 / 28`) that nothing on screen
+/// could act on, which is the definition of a vanity metric — the one remaining
+/// item had to be found by eye, among twenty-seven finished ones that never
+/// left.
 class ReviewedStrip extends StatelessWidget {
   const ReviewedStrip({
     super.key,
@@ -31,15 +32,21 @@ class ReviewedStrip extends StatelessWidget {
   /// `ANY` rather than the obvious `ALL`: the status row below already owns a
   /// chip with that label, and two chips reading `ALL 28` on one screen is a
   /// genuine ambiguity, not just a finder collision in the tests.
+  ///
+  /// [ReviewFilter.handedOff] shortens to `OFF DESK` rather than spelling the
+  /// verb out. On a phone this row *is* the progress metric — there is no
+  /// separate strip — so the three chips have to stay on one line beside the
+  /// `n / m`, and `HANDED OFF` pushes the [Wrap] onto a second one. The pair
+  /// reads as one thought anyway: the same desk, before and after.
   String _label(ReviewFilter value) => switch (value) {
-    ReviewFilter.inbox => 'INBOX',
-    ReviewFilter.done => 'DONE',
+    ReviewFilter.desk => 'DESK',
+    ReviewFilter.handedOff => 'OFF DESK',
     ReviewFilter.all => 'ANY',
   };
 
   int _count(ReviewFilter value) => switch (value) {
-    ReviewFilter.inbox => total - reviewed,
-    ReviewFilter.done => reviewed,
+    ReviewFilter.desk => total - reviewed,
+    ReviewFilter.handedOff => reviewed,
     ReviewFilter.all => total,
   };
 
@@ -49,7 +56,7 @@ class ReviewedStrip extends StatelessWidget {
     final bool allReviewed = total > 0 && reviewed == total;
 
     return Semantics(
-      label: 'Done $reviewed of $total captures',
+      label: 'Handed off $reviewed of $total captures',
       child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
         decoration: BoxDecoration(
@@ -62,7 +69,7 @@ class ReviewedStrip extends StatelessWidget {
             Icon(
               Icons.check_rounded,
               size: 18,
-              color: allReviewed ? Console.green : Console.cyan,
+              color: allReviewed ? Console.green : Console.accent,
             ),
             const SizedBox(width: 12),
             Expanded(
@@ -80,9 +87,9 @@ class ReviewedStrip extends StatelessWidget {
                             label: _label(value),
                             count: _count(value),
                             selected: filter == value,
-                            selectedColor: value == ReviewFilter.done
+                            selectedColor: value == ReviewFilter.handedOff
                                 ? Console.green
-                                : Console.cyan,
+                                : Console.accent,
                             onSelected: () => onFilterChanged(value),
                           );
                         }).toList(),
@@ -108,7 +115,9 @@ class ReviewedStrip extends StatelessWidget {
                             return LinearProgressIndicator(
                               value: value,
                               minHeight: 4,
-                              color: allReviewed ? Console.green : Console.cyan,
+                              color: allReviewed
+                                  ? Console.green
+                                  : Console.accent,
                               backgroundColor: Console.track,
                             );
                           },

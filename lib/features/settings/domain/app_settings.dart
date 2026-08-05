@@ -1,6 +1,7 @@
 import '../../enrichment/domain/enrichment_defaults.dart';
 import '../../shortcuts/domain/hotkey_binding.dart';
 import '../../shortcuts/domain/shortcut_action.dart';
+import 'app_theme_mode.dart';
 import 'audio_config.dart';
 import 'provider_profile.dart';
 
@@ -16,6 +17,7 @@ class AppSettings {
     this.activeEnrichmentProfileId,
     String? enrichmentInstructions,
     this.audio = AudioConfig.defaults,
+    this.themeMode = AppThemeMode.system,
     Map<ShortcutAction, HotkeyBinding>? shortcuts,
   }) : _enrichmentInstructions = enrichmentInstructions,
        _shortcuts = shortcuts;
@@ -56,6 +58,11 @@ class AppSettings {
   bool get hasCustomEnrichmentInstructions => _enrichmentInstructions != null;
 
   final AudioConfig audio;
+
+  /// Which palette to paint in. Written to `settings.json` unconditionally,
+  /// unlike `shortcuts` and `enrichmentInstructions` — see [AppThemeMode.system]
+  /// for why this one needs no "never configured" state.
+  final AppThemeMode themeMode;
 
   /// Null means "never configured". Kept private and nullable rather than
   /// defaulted in the constructor because the default map reads
@@ -112,6 +119,7 @@ class AppSettings {
     String? enrichmentInstructions,
     bool resetEnrichmentInstructions = false,
     AudioConfig? audio,
+    AppThemeMode? themeMode,
     Map<ShortcutAction, HotkeyBinding>? shortcuts,
     bool resetShortcuts = false,
   }) {
@@ -130,6 +138,7 @@ class AppSettings {
           ? null
           : (enrichmentInstructions ?? _enrichmentInstructions),
       audio: audio ?? this.audio,
+      themeMode: themeMode ?? this.themeMode,
       shortcuts: resetShortcuts ? null : (shortcuts ?? _shortcuts),
     );
   }
@@ -143,6 +152,7 @@ class AppSettings {
       'activeProfileId': activeProfileId,
       'activeEnrichmentProfileId': activeEnrichmentProfileId,
       'audio': audio.toJson(),
+      'themeMode': themeMode.name,
       // Omitted while untouched, for the same reason as `shortcuts`: a later
       // build that improves the default should still reach every user who never
       // wrote their own.
@@ -201,6 +211,9 @@ class AppSettings {
       audio: rawAudio is Map<String, dynamic>
           ? AudioConfig.fromJson(rawAudio)
           : AudioConfig.defaults,
+      themeMode: AppThemeMode.fromName(
+        json['themeMode'] is String ? json['themeMode'] as String : null,
+      ),
       shortcuts: shortcuts,
     );
   }
