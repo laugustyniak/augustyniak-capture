@@ -82,10 +82,15 @@ void main() {
   late _FakeAlarmPlayer alarm;
   late _FakeSessionLog sessionLog;
 
-  FocusTimerController build({AlarmPlayer? player, FocusSessionLog? log}) {
+  FocusTimerController build({
+    AlarmPlayer? player,
+    FocusSessionLog? log,
+    FocusProjectResolver? activeProject,
+  }) {
     final FocusTimerController controller = FocusTimerController(
       alarmPlayer: player ?? alarm,
       sessionLog: log ?? sessionLog,
+      activeProject: activeProject,
       clock: clock.call,
     );
     addTearDown(controller.dispose);
@@ -652,6 +657,190 @@ void main() {
         }),
         isNotNull,
       );
+    });
+  });
+
+  group('project attribution', () {
+    FocusSession session({
+      required int hour,
+      int minutes = 40,
+      String? projectId,
+      String? projectName,
+      int month = 8,
+      int day = 5,
+    }) => FocusSession(
+      completedAt: DateTime(2026, month, day, hour),
+      duration: Duration(minutes: minutes),
+      projectId: projectId,
+      projectName: projectName,
+    );
+
+    test('a session is attributed to the project active when it *ended*', () {
+      // Resolved at the finish line rather than at the start: a forty-minute
+      // session can outlast the project that was active when it began, and the
+      // honest answer is the one that was true when the work was done.
+      FocusProject? active = const FocusProject(id: 'p1', name: 'Capture');
+      final FocusTimerController timer = build(
+        activeProject: () => active,
+      )..start();
+
+      active = const FocusProject(id: 'p2', name: 'Vault');
+      clock.advance(const Duration(minutes: 41));
+      timer.tick();
+
+      expect(sessionLog.rows.single.projectId, 'p2');
+      expect(sessionLog.rows.single.projectName, 'Vault');
+    });
+
+    test('a session with no project active is still counted', () {
+      final FocusTimerController timer = build(activeProject: () => null);
+      runToZero(timer);
+
+      // Unattributed, not unrecorded: time spent outside a project is a fact
+      // about the week, and dropping it would make the rows stop adding up.
+      expect(sessionLog.rows.single.projectId, isNull);
+      expect(timer.today.sessions, 1);
+    });
+
+    test('a resolver that throws costs the attribution, never the session', () {
+      final FocusTimerController timer = build(
+        activeProject: () => throw StateError('projects not loaded'),
+      );
+      runToZero(timer);
+
+      expect(sessionLog.rows, hasLength(1));
+      expect(sessionLog.rows.single.projectId, isNull);
+      expect(timer.isFinished, isTrue);
+    });
+
+    test('the name is stored beside the id, so a deleted project keeps its hours', () {
+      // The same denormalisation `RouteRecord` makes. Resolving names at read
+      // time would let deleting a project erase the time spent on it — exactly
+      // the history this file exists to keep.
+      final List<ProjectFocusTally> tallies = tallyByProject(<FocusSession>[
+        session(hour: 10, projectId: 'gone', projectName: 'Deleted project'),
+      ]);
+
+      expect(tallies.single.projectName, 'Deleted project');
+    });
+
+    test('projects are ordered busiest first, ties broken by name', () {
+      final List<ProjectFocusTally> tallies = tallyByProject(<FocusSession>[
+        session(hour: 9, projectId: 'b', projectName: 'Beta'),
+        session(hour: 10, projectId: 'a', projectName: 'Alpha'),
+        session(hour: 11, projectId: 'c', projectName: 'Gamma'),
+        session(hour: 12, projectId: 'c', projectName: 'Gamma'),
+      ]);
+
+      // Gamma has two; Alpha and Beta have one each and sort by name, so the
+      // order cannot flicker between rebuilds when nothing has changed.
+      expect(
+        tallies.map((ProjectFocusTally t) => t.projectName).toList(),
+        <String>['Gamma', 'Alpha', 'Beta'],
+      );
+      expect(tallies.first.focused, const Duration(minutes: 80));
+    });
+
+    test('an equal session count is broken by time, not by name', () {
+      // Found by looking at the rendered panel: `Note vault · 25 min` sat above
+      // `Reading · 40 min` purely on the alphabet, which is the opposite of the
+      // answer "where did the week go" asks for.
+      final List<ProjectFocusTally> tallies = tallyByProject(<FocusSession>[
+        session(hour: 9, minutes: 25, projectId: 'a', projectName: 'Alpha'),
+        session(hour: 10, minutes: 40, projectId: 'z', projectName: 'Zebra'),
+      ]);
+
+      expect(
+        tallies.map((ProjectFocusTally t) => t.projectName).toList(),
+        <String>['Zebra', 'Alpha'],
+      );
+    });
+
+    test('a renamed project groups under one row, under its newest name', () {
+      final List<ProjectFocusTally> tallies = tallyByProject(<FocusSession>[
+        session(hour: 9, projectId: 'p1', projectName: 'Old name'),
+        session(hour: 11, projectId: 'p1', projectName: 'New name'),
+      ]);
+
+      expect(tallies, hasLength(1));
+      expect(tallies.single.projectName, 'New name');
+      expect(tallies.single.sessions, 2);
+    });
+
+    test('unattributed time sorts last however much of it there is', () {
+      // It is the residual, not a competitor. Ordering it by count puts
+      // `No project` in the middle of the real rows, where it reads as a
+      // project you own and pushes work you filed below work you did not.
+      final List<ProjectFocusTally> tallies = tallyByProject(<FocusSession>[
+        session(hour: 8),
+        session(hour: 9),
+        session(hour: 10),
+        session(hour: 11, projectId: 'p1', projectName: 'Capture'),
+        session(hour: 12, projectId: 'p2', projectName: 'Zebra'),
+      ]);
+
+      expect(
+        tallies.map((ProjectFocusTally t) => t.projectName).toList(),
+        <String>['Capture', 'Zebra', 'No project'],
+      );
+      // Three of them, and still last.
+      expect(tallies.last.sessions, 3);
+    });
+
+    test('unattributed time keeps a row of its own', () {
+      final List<ProjectFocusTally> tallies = tallyByProject(<FocusSession>[
+        session(hour: 9, projectId: 'p1', projectName: 'Capture'),
+        session(hour: 10),
+      ]);
+
+      final ProjectFocusTally unattributed = tallies.firstWhere(
+        (ProjectFocusTally t) => t.projectId == null,
+      );
+      expect(unattributed.projectName, 'No project');
+    });
+
+    test('the split covers the same window the day strip does', () {
+      // Two panels side by side must answer the same question, or one reads as
+      // the explanation of the other while covering a different span.
+      final FocusTimerController timer = build(
+        log: _FakeSessionLog(
+          stored: <FocusSession>[
+            session(hour: 10, day: 5, projectId: 'now', projectName: 'This week'),
+            // Well outside the seven-day window, not merely on its edge.
+            session(
+              hour: 10,
+              month: 7,
+              day: 20,
+              projectId: 'old',
+              projectName: 'Last month',
+            ),
+          ],
+        ),
+      );
+
+      return timer.initialize().then((_) {
+        final List<String> names = timer
+            .projectTallies(7)
+            .map((ProjectFocusTally t) => t.projectName)
+            .toList();
+        expect(names, <String>['This week']);
+        // All-time still holds both — the file is not being trimmed, only the
+        // panel's window is.
+        expect(timer.sessions, hasLength(2));
+      });
+    });
+
+    test('a row written before sessions carried a project still loads', () {
+      // The legacy-defaulting point: those sessions are real and are still
+      // counted, they simply have nothing to attribute.
+      final FocusSession? restored = FocusSession.fromJson(<String, dynamic>{
+        'completedAt': '2026-08-05T09:40:00.000',
+        'minutes': 40,
+      });
+
+      expect(restored, isNotNull);
+      expect(restored!.projectId, isNull);
+      expect(restored.projectName, isNull);
     });
   });
 }
