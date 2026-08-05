@@ -146,7 +146,7 @@ source file is untouched.
 | Tab | What it is for |
 | --- | --- |
 | **Queue** | every capture, review progress, search, filters, playback, inline editing |
-| **Projects** | repository contexts, active project, one-click coding-agent sessions |
+| **Projects** | repository contexts, active project, per-project captures, one-click coding-agent sessions |
 | **Models** | provider profiles — transcription and enrichment, add / edit / activate |
 | **Logs** | live pipeline events (persist, queue, transcribe, errors) with a level filter |
 | **Config** | appearance, audio parameters, global shortcuts, enrichment profile, note vault, keyring status |
@@ -335,6 +335,11 @@ A plain file was chosen over any tracker API deliberately: it needs no token and
 no network, so it does not trade away the one property the app is built on, and
 the result is readable by every tool you already have.
 
+Each project card carries a `CAPTURES (n)` button that opens everything filed
+under it in a sheet — searchable, and editable in place with the same inline
+editor the Queue uses, so reviewing one project's thinking does not mean
+filtering the whole queue down to it and then losing that filter.
+
 ---
 
 ## 🗄 Note vault — Obsidian and friends
@@ -344,17 +349,33 @@ plain notes repository — and **every capture is mirrored there as a markdown
 file**, with the enriched title, category and tags in YAML front matter.
 
 ```
-Config -> NOTE VAULT
-  ┌──────────────────────────────────────────────────────────┐
-  │ Vault directory   /Users/you/Obsidian/Second Brain  [..] │
-  │ Subfolder         Capture                                │
-  │ Copy sources      [ on  ]                                │
-  └──────────────────────────────────────────────────────────┘
+Config -> NOTE VAULT                                   [ MIRRORING ]
+  ┌──────────────────────────────────────────────────────────────┐
+  │ VAULT DIRECTORY   /Users/you/Obsidian/Second Brain    [ .. ] │
+  │ SUBFOLDER         Capture                                    │
+  │ SOURCE FILES      ( COPY INTO VAULT )  ( NOTE TEXT ONLY )    │
+  │                                                              │
+  │ NOTES        /Users/you/Obsidian/Second Brain/Capture        │
+  │ ATTACHMENTS  …/Capture/attachments                           │
+  │                                                              │
+  │                                     [ MIRROR EVERYTHING ]    │
+  └──────────────────────────────────────────────────────────────┘
 ```
 
 An empty directory field is the off switch — deliberately, rather than a
 separate "enabled" checkbox, because two fields would allow the state *enabled,
 nowhere to write*, which can only ever be reported as an error nobody asked for.
+The status pill reads `MIRRORING` or `OFF`, and the two resolved paths are shown
+because a subfolder typo and a working vault are otherwise the same screen.
+
+**`MIRROR EVERYTHING` is the backfill, and it is not a convenience.** Mirroring
+only *new* captures would leave the queue you already have permanently outside
+the vault, with no way in short of re-recording it. The sweep runs sequentially
+on purpose — a hundred concurrent writes into a directory your notes application
+is watching buys nothing but a stampede of file events — and skips captures with
+no text yet. On desktop the directory field carries a browse button behind the
+same `DirectoryPicker` seam the project editor uses; the typed field stays
+authoritative everywhere.
 
 ### What lands in the vault
 
@@ -402,6 +423,38 @@ We agreed to postpone the migration until the index durability work lands…
 The two machine fields sit **last** on purpose, so the plumbing lands at the
 bottom of the property list your reader shows rather than above your own
 metadata.
+
+### When it writes
+
+Three trigger points, and the list is deliberately short:
+
+```mermaid
+flowchart LR
+    P["processing<br/>completes"] --> E["enrichment<br/><i>title, category, tags</i>"]
+    E --> M["mirror"]
+    R["enrichment<br/>retried by hand"] --> M
+    U["you edit a<br/>mirrored field"] --> M
+    S["MIRROR EVERYTHING<br/><i>whole-queue sweep</i>"] --> M
+
+    style M fill:#1056C6,color:#fff
+```
+
+**Mirroring runs *after* enrichment, never before — and that ordering is the
+load-bearing part.** A note written first would be filed as
+`2026-08-05-1432-recording-1432-3f2a1c4e.md` and would have to live with that
+name for good, because rule 2 above forbids ever renaming it. Waiting the extra
+moment is what buys a file name that says what the capture was. It runs whether
+or not enrichment *succeeded*: an install with no profile still wants its
+captures copied.
+
+A hand edit reaches the vault only when it changed something a note actually
+prints — `title`, `category`, `summary`, `transcript`, `projectId` or `tags`.
+Status transitions and poster paths appear nowhere in a note, so mirroring on
+them would rewrite every file in the vault on every pipeline tick. Equally, the
+processing and enrichment paths mirror explicitly at their own tails rather than
+from the shared `_update` funnel — doing both would write the same note two or
+three times per capture, and each of those writes lands as a file event in
+whatever is watching the directory.
 
 ### Mirror, not route — and that distinction is the whole design
 
