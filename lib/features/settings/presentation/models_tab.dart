@@ -53,9 +53,15 @@ class ModelsTab extends StatelessWidget {
                         ? 'Tokens are encrypted at rest (AES-256-GCM). The '
                               'key lives in your system keyring, never in '
                               'settings.json.'
+                        // The reason is appended rather than replacing the
+                        // sentence: what it costs the user comes first, and the
+                        // keyring's own words are what makes the difference
+                        // between "no daemon here" and a real bug findable at
+                        // all. Null until initialize() has made the cipher try.
                         : 'Tokens are stored as plaintext in the app '
                               'documents directory (settings.json) — system '
-                              'keyring unavailable.',
+                              'keyring unavailable.'
+                              '${controller.tokenEncryptionIssue == null ? '' : '\n${controller.tokenEncryptionIssue}'}',
                     style: TextStyle(
                       color: Console.mutedSoft,
                       fontSize: 11,

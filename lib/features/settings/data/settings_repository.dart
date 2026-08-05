@@ -26,6 +26,11 @@ class SettingsRepository {
   /// Models/Config tab copy.
   bool get encryptsTokens => _cipher.encrypts;
 
+  /// Why they are not, when they are not. Null while encryption is on, and
+  /// null for the plaintext identity cipher, which is a choice rather than a
+  /// failure. See [TokenCipher.unavailableReason].
+  String? get tokenEncryptionIssue => _cipher.unavailableReason;
+
   Future<Directory> _directory() async {
     final Directory appDirectory = await getApplicationDocumentsDirectory();
     final Directory directory = Directory(

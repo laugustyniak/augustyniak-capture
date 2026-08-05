@@ -34,10 +34,14 @@ class AesGcmTokenCipher extends TokenCipher {
 
   SecretKey? _key;
   bool _ready = false;
+  String? _reason;
   Future<void>? _initializing;
 
   @override
   bool get encrypts => _ready;
+
+  @override
+  String? get unavailableReason => _ready ? null : _reason;
 
   @override
   Future<void> ensureReady() => _initializing ??= _initialize();
@@ -54,6 +58,7 @@ class AesGcmTokenCipher extends TokenCipher {
         }
         // Wrong-sized value: something else owns this entry — do not
         // overwrite it, run without encryption.
+        _reason = 'the keyring entry holds a value this app did not write';
         return;
       }
 
@@ -65,13 +70,26 @@ class AesGcmTokenCipher extends TokenCipher {
       // unreadable after the next launch.
       final String? verified = await _keyStore.read();
       if (verified == null) {
+        _reason = 'the keyring accepted the master key but did not store it';
         return;
       }
       _key = SecretKey(base64Decode(verified));
       _ready = true;
-    } catch (_) {
+    } catch (exception) {
+      // The one place the cause of a silent plaintext fallback is known. It is
+      // kept as text rather than rethrown because the contract here is that
+      // this method never throws — see [ensureReady] — but discarding it is
+      // what made the macOS `-34018 errSecMissingEntitlement` unfindable for
+      // the whole life of the feature.
+      _reason = _describe(exception);
       _ready = false;
     }
+  }
+
+  /// One line, no stack, no secret: this string reaches the Config tab.
+  static String _describe(Object exception) {
+    final String text = exception.toString().replaceAll('\n', ' ').trim();
+    return text.length <= 160 ? text : '${text.substring(0, 157)}…';
   }
 
   @override

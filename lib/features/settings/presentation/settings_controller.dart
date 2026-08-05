@@ -67,6 +67,12 @@ class SettingsController extends ChangeNotifier {
   /// plaintext fallback (no keyring) so the Models/Config tabs can say so.
   bool get tokenEncryptionActive => _repository.encryptsTokens;
 
+  /// What the keyring said when it refused, for the Models tab. Null when
+  /// encryption is on, and null before [initialize] has made the cipher try —
+  /// a reason that has not been established yet must not read as "no problem"
+  /// combined with [tokenEncryptionActive], which is false at that point too.
+  String? get tokenEncryptionIssue => _repository.tokenEncryptionIssue;
+
   /// The service the recordings controller should use right now. No active
   /// profile means transcription reports "not configured" — same as a fresh
   /// install with no `--dart-define`.
