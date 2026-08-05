@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../../../app/ui_kit.dart';
 import '../../settings/presentation/settings_controller.dart';
 import '../domain/alarm_sound.dart';
+import '../domain/focus_session.dart';
 import '../domain/timer_defaults.dart';
 import 'countdown_dial.dart';
 import 'focus_timer_controller.dart';
@@ -12,10 +13,11 @@ import 'focus_timer_controller.dart';
 ///
 /// The two halves are owned by different objects on purpose. The **session** —
 /// running, paused, how much is left — belongs to [FocusTimerController] and is
-/// never written to disk. The **configuration** — length and alarm — belongs to
-/// [SettingsController] like every other persisted preference, and reaches the
-/// timer through the shell. So the chips here write to settings and the change
-/// arrives back down; the tab holds no third copy of either fact.
+/// never written to disk, though the *fact that one finished* is, which is what
+/// the COMPLETED SESSIONS panel reads. The **configuration** — length and alarm
+/// — belongs to [SettingsController] like every other persisted preference, and
+/// reaches the timer through the shell. So the chips here write to settings and
+/// the change arrives back down; the tab holds no third copy of either fact.
 class TimerTab extends StatefulWidget {
   const TimerTab({super.key, required this.controller, required this.settings});
 
@@ -105,6 +107,15 @@ class _TimerTabState extends State<TimerTab> {
           ],
           const SizedBox(height: 26),
           SectionHeader(
+            title: 'COMPLETED SESSIONS',
+            trailing: timer.sessions.isEmpty
+                ? null
+                : '${timer.sessions.length} all time',
+          ),
+          const SizedBox(height: 12),
+          _FocusHistory(controller: timer),
+          const SizedBox(height: 26),
+          SectionHeader(
             title: 'SESSION GOAL',
             trailing: timer.isRunning ? 'work until zero' : null,
           ),
@@ -147,9 +158,22 @@ class _TimerTabState extends State<TimerTab> {
                             ? '$minutes min (Recommended)'
                             : '$minutes min',
                         selected: timer.duration.inMinutes == minutes,
-                        onSelected: () => widget.settings.setTimerDuration(
-                          Duration(minutes: minutes),
-                        ),
+                        // Picking a length after a session ended is setting the
+                        // next one up, so the dial leaves DONE here rather than
+                        // in `configure`. It cannot be done there: `configure`
+                        // is a push-down the shell runs on *every* settings
+                        // change, so resetting from inside it would wipe the
+                        // DONE screen when the user changed the theme. And it
+                        // cannot ride `setTimerDuration` either — that setter
+                        // drops a value equal to the stored one, so re-picking
+                        // the length just finished would never arrive. Here the
+                        // tap is known to be the user's.
+                        onSelected: () {
+                          if (timer.isFinished) timer.reset();
+                          widget.settings.setTimerDuration(
+                            Duration(minutes: minutes),
+                          );
+                        },
                       ),
                   ],
                 ),
@@ -256,9 +280,8 @@ class _Controls extends StatelessWidget {
     FocusTimerState.finished => restartLabel,
   };
 
-  IconData get _icon => controller.isRunning
-      ? Icons.pause_rounded
-      : Icons.play_arrow_rounded;
+  IconData get _icon =>
+      controller.isRunning ? Icons.pause_rounded : Icons.play_arrow_rounded;
 
   @override
   Widget build(BuildContext context) {
@@ -395,12 +418,176 @@ class _OutlineButton extends StatelessWidget {
   }
 }
 
+/// How many pomodoros have actually been finished, today and over the past week.
+///
+/// It counts **completed** sessions only — a run that reached zero. Pauses,
+/// resets and abandoned runs are not in the file, so this number cannot flatter
+/// the day, which is the only reason it is worth putting on the screen.
+class _FocusHistory extends StatelessWidget {
+  _FocusHistory({required this.controller});
+
+  final FocusTimerController controller;
+
+  /// A week, because that is the span a working rhythm is visible over: a strip
+  /// of three days says nothing about a habit, and a month of them would not
+  /// fit beside a countdown.
+  static const int windowDays = 7;
+
+  static String _dayLabel(DateTime day) {
+    const List<String> names = <String>[
+      'Mon',
+      'Tue',
+      'Wed',
+      'Thu',
+      'Fri',
+      'Sat',
+      'Sun',
+    ];
+    return names[day.weekday - 1];
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final DailyFocusTally today = controller.today;
+    final List<DailyFocusTally> week = controller.recentDays(windowDays);
+    final int busiest = week.fold(
+      1,
+      (int peak, DailyFocusTally day) => day.sessions > peak ? day.sessions : peak,
+    );
+
+    if (controller.sessions.isEmpty) {
+      return ConsoleCard(
+        child: Text(
+          'No sessions finished yet. A pomodoro is counted when the countdown '
+          'reaches zero — pausing or resetting one leaves it out, so this stays '
+          'a record of work actually done.',
+          style: ConsoleText.micro.copyWith(height: 1.45),
+        ),
+      );
+    }
+
+    return ConsoleCard(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: <Widget>[
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.end,
+            children: <Widget>[
+              Text(
+                '${today.sessions}',
+                style: TextStyle(
+                  fontFamily: ConsoleFont.display,
+                  fontSize: 34,
+                  fontWeight: FontWeight.w700,
+                  height: 1,
+                  color: today.isEmpty ? Console.mutedSoft : Console.accent,
+                ),
+              ),
+              const SizedBox(width: 8),
+              Padding(
+                padding: const EdgeInsets.only(bottom: 3),
+                child: Text(
+                  today.sessions == 1 ? 'session today' : 'sessions today',
+                  style: ConsoleText.cardMeta,
+                ),
+              ),
+              const Spacer(),
+              if (!today.isEmpty)
+                Text(
+                  '${today.focused.inMinutes} min focused',
+                  style: ConsoleText.micro,
+                ),
+            ],
+          ),
+          const SizedBox(height: 16),
+          for (final DailyFocusTally day in week) ...<Widget>[
+            _DayRow(day: day, busiest: busiest),
+            const SizedBox(height: 6),
+          ],
+        ],
+      ),
+    );
+  }
+}
+
+/// One day of the strip: label, a bar proportional to the busiest day shown,
+/// and the count.
+///
+/// Days with nothing on them are drawn rather than skipped — an empty row is
+/// the fact that no session was finished, and a strip that omitted them would
+/// make a week of one-a-day look identical to a single busy Monday.
+class _DayRow extends StatelessWidget {
+  _DayRow({required this.day, required this.busiest});
+
+  final DailyFocusTally day;
+  final int busiest;
+
+  @override
+  Widget build(BuildContext context) {
+    final bool empty = day.isEmpty;
+    return Row(
+      children: <Widget>[
+        SizedBox(
+          width: 34,
+          child: Text(
+            _FocusHistory._dayLabel(day.day),
+            style: ConsoleText.micro.copyWith(
+              color: empty ? Console.dimText : Console.textSoft,
+            ),
+          ),
+        ),
+        Expanded(
+          child: LayoutBuilder(
+            builder: (BuildContext context, BoxConstraints constraints) {
+              return Stack(
+                children: <Widget>[
+                  Container(
+                    height: 8,
+                    decoration: BoxDecoration(
+                      color: Console.track,
+                      borderRadius: BorderRadius.circular(4),
+                    ),
+                  ),
+                  if (!empty)
+                    Container(
+                      height: 8,
+                      width: constraints.maxWidth * (day.sessions / busiest),
+                      decoration: BoxDecoration(
+                        color: Console.accent,
+                        borderRadius: BorderRadius.circular(4),
+                      ),
+                    ),
+                ],
+              );
+            },
+          ),
+        ),
+        SizedBox(
+          width: 26,
+          child: Text(
+            empty ? '–' : '${day.sessions}',
+            textAlign: TextAlign.right,
+            style: ConsoleText.micro.copyWith(
+              color: empty ? Console.dimText : Console.text,
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+}
+
 /// What the session was, once it is over. Green rather than the accent: it is
 /// the one moment on this screen that reports a completed thing.
 class _FinishedPanel extends StatelessWidget {
   _FinishedPanel({required this.controller});
 
   final FocusTimerController controller;
+
+  static String _duration(Duration value) {
+    final int minutes = value.inMinutes;
+    return '$minutes ${minutes == 1 ? 'minute' : 'minutes'} done';
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -421,7 +608,7 @@ class _FinishedPanel extends StatelessWidget {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: <Widget>[
                 Text(
-                  '${controller.sessionDuration.inMinutes} minutes done',
+                  _duration(controller.sessionDuration),
                   style: ConsoleText.cardTitle,
                 ),
                 const SizedBox(height: 4),

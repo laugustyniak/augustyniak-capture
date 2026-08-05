@@ -241,18 +241,17 @@ class _DialPainter extends CustomPainter {
           ..style = PaintingStyle.stroke
           ..strokeWidth = _stroke
           ..strokeCap = StrokeCap.round
-          ..shader =
-              SweepGradient(
-                startAngle: 0,
-                endAngle: 2 * math.pi,
-                transform: GradientRotation(start + spin * 2 * math.pi),
-                colors: <Color>[
-                  color.withValues(alpha: 0),
-                  color.withValues(alpha: .28),
-                  color.withValues(alpha: 0),
-                ],
-                stops: const <double>[0, .07, .14],
-              ).createShader(ring),
+          ..shader = SweepGradient(
+            startAngle: 0,
+            endAngle: 2 * math.pi,
+            transform: GradientRotation(start + spin * 2 * math.pi),
+            colors: <Color>[
+              color.withValues(alpha: 0),
+              color.withValues(alpha: .28),
+              color.withValues(alpha: 0),
+            ],
+            stops: const <double>[0, .07, .14],
+          ).createShader(ring),
       );
     }
 
@@ -304,9 +303,7 @@ class _DialPainter extends CustomPainter {
       // A tick is lit while the countdown has not passed it yet, so the face
       // dims from twelve as the session is spent.
       final bool spent = index / 60 > progress;
-      paint.color = spent
-          ? tick
-          : color.withValues(alpha: quarter ? .55 : .3);
+      paint.color = spent ? tick : color.withValues(alpha: quarter ? .55 : .3);
       canvas.drawLine(
         centre + unit * (outer - (quarter ? 9 : 5)),
         centre + unit * outer,

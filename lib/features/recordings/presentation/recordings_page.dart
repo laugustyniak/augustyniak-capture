@@ -34,6 +34,7 @@ import '../../shortcuts/domain/shortcut_action.dart';
 import '../../shortcuts/domain/window_presenter.dart';
 import '../../shortcuts/presentation/shortcuts_coordinator.dart';
 import '../../timer/data/asset_alarm_player.dart';
+import '../../timer/data/file_focus_session_log.dart';
 import '../../timer/presentation/focus_timer_controller.dart';
 import '../../timer/presentation/timer_tab.dart';
 import '../../transcription/data/audio_splitter.dart';
@@ -208,6 +209,11 @@ class _RecordingsPageState extends State<RecordingsPage> {
     // must not have to wait out an alarm.
     timer = FocusTimerController(
       alarmPlayer: AssetAlarmPlayer(),
+      // Completed pomodoros, appended one line at a time. The only store the
+      // timer has, and deliberately not part of `settings.json`: that file is
+      // rewritten wholesale on every preference change, so a single failed load
+      // followed by any save would replace the history with nothing.
+      sessionLog: const FileFocusSessionLog(),
       logSink: logs,
     );
     shortcuts = ShortcutsCoordinator(
@@ -318,6 +324,10 @@ class _RecordingsPageState extends State<RecordingsPage> {
     // provider and capture parameters.
     await settings.initialize();
     await projects.initialize();
+    // Reads the completed-session history. Awaited rather than fired off,
+    // because it is one small file and an initial frame showing "0 today" that
+    // corrects itself a moment later reads as data loss.
+    await timer.initialize();
     _applyActiveProject();
     await controller.initialize();
     // After loading, never inside it: this reads the recordings *directory*, so
