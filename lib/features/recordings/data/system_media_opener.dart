@@ -4,8 +4,8 @@ import '../domain/media_opener.dart';
 
 /// Real opener, wired by the `RecordingsPage` shell. Hands the path to the
 /// platform's default application — the same shell-out seam as
-/// `SystemWindowPresenter`'s `xdotool` call and the `tesseract`/`ffmpeg`
-/// processors. Kept out of `domain/` so that layer stays platform-free.
+/// `SystemWindowPresenter`'s `xdotool` call and the `ffmpeg` video processors.
+/// Kept out of `domain/` so that layer stays platform-free.
 ///
 /// Throws on a non-zero exit code so the controller can surface it: unlike the
 /// clipboard hand-off, this runs from a deliberate tap and silence would read

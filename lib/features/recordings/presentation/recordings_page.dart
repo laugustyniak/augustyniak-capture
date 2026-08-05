@@ -10,7 +10,6 @@ import '../../../app/ui_kit.dart';
 import '../../enrichment/data/composed_enrichment_context_source.dart';
 import '../../logs/data/log_store.dart';
 import '../../logs/presentation/logs_tab.dart';
-import '../../processing/data/ocr_service.dart';
 import '../../processing/data/video_audio_extractor.dart';
 import '../../processing/data/video_poster_extractor.dart';
 import '../../projects/data/ghostty_zellij_agent_session_launcher.dart';
@@ -195,7 +194,9 @@ class _RecordingsPageState extends State<RecordingsPage> {
         copySources: () => settings.vaultCopySources,
         projectName: (String id) => _projectById(id)?.name,
       ),
-      ocrService: _buildOcrService(),
+      // Left at the disabled default on purpose: OCR is derived entirely from
+      // the enrichment profile, so `_applySettings` installs the real service
+      // as soon as settings load and there is no platform engine to seed here.
       videoAudioExtractor: _buildVideoAudioExtractor(),
       videoPosterExtractor: _buildVideoPosterExtractor(),
       logSink: logs,
@@ -278,16 +279,6 @@ class _RecordingsPageState extends State<RecordingsPage> {
     _bootstrap();
   }
 
-  /// Desktop shells out to the system `tesseract` binary (fails cleanly if it is
-  /// absent). Mobile has no OCR yet — ML Kit is a later slice — so it degrades
-  /// to the disabled service, which reports "not configured" and stays retryable.
-  static OcrService _buildOcrService() {
-    if (_isDesktop) {
-      return const TesseractOcrService();
-    }
-    return const DisabledOcrService();
-  }
-
   /// Desktop extracts the audio track with the system `ffmpeg` binary (fails
   /// cleanly if absent), then reuses the transcription pipeline. Mobile has no
   /// ffmpeg yet — ffmpeg_kit is a later add — so it degrades to "unavailable".
@@ -325,9 +316,9 @@ class _RecordingsPageState extends State<RecordingsPage> {
     return const UnavailableAudioSplitter();
   }
 
-  /// Desktop is where the system `tesseract`/`ffmpeg` binaries and OS-wide
-  /// hotkeys exist. Mobile gets the disabled/no-op seams instead, so those
-  /// features cost nothing there and the Config tab hides the shortcuts section.
+  /// Desktop is where the system `ffmpeg` binary and OS-wide hotkeys exist.
+  /// Mobile gets the disabled/no-op seams instead, so those features cost
+  /// nothing there and the Config tab hides the shortcuts section.
   static bool get _isDesktop =>
       Platform.isLinux || Platform.isMacOS || Platform.isWindows;
 
@@ -393,13 +384,11 @@ class _RecordingsPageState extends State<RecordingsPage> {
             audio: settings.audio,
           );
     controller.enrichmentService = settings.enrichmentService;
-    // OCR rides the enrichment profile (vision-capable chat endpoint). With no
-    // profile active it falls back to the platform default — tesseract on
-    // desktop, disabled on mobile — so a fresh install behaves as before.
-    final OcrService ocr = settings.ocrService;
-    controller.ocrService = ocr is DisabledOcrService
-        ? _buildOcrService()
-        : ocr;
+    // OCR rides the enrichment profile (vision-capable chat endpoint) and has
+    // no platform fallback behind it: with no profile active this is the
+    // disabled service on desktop exactly as on mobile, so an image capture
+    // fails the same readable, retryable way everywhere.
+    controller.ocrService = settings.ocrService;
     controller.audioConfig = settings.audio;
     // Same contract as the service swap above: the length reaches the *next*
     // session, never the one already counting down. The alarm is read at zero,

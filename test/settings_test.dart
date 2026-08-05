@@ -255,13 +255,12 @@ void main() {
     test('clearing the vault path is a decision copyWith preserves', () {
       const AppSettings mirroring = AppSettings(vaultPath: '/Users/me/Vault');
 
-      expect(
-        mirroring.copyWith(clearVaultPath: true).vaultPath,
-        isNull,
-      );
+      expect(mirroring.copyWith(clearVaultPath: true).vaultPath, isNull);
       // An unrelated save carries it through, like every other field here.
       expect(
-        mirroring.copyWith(audio: const AudioConfig(sampleRate: 44100)).vaultPath,
+        mirroring
+            .copyWith(audio: const AudioConfig(sampleRate: 44100))
+            .vaultPath,
         '/Users/me/Vault',
       );
     });
@@ -779,6 +778,50 @@ void main() {
         isNotEmpty,
       );
     });
+
+    // With `TesseractOcrService` gone, OCR has no local engine behind it on any
+    // platform: an image capture works only through a hosted vision endpoint.
+    // These three are what the README offers as the ready-made way to get one,
+    // so a preset that quietly stopped building a real service — a typo in the
+    // endpoint is enough, since `toOcrService` degrades rather than throwing —
+    // would turn every image capture into a `failed` row with nothing on screen
+    // pointing at the cause.
+    test(
+      'the vision-capable defaults build real enrichment and OCR services',
+      () {
+        for (final String name in <String>[
+          'OpenAI',
+          'Anthropic',
+          'Google Gemini',
+        ]) {
+          final ProviderPreset preset = ProviderPreset.all.singleWhere(
+            (ProviderPreset p) =>
+                p.name == name && p.kind == ProfileKind.enrichment,
+            orElse: () => throw StateError('missing enrichment preset: $name'),
+          );
+          final ProviderProfile profile = ProviderProfile(
+            id: 'p',
+            name: preset.name,
+            endpoint: preset.endpoint,
+            kind: preset.kind,
+            model: preset.model,
+          );
+
+          expect(
+            profile.toEnrichmentService(),
+            isA<HttpChatEnrichmentService>(),
+            reason: name,
+          );
+          expect(
+            profile.toOcrService(),
+            isA<HttpVisionOcrService>(),
+            reason: name,
+          );
+          expect(preset.model, isNotNull, reason: name);
+          expect(preset.models, contains(preset.model), reason: name);
+        }
+      },
+    );
 
     test('every non-custom preset endpoint parses with a scheme and host', () {
       for (final ProviderPreset preset in ProviderPreset.all) {

@@ -88,34 +88,6 @@ void main() {
     });
   });
 
-  group('TesseractOcrService error paths', () {
-    late Directory tmp;
-    setUp(() async => tmp = await Directory.systemTemp.createTemp('ocr'));
-    tearDown(() async {
-      if (await tmp.exists()) await tmp.delete(recursive: true);
-    });
-
-    test('missing image file throws FileSystemException', () {
-      expect(
-        () => const TesseractOcrService().extractText(
-          File(p.join(tmp.path, 'nope.png')),
-        ),
-        throwsA(isA<FileSystemException>()),
-      );
-    });
-
-    test('missing tesseract binary throws ProcessException', () async {
-      final File img = File(p.join(tmp.path, 'x.png'));
-      await img.writeAsBytes(<int>[1, 2, 3]);
-      expect(
-        () => const TesseractOcrService(
-          executable: 'tesseract_definitely_absent',
-        ).extractText(img),
-        throwsA(isA<ProcessException>()),
-      );
-    });
-  });
-
   group('image ingestion routes to OCR (through the real upload path)', () {
     test('a picked image is imported and OCR text lands on the item', () async {
       final Directory tmp = await Directory.systemTemp.createTemp('ocr_ingest');

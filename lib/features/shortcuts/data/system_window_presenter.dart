@@ -37,8 +37,8 @@ class SystemWindowPresenter implements WindowPresenter {
   ///
   /// `xdotool` sends `_NET_ACTIVE_WINDOW` with the pager source indication,
   /// which mutter honours unconditionally, and that clears `_HIDDEN`. Shelling
-  /// out to a system binary is the same seam `TesseractOcrService` and
-  /// `FfmpegVideoAudioExtractor` already use, with the same degradation: no
+  /// out to a system binary is the same seam `FfmpegVideoAudioExtractor` and
+  /// `FfmpegAudioSplitter` already use, with the same degradation: no
   /// `xdotool` installed means the window merely blinks in the taskbar, and
   /// everything else — the capture itself — is unaffected.
   ///
