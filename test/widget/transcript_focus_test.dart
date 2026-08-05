@@ -1,9 +1,7 @@
-import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 import 'package:augustyniak_capture/features/recordings/domain/recording.dart';
 import 'package:augustyniak_capture/features/recordings/presentation/recording_card.dart';
-import 'package:augustyniak_capture/features/recordings/presentation/transcript_focus_modal.dart';
 import '../support/harness.dart';
 
 void main() {
