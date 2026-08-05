@@ -33,9 +33,9 @@ enum RecordingFilter { all, queue, ready, failed, raw }
 ///
 /// It exists because the header already promoted `CLEAR 27 / 28` to the
 /// biggest number on the screen while offering no way to act on it: the queue
-/// held every capture ever taken, and ticking one off changed a progress bar and
-/// nothing else. [desk] is the default for that reason — it is what turns the
-/// review toggle from decoration into the control that empties the list.
+/// held every capture ever taken, and ticking one off changed a progress bar
+/// and nothing else. [desk] is the default for that reason — it is what turns
+/// the review toggle from decoration into the control that empties the list.
 ///
 /// The names are the delegation vocabulary, not mail: a capture sits on the
 /// user's [desk] until they decide who executes it, and leaves as [handedOff].
