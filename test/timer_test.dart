@@ -654,4 +654,380 @@ void main() {
       );
     });
   });
+
+  group('project attribution', () {
+    test('a finished session is attributed to the project active at the time', () async {
+      FocusProject? active = const FocusProject(id: 'p1', name: 'Acme');
+      final FocusTimerController timer = FocusTimerController(
+        alarmPlayer: alarm,
+        sessionLog: sessionLog,
+        activeProject: () => active,
+        clock: clock.call,
+      );
+      addTearDown(timer.dispose);
+
+      timer.start();
+      // Switched mid-session: what counts is which project was active when the
+      // work finished, not when it started.
+      active = const FocusProject(id: 'p2', name: 'Beta');
+      clock.advance(const Duration(minutes: 40));
+      timer.tick();
+
+      await Future<void>.delayed(Duration.zero);
+      expect(sessionLog.rows.single.projectId, 'p2');
+      expect(sessionLog.rows.single.projectName, 'Beta');
+    });
+
+    test('with no project active the session is recorded unattributed', () async {
+      final FocusTimerController timer = FocusTimerController(
+        alarmPlayer: alarm,
+        sessionLog: sessionLog,
+        activeProject: () => null,
+        clock: clock.call,
+      );
+      addTearDown(timer.dispose);
+
+      runToZero(timer);
+      await Future<void>.delayed(Duration.zero);
+
+      expect(sessionLog.rows.single.projectId, isNull);
+      expect(timer.projectTallies(7).single.projectName, 'No project');
+    });
+
+    test('a resolver that throws costs the attribution, never the session', () async {
+      final FocusTimerController timer = FocusTimerController(
+        alarmPlayer: alarm,
+        sessionLog: sessionLog,
+        activeProject: () => throw StateError('projects not loaded'),
+        clock: clock.call,
+      );
+      addTearDown(timer.dispose);
+
+      runToZero(timer);
+      await Future<void>.delayed(Duration.zero);
+
+      expect(timer.state, FocusTimerState.finished);
+      expect(timer.today.sessions, 1);
+      expect(sessionLog.rows.single.projectId, isNull);
+    });
+
+    test('projects are tallied busiest first, within the window only', () async {
+      final FocusTimerController timer = build(
+        log: _FakeSessionLog(
+          stored: <FocusSession>[
+            // Inside the seven-day window (today is 5 Aug).
+            FocusSession(
+              completedAt: DateTime(2026, 8, 5, 9),
+              duration: const Duration(minutes: 40),
+              projectId: 'p1',
+              projectName: 'Acme',
+            ),
+            FocusSession(
+              completedAt: DateTime(2026, 8, 4, 9),
+              duration: const Duration(minutes: 25),
+              projectId: 'p1',
+              projectName: 'Acme',
+            ),
+            FocusSession(
+              completedAt: DateTime(2026, 8, 3, 9),
+              duration: const Duration(minutes: 40),
+              projectId: 'p2',
+              projectName: 'Beta',
+            ),
+            // Outside it — must not reach a seven-day split.
+            FocusSession(
+              completedAt: DateTime(2026, 7, 1, 9),
+              duration: const Duration(minutes: 40),
+              projectId: 'p3',
+              projectName: 'Old',
+            ),
+          ],
+        ),
+      );
+      await timer.initialize();
+
+      final List<ProjectFocusTally> week = timer.projectTallies(7);
+
+      expect(week.map((ProjectFocusTally p) => p.projectName), <String>[
+        'Acme',
+        'Beta',
+      ]);
+      expect(week.first.sessions, 2);
+      expect(week.first.focused, const Duration(minutes: 65));
+      // The wider window reaches back far enough to include it.
+      expect(timer.projectTallies(60).length, 3);
+    });
+
+    test('a renamed project keeps its history under the newest name', () async {
+      final FocusTimerController timer = build(
+        log: _FakeSessionLog(
+          stored: <FocusSession>[
+            FocusSession(
+              completedAt: DateTime(2026, 8, 3, 9),
+              duration: const Duration(minutes: 40),
+              projectId: 'p1',
+              projectName: 'Old name',
+            ),
+            FocusSession(
+              completedAt: DateTime(2026, 8, 5, 9),
+              duration: const Duration(minutes: 40),
+              projectId: 'p1',
+              projectName: 'New name',
+            ),
+          ],
+        ),
+      );
+      await timer.initialize();
+
+      // Grouped by id, labelled by the newest name seen — and crucially still
+      // two sessions rather than two projects.
+      final ProjectFocusTally tally = timer.projectTallies(7).single;
+      expect(tally.sessions, 2);
+      expect(tally.projectName, 'New name');
+    });
+
+    test('legacy rows written before projects existed still count', () {
+      final FocusSession? session = FocusSession.fromJson(<String, dynamic>{
+        'completedAt': '2026-08-05T09:40:00.000',
+        'minutes': 40,
+      });
+
+      expect(session, isNotNull);
+      expect(session!.projectId, isNull);
+      expect(session.projectName, isNull);
+    });
+
+    test('the project fields survive a JSON round trip', () {
+      final FocusSession session = FocusSession(
+        completedAt: DateTime(2026, 8, 5, 9, 40),
+        duration: const Duration(minutes: 40),
+        projectId: 'p1',
+        projectName: 'Acme',
+      );
+
+      final FocusSession? back = FocusSession.fromJson(
+        jsonDecode(jsonEncode(session.toJson())) as Object?,
+      );
+
+      expect(back!.projectId, 'p1');
+      expect(back.projectName, 'Acme');
+    });
+  });
+
+  group('calendar geometry', () {
+    test('a week window always needs exactly one column', () {
+      for (int weekday = DateTime.monday; weekday <= DateTime.sunday; weekday++) {
+        expect(columnsFor(weekday, 7), weekday == DateTime.monday ? 1 : 2);
+      }
+    });
+
+    test('every cell of a 30-day window has a column to sit in', () {
+      // The regression: deriving the column count from
+      // `last.difference(start).inDays` loses an hour across spring-forward and
+      // floors a whole day away, dropping *today* from the grid. Swept over two
+      // years of start weekdays rather than asserted at one date, because the
+      // bug only fired on five Mondays a year.
+      for (int weekday = DateTime.monday; weekday <= DateTime.sunday; weekday++) {
+        final int columns = columnsFor(weekday, 30);
+        final int leading = weekday - 1;
+        // The last day must land inside the grid the count describes.
+        expect(columns * 7, greaterThanOrEqualTo(leading + 30));
+        // …and the grid must not carry an entirely empty trailing column.
+        expect((columns - 1) * 7, lessThan(leading + 30));
+      }
+    });
+
+    test('an empty window needs no columns at all', () {
+      expect(columnsFor(DateTime.monday, 0), 0);
+      expect(columnsFor(DateTime.sunday, 0), 0);
+    });
+
+    test('the day keys of a 30-day window are 30 distinct consecutive days', () {
+      // Guards the other half of the same DST hazard: the day *addresses* are
+      // calendar arithmetic, so they must stay correct across a transition.
+      final FocusTimerController timer = build();
+      final List<DailyFocusTally> window = timer.recentDays(30);
+
+      expect(window, hasLength(30));
+      expect(window.map((DailyFocusTally d) => d.day).toSet(), hasLength(30));
+      for (int i = 1; i < window.length; i++) {
+        final DateTime previous = window[i - 1].day;
+        final DateTime expected = DateTime(
+          previous.year,
+          previous.month,
+          previous.day + 1,
+        );
+        expect(window[i].day, expected);
+      }
+    });
+  });
+
+  group('history that cannot be read', () {
+    test('an unreadable log is reported, not counted as nothing', () async {
+      final FocusTimerController timer = build(log: _BrokenSessionLog());
+
+      await timer.initialize();
+
+      // "Nothing done yet" is a claim about the user's history; making it while
+      // the file is merely unreadable is the failure `_indexUnreadable` exists
+      // to prevent in the queue.
+      expect(timer.historyUnreadable, isTrue);
+      expect(timer.sessions, isEmpty);
+    });
+
+    test('a load that fails after disposal notifies nothing', () async {
+      // The shell awaits `initialize()` during bootstrap, so a page torn down
+      // while a slow load is still in flight would reach a dead controller.
+      // The failing path has to be exactly as quiet as the succeeding one.
+      final FocusTimerController timer = FocusTimerController(
+        alarmPlayer: alarm,
+        sessionLog: _BrokenSessionLog(),
+        clock: clock.call,
+      );
+      final Future<void> loading = timer.initialize();
+      timer.dispose();
+
+      await loading;
+
+      expect(timer.historyUnreadable, isFalse);
+    });
+
+    test('a readable but empty log is not an error', () async {
+      final FocusTimerController timer = build();
+
+      await timer.initialize();
+
+      expect(timer.historyUnreadable, isFalse);
+    });
+  });
+
+  group('window edges', () {
+    FocusTimerController withDays(List<int> daysAgo) {
+      final FocusTimerController timer = build(
+        log: _FakeSessionLog(
+          stored: <FocusSession>[
+            for (final int ago in daysAgo)
+              FocusSession(
+                completedAt: DateTime(2026, 8, 5 - ago, 9),
+                duration: const Duration(minutes: 40),
+                projectId: 'p$ago',
+                projectName: 'Project $ago',
+              ),
+          ],
+        ),
+      );
+      return timer;
+    }
+
+    test('a seven-day window includes day 6 and excludes day 7', () async {
+      final FocusTimerController timer = withDays(<int>[0, 6, 7]);
+      await timer.initialize();
+
+      final List<ProjectFocusTally> week = timer.projectTallies(7);
+
+      expect(
+        week.map((ProjectFocusTally p) => p.projectName),
+        containsAll(<String>['Project 0', 'Project 6']),
+      );
+      expect(
+        week.map((ProjectFocusTally p) => p.projectName),
+        isNot(contains('Project 7')),
+      );
+      // The strip above the split must agree — same sessions, same window.
+      final int inStrip = timer
+          .recentDays(7)
+          .fold(0, (int total, DailyFocusTally d) => total + d.sessions);
+      expect(inStrip, 2);
+    });
+
+    test('a session dated in the future is in neither panel', () async {
+      final FocusTimerController timer = build(
+        log: _FakeSessionLog(
+          stored: <FocusSession>[
+            FocusSession(
+              completedAt: DateTime(2026, 8, 9, 9),
+              duration: const Duration(minutes: 40),
+              projectId: 'p1',
+              projectName: 'Skewed',
+            ),
+          ],
+        ),
+      );
+      await timer.initialize();
+
+      // Clock skew or a hand-edited file. It must not show up in the split
+      // while being absent from the count printed directly above it.
+      expect(timer.projectTallies(7), isEmpty);
+      expect(
+        timer.recentDays(7).fold(0, (int t, DailyFocusTally d) => t + d.sessions),
+        0,
+      );
+    });
+  });
+
+  group('project tally details', () {
+    test('an equal-session tie breaks on name, so the order cannot flicker', () async {
+      final FocusTimerController timer = build(
+        log: _FakeSessionLog(
+          stored: <FocusSession>[
+            FocusSession(
+              completedAt: DateTime(2026, 8, 5, 9),
+              duration: const Duration(minutes: 40),
+              projectId: 'z',
+              projectName: 'Zed',
+            ),
+            FocusSession(
+              completedAt: DateTime(2026, 8, 5, 10),
+              duration: const Duration(minutes: 40),
+              projectId: 'a',
+              projectName: 'Acme',
+            ),
+          ],
+        ),
+      );
+      await timer.initialize();
+
+      expect(
+        timer.projectTallies(7).map((ProjectFocusTally p) => p.projectName),
+        <String>['Acme', 'Zed'],
+      );
+    });
+
+    test('a project id with no name still groups, under a stated placeholder', () async {
+      final FocusTimerController timer = build(
+        log: _FakeSessionLog(
+          stored: <FocusSession>[
+            FocusSession(
+              completedAt: DateTime(2026, 8, 5, 9),
+              duration: const Duration(minutes: 40),
+              projectId: 'p1',
+            ),
+          ],
+        ),
+      );
+      await timer.initialize();
+
+      expect(timer.projectTallies(7).single.projectName, 'Unnamed project');
+    });
+
+    test('a goal of exactly the cap is kept whole', () async {
+      final FocusTimerController timer = build();
+      timer.goal = 'x' * FocusSession.maxGoalLength;
+
+      runToZero(timer);
+      await Future<void>.delayed(Duration.zero);
+
+      expect(sessionLog.rows.single.goal, hasLength(FocusSession.maxGoalLength));
+    });
+  });
+}
+
+/// A log that cannot be read at all — a permissions problem, a truncated mount.
+class _BrokenSessionLog implements FocusSessionLog {
+  @override
+  Future<List<FocusSession>> load() async =>
+      throw const FileSystemException('cannot read');
+
+  @override
+  Future<void> append(FocusSession session) async {}
 }

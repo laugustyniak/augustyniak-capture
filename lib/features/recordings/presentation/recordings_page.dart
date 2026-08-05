@@ -35,6 +35,7 @@ import '../../shortcuts/domain/window_presenter.dart';
 import '../../shortcuts/presentation/shortcuts_coordinator.dart';
 import '../../timer/data/asset_alarm_player.dart';
 import '../../timer/data/file_focus_session_log.dart';
+import '../../timer/domain/focus_session.dart';
 import '../../timer/presentation/focus_timer_controller.dart';
 import '../../timer/presentation/timer_tab.dart';
 import '../../transcription/data/audio_splitter.dart';
@@ -214,6 +215,17 @@ class _RecordingsPageState extends State<RecordingsPage> {
       // rewritten wholesale on every preference change, so a single failed load
       // followed by any save would replace the history with nothing.
       sessionLog: const FileFocusSessionLog(),
+      // Read at the moment a session ends rather than pushed down on change:
+      // the active project can be switched during a forty-minute run, and the
+      // honest attribution is the one that was true when the work finished.
+      // Both id and name travel, so a project deleted later does not erase the
+      // hours spent on it — the same denormalisation `RouteRecord` makes.
+      activeProject: () {
+        final Project? active = projects.activeProject;
+        return active == null
+            ? null
+            : FocusProject(id: active.id, name: active.name);
+      },
       logSink: logs,
     );
     shortcuts = ShortcutsCoordinator(

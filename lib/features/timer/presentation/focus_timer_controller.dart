@@ -41,10 +41,12 @@ class FocusTimerController extends ChangeNotifier {
   FocusTimerController({
     AlarmPlayer? alarmPlayer,
     FocusSessionLog sessionLog = const NoopFocusSessionLog(),
+    FocusProjectResolver? activeProject,
     LogSink logSink = const NoopLogSink(),
     DateTime Function()? clock,
   }) : _alarm = alarmPlayer ?? const NoopAlarmPlayer(),
        _sessionLog = sessionLog,
+       _activeProject = activeProject,
        _logs = logSink,
        _clock = clock ?? DateTime.now;
 
@@ -55,6 +57,11 @@ class FocusTimerController extends ChangeNotifier {
 
   final AlarmPlayer _alarm;
   final FocusSessionLog _sessionLog;
+
+  /// Null when the host does not track projects — the pure-Dart suite, and any
+  /// build where the timer stands alone. Sessions are then simply unattributed.
+  final FocusProjectResolver? _activeProject;
+
   final LogSink _logs;
   final DateTime Function() _clock;
 
@@ -152,12 +159,29 @@ class FocusTimerController extends ChangeNotifier {
       _sessions = List<FocusSession>.unmodifiable(loaded);
       notifyListeners();
     } catch (exception) {
+      // The same guard the success path takes, and for the same reason: the
+      // shell awaits this during bootstrap, so a page disposed while a slow
+      // load is still in flight would otherwise get `notifyListeners()` on a
+      // dead controller. A failing load must not be noisier than a working one.
+      if (_disposed) return;
+      // Recorded, not swallowed into silence. "No sessions yet" is a positive
+      // claim about the user's history, and making it while the file is simply
+      // unreadable is the same failure `_indexUnreadable` exists to prevent in
+      // the queue: an empty-looking panel must always be able to say why.
+      _historyUnreadable = true;
       _logs.log(
         'Focus history could not be read · $exception',
         level: LogLevel.warn,
       );
+      notifyListeners();
     }
   }
+
+  bool _historyUnreadable = false;
+
+  /// True when the history file exists but could not be read, so the panel can
+  /// distinguish "nothing done yet" from "cannot tell you".
+  bool get historyUnreadable => _historyUnreadable;
 
   /// Every completed session, oldest first.
   List<FocusSession> get sessions => _sessions;
@@ -202,6 +226,35 @@ class FocusTimerController extends ChangeNotifier {
               DailyFocusTally(day: day, sessions: 0, focused: Duration.zero);
         }(),
     ];
+  }
+
+  /// Sessions from the last [days] calendar days, busiest project first.
+  ///
+  /// Bounded by the same window the strip shows so the two panels answer the
+  /// same question — an all-time project split beside a seven-day strip would
+  /// invite reading one as the explanation of the other.
+  List<ProjectFocusTally> projectTallies(int days) {
+    // One clock read, hoisted: three separate reads could straddle midnight and
+    // compose `from` out of two different days — on New Year's Eve that yields
+    // a window a year wide.
+    final DateTime today = focusDayOf(_clock());
+    final DateTime from = DateTime(
+      today.year,
+      today.month,
+      today.day - (days - 1),
+    );
+    return tallyByProject(
+      _sessions
+          .where((FocusSession session) {
+            final DateTime day = focusDayOf(session.completedAt);
+            // Bounded at *both* ends, so this panel and the strip above it
+            // count the same sessions. `recentDays` stops at today, so a row
+            // dated in the future — clock skew, a hand-edited file — must not
+            // appear here and nowhere else.
+            return !day.isBefore(from) && !day.isAfter(today);
+          })
+          .toList(growable: false),
+    );
   }
 
   /// The length the *next* session runs for.
@@ -365,6 +418,19 @@ class FocusTimerController extends ChangeNotifier {
   /// contract: it must never throw into a session that has already ended.
   void _record() {
     final String goal = _goal.trim();
+    // Resolved here rather than at `start()`: the active project can change
+    // during a session, and the honest attribution is the one that was true
+    // when the work finished. A resolver that throws must not cost the session,
+    // so it is treated like the alarm — the row simply goes down unattributed.
+    FocusProject? project;
+    try {
+      project = _activeProject?.call();
+    } catch (exception) {
+      _logs.log(
+        'Focus session project could not be resolved · $exception',
+        level: LogLevel.warn,
+      );
+    }
     final FocusSession session = FocusSession(
       completedAt: _clock(),
       duration: _sessionDuration,
@@ -373,6 +439,8 @@ class FocusTimerController extends ChangeNotifier {
           : goal.length > FocusSession.maxGoalLength
           ? goal.substring(0, FocusSession.maxGoalLength)
           : goal,
+      projectId: project?.id,
+      projectName: project?.name,
     );
     _sessions = List<FocusSession>.unmodifiable(<FocusSession>[
       ..._sessions,

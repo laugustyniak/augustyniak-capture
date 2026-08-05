@@ -11,6 +11,8 @@ class FocusSession {
     required this.completedAt,
     required this.duration,
     this.goal,
+    this.projectId,
+    this.projectName,
   });
 
   /// When it hit zero, in local time.
@@ -30,12 +32,26 @@ class FocusSession {
   /// able to make one row larger than the whole day's history.
   final String? goal;
 
+  /// Which project was active when the session finished, if any.
+  ///
+  /// **Both the id and the name are stored.** The id is what groups sessions
+  /// together; the name is what the panel can still show after the project has
+  /// been renamed or deleted. Resolving the name at read time would let a
+  /// deleted project erase the hours spent on it, which is exactly the history
+  /// this file exists to keep — the same reason `RouteRecord` stores its
+  /// destination as rendered text rather than as a reference to look up later,
+  /// though it keeps only the label where this keeps both.
+  final String? projectId;
+  final String? projectName;
+
   static const int maxGoalLength = 200;
 
   Map<String, dynamic> toJson() => <String, dynamic>{
     'completedAt': completedAt.toIso8601String(),
     'minutes': duration.inMinutes,
     if (goal != null) 'goal': goal,
+    if (projectId != null) 'projectId': projectId,
+    if (projectName != null) 'projectName': projectName,
   };
 
   /// Null when the row cannot be trusted, so the caller can skip exactly that
@@ -49,16 +65,48 @@ class FocusSession {
     final DateTime? parsed = DateTime.tryParse(at);
     if (parsed == null || minutes < 0) return null;
     final Object? goal = json['goal'];
+    final Object? projectId = json['projectId'];
+    final Object? projectName = json['projectName'];
     return FocusSession(
-      // Stored with an offset, read back in local time: the tally is grouped by
-      // the user's own days, so a session must not move to another day because
-      // the file was written in a different timezone.
+      // `toIso8601String()` on a local `DateTime` emits no offset, so this is a
+      // wall-clock-preserving read and a session cannot change day between
+      // write and read. `toLocal()` is here for the rows that *do* carry a `Z`
+      // or an offset — a hand-edited file, or a future writer.
       completedAt: parsed.toLocal(),
       duration: Duration(minutes: minutes),
       goal: goal is String && goal.trim().isNotEmpty ? goal : null,
+      // Absent on every row written before sessions carried a project, which is
+      // the legacy-defaulting point here: those sessions are real and are still
+      // counted, they simply have nothing to attribute.
+      projectId: projectId is String && projectId.trim().isNotEmpty
+          ? projectId
+          : null,
+      projectName: projectName is String && projectName.trim().isNotEmpty
+          ? projectName
+          : null,
     );
   }
 }
+
+/// The project a finishing session is attributed to.
+///
+/// Declared here rather than reusing the projects feature's `Project` so the
+/// timer's domain stays independent of it — the same reason `HandoffAgent.id` is
+/// an opaque string. The shell owns the mapping.
+class FocusProject {
+  const FocusProject({required this.id, required this.name});
+
+  final String id;
+  final String name;
+}
+
+/// Resolves the project to attribute a session to, at the moment it ends.
+///
+/// A callback rather than a value pushed down on change, for the same reason
+/// `ProjectInboxRouter` reads its projects live: the active project can change
+/// during a forty-minute session, and what matters is which one was active when
+/// the work finished.
+typedef FocusProjectResolver = FocusProject? Function();
 
 /// What one day amounts to: how many sessions, and how much time in them.
 class DailyFocusTally {
@@ -108,6 +156,82 @@ List<DailyFocusTally> tallyByDay(List<FocusSession> sessions) {
         ),
       ),
   ];
+}
+
+/// What one project amounts to across the sessions counted.
+class ProjectFocusTally {
+  const ProjectFocusTally({
+    required this.projectId,
+    required this.projectName,
+    required this.sessions,
+    required this.focused,
+  });
+
+  /// Null for sessions run with no project active — kept as a real row rather
+  /// than dropped, because unattributed time is a fact about the week worth
+  /// seeing, not an absence of data.
+  final String? projectId;
+
+  /// The most recent name seen for this project, so a rename shows the current
+  /// one while older rows still group under it.
+  final String projectName;
+
+  final int sessions;
+  final Duration focused;
+}
+
+/// Sessions grouped by project, busiest first.
+///
+/// Ties break on name so the order cannot flicker between rebuilds — a list
+/// that reshuffles when nothing changed reads as a bug.
+List<ProjectFocusTally> tallyByProject(List<FocusSession> sessions) {
+  final Map<String?, List<FocusSession>> byProject =
+      <String?, List<FocusSession>>{};
+  for (final FocusSession session in sessions) {
+    byProject.putIfAbsent(session.projectId, () => <FocusSession>[])
+        .add(session);
+  }
+
+  final List<ProjectFocusTally> tallies = <ProjectFocusTally>[
+    for (final MapEntry<String?, List<FocusSession>> entry
+        in byProject.entries)
+      ProjectFocusTally(
+        projectId: entry.key,
+        projectName: entry.key == null
+            ? 'No project'
+            // Last writer wins: the newest row carries the newest name.
+            : entry.value
+                      .map((FocusSession session) => session.projectName)
+                      .whereType<String>()
+                      .lastOrNull ??
+                  'Unnamed project',
+        sessions: entry.value.length,
+        focused: entry.value.fold(
+          Duration.zero,
+          (Duration total, FocusSession session) => total + session.duration,
+        ),
+      ),
+  ];
+  tallies.sort((ProjectFocusTally a, ProjectFocusTally b) {
+    final int bySessions = b.sessions.compareTo(a.sessions);
+    return bySessions != 0 ? bySessions : a.projectName.compareTo(b.projectName);
+  });
+  return tallies;
+}
+
+/// How many week-columns a calendar grid needs to hold [dayCount] consecutive
+/// days whose first day falls on [firstWeekday] (`DateTime.monday` == 1).
+///
+/// Pure integer arithmetic, and deliberately not derived from
+/// `last.difference(start).inDays`. A `Duration` measures elapsed hours, so a
+/// span containing a spring-forward transition is an hour short and `inDays`
+/// floors a whole day away — in Europe/Warsaw that yielded one column too few on
+/// five Mondays a year, and the column it dropped was the one holding *today*.
+/// Nothing here can observe a clock, so nothing here can drift.
+int columnsFor(int firstWeekday, int dayCount) {
+  if (dayCount <= 0) return 0;
+  final int leading = firstWeekday - 1;
+  return (leading + dayCount + 6) ~/ 7;
 }
 
 /// Where completed sessions are written down.

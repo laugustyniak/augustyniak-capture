@@ -107,13 +107,21 @@ class _TimerTabState extends State<TimerTab> {
           ],
           const SizedBox(height: 26),
           SectionHeader(
-            title: 'COMPLETED SESSIONS',
+            title: 'SESSIONS DONE',
             trailing: timer.sessions.isEmpty
                 ? null
-                : '${timer.sessions.length} all time',
+                : '${timer.sessions.length} total',
           ),
           const SizedBox(height: 12),
-          _FocusHistory(controller: timer),
+          // Keyed, and that is load-bearing. This card sits below a
+          // conditional `_FinishedPanel`, so finishing a session inserts two
+          // children above it in a keyless `ListView`; index-based reconciliation
+          // would then discard the state holding the chosen window, collapsing a
+          // 30-day view back to 7 at the exact moment the user looks at it.
+          _FocusHistory(
+            key: const ValueKey<String>('focus-history'),
+            controller: timer,
+          ),
           const SizedBox(height: 26),
           SectionHeader(
             title: 'SESSION GOAL',
@@ -418,44 +426,50 @@ class _OutlineButton extends StatelessWidget {
   }
 }
 
-/// How many pomodoros have actually been finished, today and over the past week.
+/// How many pomodoros have actually been finished — today, over a chosen
+/// window, and split by the project they were spent on.
 ///
-/// It counts **completed** sessions only — a run that reached zero. Pauses,
+/// It counts **completed** sessions only: a run that reached zero. Pauses,
 /// resets and abandoned runs are not in the file, so this number cannot flatter
 /// the day, which is the only reason it is worth putting on the screen.
-class _FocusHistory extends StatelessWidget {
-  _FocusHistory({required this.controller});
+class _FocusHistory extends StatefulWidget {
+  _FocusHistory({super.key, required this.controller});
 
   final FocusTimerController controller;
 
-  /// A week, because that is the span a working rhythm is visible over: a strip
-  /// of three days says nothing about a habit, and a month of them would not
-  /// fit beside a countdown.
-  static const int windowDays = 7;
+  /// The two windows offered. A week is the span a working rhythm is visible
+  /// over; a month is where a habit — or a fortnight of not working — becomes
+  /// obvious. Anything longer stops being a thing you read beside a countdown.
+  static const List<int> windows = <int>[7, 30];
 
-  static String _dayLabel(DateTime day) {
-    const List<String> names = <String>[
-      'Mon',
-      'Tue',
-      'Wed',
-      'Thu',
-      'Fri',
-      'Sat',
-      'Sun',
-    ];
-    return names[day.weekday - 1];
-  }
+  @override
+  State<_FocusHistory> createState() => _FocusHistoryState();
+}
+
+class _FocusHistoryState extends State<_FocusHistory> {
+  int _days = _FocusHistory.windows.first;
 
   @override
   Widget build(BuildContext context) {
-    final DailyFocusTally today = controller.today;
-    final List<DailyFocusTally> week = controller.recentDays(windowDays);
-    final int busiest = week.fold(
-      1,
-      (int peak, DailyFocusTally day) => day.sessions > peak ? day.sessions : peak,
-    );
+    final FocusTimerController timer = widget.controller;
+    final DailyFocusTally today = timer.today;
+    final List<DailyFocusTally> window = timer.recentDays(_days);
+    final List<ProjectFocusTally> projects = timer.projectTallies(_days);
 
-    if (controller.sessions.isEmpty) {
+    // Three states, not two. "Nothing done yet" is a claim about the user's
+    // history and must not be made when the file simply could not be read.
+    if (timer.historyUnreadable) {
+      return ConsoleCard(
+        accent: Console.amber.withValues(alpha: .45),
+        child: Text(
+          'The session history could not be read, so this is not a count of '
+          'nothing — it is no answer. Finished sessions are still being '
+          'appended; the Logs tab has the reason.',
+          style: ConsoleText.micro.copyWith(height: 1.45),
+        ),
+      );
+    }
+    if (timer.sessions.isEmpty) {
       return ConsoleCard(
         child: Text(
           'No sessions finished yet. A pomodoro is counted when the countdown '
@@ -465,6 +479,11 @@ class _FocusHistory extends StatelessWidget {
         ),
       );
     }
+
+    final int inWindow = window.fold(
+      0,
+      (int total, DailyFocusTally day) => total + day.sessions,
+    );
 
     return ConsoleCard(
       child: Column(
@@ -484,25 +503,67 @@ class _FocusHistory extends StatelessWidget {
                 ),
               ),
               const SizedBox(width: 8),
-              Padding(
-                padding: const EdgeInsets.only(bottom: 3),
-                child: Text(
-                  today.sessions == 1 ? 'session today' : 'sessions today',
-                  style: ConsoleText.cardMeta,
+              Expanded(
+                child: Padding(
+                  padding: const EdgeInsets.only(bottom: 3),
+                  child: Text(
+                    'today',
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: ConsoleText.cardMeta,
+                  ),
                 ),
               ),
-              const Spacer(),
               if (!today.isEmpty)
                 Text(
-                  '${today.focused.inMinutes} min focused',
+                  '${today.focused.inMinutes} min',
+                  maxLines: 1,
                   style: ConsoleText.micro,
                 ),
             ],
           ),
-          const SizedBox(height: 16),
-          for (final DailyFocusTally day in week) ...<Widget>[
-            _DayRow(day: day, busiest: busiest),
-            const SizedBox(height: 6),
+          const SizedBox(height: 14),
+          Row(
+            children: <Widget>[
+              for (final int days in _FocusHistory.windows) ...<Widget>[
+                ConsoleChip(
+                  label: '$days DAYS',
+                  selected: days == _days,
+                  onSelected: () => setState(() => _days = days),
+                ),
+                const SizedBox(width: 8),
+              ],
+              Expanded(
+                child: Text(
+                  '$inWindow in $_days days',
+                  textAlign: TextAlign.right,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: ConsoleText.micro,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 14),
+          // A week is few enough rows to label each day and give it a bar; a
+          // month is not, so it switches to a calendar grid rather than
+          // shrinking thirty labelled rows into something unreadable.
+          if (_days <= 7)
+            _DayBars(days: window)
+          else
+            _FocusCalendar(days: window),
+          // Hidden until at least one session carries a project. Before that
+          // the section's entire content would be a single full-width
+          // `No project` bar — honest, and worth no space at all.
+          if (projects.any(
+            (ProjectFocusTally project) => project.projectId != null,
+          )) ...<Widget>[
+            const SizedBox(height: 18),
+            Container(height: 1, color: Console.border),
+            const SizedBox(height: 14),
+            Text('WHERE IT WENT', style: ConsoleText.pill),
+            const SizedBox(height: 10),
+            _ProjectSplit(projects: projects),
           ],
         ],
       ),
@@ -510,68 +571,361 @@ class _FocusHistory extends StatelessWidget {
   }
 }
 
-/// One day of the strip: label, a bar proportional to the busiest day shown,
-/// and the count.
+/// The week view: one labelled row per day, bar proportional to the busiest day
+/// shown.
 ///
-/// Days with nothing on them are drawn rather than skipped — an empty row is
-/// the fact that no session was finished, and a strip that omitted them would
-/// make a week of one-a-day look identical to a single busy Monday.
-class _DayRow extends StatelessWidget {
-  _DayRow({required this.day, required this.busiest});
+/// Days with nothing on them are drawn rather than skipped — an empty row is the
+/// fact that no session was finished, and a strip that omitted them would make
+/// one busy Monday look like a steady week.
+class _DayBars extends StatelessWidget {
+  _DayBars({required this.days});
 
-  final DailyFocusTally day;
-  final int busiest;
+  final List<DailyFocusTally> days;
+
+  static const List<String> _names = <String>[
+    'Mon',
+    'Tue',
+    'Wed',
+    'Thu',
+    'Fri',
+    'Sat',
+    'Sun',
+  ];
 
   @override
   Widget build(BuildContext context) {
-    final bool empty = day.isEmpty;
-    return Row(
+    final int busiest = days.fold(
+      1,
+      (int peak, DailyFocusTally day) =>
+          day.sessions > peak ? day.sessions : peak,
+    );
+
+    return Column(
       children: <Widget>[
-        SizedBox(
-          width: 34,
-          child: Text(
-            _FocusHistory._dayLabel(day.day),
-            style: ConsoleText.micro.copyWith(
-              color: empty ? Console.dimText : Console.textSoft,
-            ),
-          ),
-        ),
-        Expanded(
-          child: LayoutBuilder(
-            builder: (BuildContext context, BoxConstraints constraints) {
-              return Stack(
-                children: <Widget>[
-                  Container(
-                    height: 8,
-                    decoration: BoxDecoration(
-                      color: Console.track,
-                      borderRadius: BorderRadius.circular(4),
-                    ),
+        for (final DailyFocusTally day in days) ...<Widget>[
+          Row(
+            children: <Widget>[
+              SizedBox(
+                width: 34,
+                child: Text(
+                  _names[day.day.weekday - 1],
+                  style: ConsoleText.micro.copyWith(
+                    color: day.isEmpty ? Console.dimText : Console.textSoft,
                   ),
-                  if (!empty)
-                    Container(
-                      height: 8,
-                      width: constraints.maxWidth * (day.sessions / busiest),
-                      decoration: BoxDecoration(
-                        color: Console.accent,
-                        borderRadius: BorderRadius.circular(4),
+                ),
+              ),
+              Expanded(
+                child: LayoutBuilder(
+                  builder: (BuildContext context, BoxConstraints constraints) {
+                    return Stack(
+                      children: <Widget>[
+                        Container(
+                          height: 8,
+                          decoration: BoxDecoration(
+                            color: Console.track,
+                            borderRadius: BorderRadius.circular(4),
+                          ),
+                        ),
+                        if (!day.isEmpty)
+                          Container(
+                            height: 8,
+                            width:
+                                constraints.maxWidth * (day.sessions / busiest),
+                            decoration: BoxDecoration(
+                              color: Console.accent,
+                              borderRadius: BorderRadius.circular(4),
+                            ),
+                          ),
+                      ],
+                    );
+                  },
+                ),
+              ),
+              SizedBox(
+                width: 26,
+                child: Text(
+                  day.isEmpty ? '\u2013' : '${day.sessions}',
+                  textAlign: TextAlign.right,
+                  style: ConsoleText.micro.copyWith(
+                    color: day.isEmpty ? Console.dimText : Console.text,
+                  ),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 6),
+        ],
+      ],
+    );
+  }
+}
+
+/// The month view: a calendar grid, weeks running left to right and weekdays
+/// down, each cell shaded by how many sessions that day held.
+///
+/// **One hue, light to dark.** Session count is a magnitude, so it takes a
+/// sequential scale rather than a set of distinct colours — a rainbow here would
+/// imply the days were different *kinds* of thing rather than more and less of
+/// the same one. Empty days keep the track colour, so a gap is visibly a gap and
+/// not a missing cell.
+class _FocusCalendar extends StatelessWidget {
+  _FocusCalendar({required this.days});
+
+  final List<DailyFocusTally> days;
+
+  static const double _cell = 15;
+  static const double _gap = 4;
+
+  /// Four steps plus the empty track. More steps than this stop being tellable
+  /// apart at 15 px, which is the size the grid has to be to fit a month beside
+  /// a countdown.
+  static Color _shade(int sessions) {
+    if (sessions <= 0) return Console.track;
+    if (sessions == 1) return Console.accent.withValues(alpha: .32);
+    if (sessions == 2) return Console.accent.withValues(alpha: .55);
+    if (sessions == 3) return Console.accent.withValues(alpha: .78);
+    return Console.accent;
+  }
+
+  static String _label(DailyFocusTally day) {
+    final String date = '${day.day.day}/${day.day.month}';
+    if (day.isEmpty) return '$date · nothing finished';
+    final String count = day.sessions == 1 ? '1 session' : '${day.sessions} sessions';
+    return '$date · $count · ${day.focused.inMinutes} min';
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (days.isEmpty) return const SizedBox.shrink();
+
+    // Aligned back to the Monday on or before the first day shown, so the rows
+    // are weekdays and a column is a real week rather than an arbitrary seven.
+    final DateTime first = days.first.day;
+    // Calendar arithmetic, never `Duration` — a day is not always 24 hours.
+    // `subtract(Duration(days: n))` would drift in a timezone whose transition
+    // lands at midnight, and deriving the column count from
+    // `difference().inDays` truncates an hour away across spring-forward: in
+    // Europe/Warsaw that produced one column too few on five Mondays a year,
+    // and the day it dropped was *today*. Both numbers below come from integers
+    // the caller already has.
+    final DateTime start = DateTime(
+      first.year,
+      first.month,
+      first.day - (first.weekday - 1),
+    );
+    final DateTime last = days.last.day;
+    final Map<DateTime, DailyFocusTally> byDay = <DateTime, DailyFocusTally>{
+      for (final DailyFocusTally day in days) day.day: day,
+    };
+    final int columns = columnsFor(first.weekday, days.length);
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: <Widget>[
+        for (int row = 0; row < 7; row++) ...<Widget>[
+          Row(
+            children: <Widget>[
+              SizedBox(
+                width: 30,
+                child: Text(
+                  // Every other weekday, so the labels do not crowd a 15 px row.
+                  row.isEven ? _DayBars._names[row] : '',
+                  style: ConsoleText.micro.copyWith(color: Console.dimText),
+                ),
+              ),
+              for (int column = 0; column < columns; column++) ...<Widget>[
+                Builder(
+                  builder: (BuildContext context) {
+                    final DateTime day = DateTime(
+                      start.year,
+                      start.month,
+                      start.day + column * 7 + row,
+                    );
+                    final bool inRange =
+                        !day.isBefore(first) && !day.isAfter(last);
+                    if (!inRange) {
+                      return const SizedBox(
+                        width: _cell,
+                        height: _cell,
+                      );
+                    }
+                    final DailyFocusTally tally =
+                        byDay[day] ??
+                        DailyFocusTally(
+                          day: day,
+                          sessions: 0,
+                          focused: Duration.zero,
+                        );
+                    return Tooltip(
+                      // Tap rather than the default long-press: on a phone the
+                      // grid is otherwise thirty unlabelled squares whose counts
+                      // need a gesture nothing on screen suggests.
+                      triggerMode: TooltipTriggerMode.tap,
+                      message: _label(tally),
+                      child: Container(
+                        width: _cell,
+                        height: _cell,
+                        decoration: BoxDecoration(
+                          color: _shade(tally.sessions),
+                          borderRadius: BorderRadius.circular(3),
+                        ),
                       ),
-                    ),
-                ],
-              );
-            },
+                    );
+                  },
+                ),
+                const SizedBox(width: _gap),
+              ],
+            ],
           ),
+          const SizedBox(height: _gap),
+        ],
+        const SizedBox(height: 4),
+        // The scale, named — a shaded grid is unreadable without it, and this is
+        // the one legend the panel needs since there is only ever one series.
+        Row(
+          children: <Widget>[
+            const SizedBox(width: 30),
+            Text('less', style: ConsoleText.micro.copyWith(color: Console.dimText)),
+            const SizedBox(width: 6),
+            for (final int step in <int>[0, 1, 2, 3, 4]) ...<Widget>[
+              Container(
+                width: 11,
+                height: 11,
+                decoration: BoxDecoration(
+                  color: _shade(step),
+                  borderRadius: BorderRadius.circular(3),
+                ),
+              ),
+              const SizedBox(width: 3),
+            ],
+            const SizedBox(width: 3),
+            Text('more', style: ConsoleText.micro.copyWith(color: Console.dimText)),
+          ],
         ),
-        SizedBox(
-          width: 26,
-          child: Text(
-            empty ? '–' : '${day.sessions}',
-            textAlign: TextAlign.right,
-            style: ConsoleText.micro.copyWith(
-              color: empty ? Console.dimText : Console.text,
-            ),
+      ],
+    );
+  }
+}
+
+/// Which projects the finished sessions went into.
+///
+/// Sessions run with no project active keep a row of their own rather than
+/// being dropped: unattributed focus is a fact about the period worth seeing.
+class _ProjectSplit extends StatelessWidget {
+  _ProjectSplit({required this.projects});
+
+  final List<ProjectFocusTally> projects;
+
+  /// Enough to see where the time actually goes without the panel turning into
+  /// a second screen. The remainder is summed into one honest row rather than
+  /// silently dropped.
+  static const int maxRows = 4;
+
+  @override
+  Widget build(BuildContext context) {
+    final List<ProjectFocusTally> shown = projects.take(maxRows).toList();
+    final List<ProjectFocusTally> rest = projects.skip(maxRows).toList();
+    final int busiest = shown.isEmpty ? 1 : shown.first.sessions;
+    final int restSessions = rest.fold(
+      0,
+      (int total, ProjectFocusTally project) => total + project.sessions,
+    );
+    final Duration restFocused = rest.fold(
+      Duration.zero,
+      (Duration total, ProjectFocusTally project) => total + project.focused,
+    );
+
+    return Column(
+      children: <Widget>[
+        for (final ProjectFocusTally project in shown) ...<Widget>[
+          Row(
+            children: <Widget>[
+              Expanded(
+                child: Text(
+                  project.projectName,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: ConsoleText.micro.copyWith(
+                    color: project.projectId == null
+                        ? Console.dimText
+                        : Console.textSoft,
+                  ),
+                ),
+              ),
+              const SizedBox(width: 10),
+              SizedBox(
+                width: 74,
+                child: LayoutBuilder(
+                  builder: (BuildContext context, BoxConstraints constraints) {
+                    return Stack(
+                      children: <Widget>[
+                        Container(
+                          height: 6,
+                          margin: const EdgeInsets.only(top: 3),
+                          decoration: BoxDecoration(
+                            color: Console.track,
+                            borderRadius: BorderRadius.circular(3),
+                          ),
+                        ),
+                        Container(
+                          height: 6,
+                          margin: const EdgeInsets.only(top: 3),
+                          width: constraints.maxWidth *
+                              (project.sessions / busiest),
+                          decoration: BoxDecoration(
+                            // The unattributed row is deliberately dimmer: it is
+                            // a residue, not a destination competing with the
+                            // named projects above it.
+                            color: project.projectId == null
+                                ? Console.mutedSoft
+                                : Console.accent,
+                            borderRadius: BorderRadius.circular(3),
+                          ),
+                        ),
+                      ],
+                    );
+                  },
+                ),
+              ),
+              const SizedBox(width: 10),
+              SizedBox(
+                width: 54,
+                child: Text(
+                  '${project.sessions} · ${project.focused.inMinutes}m',
+                  textAlign: TextAlign.right,
+                  style: ConsoleText.micro,
+                ),
+              ),
+            ],
           ),
-        ),
+          const SizedBox(height: 7),
+        ],
+        // The tail keeps the columns of the rows above it: the right-hand
+        // figure is sessions and minutes there, so it must be sessions and
+        // minutes here too. Reporting a *project* count in that column made the
+        // minute column stop summing to the window total.
+        if (rest.isNotEmpty)
+          Row(
+            children: <Widget>[
+              Expanded(
+                child: Text(
+                  rest.length == 1 ? '1 more project' : '${rest.length} more projects',
+                  style: ConsoleText.micro.copyWith(color: Console.dimText),
+                ),
+              ),
+              const SizedBox(width: 10),
+              const SizedBox(width: 74),
+              const SizedBox(width: 10),
+              SizedBox(
+                width: 54,
+                child: Text(
+                  '$restSessions · ${restFocused.inMinutes}m',
+                  textAlign: TextAlign.right,
+                  style: ConsoleText.micro.copyWith(color: Console.dimText),
+                ),
+              ),
+            ],
+          ),
       ],
     );
   }
