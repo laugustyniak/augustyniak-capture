@@ -35,6 +35,7 @@ import '../../shortcuts/domain/window_presenter.dart';
 import '../../shortcuts/presentation/shortcuts_coordinator.dart';
 import '../../timer/data/asset_alarm_player.dart';
 import '../../timer/data/file_focus_session_log.dart';
+import '../../timer/domain/focus_session.dart';
 import '../../timer/presentation/focus_timer_controller.dart';
 import '../../timer/presentation/timer_tab.dart';
 import '../../transcription/data/audio_splitter.dart';
@@ -81,6 +82,7 @@ class _RecordingsPageState extends State<RecordingsPage> {
   // Indices used in code; Timer, Projects, Logs and Config are selected only by
   // the navigation itself.
   static const int queueIndex = 0;
+  static const int timerIndex = 1;
   static const int modelsIndex = 3;
 
   static const List<({IconData icon, String label, String shortLabel})>
@@ -214,10 +216,28 @@ class _RecordingsPageState extends State<RecordingsPage> {
       // rewritten wholesale on every preference change, so a single failed load
       // followed by any save would replace the history with nothing.
       sessionLog: const FileFocusSessionLog(),
+      // Read live, like the router's project lookup and for the same reason: a
+      // forty-minute session can outlast the project that was active when it
+      // started, and the honest attribution is the one true when the work
+      // finished. Returns null with no project active, which is a real answer —
+      // unattributed time is a fact about the week, not missing data.
+      activeProject: () {
+        final String? id = projects.activeProjectId;
+        if (id == null) return null;
+        final Project? project = _projectById(id);
+        return project == null
+            ? null
+            : FocusProject(id: project.id, name: project.name);
+      },
       logSink: logs,
     );
     shortcuts = ShortcutsCoordinator(
       recordings: controller,
+      // The one shortcut target that is not the capture pipeline. Handed the
+      // controller rather than a callback because the coordinator has to read
+      // the state back — whether the press started a session decides whether
+      // the window is raised at all.
+      focusTimer: timer,
       // Read lazily rather than capturing `context` here: a hotkey can fire long
       // after initState, and the sheet must open against the live element.
       composeTextNote: () async {
@@ -231,6 +251,14 @@ class _RecordingsPageState extends State<RecordingsPage> {
       revealQueue: () async {
         if (!mounted || navigationIndex == queueIndex) return;
         setState(() => navigationIndex = queueIndex);
+      },
+      // A session started from a hotkey is otherwise invisible: the dial, the
+      // countdown and the alarm choice all live on one tab, and a shortcut that
+      // cannot be told apart from an unregistered one is the failure this app
+      // keeps designing against.
+      revealTimer: () async {
+        if (!mounted || navigationIndex == timerIndex) return;
+        setState(() => navigationIndex = timerIndex);
       },
       registrar: _buildHotkeyRegistrar(),
       windowPresenter: _buildWindowPresenter(),
