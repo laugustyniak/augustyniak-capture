@@ -600,10 +600,10 @@ Mon  ██████████───────────────
 Tue  ██████████──────────────────────────────────────   1
 Wed  ██████████████████████████████──────────────────   3
 
-BY PROJECT
+WHERE IT WENT
 Augustyniak Capture                              3 · 130 min
-Note vault                                        1 ·  25 min
 Reading                                           1 ·  40 min
+Note vault                                        1 ·  25 min
 No project                                        1 ·  15 min
 ```
 
