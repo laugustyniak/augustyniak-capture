@@ -37,6 +37,10 @@ flutter:
   # (linux/runner/my_application.cc), so it must ship in flutter_assets.
   assets:
     - assets/icon/
+    # The focus timer's end-of-session clips. Vendored for the same reason the
+    # fonts below are: the app is offline-first, and an alarm that only rings
+    # once the device has network is not an alarm.
+    - assets/sounds/
 
   # Vendored rather than fetched at runtime: the app is offline-first, so a
   # font that only renders once the device has network would be a regression.
