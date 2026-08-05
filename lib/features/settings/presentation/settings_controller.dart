@@ -5,6 +5,8 @@ import '../../enrichment/domain/enrichment_service.dart';
 import '../../processing/data/ocr_service.dart';
 import '../../shortcuts/domain/hotkey_binding.dart';
 import '../../shortcuts/domain/shortcut_action.dart';
+import '../../timer/domain/alarm_sound.dart';
+import '../../timer/domain/timer_defaults.dart';
 import '../../transcription/data/transcription_service.dart';
 import '../data/settings_repository.dart';
 import '../domain/app_settings.dart';
@@ -330,6 +332,26 @@ class SettingsController extends ChangeNotifier {
   Future<void> setVaultCopySources(bool value) async {
     if (value == _settings.vaultCopySources) return;
     await _persist(_settings.copyWith(vaultCopySources: value));
+  }
+
+  /// How long a focus session runs, and what plays when it ends.
+  ///
+  /// Owned here rather than by `FocusTimerController` for the same reason the
+  /// audio config is owned here rather than by `RecordingsController`: it is
+  /// configuration that has to survive a restart, and the controller that runs
+  /// on it holds no persisted state at all. The shell pushes both down.
+  Duration get timerDuration => _settings.timerDuration;
+  AlarmSound get timerAlarm => _settings.timerAlarm;
+
+  Future<void> setTimerDuration(Duration value) async {
+    final int minutes = TimerDefaults.clamp(value).inMinutes;
+    if (minutes == _settings.timerMinutes) return;
+    await _persist(_settings.copyWith(timerMinutes: minutes));
+  }
+
+  Future<void> setTimerAlarm(AlarmSound value) async {
+    if (value == _settings.timerAlarm) return;
+    await _persist(_settings.copyWith(timerAlarm: value));
   }
 
   Future<void> updateAudio(AudioConfig audio) async {

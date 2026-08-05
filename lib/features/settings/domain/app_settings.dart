@@ -2,6 +2,8 @@ import '../../enrichment/domain/enrichment_defaults.dart';
 import '../../recordings/domain/note_vault.dart';
 import '../../shortcuts/domain/hotkey_binding.dart';
 import '../../shortcuts/domain/shortcut_action.dart';
+import '../../timer/domain/alarm_sound.dart';
+import '../../timer/domain/timer_defaults.dart';
 import 'app_theme_mode.dart';
 import 'audio_config.dart';
 import 'provider_profile.dart';
@@ -22,6 +24,8 @@ class AppSettings {
     this.vaultPath,
     this.vaultFolder = VaultDefaults.folder,
     this.vaultCopySources = true,
+    this.timerMinutes = TimerDefaults.defaultMinutes,
+    this.timerAlarm = AlarmSound.fallback,
     Map<ShortcutAction, HotkeyBinding>? shortcuts,
   }) : _enrichmentInstructions = enrichmentInstructions,
        _shortcuts = shortcuts;
@@ -97,6 +101,31 @@ class AppSettings {
   /// and the controller both ask, so neither re-derives it from a blank check.
   bool get mirrorsToVault => (vaultPath ?? '').trim().isNotEmpty;
 
+  /// How long a focus session runs, in whole minutes.
+  ///
+  /// Stored as an integer rather than a `Duration` because that is what
+  /// survives a round trip through JSON without inventing a unit, and because
+  /// the picker offers whole minutes anyway. Read [timerDuration] instead of
+  /// this everywhere outside serialization.
+  final int timerMinutes;
+
+  /// Which clip plays when a session reaches zero.
+  ///
+  /// Both timer keys are written **unconditionally**, unlike `shortcuts` and
+  /// `enrichmentInstructions`: those are omitted while untouched so a later
+  /// build can ship a better default to users who never chose. Here there is no
+  /// better default to ship later — 40 minutes and a chime are the user's
+  /// choice or the shipped one, and silently re-deciding either on their behalf
+  /// in an update is the opposite of what a timer is for. Same reasoning as
+  /// `themeMode`.
+  final AlarmSound timerAlarm;
+
+  /// [timerMinutes] as the type the timer actually runs on, pulled into the
+  /// supported range — a hand-edited `settings.json` holding `0` or `99999`
+  /// must not produce a countdown that cannot run.
+  Duration get timerDuration =>
+      TimerDefaults.clamp(Duration(minutes: timerMinutes));
+
   /// Null means "never configured". Kept private and nullable rather than
   /// defaulted in the constructor because the default map reads
   /// `PhysicalKeyboardKey` fields and so cannot be a `const` default value.
@@ -157,6 +186,8 @@ class AppSettings {
     bool clearVaultPath = false,
     String? vaultFolder,
     bool? vaultCopySources,
+    int? timerMinutes,
+    AlarmSound? timerAlarm,
     Map<ShortcutAction, HotkeyBinding>? shortcuts,
     bool resetShortcuts = false,
   }) {
@@ -179,6 +210,8 @@ class AppSettings {
       vaultPath: clearVaultPath ? null : (vaultPath ?? this.vaultPath),
       vaultFolder: vaultFolder ?? this.vaultFolder,
       vaultCopySources: vaultCopySources ?? this.vaultCopySources,
+      timerMinutes: timerMinutes ?? this.timerMinutes,
+      timerAlarm: timerAlarm ?? this.timerAlarm,
       shortcuts: resetShortcuts ? null : (shortcuts ?? _shortcuts),
     );
   }
@@ -193,6 +226,8 @@ class AppSettings {
       'activeEnrichmentProfileId': activeEnrichmentProfileId,
       'audio': audio.toJson(),
       'themeMode': themeMode.name,
+      'timerMinutes': timerMinutes,
+      'timerAlarm': timerAlarm.name,
       // Omitted while unset, so an install that mirrors nothing carries no key
       // claiming it does. The two settings below only mean anything alongside
       // it, so they travel with it rather than on their own.
@@ -273,6 +308,17 @@ class AppSettings {
       vaultCopySources: json['vaultCopySources'] is bool
           ? json['vaultCopySources'] as bool
           : true,
+      // Type-checked like every field above. Out-of-range values are not
+      // rejected here — `timerDuration` clamps them — so a settings.json with a
+      // silly length still loads, and still runs a timer.
+      timerMinutes: json['timerMinutes'] is int
+          ? json['timerMinutes'] as int
+          : TimerDefaults.defaultMinutes,
+      // Unknown names degrade to the shipped sound rather than to silence; see
+      // `AlarmSound.fromName`.
+      timerAlarm: AlarmSound.fromName(
+        json['timerAlarm'] is String ? json['timerAlarm'] as String : null,
+      ),
       shortcuts: shortcuts,
     );
   }
