@@ -74,7 +74,10 @@ void main() {
         request(arguments: <String>['--model', 'x; touch /tmp/not-run']),
       );
 
-      expect(result.sessionName, 'augustyniak-client-legal-pilot-550e8400-codex');
+      expect(
+        result.sessionName,
+        'augustyniak-client-legal-pilot-550e8400-codex',
+      );
       expect(result.attachedToExistingSession, isFalse);
       expect(runner.invocations.first.executable, 'zellij');
       expect(runner.invocations.first.arguments, const <String>[
@@ -125,7 +128,7 @@ void main() {
       projectId: '550E8400-E29B-41D4-A716-446655440000',
       projectName: 'Ignored once a session name is set',
       repoPath: repo.path,
-      agent: ProjectAgent.gemini,
+      agent: ProjectAgent.antigravity,
       sessionName: '  My Client / Workspace  ',
     );
 
@@ -133,7 +136,7 @@ void main() {
     // project id still rides along, for the reason the next test states.
     expect(
       GhosttyZellijAgentSessionLauncher.buildSessionName(configured),
-      'my-client-workspace-550e8400-gemini',
+      'my-client-workspace-550e8400-agy',
     );
   });
 

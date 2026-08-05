@@ -71,21 +71,28 @@ void main() {
       expect(restored.agentSettings, hasLength(1));
     });
 
-    test('legacy Claude name and args spelling remain readable', () {
+    test('legacy agent names and args spelling remain readable', () {
       final Project restored = Project.fromJson(<String, dynamic>{
         'id': 'legacy',
-        'defaultAgent': 'claude',
+        'defaultAgent': 'gemini',
         'agentSettings': <String, dynamic>{
           'claude': <String, dynamic>{
             'args': <String>['--verbose'],
           },
+          'gemini': <String, dynamic>{
+            'args': <String>['--model', 'gemini-2.5-pro'],
+          },
         },
       });
 
-      expect(restored.defaultAgent, AgentKind.claudeCode);
+      expect(restored.defaultAgent, AgentKind.antigravity);
       expect(
         restored.settingsFor(AgentKind.claudeCode).additionalArgs,
         <String>['--verbose'],
+      );
+      expect(
+        restored.settingsFor(AgentKind.antigravity).additionalArgs,
+        <String>['--model', 'gemini-2.5-pro'],
       );
     });
 
@@ -130,7 +137,7 @@ void main() {
           id: 'one',
           name: 'One',
           repoPath: '/repos/one',
-          defaultAgent: AgentKind.gemini,
+          defaultAgent: AgentKind.antigravity,
         ),
         Project(id: 'two', name: 'Two', repoPath: '/repos/two'),
       ];
@@ -142,7 +149,7 @@ void main() {
       expect(await File('${file.path}.tmp').exists(), isFalse);
       final List<Project> restored = await repository.loadAll();
       expect(restored.map((Project item) => item.id), <String>['one', 'two']);
-      expect(restored.first.defaultAgent, AgentKind.gemini);
+      expect(restored.first.defaultAgent, AgentKind.antigravity);
       expect(repository.loadedActiveProjectId, 'two');
     });
 

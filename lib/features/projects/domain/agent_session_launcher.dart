@@ -2,7 +2,7 @@
 enum ProjectAgent {
   codex('codex'),
   claude('claude'),
-  gemini('gemini');
+  antigravity('agy');
 
   const ProjectAgent(this.executable);
 

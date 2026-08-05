@@ -53,7 +53,7 @@ void main() {
       name: 'Augustyniak Capture',
       repoPath: first.repoPath,
       sessionName: 'augustyniak-capture',
-      defaultAgent: AgentKind.gemini,
+      defaultAgent: AgentKind.antigravity,
     );
     await controller.delete(second.id);
 
@@ -62,7 +62,7 @@ void main() {
     expect(stored.single.name, 'Augustyniak Capture');
     expect(stored.single.repoPath, '/work/augustyniak-capture');
     expect(stored.single.sessionName, 'augustyniak-capture');
-    expect(stored.single.defaultAgent, AgentKind.gemini);
+    expect(stored.single.defaultAgent, AgentKind.antigravity);
     expect(controller.activeProjectId, isNull);
   });
 
@@ -95,6 +95,37 @@ void main() {
     expect(request.agent, ProjectAgent.claude);
     expect(request.arguments, <String>['--model', 'sonnet', 'Read AGENTS.md.']);
     expect(controller.isLaunching(project.id, AgentKind.claudeCode), isFalse);
+  });
+
+  test('launch maps Antigravity to AGY interactive prompt arguments', () async {
+    final _CapturingLauncher launcher = _CapturingLauncher();
+    final ProjectsController controller = ProjectsController(
+      repository: repository,
+      launcher: launcher,
+    );
+    const Project project = Project(
+      id: 'legal-ai',
+      name: 'Legal AI',
+      repoPath: '/work/legal-ai',
+      agentSettings: <AgentKind, AgentSettings>{
+        AgentKind.antigravity: AgentSettings(
+          additionalArgs: <String>['--model', 'gemini-2.5-pro'],
+          initialPrompt: 'Read AGENTS.md.',
+        ),
+      },
+    );
+
+    await controller.launch(project, AgentKind.antigravity);
+
+    final AgentSessionLaunchRequest request = launcher.requests.single;
+    expect(request.agent, ProjectAgent.antigravity);
+    expect(request.agent.executable, 'agy');
+    expect(request.arguments, <String>[
+      '--model',
+      'gemini-2.5-pro',
+      '--prompt-interactive',
+      'Read AGENTS.md.',
+    ]);
   });
 
   test('failed save does not replace in-memory state', () async {
