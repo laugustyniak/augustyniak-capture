@@ -1575,11 +1575,28 @@ class EmptyPanel extends StatelessWidget {
     required this.icon,
     required this.title,
     required this.blurb,
+    this.action,
+    this.tone,
   });
 
   final IconData icon;
   final String title;
   final String blurb;
+
+  /// The way out of this empty state, when there is one.
+  ///
+  /// Optional because most empty panels describe a state the user chose (a
+  /// filter excluded everything) and the way out is the control still on
+  /// screen. It earns its place only where the panel reports something the
+  /// user has *not* done yet and cannot act on from here — a first run with no
+  /// provider profile being the case it was added for.
+  final Widget? action;
+
+  /// Overrides the icon colour. Null keeps the accent, which reads as "this is
+  /// normal". A panel reporting an unfinished setup passes amber, so it is
+  /// distinguishable from a cleared desk at a glance rather than only by
+  /// reading the title.
+  final Color? tone;
 
   @override
   Widget build(BuildContext context) {
@@ -1592,7 +1609,7 @@ class EmptyPanel extends StatelessWidget {
       ),
       child: Column(
         children: <Widget>[
-          Icon(icon, size: 36, color: Console.accent),
+          Icon(icon, size: 36, color: tone ?? Console.accent),
           const SizedBox(height: 14),
           Text(
             title,
@@ -1601,6 +1618,10 @@ class EmptyPanel extends StatelessWidget {
           ),
           const SizedBox(height: 7),
           Text(blurb, textAlign: TextAlign.center, style: ConsoleText.micro),
+          if (action != null) ...<Widget>[
+            const SizedBox(height: 16),
+            action!,
+          ],
         ],
       ),
     );

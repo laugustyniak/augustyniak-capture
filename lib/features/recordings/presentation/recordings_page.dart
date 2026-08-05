@@ -545,19 +545,17 @@ class _RecordingsPageState extends State<RecordingsPage> {
   /// rows with no cost yet, so it cannot rewrite a price already charged
   /// against an earlier rate.
   void _onPriceRateChanged(String key, ModelPrice? price) {
-    unawaited(
-      () async {
-        await settings.setPriceOverride(key, price);
-        if (price == null) return;
-        final UsageRepository? repository = _usageRepository;
-        if (repository == null) return;
-        final int filled = repository.backfill(
-          key,
-          PriceBook(overrides: settings.settings.priceOverrides),
-        );
-        if (filled > 0 && mounted) setState(() {});
-      }(),
-    );
+    unawaited(() async {
+      await settings.setPriceOverride(key, price);
+      if (price == null) return;
+      final UsageRepository? repository = _usageRepository;
+      if (repository == null) return;
+      final int filled = repository.backfill(
+        key,
+        PriceBook(overrides: settings.settings.priceOverrides),
+      );
+      if (filled > 0 && mounted) setState(() {});
+    }());
   }
 
   /// Push provider + audio changes into the recordings controller. Only affects
@@ -769,6 +767,17 @@ class _RecordingsPageState extends State<RecordingsPage> {
                                     projects: projects,
                                     initialProjectId:
                                         activeQueueProjectFilterId,
+                                    // The amber dot on the Models destination
+                                    // already says this, but it says it where
+                                    // nobody on a first run is looking. The
+                                    // queue is the screen the app opens on and
+                                    // the one an unconfigured install leaves
+                                    // empty, so the prompt belongs there too.
+                                    hasTranscriptionProfile:
+                                        settings.activeProfile != null,
+                                    onConfigureModels: () => setState(
+                                      () => navigationIndex = modelsIndex,
+                                    ),
                                     // Null until `_bootstrap()`'s database open
                                     // resolves — same nullable resolver shape
                                     // the PRICING section below already reads
@@ -826,34 +835,38 @@ class _RecordingsPageState extends State<RecordingsPage> {
                                     // open resolves, so every read here falls
                                     // back to the same "nothing yet" value the
                                     // section would show on a fresh install.
-                                    thisMonthUsd: _usageRepository?.totalSince(
+                                    thisMonthUsd:
+                                        _usageRepository?.totalSince(
                                           DateTime(
                                             DateTime.now().year,
                                             DateTime.now().month,
                                           ),
                                         ) ??
                                         UsageTotal.none,
-                                    allTimeUsd: _usageRepository?.totalAll() ??
+                                    allTimeUsd:
+                                        _usageRepository?.totalAll() ??
                                         UsageTotal.none,
                                     // Both R2 (source files) and Turso (the
                                     // index) scale with the same total, so one
                                     // measured sum feeds both halves of the
                                     // monthly-rate formula.
-                                    storageBytes: controller.recordings.fold<
-                                        int>(
-                                      0,
-                                      (int sum, Recording r) =>
-                                          sum + r.sizeBytes,
-                                    ),
+                                    storageBytes: controller.recordings
+                                        .fold<int>(
+                                          0,
+                                          (int sum, Recording r) =>
+                                              sum + r.sizeBytes,
+                                        ),
                                     storagePrice: settings.storagePrice,
                                     priceBook: PriceBook(
-                                      overrides: settings.settings.priceOverrides,
+                                      overrides:
+                                          settings.settings.priceOverrides,
                                     ),
                                     models: _usageModels(),
                                     missingRateCounts:
                                         _usageRepository?.missingRateCounts() ??
-                                            const <String, MissingRateInfo>{},
-                                    unknownQuantityCount: _usageRepository
+                                        const <String, MissingRateInfo>{},
+                                    unknownQuantityCount:
+                                        _usageRepository
                                             ?.unknownQuantityCount() ??
                                         0,
                                     onRateChanged: _onPriceRateChanged,

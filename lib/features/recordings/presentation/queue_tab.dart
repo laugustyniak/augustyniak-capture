@@ -58,6 +58,8 @@ class QueueTab extends StatefulWidget {
     required this.controller,
     this.projects,
     this.initialProjectId,
+    this.hasTranscriptionProfile = true,
+    this.onConfigureModels,
     this.usageRepository,
     this.storagePrice = StoragePrice.defaults,
   });
@@ -65,6 +67,23 @@ class QueueTab extends StatefulWidget {
   final RecordingsController controller;
   final ProjectsController? projects;
   final String? initialProjectId;
+
+  /// Whether audio captured here has anywhere to be transcribed.
+  ///
+  /// **Defaults to true, and that default is the safe one.** The claim this
+  /// flag makes is "your setup is unfinished", which is worth making only when
+  /// the shell has actually looked at the settings; a caller that does not pass
+  /// it (every existing widget test) must not have the first-run prompt
+  /// invented for it. The shell answers `settings.activeProfile != null`.
+  ///
+  /// Deliberately narrower than "nothing is configured": a text note needs no
+  /// profile at all, so this gates a message about *audio*, not about the app.
+  final bool hasTranscriptionProfile;
+
+  /// Takes the user to the Models tab. Null where there is no tab to go to, in
+  /// which case the prompt still states the problem and simply offers no
+  /// button — a control that does nothing is worse than no control.
+  final VoidCallback? onConfigureModels;
 
   /// Null until the shell's database open resolves (or on a build that never
   /// opened one) — the editor's `COST` section reads through this the same way
@@ -317,7 +336,9 @@ class _QueueTabState extends State<QueueTab> {
                             style: ElevatedButton.styleFrom(
                               backgroundColor: Console.green,
                               foregroundColor: Colors.black,
-                              disabledBackgroundColor: Console.green.withValues(alpha: 0.8),
+                              disabledBackgroundColor: Console.green.withValues(
+                                alpha: 0.8,
+                              ),
                               disabledForegroundColor: Colors.black,
                               padding: const EdgeInsets.symmetric(
                                 horizontal: 12,
@@ -429,50 +450,58 @@ class _QueueTabState extends State<QueueTab> {
                         onRefresh: () => _handleSync(context, controller),
                         color: Console.accent,
                         backgroundColor: Console.surface,
-                        child: ListView(
-                          padding: compact
-                              ? const EdgeInsets.fromLTRB(10, 6, 10, 24)
-                              : const EdgeInsets.fromLTRB(16, 14, 16, 190),
-                          children: <Widget>[
-                            if (visible.isEmpty)
-                              Padding(
-                                padding: const EdgeInsets.symmetric(
-                                  horizontal: 4,
-                                ),
-                                child: EmptyPanel(
-                                  icon: all.isEmpty
-                                      ? Icons.graphic_eq
-                                      : Icons.inbox_outlined,
-                                  title: _emptyLabel(
-                                    selectedFilter,
-                                    reviewFilter,
-                                    hasAny: all.isNotEmpty,
+                        // **`.builder`, not `children:`.** A keyed child list
+                        // builds every element the moment the list does, and
+                        // this list is rebuilt on every `notifyListeners()` —
+                        // which the pipeline emits per status transition, per
+                        // poster, per enrichment. With `children:` a queue of
+                        // four hundred captures paid for four hundred
+                        // `RecordingCard` subtrees to move one status pill. The
+                        // builder pays for the viewport.
+                        child: visible.isEmpty
+                            ? ListView(
+                                padding: _listPadding(compact),
+                                children: <Widget>[
+                                  Padding(
+                                    padding: const EdgeInsets.symmetric(
+                                      horizontal: 4,
+                                    ),
+                                    child: _emptyPanel(all),
                                   ),
-                                  blurb: all.isEmpty
-                                      ? 'Every capture is written to disk and verified '
-                                            'before processing is even attempted.'
-                                      : 'Adjust the review, status, project, or search '
-                                            'filters to broaden the queue.',
-                                ),
+                                ],
                               )
-                            else
-                              ...visible.map(
-                                (Recording recording) => Padding(
-                                  padding: const EdgeInsets.fromLTRB(4, 0, 4, 10),
-                                  child: AnimatedSize(
-                                    duration: const Duration(milliseconds: 220),
-                                    curve: Curves.easeOutCubic,
-                                    alignment: Alignment.topCenter,
-                                    child: recording.id == editingId
-                                        ? _buildEditor(recording)
-                                        : compact
-                                        ? _buildMobileRow(recording)
-                                        : _buildCard(recording),
-                                  ),
-                                ),
+                            : ListView.builder(
+                                padding: _listPadding(compact),
+                                itemCount: visible.length,
+                                itemBuilder: (BuildContext context, int index) {
+                                  final Recording recording = visible[index];
+                                  return Padding(
+                                    padding: const EdgeInsets.fromLTRB(
+                                      4,
+                                      0,
+                                      4,
+                                      10,
+                                    ),
+                                    // The row grows into the editor in place.
+                                    // Animating the height is what keeps the
+                                    // rows below from jumping — the edited item
+                                    // has to stay under the finger that opened
+                                    // it.
+                                    child: AnimatedSize(
+                                      duration: const Duration(
+                                        milliseconds: 220,
+                                      ),
+                                      curve: Curves.easeOutCubic,
+                                      alignment: Alignment.topCenter,
+                                      child: recording.id == editingId
+                                          ? _buildEditor(recording)
+                                          : compact
+                                          ? _buildMobileRow(recording)
+                                          : _buildCard(recording),
+                                    ),
+                                  );
+                                },
                               ),
-                          ],
-                        ),
                       ),
                     ),
                   ],
@@ -520,6 +549,59 @@ class _QueueTabState extends State<QueueTab> {
           ),
         );
       },
+    );
+  }
+
+  /// Shared by both branches of the list so the empty panel and the rows sit in
+  /// the same gutter. Two literals drifted apart is exactly how an empty state
+  /// ends up inset differently from the list it replaces.
+  EdgeInsets _listPadding(bool compact) => compact
+      ? const EdgeInsets.fromLTRB(10, 6, 10, 24)
+      : const EdgeInsets.fromLTRB(16, 14, 16, 190);
+
+  /// Why the list is empty, in the user's terms.
+  ///
+  /// **Three causes, not two.** A filter can be hiding the work, or nothing has
+  /// been captured — and those were already told apart. The third is the one
+  /// this app got wrong for its whole life: a fresh install has no provider
+  /// profile, so every audio capture lands `failed`, and the panel greeting
+  /// that user advertised the durability guarantee ("written to disk and
+  /// verified before processing is even attempted") to someone staring at a red
+  /// row. It is a true sentence and the least useful one available. The setup
+  /// case is checked first because it outranks the other two: a filter is
+  /// something the user did, an unconfigured endpoint is something the app
+  /// never asked them to do.
+  Widget _emptyPanel(List<Recording> all) {
+    if (all.isEmpty && !widget.hasTranscriptionProfile) {
+      return EmptyPanel(
+        icon: Icons.memory_outlined,
+        tone: Console.amber,
+        title: 'No transcription model configured.',
+        blurb:
+            'Recordings are saved and kept either way — but nothing will be '
+            'transcribed until a provider profile is active. Text notes work '
+            'without one.',
+        action: widget.onConfigureModels == null
+            ? null
+            : TextButton.icon(
+                onPressed: widget.onConfigureModels,
+                icon: const Icon(Icons.tune, size: 17),
+                label: const Text('SET UP A MODEL'),
+              ),
+      );
+    }
+    return EmptyPanel(
+      // An empty list has two very different causes and they look identical:
+      // nothing was captured, or a filter is hiding what was. Naming the filter
+      // that emptied the list is the whole difference between "you are done"
+      // and "you cannot see your work".
+      icon: all.isEmpty ? Icons.graphic_eq : Icons.inbox_outlined,
+      title: _emptyLabel(selectedFilter, reviewFilter, hasAny: all.isNotEmpty),
+      blurb: all.isEmpty
+          ? 'Every capture is written to disk and verified before processing '
+                'is even attempted.'
+          : 'Adjust the review, status, project, or search filters to broaden '
+                'the queue.',
     );
   }
 
