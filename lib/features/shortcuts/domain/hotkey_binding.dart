@@ -261,6 +261,11 @@ class ShortcutDefaults {
   /// stay unbound because every plausible default (`Ctrl+Shift+V`, `Ctrl+Shift+I`)
   /// already means something in a browser or editor, and a global hotkey wins
   /// system-wide — stealing one silently is worse than leaving it to the user.
+  ///
+  /// [ShortcutAction.toggleTimer] stays unbound for the same reason and one
+  /// sharper: the letter that names it, `Ctrl+Alt+T`, is GNOME's shipped
+  /// "open a terminal" binding, and a global registration that quietly wins over
+  /// it would break something the user relies on outside this app entirely.
   static final Map<ShortcutAction, HotkeyBinding> bindings =
       Map<ShortcutAction, HotkeyBinding>.unmodifiable(
         <ShortcutAction, HotkeyBinding>{
