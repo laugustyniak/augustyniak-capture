@@ -141,11 +141,12 @@ source file is untouched.
 
 ---
 
-## 🖥 The five tabs
+## 🖥 The six tabs
 
 | Tab | What it is for |
 | --- | --- |
 | **Queue** | every capture, review progress, search, filters, playback, inline editing |
+| **Timer** | a focus session — countdown dial, session goal, alarm at zero |
 | **Projects** | repository contexts, active project, per-project captures, one-click coding-agent sessions |
 | **Models** | provider profiles — transcription and enrichment, add / edit / activate |
 | **Logs** | live pipeline events (persist, queue, transcribe, errors) with a level filter |
@@ -548,6 +549,31 @@ and leaves it alone on stop.
 
 ---
 
+## ⏱ Focus timer
+
+A Pomodoro countdown on its own tab, next to the Queue. **40 minutes by
+default** — the classic 25 is short for the kind of work this app sits beside,
+and the length is a row of chips (15 / 25 / 40 / 50 / 60 / 90) plus `+5 MIN`
+for stretching a session already under way.
+
+- The dial counts **down**: the ring drains clockwise from twelve, the clock
+  face dims behind it, and a sweep circles the ring for as long as the session
+  is actually running — so a glance from across the desk separates *running*
+  from *paused* without reading digits.
+- **A session goal** sits under the dial. It is carried into the log line the
+  session writes when it ends, and it survives `RESET`, because the next
+  pomodoro is usually the same piece of work.
+- **An alarm at zero**, chosen from `Chime` / `Bell` / `Ping` / `Silent`, with a
+  preview button so picking one does not mean waiting out a session. The clips
+  ship inside the app like the fonts do — nothing is fetched, so the alarm
+  rings offline. A device that refuses to play it costs the sound, never the
+  session.
+- The countdown reads the **clock**, not a counter. Close the laptop mid-session
+  and open it an hour later: the timer has finished, rather than claiming the
+  time you slept through is still yours.
+- The length and the alarm are saved in `settings.json`; the session itself is
+  never written to disk — there is nothing in a countdown worth resuming.
+
 ## 💾 Files on disk
 
 Everything lives in the `recordings/` subdirectory of the app documents
@@ -559,7 +585,7 @@ recordings/
 ├── 3f2a…-c81b.thumb.jpg    ← derived video poster (safe to delete)
 ├── 9d10…-77ef.txt
 ├── recordings.json         ← the index — every capture, rewritten whole
-├── settings.json           ← profiles, audio params, shortcuts, theme, vault path
+├── settings.json           ← profiles, audio params, shortcuts, theme, vault, timer
 ├── projects.json           ← projects + the active one
 ├── logs.json               ← ring buffer, max 500 events
 └── revisions.jsonl         ← append-only history of overwritten values
