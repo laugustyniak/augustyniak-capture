@@ -331,6 +331,19 @@ The shell picks the desktop impls (`Tesseract`/`Ffmpeg`) on Linux/macOS/Windows 
 
 ## Testing
 
+**Look at the screen before calling UI work done. A green gate only describes what it was asked.** The light theme shipped `flutter analyze` clean, 475 tests green and *two purpose-built source-level guards* — and half the app still painted the previous theme after a swap, because `MaterialApp.builder` does not rebuild the route it has already pushed. Nothing in the suite could see it: every widget rendered *correctly* for the palette it held, so there was no wrong pixel to assert against and no exception to catch. One screenshot found it in a second. The guards were not useless, they were aimed one level too low — they caught a single widget going stale, while the failure was a whole subtree that never rebuilt at all.
+
+The order that worked, and the order to repeat:
+
+1. **Run it and look.** `flutter build macos --release` then `open`, or `flutter run`. For a theme, a layout or anything else whose defect is *visual*, this is the only step that can find an unknown failure mode — a test can only assert something you already suspect.
+2. **Understand the mechanism** before writing anything. "It looks wrong" is not yet a test; "the route is never rebuilt because `home:` only builds the first one" is.
+3. **Then write the regression test**, and **prove it is not vacuous**: break the fix, watch the new test fail, restore it. A test written after the fix that has never been seen red is an assumption, not a check. (`test/theme_test.dart`'s scope group was verified exactly this way.)
+
+Two corollaries this session paid for:
+
+- **Do not `git checkout -- <file>` in a dirty tree to undo a temporary edit.** It reverts to `HEAD`, taking every *other* uncommitted change in that file with it — during the vacuity check above it deleted the fix under test. Copy the file to the scratchpad first and copy it back.
+- **A hung or slow suite is not automatically a defect.** A run that normally takes ~15 s once took over 600 s because another test suite was running on the machine; the same tree passed in 11 s immediately afterwards. Re-run before debugging, and see the `_until` note below — this repo has already been bitten by wall-clock assumptions.
+
 Two `testWidgets` rules the design work established, both easy to trip over:
 
 - **Never `pumpAndSettle` a screen containing a `PulseDot` or a `ScanLine`** (a transcribing card, a card being enriched, the capture screen). Both repeat forever, so "no frames scheduled" is a state that screen never reaches and the call hangs until the timeout. Pump explicit frames instead. **A focused `TextField` belongs on that list too** — its cursor blinks forever, which is why `RecordingEditor` does not autofocus its title: an editor that opened focused would have made every `pumpAndSettle` in the queue suite hang.
