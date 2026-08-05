@@ -208,6 +208,89 @@ String metaLineFor(Recording recording, String filename) {
   ].join(' · ');
 }
 
+/// What a capture is doing right now, drawn while it does it: a moving glyph, a
+/// label naming the stage, and a band of light under both.
+///
+/// It exists for the phone form, where the desktop card's two separate signals
+/// — a `LinearProgressIndicator` for transcription and a scan line for the
+/// enrichment pass — have no room to live side by side, and where a row is one
+/// line tall so a pill alone is easy to scroll past.
+///
+/// The two stages are drawn by *different* animations rather than one shared
+/// one. On a phone they follow each other within seconds on the same row, and
+/// the failure to avoid is a user who looks up mid-way and cannot tell which
+/// one they are watching — which is the same reason the label is spelled out
+/// rather than left to the glyph.
+///
+/// Both animations repeat forever: a test pumping a screen with one of these on
+/// it must pump explicit frames, never `pumpAndSettle`.
+class ProcessingStrip extends StatelessWidget {
+  ProcessingStrip({super.key, required this.enriching});
+
+  /// True while the model reads the text; false while the audio is being
+  /// transcribed. Only these two stages animate — everything else in the
+  /// pipeline is either instant or waiting for its turn.
+  final bool enriching;
+
+  /// Public so a widget test asserts the string that is actually rendered
+  /// rather than a copy of it, the same rule `RecordingCard.analyzingLabel`
+  /// follows on the desktop card.
+  static const String transcribingLabel = 'TRANSCRIBING';
+  static const String analyzingLabel = 'ANALYZING';
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: <Widget>[
+        Row(
+          children: <Widget>[
+            SizedBox(
+              // A fixed slot for the two glyphs: a wave is wider than an icon,
+              // and without it the label would shift sideways at the exact
+              // moment the stage changes — the one moment the eye is on it.
+              width: 22,
+              child: Align(
+                alignment: Alignment.centerLeft,
+                child: enriching
+                    ? SparklePulse(color: Console.accent, size: 14)
+                    : WaveBars(color: Console.accent, height: 13, barCount: 4),
+              ),
+            ),
+            const SizedBox(width: 8),
+            Text(
+              enriching ? analyzingLabel : transcribingLabel,
+              style: ConsoleText.micro.copyWith(color: Console.accent),
+            ),
+            const SizedBox(width: 8),
+            Expanded(
+              child: Text(
+                enriching ? 'title · summary · tags' : 'speech → text',
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                textAlign: TextAlign.right,
+                style: ConsoleText.micro.copyWith(color: Console.muted),
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 6),
+        ScanLine(height: 3),
+      ],
+    );
+  }
+}
+
+/// What the tag row hands to the clipboard: `#idea #calendar #q3`.
+///
+/// One definition for all three forms that draw tags — the card, the compact
+/// row and the focus modal — because the hash prefix is not decoration. It is
+/// what makes the pasted line a tag line in Obsidian and in every other notes
+/// tool the vault mirror already targets, so a form that dropped it would paste
+/// something that merely looks the same as the chips on screen.
+String tagsClipboardText(List<String> tags) =>
+    tags.map((String tag) => '#$tag').join(' ');
+
 IconData typeIconFor(CaptureType type) => switch (type) {
   CaptureType.audioRecording => Icons.mic_none_rounded,
   CaptureType.audioUpload => Icons.audio_file_outlined,

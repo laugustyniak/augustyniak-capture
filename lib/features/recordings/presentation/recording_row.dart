@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
 import '../../../app/ui_kit.dart';
+import '../../gamification/presentation/done_burst_animation.dart';
 import '../domain/capture_type.dart';
 import '../domain/recording.dart';
 import 'card_parts.dart';
@@ -62,6 +64,11 @@ class RecordingRow extends StatelessWidget {
     final String summary = (recording.summary ?? '').trim();
     final bool hasTranscript = transcript.isNotEmpty;
     final bool openable = recording.type == CaptureType.video;
+    // The two stages that are actually running. `pendingTranscription` is not
+    // one of them: an item waiting its turn behind the single-flight drain is
+    // not moving, and animating it would claim work that has not started.
+    final bool processing =
+        isEnriching || recording.status == RecordingStatus.transcribing;
 
     return Semantics(
       button: true,
@@ -74,13 +81,23 @@ class RecordingRow extends StatelessWidget {
           margin: const EdgeInsets.only(bottom: 6),
           padding: const EdgeInsets.fromLTRB(12, 8, 8, 8),
           decoration: BoxDecoration(
-            color: expanded ? Console.surface : Colors.transparent,
+            // A row with work running on it lifts off the page even when it is
+            // collapsed and off screen-centre. The 180 ms tween is what makes
+            // the end of a stage read as the row settling rather than as the
+            // list repainting.
+            color: expanded
+                ? Console.surface
+                : processing
+                ? Console.accent.withValues(alpha: .05)
+                : Colors.transparent,
             borderRadius: BorderRadius.circular(11),
             border: Border.all(
               color: focused
                   ? Console.accent
                   : expanded
                   ? Console.borderStrong
+                  : processing
+                  ? Console.accent.withValues(alpha: .28)
                   : Colors.transparent,
             ),
           ),
@@ -101,9 +118,7 @@ class RecordingRow extends StatelessWidget {
                         : recording.status != RecordingStatus.completed
                         ? Console.accent
                         : categoryColorFor(recording.category),
-                    pulse:
-                        isEnriching ||
-                        recording.status == RecordingStatus.transcribing,
+                    pulse: processing,
                   ),
                   const SizedBox(width: 8),
                   Expanded(
@@ -115,24 +130,54 @@ class RecordingRow extends StatelessWidget {
                     ),
                   ),
                   const SizedBox(width: 6),
-                  _CollapsedBadge(
-                    recording: recording,
-                    isEnriching: isEnriching,
-                  ),
+                  // Silent while the strip below is up: the two would print
+                  // TRANSCRIBING twice in the same accent on a 393 px row,
+                  // which reads as the row stuttering rather than as one state.
+                  // The strip wins because it carries the animation as well as
+                  // the word, and the badge has nothing to add to it.
+                  if (!processing)
+                    _CollapsedBadge(recording: recording)
+                  else
+                    const SizedBox.shrink(),
                   const SizedBox(width: 2),
                   _ReviewToggle(reviewed: reviewed, onTap: onToggleProcessed),
                 ],
               ),
+              // Drawn collapsed as well as expanded, which is the whole point:
+              // the phone form shows nine rows of one line each, and a capture
+              // being transcribed or read by the model is the one row worth
+              // finding without opening anything. The pill above says *what*
+              // stage it is; this says it is still moving.
+              if (processing)
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(_indent, 9, 4, 2),
+                  child: ProcessingStrip(enriching: isEnriching),
+                ),
               if (expanded) ...<Widget>[
                 if (summary.isNotEmpty)
                   Padding(
                     padding: const EdgeInsets.fromLTRB(_indent, 8, 4, 0),
-                    child: Text(
-                      summary,
-                      style: ConsoleText.cardMeta.copyWith(
-                        color: Console.textSoft,
-                        height: 1.4,
-                      ),
+                    child: Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: <Widget>[
+                        Expanded(
+                          child: Text(
+                            summary,
+                            style: ConsoleText.cardMeta.copyWith(
+                              color: Console.textSoft,
+                              height: 1.4,
+                            ),
+                          ),
+                        ),
+                        const SizedBox(width: 6),
+                        CopyButton(
+                          text: summary,
+                          tooltip: 'Copy summary',
+                          semanticLabel: 'Copy summary to clipboard',
+                          size: 26,
+                          iconSize: 13,
+                        ),
+                      ],
                     ),
                   ),
                 if (hasTranscript)
@@ -146,6 +191,7 @@ class RecordingRow extends StatelessWidget {
                     child: Wrap(
                       spacing: 5,
                       runSpacing: 5,
+                      crossAxisAlignment: WrapCrossAlignment.center,
                       children: <Widget>[
                         if (projectName != null)
                           StatusPill(
@@ -157,6 +203,14 @@ class RecordingRow extends StatelessWidget {
                           ),
                         for (final String tag in recording.tags)
                           _TagLabel(label: tag),
+                        if (recording.tags.isNotEmpty)
+                          CopyButton(
+                            text: tagsClipboardText(recording.tags),
+                            tooltip: 'Copy tags',
+                            semanticLabel: 'Copy tags to clipboard',
+                            size: 24,
+                            iconSize: 12,
+                          ),
                       ],
                     ),
                   ),
@@ -299,17 +353,16 @@ class _StatusDot extends StatelessWidget {
   }
 }
 
+/// The resting label on a collapsed row: what the item *is*, or why it is not
+/// ready. The two running stages are drawn by [ProcessingStrip] instead — see
+/// the call site.
 class _CollapsedBadge extends StatelessWidget {
-  const _CollapsedBadge({required this.recording, required this.isEnriching});
+  const _CollapsedBadge({required this.recording});
 
   final Recording recording;
-  final bool isEnriching;
 
   @override
   Widget build(BuildContext context) {
-    if (isEnriching) {
-      return StatusPill(label: 'ANALYZING', color: Console.accent, pulse: true);
-    }
     if (recording.status != RecordingStatus.completed) {
       final (String label, Color color) = switch (recording.status) {
         RecordingStatus.saved => ('RAW', Console.muted),
@@ -346,26 +399,34 @@ class _ReviewToggle extends StatelessWidget {
       child: SizedBox.square(
         dimension: 44,
         child: InkResponse(
-          onTap: onTap,
+          onTap: () {
+            if (!reviewed) {
+              HapticFeedback.mediumImpact();
+            }
+            onTap();
+          },
           radius: 22,
           child: Center(
-            child: AnimatedSwitcher(
-              duration: const Duration(milliseconds: 320),
-              transitionBuilder: (Widget child, Animation<double> animation) =>
-                  ScaleTransition(
-                    scale: CurvedAnimation(
-                      parent: animation,
-                      curve: Curves.easeOutBack,
+            child: DoneBurstAnimation(
+              reviewed: reviewed,
+              child: AnimatedSwitcher(
+                duration: const Duration(milliseconds: 320),
+                transitionBuilder: (Widget child, Animation<double> animation) =>
+                    ScaleTransition(
+                      scale: CurvedAnimation(
+                        parent: animation,
+                        curve: Curves.easeOutBack,
+                      ),
+                      child: FadeTransition(opacity: animation, child: child),
                     ),
-                    child: FadeTransition(opacity: animation, child: child),
-                  ),
-              child: Icon(
-                reviewed
-                    ? Icons.check_circle_rounded
-                    : Icons.radio_button_unchecked_rounded,
-                key: ValueKey<bool>(reviewed),
-                color: reviewed ? Console.green : Console.dimText,
-                size: 22,
+                child: Icon(
+                  reviewed
+                      ? Icons.check_circle_rounded
+                      : Icons.radio_button_unchecked_rounded,
+                  key: ValueKey<bool>(reviewed),
+                  color: reviewed ? Console.green : Console.dimText,
+                  size: 22,
+                ),
               ),
             ),
           ),
