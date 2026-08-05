@@ -15,6 +15,7 @@ Your thought lands on disk *before* anything clever is attempted with it.
 
 [Quick start](#-quick-start) ·
 [What it captures](#-what-it-captures) ·
+[Note vault](#-note-vault--obsidian-and-friends) ·
 [Build & deploy](#-build--deploy) ·
 [Providers](#-connect-a-provider) ·
 [Architecture](#-architecture)
@@ -40,8 +41,10 @@ background, and are allowed to fail** without ever costing you the capture.
 ```
 
 Then the enrichment stage gives each capture a title, a summary, a category and
-tags, and one keypress hands it off to your project's `inbox.md` — where the
-coding agent that reads that repo next will find it.
+tags. One keypress hands it off to your project's `inbox.md` — where the coding
+agent that reads that repo next will find it — and, if you point the app at one,
+every capture is also mirrored into your **Obsidian vault** as a markdown note
+with proper front matter.
 
 ---
 
@@ -146,7 +149,7 @@ source file is untouched.
 | **Projects** | repository contexts, active project, one-click coding-agent sessions |
 | **Models** | provider profiles — transcription and enrichment, add / edit / activate |
 | **Logs** | live pipeline events (persist, queue, transcribe, errors) with a level filter |
-| **Config** | appearance, audio parameters, global shortcuts, enrichment profile, keyring status |
+| **Config** | appearance, audio parameters, global shortcuts, enrichment profile, note vault, keyring status |
 
 ### A queue row, annotated
 
@@ -334,6 +337,139 @@ the result is readable by every tool you already have.
 
 ---
 
+## 🗄 Note vault — Obsidian and friends
+
+Point the app at a directory you own — an Obsidian vault, a synced folder, a
+plain notes repository — and **every capture is mirrored there as a markdown
+file**, with the enriched title, category and tags in YAML front matter.
+
+```
+Config -> NOTE VAULT
+  ┌──────────────────────────────────────────────────────────┐
+  │ Vault directory   /Users/you/Obsidian/Second Brain  [..] │
+  │ Subfolder         Capture                                │
+  │ Copy sources      [ on  ]                                │
+  └──────────────────────────────────────────────────────────┘
+```
+
+An empty directory field is the off switch — deliberately, rather than a
+separate "enabled" checkbox, because two fields would allow the state *enabled,
+nowhere to write*, which can only ever be reported as an error nobody asked for.
+
+### What lands in the vault
+
+```
+Second Brain/                 ← your vault, your filing system
+└── Capture/                  ← notes land in a subfolder, never the root
+    ├── 2026-08-05-1432-sprint-planning-migration-postponed-3f2a1c4e.md
+    ├── 2026-08-05-0917-notatka-o-wdrozeniu-9d1077ef.md
+    └── attachments/          ← Obsidian's own convention
+        ├── 3f2a1c4e-….m4a
+        └── 9d1077ef-….jpg
+```
+
+```
+ 2026-08-05-1432  -  sprint-planning-migration-postponed  -  3f2a1c4e  .md
+ └─ when ────────┘   └─ slug of the title ──────────────┘   └─ id ──┘
+    sortable            decoration — may be stale              the only
+                        after a re-title                       part that
+                                                               identifies
+```
+
+```markdown
+---
+title: "Sprint planning — migration postponed"
+created: 2026-08-05T14:32:11.482Z
+type: audioRecording
+category: meetingNote
+project: "augustyniak-capture"
+tags: ["backend", "migration"]
+duration: 3m 04s
+source: "3f2a1c4e-….m4a"
+capture-id: 3f2a1c4e-…-c81b
+capture-hash: 8f14e45fceea167a5a36dedd4bea2543…
+---
+
+# Sprint planning — migration postponed
+
+> Migration deferred until index durability lands; router split agreed.
+
+![[attachments/3f2a1c4e-….m4a]]
+
+We agreed to postpone the migration until the index durability work lands…
+```
+
+The two machine fields sit **last** on purpose, so the plumbing lands at the
+bottom of the property list your reader shows rather than above your own
+metadata.
+
+### Mirror, not route — and that distinction is the whole design
+
+| | Hand-off (`CaptureRouter`) | Vault (`NoteVault`) |
+| --- | --- | --- |
+| **Delivers** | once | the same note, over and over |
+| **Write mode** | append-only | rewrite in place |
+| **Closes the item** | yes, sets `OFF DESK` | no, it is a copy |
+| **Twice** | two entries — both really happened | one file, updated |
+
+A route is a delivery. A vault holds *the same thought over time*: enrichment
+names it minutes after it was created, and you may correct a transcript a week
+later. Folding the two together would give you either an inbox accumulating
+duplicates of one thought, or a mirror that could never record a second delivery
+honestly.
+
+### Four rules, because the vault is not ours
+
+The reader does not merely edit these files — their application indexes them,
+links them, and reorders lists by modification time. So:
+
+1. **A note is located by id, never by name.** The file name carries the first
+   eight characters of the capture id as a suffix; the rest is decoration. That
+   is what lets a title arrive from enrichment *after* the file already exists.
+2. **The name is then never changed again.** Renaming a file behind your back
+   would break every `[[wikilink]]` you had written to it, and nothing in this
+   app could repair them. A later title lands in the front matter and the
+   heading — the same information, without the cost.
+3. **A file is only rewritten while it is still ours.** `capture-hash` is the
+   sha-256 of the body beneath the front matter. A mismatch means you edited the
+   note, and the mirror steps back. The claim lives *in the file* rather than in
+   `recordings.json`, so a vault rebuilt after a reinstall still knows which
+   notes it owns.
+4. **An unchanged note is not rewritten at all.** A no-op write would still bump
+   the mtime and shove the note to the top of your "recently modified" list on
+   every unrelated pipeline tick.
+
+Every mirror reports which of these applied, and a sweep over the queue counts
+them for the Config tab:
+
+| Outcome | Meaning |
+| --- | --- |
+| `created` | no file for this capture existed |
+| `updated` | still ours, and a mirrored field changed |
+| `unchanged` | already identical — no write, on purpose |
+| `foreign` | **you edited it.** Left alone, and counted rather than swallowed: this is the one outcome that looks like a failure and is in fact the mirror doing its job |
+
+Mirroring is best-effort under the same contract as the clipboard: it runs after
+the capture is already persisted, swallows its errors into the Logs tab, and
+**never touches `status`**. A vault on an unmounted drive costs you a copy, never
+a capture. Writes are atomic (`.tmp` → `rename`) for a sharper reason than
+usual — a torn write would leave a file whose hash no longer matches its body,
+which this code would then read back as *your* edit and refuse to touch ever
+again.
+
+> **Polish diacritics are transliterated in file names, not dropped.** These
+> captures are largely Polish, and `notatka-o-wdroeniu` names nothing. Slugs are
+> ASCII, lowercase, hyphenated, capped at 48 characters and cut on a word
+> boundary so a shortened name still reads as a title.
+
+> **`Copy sources` is a switch rather than a constant** because the two answers
+> differ by gigabytes on a vault that syncs. On, an audio capture is playable
+> straight from your reader. Off, the vault stays text-only and the media stays
+> where it already lives. Text notes never attach their `.txt` either way — the
+> body is already printed above it.
+
+---
+
 ## ⌨️ Global shortcuts (desktop)
 
 System-wide, firing while the window is minimised or unfocused. Editable in
@@ -370,11 +506,16 @@ recordings/
 ├── 3f2a…-c81b.thumb.jpg    ← derived video poster (safe to delete)
 ├── 9d10…-77ef.txt
 ├── recordings.json         ← the index — every capture, rewritten whole
-├── settings.json           ← profiles, audio params, shortcuts, theme
+├── settings.json           ← profiles, audio params, shortcuts, theme, vault path
 ├── projects.json           ← projects + the active one
 ├── logs.json               ← ring buffer, max 500 events
 └── revisions.jsonl         ← append-only history of overwritten values
 ```
+
+Three things deliberately live **outside** that directory, because they belong to
+you rather than to the app: your project repositories (and the `inbox.md` in
+each), your [note vault](#-note-vault--obsidian-and-friends), and the master key
+for token encryption, which is in the OS keyring.
 
 <details>
 <summary><b>What a row in <code>recordings.json</code> looks like</b></summary>
@@ -731,16 +872,19 @@ flowchart TD
     DONE --> CB["clipboard"]
     DONE --> EN["enrichment<br/><i>best effort, last</i>"]
     EN --> REPO
+    EN --> NV["note vault<br/><i>markdown mirror</i>"]
+    REPO -.->|"user presses R"| RT["inbox.md<br/><i>append-only route</i>"]
 
     style REPO fill:#1056C6,color:#fff
     style EN fill:#3a3a5c,color:#fff
+    style NV fill:#3a3a5c,color:#fff
 ```
 
 Everything external sits behind a swappable seam with a disabled default, which
 is why the test suite is pure Dart: `TranscriptionService`, `EnrichmentService`,
 `OcrService`, `VideoAudioExtractor`, `AudioSplitter`, `ClipboardSink`,
 `MediaOpener`, `MediaPicker`, `DirectoryPicker`, `HotkeyRegistrar`,
-`WindowPresenter`, `CaptureRouter`, `TokenCipher`, `LogSink`.
+`WindowPresenter`, `CaptureRouter`, `NoteVault`, `TokenCipher`, `LogSink`.
 
 ### Long audio has three ceilings
 
@@ -809,12 +953,15 @@ second.
 
 ## 🗺 Roadmap
 
+- [x] `inbox.md` hand-off into a project repository
+- [x] Markdown [note vault](#-note-vault--obsidian-and-friends) mirror for
+      Obsidian and any synced notes folder
 - [ ] **Export / import**, so a mobile reinstall stops being data loss
 - [ ] OCR and video processing on mobile (ML Kit / `ffmpeg_kit`)
 - [ ] `WorkManager` (Android) and `BGTaskScheduler` (iOS), so jobs survive
       backgrounding
 - [ ] Local on-device models — whisper.cpp via FFI
-- [ ] Sync with Obsidian / Notion, alongside the `inbox.md` hand-off
+- [ ] Notion and tracker destinations behind the same `CaptureRouter` seam
 
 ---
 

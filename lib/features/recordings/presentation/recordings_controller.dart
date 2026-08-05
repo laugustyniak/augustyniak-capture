@@ -28,6 +28,7 @@ import '../domain/capture_type.dart';
 import '../domain/clipboard_sink.dart';
 import '../domain/capture_router.dart';
 import '../domain/media_opener.dart';
+import '../domain/note_vault.dart';
 import '../domain/recording.dart';
 import '../domain/recording_revision.dart';
 import '../domain/recording_tag.dart';
@@ -54,6 +55,7 @@ class RecordingsController extends ChangeNotifier {
     ClipboardSink clipboardSink = const NoopClipboardSink(),
     MediaOpener mediaOpener = const NoopMediaOpener(),
     CaptureRouter captureRouter = const DisabledCaptureRouter(),
+    NoteVault noteVault = const DisabledNoteVault(),
     RevisionsRepository? revisionsRepository,
     ProcessorRegistry? processorRegistry,
     MediaPicker? mediaPicker,
@@ -72,6 +74,7 @@ class RecordingsController extends ChangeNotifier {
        _clipboardSink = clipboardSink,
        _mediaOpener = mediaOpener,
        _captureRouter = captureRouter,
+       _noteVault = noteVault,
        _mediaPicker = mediaPicker ?? const FilePickerMediaPicker(),
        _importer = MediaImporter(repository),
        _recorder = recorder ?? AudioRecorder(),
@@ -110,6 +113,7 @@ class RecordingsController extends ChangeNotifier {
   final ClipboardSink _clipboardSink;
   final MediaOpener _mediaOpener;
   final CaptureRouter _captureRouter;
+  final NoteVault _noteVault;
   final MediaPicker _mediaPicker;
   final MediaImporter _importer;
   late final ProcessorRegistry _registry;
@@ -1077,6 +1081,47 @@ class RecordingsController extends ChangeNotifier {
     _logSink.log('Routed to ${record.target}.', recordingId: id);
   }
 
+  /// Whether captures are being copied to a second location as markdown.
+  /// Synchronous, like [canRoute], because it is configuration rather than
+  /// state and the Config tab reads it during `build`.
+  bool get mirrorsToVault => _noteVault.isConfigured;
+
+  /// Copy every capture that has text into the vault.
+  ///
+  /// The backfill half of the feature, and not optional: mirroring only new
+  /// captures would leave the queue the user already has permanently outside
+  /// the vault, with no way in short of re-recording it. Runs sequentially on
+  /// purpose — it is a user-initiated sweep over the user's own disk, and a
+  /// hundred concurrent writes into a directory their notes application is
+  /// watching buys nothing but a stampede of file events.
+  Future<VaultMirrorSummary> mirrorAll() async {
+    VaultMirrorSummary summary = const VaultMirrorSummary();
+    if (!_noteVault.isConfigured) return summary;
+
+    // Snapshotted: the drain can complete an item mid-sweep, and iterating the
+    // live list while it is replaced wholesale by `_update` would throw.
+    for (final Recording item in List<Recording>.of(_recordings)) {
+      if ((item.transcript ?? '').trim().isEmpty) continue;
+      try {
+        summary = summary.plus(await _mirrorOne(item));
+      } catch (exception) {
+        summary = summary.withFailure();
+        _logSink.log(
+          'Vault mirror failed: $exception',
+          level: LogLevel.warn,
+          recordingId: item.id,
+        );
+      }
+      if (_disposed) break;
+    }
+    _logSink.log(
+      'Vault sweep · ${summary.created} new, ${summary.updated} updated, '
+      '${summary.unchanged} unchanged, ${summary.foreign} left alone, '
+      '${summary.failed} failed',
+    );
+    return summary;
+  }
+
   /// Re-queue a failed (or any) item for processing. Like capture, this only
   /// enqueues — it does not hold the `_isBusy` capture lock, so a retry never
   /// blocks starting a new recording.
@@ -1107,6 +1152,9 @@ class RecordingsController extends ChangeNotifier {
 
     _logSink.log('Retrying enrichment.', level: LogLevel.warn, recordingId: id);
     await _enrich(id, text);
+    // Same tail as the processing path: a better title is only half the point
+    // if the copy in the vault keeps the old one.
+    await _mirrorToVault(id);
   }
 
   /// Mark an already-persisted item `pendingTranscription`, add it to the
@@ -1220,6 +1268,13 @@ class RecordingsController extends ChangeNotifier {
         // durable, so a model outage, a malformed response or a kill in this
         // window costs a title, never a capture.
         await _enrich(id, transcript);
+        // Last of all, and after enrichment rather than before it, so the note
+        // reaches the vault already named and classified. Mirroring first would
+        // create a file called `…-recording-1432-…` and then have to live with
+        // that name for good — see `MarkdownNoteVault` on why the name is never
+        // changed again. It runs whether or not enrichment succeeded: an
+        // install with no profile still wants its captures copied.
+        await _mirrorToVault(id);
       } catch (exception) {
         await _update(
           id,
@@ -1351,6 +1406,74 @@ class RecordingsController extends ChangeNotifier {
         recordingId: id,
       );
     }
+  }
+
+  /// Copy one capture into the vault, if there is a vault and there is text.
+  ///
+  /// Best-effort under the `ClipboardSink` contract, and for a stronger reason
+  /// than the clipboard has: the copy is a *second* location, so failing to
+  /// write it costs the user nothing they had before — while letting it throw
+  /// into the pipeline would cost them the capture the mirror exists to
+  /// protect. An unconfigured vault is not even attempted, so an install that
+  /// mirrors nothing pays no log line per capture.
+  Future<void> _mirrorToVault(String id) async {
+    if (!_noteVault.isConfigured) return;
+    final int index = _recordings.indexWhere((Recording item) => item.id == id);
+    if (index < 0) return;
+    final Recording item = _recordings[index];
+    if ((item.transcript ?? '').trim().isEmpty) return;
+
+    try {
+      await _mirrorOne(item);
+    } catch (exception) {
+      _logSink.log(
+        'Vault mirror failed: $exception',
+        level: LogLevel.warn,
+        recordingId: id,
+      );
+    }
+  }
+
+  /// The write itself. Throws, so [mirrorAll] can count a failure and
+  /// [_mirrorToVault] can swallow one — the two callers disagree about what a
+  /// failure is worth, and neither should have to infer it from a null.
+  Future<VaultOutcome> _mirrorOne(Recording item) async {
+    final VaultWrite write = await _noteVault.mirror(
+      VaultNote(
+        id: item.id,
+        // The same resolved name the card and the router use, so a note in the
+        // vault can never disagree with the row it came from.
+        title: displayNameFor(item),
+        body: item.transcript ?? '',
+        capturedAt: item.createdAt,
+        type: item.type,
+        summary: item.summary,
+        category: item.category,
+        tags: item.tags,
+        projectId: item.projectId,
+        durationMs: item.durationMs,
+        sourcePath: item.filePath,
+      ),
+    );
+
+    switch (write.outcome) {
+      case VaultOutcome.created:
+        _logSink.log('Mirrored to vault.', recordingId: item.id);
+      case VaultOutcome.updated:
+        _logSink.log('Vault note updated.', recordingId: item.id);
+      case VaultOutcome.foreign:
+        // The one outcome that looks like a failure and is the feature working:
+        // say so, because a note that silently stops tracking its capture is
+        // indistinguishable from a mirror that has quietly broken.
+        _logSink.log(
+          'Vault note left alone — it has been edited outside the app.',
+          level: LogLevel.warn,
+          recordingId: item.id,
+        );
+      case VaultOutcome.unchanged:
+        break; // Nothing happened; a log line per pipeline tick would be noise.
+    }
+    return write.outcome;
   }
 
   /// Ask the enrichment model to name and classify freshly derived text.
@@ -1518,6 +1641,20 @@ class RecordingsController extends ChangeNotifier {
     }
   }
 
+  /// Whether anything the vault actually prints has changed.
+  ///
+  /// The same five fields the change history diffs, plus the project — status
+  /// transitions and poster paths are pipeline mechanics that appear nowhere in
+  /// a note, and mirroring on them would rewrite every file in the vault on
+  /// every drain.
+  static bool _mirrorsField(Recording before, Recording after) =>
+      before.title != after.title ||
+      before.category != after.category ||
+      before.summary != after.summary ||
+      before.transcript != after.transcript ||
+      before.projectId != after.projectId ||
+      !listEquals(before.tags, after.tags);
+
   Future<void> _update(
     String id,
     Recording Function(Recording) transform, {
@@ -1548,6 +1685,15 @@ class RecordingsController extends ChangeNotifier {
     // file ever held. Recording it here means the history can only ever lag the
     // index, never lead it.
     await _recordRevisions(before, _recordings[index], source);
+    // A hand edit is the one change that reaches the vault from here. The
+    // processing and enrichment paths mirror explicitly at their own tails
+    // (see `_processOne`), and doing it from this funnel as well would write
+    // the same note two or three times per capture — every one of those writes
+    // landing as a file event in whatever is watching the vault.
+    if (source == RevisionSource.user &&
+        _mirrorsField(before, _recordings[index])) {
+      await _mirrorToVault(id);
+    }
     // Notifying does not. `_processOne` awaits a processor, so dispose can land
     // inside that gap; a disposed ChangeNotifier throws from notifyListeners,
     // and the drain runs unawaited, so the error would surface as an unhandled

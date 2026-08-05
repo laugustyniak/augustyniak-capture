@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../../../app/ui_kit.dart';
 import '../../projects/domain/project.dart';
+import '../../recordings/domain/note_vault.dart';
 import '../../shortcuts/domain/shortcut_action.dart';
 import '../../shortcuts/presentation/shortcuts_section.dart';
 import '../domain/app_theme_mode.dart';
@@ -10,6 +11,7 @@ import '../domain/provider_profile.dart';
 import '../domain/token_cipher.dart';
 import 'enrichment_context_section.dart';
 import 'settings_controller.dart';
+import 'vault_section.dart';
 
 /// Runtime settings: capture parameters plus a read-only view of where data
 /// lives and which provider is active. Provider editing lives in the Models tab.
@@ -25,6 +27,7 @@ class ConfigTab extends StatelessWidget {
     this.showShortcuts = false,
     this.rejectedShortcuts = const <ShortcutAction>{},
     this.runWithHotkeysSuspended = _runDirectly,
+    this.onMirrorAll,
   });
 
   /// Default for callers with no coordinator (mobile, tests): just run it.
@@ -50,6 +53,11 @@ class ConfigTab extends StatelessWidget {
   /// the OS would swallow the very combination the user is trying to rebind.
   final Future<void> Function(Future<void> Function() action)
   runWithHotkeysSuspended;
+
+  /// Copies the existing queue into the vault. Null where there is no
+  /// recordings controller to ask — the button then renders disabled rather
+  /// than absent, so the section reads the same in every host.
+  final Future<VaultMirrorSummary> Function()? onMirrorAll;
 
   @override
   Widget build(BuildContext context) {
@@ -231,6 +239,8 @@ class ConfigTab extends StatelessWidget {
           ),
           const SizedBox(height: 22),
           EnrichmentContextSection(controller: controller, projects: projects),
+          const SizedBox(height: 22),
+          VaultSection(controller: controller, onMirrorAll: onMirrorAll),
           if (showShortcuts) ...<Widget>[
             const SizedBox(height: 22),
             ShortcutsSection(
