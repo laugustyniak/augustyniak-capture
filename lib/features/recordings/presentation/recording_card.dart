@@ -6,6 +6,7 @@ import '../../../app/ui_kit.dart';
 import '../domain/capture_type.dart';
 import '../domain/recording.dart';
 import 'card_parts.dart';
+import 'transcript_focus_modal.dart';
 
 /// One queue item, in the design's "console card" form.
 ///
@@ -263,26 +264,10 @@ class RecordingCard extends StatelessWidget {
             _EnrichingStrip(),
           ],
           if (hasTranscript) ...<Widget>[
-            const SizedBox(height: 11),
-            Row(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: <Widget>[
-                Expanded(
-                  child: Text(
-                    transcript,
-                    maxLines: 3,
-                    overflow: TextOverflow.ellipsis,
-                    style: ConsoleText.body,
-                  ),
-                ),
-                const SizedBox(width: 8),
-                // Copies the whole text, not the three lines rendered above.
-                CopyButton(
-                  text: transcript,
-                  tooltip: 'Copy text',
-                  semanticLabel: 'Copy text to clipboard',
-                ),
-              ],
+            _CardTranscriptSection(
+              recording: recording,
+              projectName: projectName,
+              onEdit: onEdit,
             ),
           ],
           if (recording.error != null) ...<Widget>[
@@ -579,3 +564,95 @@ _StatusVisual? _statusVisual(RecordingStatus status) => switch (status) {
   RecordingStatus.completed => null,
   RecordingStatus.failed => _StatusVisual('FAILED', Console.red),
 };
+
+/// Renders the transcript excerpt on the card, supporting inline expand/collapse
+/// and a focus view modal for reading longer captures.
+class _CardTranscriptSection extends StatefulWidget {
+  const _CardTranscriptSection({
+    required this.recording,
+    this.projectName,
+    required this.onEdit,
+  });
+
+  final Recording recording;
+  final String? projectName;
+  final VoidCallback onEdit;
+
+  @override
+  State<_CardTranscriptSection> createState() => _CardTranscriptSectionState();
+}
+
+class _CardTranscriptSectionState extends State<_CardTranscriptSection> {
+  bool _expanded = false;
+
+  void _openFocusModal() {
+    showTranscriptFocusModal(
+      context,
+      recording: widget.recording,
+      projectName: widget.projectName,
+      onEdit: widget.onEdit,
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final String transcript = (widget.recording.transcript ?? '').trim();
+    final bool isLong = transcript.length > 120 || transcript.contains('\n');
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: <Widget>[
+        const SizedBox(height: 11),
+        Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: <Widget>[
+            Expanded(
+              child: AnimatedSize(
+                duration: const Duration(milliseconds: 200),
+                alignment: Alignment.topLeft,
+                child: Text(
+                  transcript,
+                  maxLines: _expanded ? null : 3,
+                  overflow:
+                      _expanded ? TextOverflow.clip : TextOverflow.ellipsis,
+                  style: ConsoleText.body,
+                ),
+              ),
+            ),
+            const SizedBox(width: 8),
+            Row(
+              mainAxisSize: MainAxisSize.min,
+              children: <Widget>[
+                if (isLong) ...<Widget>[
+                  ConsoleIconButton(
+                    icon: _expanded
+                        ? Icons.expand_less_rounded
+                        : Icons.expand_more_rounded,
+                    onTap: () => setState(() => _expanded = !_expanded),
+                    semanticLabel: _expanded ? 'Collapse text' : 'Expand text',
+                    size: 34,
+                    iconSize: 18,
+                  ),
+                  const SizedBox(width: 4),
+                  ConsoleIconButton(
+                    icon: Icons.open_in_full_rounded,
+                    onTap: _openFocusModal,
+                    semanticLabel: 'Focus view',
+                    size: 34,
+                    iconSize: 16,
+                  ),
+                  const SizedBox(width: 4),
+                ],
+                CopyButton(
+                  text: transcript,
+                  tooltip: 'Copy text',
+                  semanticLabel: 'Copy text to clipboard',
+                ),
+              ],
+            ),
+          ],
+        ),
+      ],
+    );
+  }
+}
