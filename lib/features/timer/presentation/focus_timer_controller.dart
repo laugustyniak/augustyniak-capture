@@ -6,6 +6,7 @@ import 'package:flutter/foundation.dart';
 import '../../logs/domain/log_event.dart';
 import '../domain/alarm_player.dart';
 import '../domain/alarm_sound.dart';
+import '../domain/focus_session.dart';
 import '../domain/timer_defaults.dart';
 
 /// Where a focus session is.
@@ -28,18 +29,22 @@ enum FocusTimerState { idle, running, paused, finished }
 /// would wake up claiming there were 38 minutes left. Here it wakes up
 /// finished, which is the truth.
 ///
-/// Nothing in this class is persisted. A countdown is not a capture: there is
-/// no artifact to protect and no state worth resuming, so the whole
-/// persist-before-process apparatus does not apply. What *is* persisted lives
-/// in `AppSettings` — the session length and the chosen alarm — and reaches
-/// this controller the way the audio config reaches `RecordingsController`:
-/// pushed down by the shell on every settings change.
+/// **No session *state* is persisted, but a finished session is.** A countdown
+/// is not a capture: there is no artifact to protect and nothing worth resuming,
+/// so the persist-before-process apparatus does not apply to a run in progress.
+/// What survives is the *fact that a session completed* — appended to
+/// [FocusSessionLog] the moment it reaches zero, because a day's work done is
+/// not reconstructible from anything else. Configuration (length, alarm) lives
+/// in `AppSettings` and reaches this controller the way the audio config reaches
+/// `RecordingsController`: pushed down by the shell on every settings change.
 class FocusTimerController extends ChangeNotifier {
   FocusTimerController({
     AlarmPlayer? alarmPlayer,
+    FocusSessionLog sessionLog = const NoopFocusSessionLog(),
     LogSink logSink = const NoopLogSink(),
     DateTime Function()? clock,
   }) : _alarm = alarmPlayer ?? const NoopAlarmPlayer(),
+       _sessionLog = sessionLog,
        _logs = logSink,
        _clock = clock ?? DateTime.now;
 
@@ -49,8 +54,13 @@ class FocusTimerController extends ChangeNotifier {
   static const Duration tickInterval = Duration(milliseconds: 250);
 
   final AlarmPlayer _alarm;
+  final FocusSessionLog _sessionLog;
   final LogSink _logs;
   final DateTime Function() _clock;
+
+  /// Completed sessions, oldest first — the in-memory view of the log file.
+  /// Loaded once by [initialize] and kept in step by [_finish].
+  List<FocusSession> _sessions = const <FocusSession>[];
 
   Timer? _ticker;
   bool _disposed = false;
@@ -130,6 +140,70 @@ class FocusTimerController extends ChangeNotifier {
   /// second while nothing counts down.
   DateTime? get endsAt => _deadline;
 
+  /// Read the completed-session history off disk.
+  ///
+  /// Best-effort and unawaited-safe: a log that will not load costs the history
+  /// panel and nothing else, so the timer is usable before this returns and
+  /// remains usable if it fails. The shell kicks it once at start-up.
+  Future<void> initialize() async {
+    try {
+      final List<FocusSession> loaded = await _sessionLog.load();
+      if (_disposed) return;
+      _sessions = List<FocusSession>.unmodifiable(loaded);
+      notifyListeners();
+    } catch (exception) {
+      _logs.log(
+        'Focus history could not be read · $exception',
+        level: LogLevel.warn,
+      );
+    }
+  }
+
+  /// Every completed session, oldest first.
+  List<FocusSession> get sessions => _sessions;
+
+  /// Completed sessions grouped into days, newest day first.
+  List<DailyFocusTally> get dailyTallies => tallyByDay(_sessions);
+
+  /// Today's count and focused time — the number the tab leads with.
+  ///
+  /// Derived on read rather than kept as a counter: a running app crosses
+  /// midnight, and a stored "today" would be yesterday's by morning with nothing
+  /// to trigger a correction.
+  DailyFocusTally get today {
+    final DateTime day = focusDayOf(_clock());
+    for (final DailyFocusTally tally in dailyTallies) {
+      if (tally.day == day) return tally;
+    }
+    return DailyFocusTally(day: day, sessions: 0, focused: Duration.zero);
+  }
+
+  /// The last [days] calendar days, oldest first, **including days with nothing
+  /// on them**.
+  ///
+  /// The gaps are the point: "three sessions a day" and "three sessions once a
+  /// week" are the same list of tallies and a very different working week, so a
+  /// strip that silently skipped the empty days would misreport the habit it
+  /// exists to show.
+  List<DailyFocusTally> recentDays(int days) {
+    final Map<DateTime, DailyFocusTally> byDay = <DateTime, DailyFocusTally>{
+      for (final DailyFocusTally tally in dailyTallies) tally.day: tally,
+    };
+    final DateTime today = focusDayOf(_clock());
+    return <DailyFocusTally>[
+      for (int offset = days - 1; offset >= 0; offset--)
+        () {
+          final DateTime day = DateTime(
+            today.year,
+            today.month,
+            today.day - offset,
+          );
+          return byDay[day] ??
+              DailyFocusTally(day: day, sessions: 0, focused: Duration.zero);
+        }(),
+    ];
+  }
+
   /// The length the *next* session runs for.
   ///
   /// Pushed down by the shell whenever settings change, so it can arrive at any
@@ -145,8 +219,15 @@ class FocusTimerController extends ChangeNotifier {
       _sessionDuration = clamped;
       _frozen = clamped;
       _remainingTicker.value = clamped;
-      // A finished session whose length is re-picked is being set up again, so
-      // it goes back to idle rather than sitting on a stale DONE.
+      // A finished session whose length is changed is being set up again, so it
+      // goes back to idle rather than sitting on a stale DONE.
+      //
+      // Only a *changed* length reaches this, because of the guard above — and
+      // that guard has to stay. This method is a push-down the shell runs on
+      // every settings change, so dropping it would clear the DONE screen when
+      // the user picked a theme. Re-picking the length that just finished is
+      // handled by the chip in `TimerTab`, where the tap is known to be a
+      // deliberate one.
       _state = FocusTimerState.idle;
     }
     notifyListeners();
@@ -269,8 +350,46 @@ class FocusTimerController extends ChangeNotifier {
           : 'Focus session finished · ${_describe(_sessionDuration)} · '
                 '${_goal.trim()}',
     );
+    _record();
     unawaited(_play(_alarmSound));
     notifyListeners();
+  }
+
+  /// Count this session. The only place that writes to [_sessionLog], which is
+  /// what makes "a pomodoro" mean exactly one thing: a run that reached zero.
+  ///
+  /// **In memory first, then the file** — the same order the revisions history
+  /// uses. A failed append leaves the tally correct for the rest of the session
+  /// and merely incomplete on disk, which is strictly better than a number that
+  /// is wrong in both places. The write is best-effort under the `ClipboardSink`
+  /// contract: it must never throw into a session that has already ended.
+  void _record() {
+    final String goal = _goal.trim();
+    final FocusSession session = FocusSession(
+      completedAt: _clock(),
+      duration: _sessionDuration,
+      goal: goal.isEmpty
+          ? null
+          : goal.length > FocusSession.maxGoalLength
+          ? goal.substring(0, FocusSession.maxGoalLength)
+          : goal,
+    );
+    _sessions = List<FocusSession>.unmodifiable(<FocusSession>[
+      ..._sessions,
+      session,
+    ]);
+    unawaited(_appendSession(session));
+  }
+
+  Future<void> _appendSession(FocusSession session) async {
+    try {
+      await _sessionLog.append(session);
+    } catch (exception) {
+      _logs.log(
+        'Focus session could not be recorded · $exception',
+        level: LogLevel.warn,
+      );
+    }
   }
 
   Duration _computeRemaining() {
@@ -339,9 +458,7 @@ class FocusTimerController extends ChangeNotifier {
 /// minutes modulo 60 — correct for a recording's length, wrong for a 90-minute
 /// countdown, which it would render as `30:00`.
 String formatCountdown(Duration value) {
-  final int total = value.isNegative
-      ? 0
-      : (value.inMilliseconds / 1000).ceil();
+  final int total = value.isNegative ? 0 : (value.inMilliseconds / 1000).ceil();
   final int hours = total ~/ 3600;
   final String minutes = ((total % 3600) ~/ 60).toString().padLeft(2, '0');
   final String seconds = (total % 60).toString().padLeft(2, '0');
