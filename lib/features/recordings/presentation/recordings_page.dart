@@ -33,6 +33,9 @@ import '../../shortcuts/domain/hotkey_registrar.dart';
 import '../../shortcuts/domain/shortcut_action.dart';
 import '../../shortcuts/domain/window_presenter.dart';
 import '../../shortcuts/presentation/shortcuts_coordinator.dart';
+import '../../timer/data/asset_alarm_player.dart';
+import '../../timer/presentation/focus_timer_controller.dart';
+import '../../timer/presentation/timer_tab.dart';
 import '../../transcription/data/audio_splitter.dart';
 import '../../transcription/data/chunked_transcription_service.dart';
 import '../../transcription/data/transcription_service.dart';
@@ -55,7 +58,7 @@ import 'recording_view.dart';
 import 'recordings_controller.dart';
 import 'text_note_sheet.dart';
 
-/// Shell for the five navigation tabs. Owns the controllers and keeps the
+/// Shell for the six navigation tabs. Owns the controllers and keeps the
 /// recordings controller in sync with settings; every tab body lives in its own
 /// file.
 class RecordingsPage extends StatefulWidget {
@@ -74,10 +77,10 @@ class RecordingsPage extends StatefulWidget {
 }
 
 class _RecordingsPageState extends State<RecordingsPage> {
-  // Indices used in code; Projects, Logs and Config are selected only by the
-  // NavigationBar itself.
+  // Indices used in code; Timer, Projects, Logs and Config are selected only by
+  // the navigation itself.
   static const int queueIndex = 0;
-  static const int modelsIndex = 2;
+  static const int modelsIndex = 3;
 
   static const List<({IconData icon, String label, String shortLabel})>
   destinations = <({IconData icon, String label, String shortLabel})>[
@@ -86,6 +89,9 @@ class _RecordingsPageState extends State<RecordingsPage> {
       label: 'QUEUE',
       shortLabel: 'QUEUE',
     ),
+    // Beside the Queue rather than beside Config: a focus session is something
+    // you *do*, on the same footing as capturing, not something you set up once.
+    (icon: Icons.timer_outlined, label: 'TIMER', shortLabel: 'TIMER'),
     (icon: Icons.account_tree_outlined, label: 'PROJECTS', shortLabel: 'PROJ'),
     (icon: Icons.memory_rounded, label: 'MODELS', shortLabel: 'MODELS'),
     (icon: Icons.chevron_right_rounded, label: 'LOGS', shortLabel: 'LOGS'),
@@ -97,6 +103,7 @@ class _RecordingsPageState extends State<RecordingsPage> {
   late final LogStore logs;
   late final RecordingsController controller;
   late final ProjectsController projects;
+  late final FocusTimerController timer;
   late final ShortcutsCoordinator shortcuts;
   late final Listenable listenable;
 
@@ -196,6 +203,13 @@ class _RecordingsPageState extends State<RecordingsPage> {
       // no-op default.
       mediaOpener: const SystemMediaOpener(),
     );
+    // Its own `AudioPlayer` inside `AssetAlarmPlayer`, never the recordings
+    // controller's: an alarm must not stop a clip being reviewed, and a review
+    // must not have to wait out an alarm.
+    timer = FocusTimerController(
+      alarmPlayer: AssetAlarmPlayer(),
+      logSink: logs,
+    );
     shortcuts = ShortcutsCoordinator(
       recordings: controller,
       // Read lazily rather than capturing `context` here: a hotkey can fire long
@@ -224,6 +238,10 @@ class _RecordingsPageState extends State<RecordingsPage> {
       projects,
       settings,
       logs,
+      // State changes only — the countdown itself ticks into its own
+      // `ValueNotifier`, which is what keeps a running session from rebuilding
+      // all six tabs four times a second.
+      timer,
     ]);
     _bootstrap();
   }
@@ -347,6 +365,11 @@ class _RecordingsPageState extends State<RecordingsPage> {
         ? _buildOcrService()
         : ocr;
     controller.audioConfig = settings.audio;
+    // Same contract as the service swap above: the length reaches the *next*
+    // session, never the one already counting down. The alarm is read at zero,
+    // so a change there does reach a session already under way.
+    timer.configure(settings.timerDuration);
+    timer.setAlarmSound(settings.timerAlarm);
     // The one setting that travels *up*: the palette is chosen above
     // `MaterialApp`, which is above this page. A `ValueNotifier` no-ops on an
     // unchanged value, so this costs nothing on the settings changes that are
@@ -441,6 +464,7 @@ class _RecordingsPageState extends State<RecordingsPage> {
     unawaited(shortcuts.dispose());
     controller.dispose();
     projects.dispose();
+    timer.dispose();
     settings.dispose();
     logs.dispose();
     super.dispose();
@@ -503,6 +527,7 @@ class _RecordingsPageState extends State<RecordingsPage> {
                                   projects: projects,
                                   initialProjectId: activeQueueProjectFilterId,
                                 ),
+                                TimerTab(controller: timer, settings: settings),
                                 ProjectsTab(
                                   controller: projects,
                                   recordingsController: controller,
@@ -662,29 +687,20 @@ class _RecordingsPageState extends State<RecordingsPage> {
         onDestinationSelected: (int value) {
           setState(() => navigationIndex = value);
         },
+        // Built from the same [destinations] list the compact bar and the rail
+        // read. It used to be a third, hand-kept copy — which is exactly the
+        // shape that lets a destination be added to two of the three forms and
+        // silently repoint every index in the file for the one it was not.
         destinations: <NavigationDestination>[
-          const NavigationDestination(
-            icon: Icon(Icons.format_list_bulleted_rounded),
-            label: 'QUEUE',
-          ),
-          const NavigationDestination(
-            icon: Icon(Icons.account_tree_outlined),
-            label: 'PROJECTS',
-          ),
-          NavigationDestination(
-            icon: _ProfileBadge(
-              hasActiveProfile: settings.activeProfile != null,
+          for (int index = 0; index < destinations.length; index++)
+            NavigationDestination(
+              icon: index == modelsIndex
+                  ? _ProfileBadge(
+                      hasActiveProfile: settings.activeProfile != null,
+                    )
+                  : Icon(destinations[index].icon),
+              label: destinations[index].label,
             ),
-            label: 'MODELS',
-          ),
-          const NavigationDestination(
-            icon: Icon(Icons.chevron_right_rounded),
-            label: 'LOGS',
-          ),
-          const NavigationDestination(
-            icon: Icon(Icons.tune_rounded),
-            label: 'CONFIG',
-          ),
         ],
       ),
     );
