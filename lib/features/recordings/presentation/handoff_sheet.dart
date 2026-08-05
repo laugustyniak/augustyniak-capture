@@ -73,7 +73,7 @@ class _HandoffSheetState extends State<_HandoffSheet> {
         )
         .id;
     _instruction = TextEditingController(
-      text: widget.controller.handoffInstruction(widget.recording.id),
+      text: widget.controller.handoffPrompt(widget.recording),
     );
   }
 
@@ -196,17 +196,20 @@ class _HandoffSheetState extends State<_HandoffSheet> {
 
             SectionHeader(title: 'OPENING PROMPT'),
             const SizedBox(height: 9),
+            // Room for the capture itself, which is what this field now holds.
+            // Bounded rather than unbounded: the sheet has to stay reachable
+            // above the keyboard on a phone, and a long transcript scrolls.
             ConsoleField(
               controller: _instruction,
-              maxLines: 3,
-              minLines: 2,
+              maxLines: 12,
+              minLines: 4,
               monospace: true,
               fontSize: 12,
             ),
             const SizedBox(height: 9),
-            // The brief is the actual payload; the prompt above is only the
-            // pointer to it. Naming the file here is what makes that visible —
-            // and what lets the user open it themselves when an agent stalls.
+            // The agent is started with the text above. The file is the copy
+            // that outlives the session — and the one an *attach* falls back
+            // on, since a running agent never receives this prompt.
             Row(
               children: <Widget>[
                 Icon(
@@ -217,8 +220,9 @@ class _HandoffSheetState extends State<_HandoffSheet> {
                 const SizedBox(width: 6),
                 Expanded(
                   child: Text(
-                    'The full capture is written to $taskPath',
-                    maxLines: 2,
+                    'Sent to the agent as its opening prompt. A copy is also '
+                    'written to $taskPath',
+                    maxLines: 3,
                     style: ConsoleText.micro,
                   ),
                 ),

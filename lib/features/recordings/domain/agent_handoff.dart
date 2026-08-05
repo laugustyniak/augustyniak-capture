@@ -46,9 +46,8 @@ class AgentHandoffRequest {
   /// starting answer.
   final String agentId;
 
-  /// The opening prompt. Kept to one line by construction — see
-  /// [AgentHandoff.instructionFor] for why the capture's own text does not
-  /// travel this way.
+  /// The opening prompt, carrying the capture's own text — see
+  /// [AgentHandoff.promptFor].
   final String instruction;
 }
 
@@ -102,18 +101,23 @@ abstract interface class AgentHandoff {
   /// capture lands in the same file rather than scattering briefs.
   String taskPathFor(String captureId);
 
-  /// The default opening prompt: a single line telling the agent which file to
-  /// read.
+  /// The default opening prompt: **the capture's own text**, so the agent
+  /// starts on the task itself rather than on an errand to go and read it.
   ///
-  /// **The capture's text is deliberately not the prompt.** It would have to
-  /// survive KDL escaping, an `--args` hand-off and the agent's own argument
-  /// parsing, and a dictated note is exactly the input that breaks that chain —
-  /// newlines, quotes, several kilobytes of it — while every layer fails by
-  /// silently truncating rather than by refusing. A path is one short token, and
-  /// putting the brief in the repository buys three things besides: it survives
-  /// the session, every agent can read it without a code change here, and it is
-  /// versioned with the project.
-  String instructionFor(String captureId);
+  /// This used to be one line naming [taskPathFor], on the reasoning that a
+  /// dictated note — newlines, quotes, kilobytes of it — could not survive KDL
+  /// escaping, an `--args` hand-off and the agent's own argument parsing, and
+  /// that each of those layers fails by silently truncating. Two of the three
+  /// links turned out to be sound: Ghostty passes an `-e` argument vector
+  /// through verbatim, multi-line values included, and the Zellij layout is now
+  /// written to a file, which takes the whole prompt out of `ARG_MAX` as well.
+  /// What the pointer cost was the thing the handoff is for — a session opened
+  /// on an instruction to read a file is a session waiting for a second turn.
+  ///
+  /// The brief is still written to [taskPathFor], and that is not redundancy:
+  /// it is what an *attach* falls back on, since a running agent never receives
+  /// this prompt, and it is the copy that outlives the session.
+  String promptFor(RoutedCapture capture);
 
   /// Writes the brief, then starts (or reattaches to) the agent's session.
   ///
@@ -133,7 +137,7 @@ class DisabledAgentHandoff implements AgentHandoff {
   String taskPathFor(String captureId) => '';
 
   @override
-  String instructionFor(String captureId) => '';
+  String promptFor(RoutedCapture capture) => '';
 
   @override
   Future<AgentHandoffResult> handoff(AgentHandoffRequest request) async {

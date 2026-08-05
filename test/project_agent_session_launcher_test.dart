@@ -1,9 +1,23 @@
 import 'dart:io';
 
+import 'package:augustyniak_capture/features/projects/data/executable_resolver.dart';
 import 'package:augustyniak_capture/features/projects/data/ghostty_zellij_agent_session_launcher.dart';
 import 'package:augustyniak_capture/features/projects/data/process_runner.dart';
 import 'package:augustyniak_capture/features/projects/domain/agent_session_launcher.dart';
 import 'package:flutter_test/flutter_test.dart';
+
+/// Stands in for the machine's installed tools. Every name resolves under
+/// `/opt/fake/bin` unless [missing] names it — which is how the "not installed"
+/// path is exercised without depending on what this machine happens to have.
+class _FakeResolver implements ExecutableResolver {
+  const _FakeResolver({this.missing = const <String>{}});
+
+  final Set<String> missing;
+
+  @override
+  Future<String?> resolve(String name) async =>
+      missing.contains(name) ? null : '/opt/fake/bin/$name';
+}
 
 class _Invocation {
   const _Invocation(this.executable, this.arguments);
@@ -37,14 +51,38 @@ const CommandResult _success = CommandResult(
 
 void main() {
   late Directory repo;
+  late Directory layouts;
 
   setUp(() {
     repo = Directory.systemTemp.createTempSync('augustyniak_capture_project_');
+    layouts = Directory.systemTemp.createTempSync(
+      'augustyniak_capture_layouts_',
+    );
   });
 
   tearDown(() {
     if (repo.existsSync()) repo.deleteSync(recursive: true);
+    if (layouts.existsSync()) layouts.deleteSync(recursive: true);
   });
+
+  GhosttyZellijAgentSessionLauncher build(
+    ProcessRunner runner, {
+    bool isMacOS = true,
+    Set<String> missing = const <String>{},
+  }) => GhosttyZellijAgentSessionLauncher(
+    processRunner: runner,
+    executables: _FakeResolver(missing: missing),
+    layoutDirectory: layouts,
+    isMacOS: isMacOS,
+  );
+
+  /// The layout Zellij will actually read, fetched the way Zellij fetches it —
+  /// off the path in the argument vector, not off anything the launcher kept.
+  String layoutFrom(List<String> openArguments) {
+    final int index = openArguments.indexOf('--new-session-with-layout');
+    expect(index, isNot(-1), reason: 'no layout was passed to Zellij');
+    return File(openArguments[index + 1]).readAsStringSync();
+  }
 
   AgentSessionLaunchRequest request({
     ProjectAgent agent = ProjectAgent.codex,
@@ -64,11 +102,7 @@ void main() {
         _success,
         _success,
       ]);
-      final GhosttyZellijAgentSessionLauncher launcher =
-          GhosttyZellijAgentSessionLauncher(
-            processRunner: runner,
-            isMacOS: true,
-          );
+      final GhosttyZellijAgentSessionLauncher launcher = build(runner);
 
       final AgentSessionLaunchResult result = await launcher.launch(
         request(arguments: <String>['--model', 'x; touch /tmp/not-run']),
@@ -79,7 +113,10 @@ void main() {
         'augustyniak-client-legal-pilot-550e8400-codex',
       );
       expect(result.attachedToExistingSession, isFalse);
-      expect(runner.invocations.first.executable, 'zellij');
+      // Absolute, never the bare name: a bundled app's PATH is
+      // `/usr/bin:/bin:/usr/sbin:/sbin`, so `zellij` alone throws here and
+      // `command="codex"` would fail inside a window that is already open.
+      expect(runner.invocations.first.executable, '/opt/fake/bin/zellij');
       expect(runner.invocations.first.arguments, const <String>[
         'list-sessions',
         '--short',
@@ -93,17 +130,96 @@ void main() {
         '--args',
         '--working-directory=${repo.absolute.path}',
         '-e',
-        'zellij',
+        '/opt/fake/bin/zellij',
       ]);
-      expect(open.arguments, contains('--layout-string'));
-      final String layout =
-          open.arguments[open.arguments.indexOf('--layout-string') + 1];
-      expect(layout, contains('command="codex"'));
+      // `--layout-string` adds a tab to a session that already exists; it does
+      // not create one. It answered `Session '…' not found` and exited 0, so
+      // Ghostty closed a window that had started nothing.
+      expect(open.arguments, isNot(contains('--layout-string')));
+      expect(
+        open.arguments,
+        containsAllInOrder(<String>[
+          '--session',
+          'augustyniak-client-legal-pilot-550e8400-codex',
+          '--new-session-with-layout',
+        ]),
+      );
+      final String layout = layoutFrom(open.arguments);
+      expect(layout, contains('command="/opt/fake/bin/codex"'));
       expect(layout, contains('"x; touch /tmp/not-run"'));
       expect(open.arguments, isNot(contains('sh')));
       expect(open.arguments, isNot(contains('-c')));
     },
   );
+
+  test('a tool that is not installed is named before a window opens', () async {
+    final _FakeProcessRunner runner = _FakeProcessRunner(<CommandResult>[]);
+    final GhosttyZellijAgentSessionLauncher launcher = build(
+      runner,
+      missing: <String>{'zellij'},
+    );
+
+    await expectLater(
+      launcher.launch(request()),
+      throwsA(
+        isA<AgentSessionLaunchException>().having(
+          (AgentSessionLaunchException error) => error.message,
+          'message',
+          allOf(contains('zellij'), contains('PATH')),
+        ),
+      ),
+    );
+    // Nothing ran, so there is no terminal on screen to explain away. A missing
+    // binary that only surfaces inside the window reads as a silent agent.
+    expect(runner.invocations, isEmpty);
+  });
+
+  test('a missing agent is caught before the session is created', () async {
+    final _FakeProcessRunner runner = _FakeProcessRunner(<CommandResult>[
+      _success,
+    ]);
+    final GhosttyZellijAgentSessionLauncher launcher = build(
+      runner,
+      missing: <String>{'codex'},
+    );
+
+    await expectLater(
+      launcher.launch(request()),
+      throwsA(
+        isA<AgentSessionLaunchException>().having(
+          (AgentSessionLaunchException error) => error.message,
+          'message',
+          contains('codex'),
+        ),
+      ),
+    );
+    // The session listing ran; `open` did not.
+    expect(runner.invocations, hasLength(1));
+  });
+
+  test('a multi-line prompt survives into the layout', () async {
+    final _FakeProcessRunner runner = _FakeProcessRunner(<CommandResult>[
+      _success,
+      _success,
+    ]);
+    final GhosttyZellijAgentSessionLauncher launcher = build(runner);
+
+    await launcher.launch(
+      request(
+        agent: ProjectAgent.claude,
+        arguments: <String>['Fix the "save" button.\nIt drops the last edit.'],
+      ),
+    );
+
+    // KDL escapes it going in; Zellij unescapes it going out. Writing the
+    // layout to a file is also what keeps a long capture off the command line
+    // and therefore out of ARG_MAX.
+    final String layout = layoutFrom(runner.invocations.last.arguments);
+    expect(
+      layout,
+      contains(r'"Fix the \"save\" button.\nIt drops the last edit."'),
+    );
+  });
 
   test('treats Zellij no-sessions exit as a valid first launch', () async {
     final _FakeProcessRunner runner = _FakeProcessRunner(<CommandResult>[
@@ -114,13 +230,15 @@ void main() {
       ),
       _success,
     ]);
-    final GhosttyZellijAgentSessionLauncher launcher =
-        GhosttyZellijAgentSessionLauncher(processRunner: runner, isMacOS: true);
+    final GhosttyZellijAgentSessionLauncher launcher = build(runner);
 
     final AgentSessionLaunchResult result = await launcher.launch(request());
 
     expect(result.attachedToExistingSession, isFalse);
-    expect(runner.invocations.last.arguments, contains('--layout-string'));
+    expect(
+      runner.invocations.last.arguments,
+      contains('--new-session-with-layout'),
+    );
   });
 
   test('sanitizes a project-configured session base and appends agent', () {
@@ -189,11 +307,7 @@ void main() {
         const CommandResult(exitCode: 0, stdout: '$session\n', stderr: ''),
         _success,
       ]);
-      final GhosttyZellijAgentSessionLauncher launcher =
-          GhosttyZellijAgentSessionLauncher(
-            processRunner: runner,
-            isMacOS: true,
-          );
+      final GhosttyZellijAgentSessionLauncher launcher = build(runner);
 
       final AgentSessionLaunchResult result = await launcher.launch(
         request(agent: ProjectAgent.claude),
@@ -202,11 +316,16 @@ void main() {
       expect(result.attachedToExistingSession, isTrue);
       expect(
         runner.invocations.last.arguments,
-        containsAllInOrder(<String>['-e', 'zellij', 'attach', session]),
+        containsAllInOrder(<String>[
+          '-e',
+          '/opt/fake/bin/zellij',
+          'attach',
+          session,
+        ]),
       );
       expect(
         runner.invocations.last.arguments,
-        isNot(contains('--layout-string')),
+        isNot(contains('--new-session-with-layout')),
       );
     },
   );
@@ -217,17 +336,12 @@ void main() {
         _success,
         _success,
       ]);
-      final GhosttyZellijAgentSessionLauncher launcher =
-          GhosttyZellijAgentSessionLauncher(
-            processRunner: runner,
-            isMacOS: true,
-          );
+      final GhosttyZellijAgentSessionLauncher launcher = build(runner);
 
       await launcher.launch(request(agent: agent));
 
-      final List<String> openArgs = runner.invocations.last.arguments;
-      final String layout = openArgs[openArgs.indexOf('--layout-string') + 1];
-      expect(layout, contains('command="${agent.executable}"'));
+      final String layout = layoutFrom(runner.invocations.last.arguments);
+      expect(layout, contains('command="/opt/fake/bin/${agent.executable}"'));
     }
   });
 
@@ -235,11 +349,10 @@ void main() {
     'fails clearly on unsupported platforms without running a process',
     () async {
       final _FakeProcessRunner runner = _FakeProcessRunner(<CommandResult>[]);
-      final GhosttyZellijAgentSessionLauncher launcher =
-          GhosttyZellijAgentSessionLauncher(
-            processRunner: runner,
-            isMacOS: false,
-          );
+      final GhosttyZellijAgentSessionLauncher launcher = build(
+        runner,
+        isMacOS: false,
+      );
 
       await expectLater(
         launcher.launch(request()),
@@ -258,8 +371,7 @@ void main() {
   test('rejects a missing repository before running a process', () async {
     repo.deleteSync(recursive: true);
     final _FakeProcessRunner runner = _FakeProcessRunner(<CommandResult>[]);
-    final GhosttyZellijAgentSessionLauncher launcher =
-        GhosttyZellijAgentSessionLauncher(processRunner: runner, isMacOS: true);
+    final GhosttyZellijAgentSessionLauncher launcher = build(runner);
 
     await expectLater(
       launcher.launch(request()),

@@ -64,9 +64,23 @@ class ProjectAgentHandoff implements AgentHandoff {
   @override
   String taskPathFor(String captureId) => '$directoryName/$captureId.md';
 
+  /// The capture's own words, and nothing wrapped around them.
+  ///
+  /// The body is the whole prompt whenever there is one: a dictated note
+  /// already says what it wants done, and a generated preamble would only
+  /// compete with it. The title is the fallback rather than a header, because
+  /// an un-enriched capture's title is `displayNameFor`'s stand-in — `Recording
+  /// 14:32` — which is noise at the top of a prompt and the only thing left at
+  /// the bottom of an empty one. The category and tags stay out entirely: they
+  /// are how the *queue* files a capture, not what the task is.
   @override
-  String instructionFor(String captureId) =>
-      'Read ${taskPathFor(captureId)} and start on the task described there.';
+  String promptFor(RoutedCapture capture) {
+    final String body = capture.body.trim();
+    if (body.isNotEmpty) return body;
+    final String summary = capture.summary?.trim() ?? '';
+    if (summary.isNotEmpty) return summary;
+    return capture.title.trim();
+  }
 
   @override
   Future<AgentHandoffResult> handoff(AgentHandoffRequest request) async {

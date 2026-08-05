@@ -118,12 +118,14 @@ void main() {
 
     await openSheet(tester, controller);
 
-    // The prompt shown is the pointer to the brief, not the transcript.
+    // The prompt shown is the capture itself — what the agent will be started
+    // on — and the file is named underneath as the copy, not as the payload.
     expect(find.text('ANTIGRAVITY'), findsOneWidget);
     expect(
-      find.text('Read .agent-tasks/r1.md and start on the task described there.'),
+      find.text('Dictate a note, then hand it to an agent.'),
       findsOneWidget,
     );
+    expect(find.textContaining('.agent-tasks/r1.md'), findsOneWidget);
 
     await tester.tap(find.text('LAUNCH SESSION'));
     await settleIo(tester);

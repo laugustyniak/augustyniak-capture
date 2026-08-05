@@ -1093,12 +1093,25 @@ class RecordingsController extends ChangeNotifier {
   bool canHandoff(Recording recording) => handoffAgents(recording).isNotEmpty;
 
   /// Where the brief for [id] will be written, relative to the repository, and
-  /// the default one-line prompt that points an agent at it. Both are
-  /// synchronous so the handoff sheet can show exactly what it is about to do
-  /// before anything is written.
+  /// the prompt the agent will be started with. Both are synchronous so the
+  /// handoff sheet can show exactly what it is about to do before anything is
+  /// written.
   String handoffTaskPath(String id) => _agentHandoff.taskPathFor(id);
 
-  String handoffInstruction(String id) => _agentHandoff.instructionFor(id);
+  String handoffPrompt(Recording recording) =>
+      _agentHandoff.promptFor(_routedCapture(recording));
+
+  /// The one place a `Recording` is flattened for a destination, so the prompt
+  /// the sheet shows and the prompt the launch uses cannot drift apart.
+  RoutedCapture _routedCapture(Recording recording) => RoutedCapture(
+    projectId: recording.projectId,
+    title: displayNameFor(recording),
+    body: recording.transcript ?? '',
+    capturedAt: recording.createdAt,
+    summary: recording.summary,
+    category: recording.category,
+    tags: recording.tags,
+  );
 
   /// A handoff is in flight for this capture.
   ///
@@ -1134,23 +1147,16 @@ class RecordingsController extends ChangeNotifier {
     notifyListeners();
 
     final AgentHandoffResult result;
+    final RoutedCapture capture = _routedCapture(recording);
     try {
       result = await _agentHandoff.handoff(
         AgentHandoffRequest(
           captureId: id,
-          capture: RoutedCapture(
-            projectId: recording.projectId,
-            title: displayNameFor(recording),
-            body: recording.transcript ?? '',
-            capturedAt: recording.createdAt,
-            summary: recording.summary,
-            category: recording.category,
-            tags: recording.tags,
-          ),
+          capture: capture,
           agentId: agentId,
           instruction: instruction?.trim().isNotEmpty == true
               ? instruction!.trim()
-              : _agentHandoff.instructionFor(id),
+              : _agentHandoff.promptFor(capture),
         ),
       );
     } catch (exception) {
