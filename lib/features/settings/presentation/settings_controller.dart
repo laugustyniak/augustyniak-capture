@@ -127,8 +127,9 @@ class SettingsController extends ChangeNotifier {
 
   /// The image-OCR service, derived from the **enrichment** profile — OCR has
   /// no profile kind of its own (see [ProviderProfile.toOcrService]). Returns
-  /// the disabled service when no enrichment profile is active; the shell
-  /// decides what to fall back to (tesseract on desktop, nothing on mobile).
+  /// the disabled service when no enrichment profile is active, and that is the
+  /// end of it: there is no local engine behind this on any platform, so an
+  /// image captured without a vision profile fails readably and stays retryable.
   ///
   /// Same caching rule and the same signature fields as [enrichmentService]:
   /// the two services share one profile, so they invalidate together.

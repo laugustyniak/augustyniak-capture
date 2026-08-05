@@ -193,4 +193,62 @@ void main() {
     // Activating an enrichment profile must never repoint transcription.
     expect(controller.settings.activeProfileId, transcriptionActive);
   });
+
+  // The enrichment profile is also the OCR engine, and with the tesseract
+  // fallback gone it is the *only* one. So the three vision-capable presets have
+  // to be reachable in the sheet, not merely present in `ProviderPreset.all`:
+  // the chips live in a horizontally scrolling ListView that builds only what is
+  // on screen, so a fourth preset added ahead of them would push one out of
+  // reach with every unit test still green.
+  testWidgets('the vision presets are offered and fill the enrichment form', (
+    WidgetTester tester,
+  ) async {
+    final SettingsController controller = buildSettingsController();
+    await controller.initialize();
+    await pumpModels(tester, controller);
+
+    await scrollTo(tester, find.text('ADD ENRICHMENT PROFILE'));
+    await tester.tap(find.text('ADD ENRICHMENT PROFILE'));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 400));
+
+    expect(find.text('NEW ENRICHMENT PROFILE'), findsOneWidget);
+    for (final String name in <String>[
+      'OpenAI',
+      'Anthropic',
+      'Google Gemini',
+    ]) {
+      expect(
+        find.widgetWithText(ActionChip, name),
+        findsOneWidget,
+        reason: name,
+      );
+    }
+
+    // Applying the preset has to reach the fields, or the chip is decoration:
+    // the endpoint it writes is what `toOcrService` parses, and a schemeless one
+    // degrades to the disabled service without a word.
+    await tester.tap(find.widgetWithText(ActionChip, 'Google Gemini'));
+    await tester.pump();
+
+    expect(
+      find.widgetWithText(
+        TextFormField,
+        'https://generativelanguage.googleapis.com/v1beta/openai/chat/completions',
+      ),
+      findsOneWidget,
+    );
+    // Scoped to the field rather than `find.text`: the same string is also on a
+    // suggestion chip once the preset matches, so a bare text finder would read
+    // "too many" — and, worse, would pass on the chip alone if the field never
+    // got filled.
+    expect(
+      find.widgetWithText(TextFormField, 'gemini-3.6-flash'),
+      findsOneWidget,
+    );
+    // The suggestion row only renders once the endpoint host matches a preset,
+    // so its presence is what proves the round-trip rather than a lucky string.
+    expect(find.widgetWithText(ActionChip, 'gemini-3.1-pro'), findsOneWidget);
+    expect(find.text('Google AI Studio API key (AIza…)'), findsOneWidget);
+  });
 }

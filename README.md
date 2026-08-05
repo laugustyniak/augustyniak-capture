@@ -122,23 +122,32 @@ is still being transcribed — the queue simply grows.
 | 🎙 | microphone recording | `.m4a` | transcription | everywhere |
 | 📝 | text note | `.txt` | passthrough, no network | everywhere |
 | 🎧 | audio upload | original ext | transcription | everywhere |
-| 🖼 | image | `.jpg` / `.png` | **OCR** — vision model, or `tesseract` | everywhere with a vision profile; desktop otherwise |
+| 🖼 | image | `.jpg` / `.png` | **OCR** — a vision model | everywhere |
 | 🎬 | video | `.mp4` / `.mov` | `ffmpeg` audio track → transcription | desktop |
 
-Image OCR is **LLM-first**: with an enrichment profile configured it sends the
-image to that profile's vision endpoint on *every* platform, mobile included.
-Without one, it falls back to system `tesseract` on desktop.
+Image OCR is **LLM-only**. It sends the image to whichever vision model your
+enrichment profile points at — **OpenAI, Anthropic or Google Gemini**, all three
+one click away in Models — and it behaves identically on a laptop and on a
+phone. There is no local OCR engine to install, no language packs, and no
+platform where images quietly work better than on another.
+
+That is a deliberate removal, not a gap: a `tesseract` fallback used to sit
+behind this on desktop. It made the same image succeed on Linux and fail on
+Android while the screen said nothing about the difference, and the result it
+produced was worse than the vision model the app was already configured to talk
+to. One endpoint now answers for both stages.
 
 ```bash
-# optional desktop binaries — OCR fallback and all video handling
-sudo apt-get install tesseract-ocr tesseract-ocr-pol ffmpeg   # Debian/Ubuntu
-brew install tesseract tesseract-lang ffmpeg                  # macOS
-winget install Gyan.FFmpeg UB-Mannheim.TesseractOCR           # Windows
+# the one optional desktop binary — video only
+sudo apt-get install ffmpeg     # Debian/Ubuntu
+brew install ffmpeg             # macOS
+winget install Gyan.FFmpeg      # Windows
 ```
 
-Missing a binary is not a crash: the item is still ingested, verified and listed,
-its processing lands `failed` with a readable error and a retry button, and the
-source file is untouched.
+Neither a missing binary nor a missing profile is a crash: the item is still
+ingested, verified and listed, its processing lands `failed` with a readable
+error and a retry button, and the source file is untouched. Add the profile
+later and press retry.
 
 ---
 
@@ -240,13 +249,36 @@ a key. Presets ship for:
 
 | Transcription | Enrichment / vision |
 | --- | --- |
-| OpenAI transcribe · OpenAI Whisper | OpenAI · Anthropic |
+| OpenAI transcribe · OpenAI Whisper | **OpenAI** · **Anthropic** · **Google Gemini** |
 | Groq | Groq chat *(no vision model — images will fail)* |
 | Local whisper.cpp (`localhost:8080`) | Local Ollama (`localhost:11434`) |
 | Custom endpoint | Custom endpoint |
 
 Exactly one profile is active per kind, and the two are independent. **No profile
 = that stage is simply disabled** — recording and persistence carry on unchanged.
+
+**The three bolded presets are the defaults worth picking**, because an
+enrichment profile does double duty: it writes titles, categories, summaries and
+tags *and* it is the OCR engine for image captures. All three ship with a
+vision-capable model pre-filled, so one key turns on both stages at once.
+
+| Preset | Endpoint | Ships with | Key looks like |
+| --- | --- | --- | --- |
+| **OpenAI** | `api.openai.com/v1/chat/completions` | `gpt-5.6-luna` | `sk-…` |
+| **Anthropic** | `api.anthropic.com/v1/chat/completions` | `claude-haiku-4-5` | `sk-ant-…` |
+| **Google Gemini** | `generativelanguage.googleapis.com/v1beta/openai/…` | `gemini-3.6-flash` | `AIza…` |
+
+Each defaults to the **cheap, fast** member of its family rather than the
+flagship — this stage runs on every single capture and reads at most 12 000
+characters — with the larger models one chip away in the editor. Anthropic and
+Gemini are reached through their **OpenAI-compatible** endpoints, so all three
+speak one request shape and the app needs no per-vendor adapter.
+
+> Both of those compatibility layers do **not** honour `response_format:
+> json_object` the way OpenAI does, so for them the JSON contract rests on the
+> prompt alone. The parser is built for that: it strips a stray ` ```json `
+> fence and degrades field by field rather than throwing, which is why they work
+> anyway. Worth knowing if you point a profile at a fourth vendor.
 
 <details>
 <summary><b>Seeding the first profile from the command line</b></summary>
@@ -734,17 +766,18 @@ Both `macos/Runner/Release.entitlements` and `DebugProfile.entitlements` set
 `com.apple.security.app-sandbox` to `false`, and they must stay in agreement or a
 debug run cannot reproduce an installed-app bug.
 
-A sandboxed process hands its sandbox to every child it spawns, which breaks all
-three of this app's shell-outs at once: `tesseract` and `ffmpeg` could not read
-the recordings directory, and `open` could not reach LaunchServices. They break
-*the same quiet way a missing binary does* — the item lands `failed` with its
-source intact — so the sandbox is invisible as a cause.
+A sandboxed process hands its sandbox to every child it spawns, which breaks
+both of this app's shell-outs at once: `ffmpeg` could not read the recordings
+directory, and `open` could not reach LaunchServices. They break *the same quiet
+way a missing binary does* — the item lands `failed` with its source intact — so
+the sandbox is invisible as a cause.
 
 Re-enabling it is a **Mac App Store prerequisite, not a security fix**: it needs
 `device.audio-input`, `network.client` and `files.user-selected.read-only`, *and*
-in-process replacements (Vision, AVFoundation, NSWorkspace) before those three
-features work again — *and* a real Team-ID signature, because the sandbox forces
-the data-protection keychain that token encryption would then have to use.
+in-process replacements (AVFoundation for the video track, NSWorkspace for
+opening a file) before those features work again — *and* a real Team-ID
+signature, because the sandbox forces the data-protection keychain that token
+encryption would then have to use.
 
 One entitlement is required **regardless of the sandbox**:
 `com.apple.security.files.user-selected.read-only`, in both files. `file_picker`
@@ -1029,7 +1062,7 @@ enriched from the part that survived.
 
 ```bash
 flutter analyze                                  # flutter_lints + avoid_print
-flutter test                                     # 51 test files, pure Dart + widget
+flutter test                                     # 56 test files, pure Dart + widget
 flutter test test/index_durability_test.dart     # one file
 flutter test --plain-name "legacy JSON defaults" # one test
 ```
@@ -1079,8 +1112,10 @@ second.
 - [x] `inbox.md` hand-off into a project repository
 - [x] Markdown [note vault](#-note-vault--obsidian-and-friends) mirror for
       Obsidian and any synced notes folder
+- [x] Image OCR on every platform, through the enrichment profile's vision model
 - [ ] **Export / import**, so a mobile reinstall stops being data loss
-- [ ] OCR and video processing on mobile (ML Kit / `ffmpeg_kit`)
+- [ ] Video processing on mobile (`ffmpeg_kit`) — the last desktop-only capture
+      type
 - [ ] `WorkManager` (Android) and `BGTaskScheduler` (iOS), so jobs survive
       backgrounding
 - [ ] Local on-device models — whisper.cpp via FFI

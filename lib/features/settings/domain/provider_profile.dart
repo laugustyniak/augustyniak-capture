@@ -296,10 +296,30 @@ class ProviderPreset {
       ],
       tokenHint: 'Anthropic API key (sk-ant-…)',
     ),
+    ProviderPreset(
+      name: 'Google Gemini',
+      kind: ProfileKind.enrichment,
+      // Gemini's OpenAI-compatibility layer, so no dedicated adapter is needed
+      // here either. Same caveat as Anthropic and for the same reason: Google
+      // documents structured output through its own schema parameter and does
+      // **not** promise `response_format: json_object` on this layer, so the
+      // JSON contract rests on the prompt — which is what `_stripFence` and the
+      // field-by-field degrade in the parser are for. `image_url` data URLs are
+      // supported, so the OCR path this profile also powers works.
+      endpoint:
+          'https://generativelanguage.googleapis.com/v1beta/openai/chat/completions',
+      model: 'gemini-3.6-flash',
+      models: <String>[
+        'gemini-3.6-flash',
+        'gemini-3.5-flash-lite',
+        'gemini-3.1-pro',
+      ],
+      tokenHint: 'Google AI Studio API key (AIza…)',
+    ),
     // Groq's production line-up has no vision model, so this profile enriches
     // text well and cannot do OCR — an image capture on it lands `failed`,
-    // retryable, with the source intact. Pick OpenAI, Anthropic or a local
-    // vision model if you capture images.
+    // retryable, with the source intact. Pick OpenAI, Anthropic or Gemini (or a
+    // local vision model) if you capture images.
     ProviderPreset(
       name: 'Groq chat',
       kind: ProfileKind.enrichment,

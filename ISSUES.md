@@ -4,19 +4,23 @@ Local issue tracker (no GitHub remote yet). Move to `gh issue` once a remote exi
 
 ## Open
 
-### Mobile OCR + video processing
+### Mobile video processing
 
-Desktop processing for image (OCR) and video is done — `TesseractOcrService`
-and `FfmpegVideoAudioExtractor` shell out to system binaries behind the
-`OcrService` / `VideoAudioExtractor` seams. Mobile has neither wired:
-- **Image OCR:** add `MlKitOcrService implements OcrService`
-  (`google_mlkit_text_recognition`, Android/iOS only) and select it for
-  `Platform.isAndroid || Platform.isIOS` in `RecordingsPage._buildOcrService`.
-- **Video:** add an `ffmpeg_kit_flutter_*`-backed `VideoAudioExtractor` for
-  mobile in `_buildVideoAudioExtractor`. Both large mobile-only binaries, left
-  out of `pubspec.yaml` to keep the Linux build green.
+**Image OCR is closed**: it runs through `HttpVisionOcrService` off the
+enrichment profile, identically on every platform. The `TesseractOcrService`
+that once covered desktop has been removed rather than mirrored onto mobile —
+it made the same image succeed on desktop and fail on a phone, and it lost to
+the vision model already configured for enrichment. An on-device
+`MlKitOcrService` is no longer the plan; if it ever returns it is an *offline*
+feature, not a platform gap.
 
-Until then mobile degrades to disabled/unavailable (item `failed`, retryable).
+Still open: **video**. `FfmpegVideoAudioExtractor` shells out to a system
+binary behind the `VideoAudioExtractor` seam, which mobile has not got. Add an
+`ffmpeg_kit_flutter_*`-backed impl and select it in `_buildVideoAudioExtractor`
+— a large mobile-only binary, left out of `pubspec.yaml` so far to keep the
+Linux build green.
+
+Until then mobile video degrades to unavailable (item `failed`, retryable).
 
 ### Video poster + in-app playback
 
