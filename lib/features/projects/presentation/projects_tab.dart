@@ -37,20 +37,17 @@ class ProjectsTab extends StatelessWidget {
             ErrorBanner(message: controller.error!),
             const SizedBox(height: 12),
           ],
-          const SectionHeader(
-            title: 'WORKSPACES',
-            trailing: 'REPOSITORY CONTEXT',
-          ),
+          SectionHeader(title: 'WORKSPACES', trailing: 'REPOSITORY CONTEXT'),
           const SizedBox(height: 12),
           if (controller.isLoading && projects.isEmpty)
-            const Padding(
+            Padding(
               padding: EdgeInsets.symmetric(vertical: 48),
               child: Center(
-                child: CircularProgressIndicator(color: Console.cyan),
+                child: CircularProgressIndicator(color: Console.accent),
               ),
             )
           else if (projects.isEmpty)
-            const EmptyPanel(
+            EmptyPanel(
               icon: Icons.folder_open_outlined,
               title: 'No projects yet.',
               blurb:
@@ -77,7 +74,7 @@ class ProjectsTab extends StatelessWidget {
             key: const ValueKey<String>('add-project'),
             onPressed: () => _openEditor(context, null),
             style: FilledButton.styleFrom(
-              backgroundColor: Console.cyan,
+              backgroundColor: Console.accent,
               foregroundColor: Console.ink,
               padding: const EdgeInsets.symmetric(vertical: 14),
               shape: RoundedRectangleBorder(
@@ -99,13 +96,15 @@ class ProjectsTab extends StatelessWidget {
     final _ProjectDraft? draft = await showModalBottomSheet<_ProjectDraft>(
       context: context,
       isScrollControlled: true,
-      backgroundColor: Console.surfaceDeep,
+      backgroundColor: Console.surface,
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(22)),
       ),
-      builder: (BuildContext context) => _ProjectEditorSheet(
-        existing: existing,
-        directoryPicker: directoryPicker,
+      builder: (BuildContext context) => ConsolePaletteScope(
+        builder: (BuildContext context) => _ProjectEditorSheet(
+          existing: existing,
+          directoryPicker: directoryPicker,
+        ),
       ),
     );
     // Persisting belongs to the controller and does not require a live widget
@@ -184,7 +183,7 @@ class _ProjectCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return ConsoleCard(
-      accent: active ? Console.cyan : null,
+      accent: active ? Console.accent : null,
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: <Widget>[
@@ -198,9 +197,9 @@ class _ProjectCard extends StatelessWidget {
                   color: Console.iconTile,
                   borderRadius: BorderRadius.circular(10),
                 ),
-                child: const Icon(
+                child: Icon(
                   Icons.account_tree_outlined,
-                  color: Console.cyan,
+                  color: Console.accent,
                   size: 20,
                 ),
               ),
@@ -221,10 +220,7 @@ class _ProjectCard extends StatelessWidget {
                         ),
                         if (active) ...<Widget>[
                           const SizedBox(width: 8),
-                          const StatusPill(
-                            label: 'ACTIVE',
-                            color: Console.cyan,
-                          ),
+                          StatusPill(label: 'ACTIVE', color: Console.accent),
                         ],
                       ],
                     ),
@@ -321,9 +317,9 @@ class _AgentButton extends StatelessWidget {
               }
             },
       style: OutlinedButton.styleFrom(
-        foregroundColor: preferred ? Console.cyan : Console.textSoft,
+        foregroundColor: preferred ? Console.accent : Console.textSoft,
         side: BorderSide(
-          color: preferred ? Console.cyan : Console.borderStrong,
+          color: preferred ? Console.accent : Console.borderStrong,
         ),
       ),
       icon: launching
@@ -453,9 +449,9 @@ class _ProjectEditorSheetState extends State<_ProjectEditorSheet> {
                             'project-repo-path-browse',
                           ),
                           tooltip: 'Choose directory',
-                          icon: const Icon(
+                          icon: Icon(
                             Icons.folder_open_outlined,
-                            color: Console.cyan,
+                            color: Console.accent,
                             size: 20,
                           ),
                           onPressed: _browseForRepository,
@@ -492,7 +488,7 @@ class _ProjectEditorSheetState extends State<_ProjectEditorSheet> {
                 textInputAction: TextInputAction.done,
               ),
               const SizedBox(height: 18),
-              const SectionHeader(title: 'DEFAULT AGENT'),
+              SectionHeader(title: 'DEFAULT AGENT'),
               const SizedBox(height: 9),
               Wrap(
                 spacing: 8,
@@ -513,7 +509,7 @@ class _ProjectEditorSheetState extends State<_ProjectEditorSheet> {
                 ],
               ),
               const SizedBox(height: 18),
-              const SectionHeader(title: 'AGENT SETTINGS'),
+              SectionHeader(title: 'AGENT SETTINGS'),
               const SizedBox(height: 9),
               ...AgentKind.values.map(
                 (AgentKind agent) => ExpansionTile(
@@ -523,7 +519,7 @@ class _ProjectEditorSheetState extends State<_ProjectEditorSheet> {
                     _agentLabel(agent).toUpperCase(),
                     style: ConsoleText.chip,
                   ),
-                  subtitle: const Text(
+                  subtitle: Text(
                     'Structured arguments and optional initial prompt',
                     style: ConsoleText.micro,
                   ),
@@ -564,7 +560,7 @@ class _ProjectEditorSheetState extends State<_ProjectEditorSheet> {
                       key: const ValueKey<String>('save-project'),
                       onPressed: _submit,
                       style: FilledButton.styleFrom(
-                        backgroundColor: Console.cyan,
+                        backgroundColor: Console.accent,
                         foregroundColor: Console.ink,
                       ),
                       child: const Text('SAVE'),

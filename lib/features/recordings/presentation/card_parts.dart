@@ -3,6 +3,7 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 
 import '../../../app/ui_kit.dart';
+import '../domain/capture_category.dart';
 import '../domain/capture_type.dart';
 import '../domain/recording.dart';
 
@@ -74,7 +75,7 @@ class RecordingLeadingTile extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final Color color = failed ? Console.red : Console.cyan;
+    final Color color = failed ? Console.red : Console.accent;
     final Color background = failed
         ? Console.red.withValues(alpha: .1)
         : Console.iconTile;
@@ -125,7 +126,7 @@ class VerificationLine extends StatelessWidget {
 
     return Row(
       children: <Widget>[
-        const Icon(Icons.check_rounded, size: 12, color: Console.green),
+        Icon(Icons.check_rounded, size: 12, color: Console.green),
         const SizedBox(width: 6),
         Expanded(
           child: Text(
@@ -162,6 +163,28 @@ String displayNameFor(Recording recording) {
   return '${typeLabelFor(recording.type)} · '
       '${formatTimeOfDay(recording.createdAt)}';
 }
+
+/// The colour a category is scanned by — the dot on a compact row and the pill
+/// on both forms.
+///
+/// The five the design names get the five hues it picked, and they are the five
+/// a user actually sorts by. The other two are deliberately colourless: [note]
+/// is the resting kind, and [capture] means *the model looked and could not
+/// place it* — giving that a colour of its own would make "unclassified" look
+/// like a sixth destination rather than the absence of one.
+///
+/// Null (enrichment never ran) answers the accent, not a category colour: it is
+/// the same "nothing to say here" the card already draws with no pill at all.
+Color categoryColorFor(CaptureCategory? category) => switch (category) {
+  CaptureCategory.researchLead => Console.accent,
+  CaptureCategory.agentTask => Console.violet,
+  CaptureCategory.idea => Console.amber,
+  CaptureCategory.task => Console.green,
+  CaptureCategory.meetingNote => Console.pink,
+  CaptureCategory.note => Console.muted,
+  CaptureCategory.capture => Console.dimText,
+  null => Console.accent,
+};
 
 String typeLabelFor(CaptureType type) => switch (type) {
   CaptureType.audioRecording => 'Voice note',

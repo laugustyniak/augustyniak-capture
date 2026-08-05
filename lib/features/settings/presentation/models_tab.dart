@@ -43,7 +43,7 @@ class ModelsTab extends StatelessWidget {
                   Icons.lock_outline,
                   size: 16,
                   color: controller.tokenEncryptionActive
-                      ? Console.cyan
+                      ? Console.accent
                       : Console.amber,
                 ),
                 const SizedBox(width: 10),
@@ -51,12 +51,12 @@ class ModelsTab extends StatelessWidget {
                   child: Text(
                     controller.tokenEncryptionActive
                         ? 'Tokens are encrypted at rest (AES-256-GCM). The '
-                            'key lives in your system keyring, never in '
-                            'settings.json.'
+                              'key lives in your system keyring, never in '
+                              'settings.json.'
                         : 'Tokens are stored as plaintext in the app '
-                            'documents directory (settings.json) — system '
-                            'keyring unavailable.',
-                    style: const TextStyle(
+                              'documents directory (settings.json) — system '
+                              'keyring unavailable.',
+                    style: TextStyle(
                       color: Console.mutedSoft,
                       fontSize: 11,
                       height: 1.45,
@@ -124,7 +124,7 @@ class ModelsTab extends StatelessWidget {
       FilledButton.icon(
         onPressed: () => _openEditor(context, kind),
         style: FilledButton.styleFrom(
-          backgroundColor: Console.cyan,
+          backgroundColor: Console.accent,
           foregroundColor: Console.ink,
           padding: const EdgeInsets.symmetric(vertical: 14),
           shape: RoundedRectangleBorder(
@@ -153,12 +153,14 @@ class ModelsTab extends StatelessWidget {
     final _ProfileDraft? draft = await showModalBottomSheet<_ProfileDraft>(
       context: context,
       isScrollControlled: true,
-      backgroundColor: Console.surfaceDeep,
+      backgroundColor: Console.surface,
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(22)),
       ),
-      builder: (BuildContext sheetContext) =>
-          _ProfileEditorSheet(kind: kind, existing: existing),
+      builder: (BuildContext sheetContext) => ConsolePaletteScope(
+        builder: (BuildContext context) =>
+            _ProfileEditorSheet(kind: kind, existing: existing),
+      ),
     );
     if (draft == null) return;
 
@@ -215,7 +217,7 @@ class _ActiveProfileCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final ProviderProfile? item = profile;
     return ConsoleCard(
-      accent: item == null ? Console.border : Console.cyan,
+      accent: item == null ? Console.border : Console.accent,
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: <Widget>[
@@ -223,7 +225,7 @@ class _ActiveProfileCard extends StatelessWidget {
             children: <Widget>[
               ConsoleIconTile(
                 icon: item == null ? Icons.cloud_off : Icons.memory,
-                color: item == null ? Console.muted : Console.cyan,
+                color: item == null ? Console.muted : Console.accent,
               ),
               const SizedBox(width: 11),
               Expanded(
@@ -245,10 +247,7 @@ class _ActiveProfileCard extends StatelessWidget {
                       item?.host ?? 'No active profile',
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(
-                        color: Console.mutedSoft,
-                        fontSize: 10,
-                      ),
+                      style: TextStyle(color: Console.mutedSoft, fontSize: 10),
                     ),
                   ],
                 ),
@@ -262,7 +261,7 @@ class _ActiveProfileCard extends StatelessWidget {
             children: <Widget>[
               StatusPill(
                 label: item == null ? 'NOT CONFIGURED' : 'ACTIVE PROVIDER',
-                color: item == null ? Console.amber : Console.cyan,
+                color: item == null ? Console.amber : Console.accent,
               ),
               if (item?.model != null)
                 StatusPill(
@@ -277,7 +276,7 @@ class _ActiveProfileCard extends StatelessWidget {
                   color: Console.green,
                 ),
               if (item != null && item.bearerToken != null)
-                const StatusPill(label: 'TOKEN SET', color: Console.green),
+                StatusPill(label: 'TOKEN SET', color: Console.green),
             ],
           ),
         ],
@@ -304,7 +303,7 @@ class _ProfileCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return ConsoleCard(
-      accent: isActive ? Console.cyan : Console.border,
+      accent: isActive ? Console.accent : Console.border,
       child: Row(
         children: <Widget>[
           Semantics(
@@ -318,7 +317,7 @@ class _ProfileCard extends StatelessWidget {
                 isActive
                     ? Icons.radio_button_checked
                     : Icons.radio_button_unchecked,
-                color: isActive ? Console.cyan : Console.muted,
+                color: isActive ? Console.accent : Console.muted,
               ),
             ),
           ),
@@ -511,7 +510,7 @@ class _ProfileEditorSheetState extends State<_ProfileEditorSheet> {
               Text(
                 '${isEdit ? 'EDIT' : 'NEW'} '
                 '${isTranscription ? 'TRANSCRIPTION' : 'ENRICHMENT'} PROFILE',
-                style: const TextStyle(
+                style: TextStyle(
                   fontSize: 12,
                   fontWeight: FontWeight.w900,
                   letterSpacing: 1.1,
@@ -531,7 +530,7 @@ class _ProfileEditorSheetState extends State<_ProfileEditorSheet> {
                       return ActionChip(
                         onPressed: () => _applyPreset(preset),
                         label: Text(preset.name),
-                        labelStyle: const TextStyle(
+                        labelStyle: TextStyle(
                           fontSize: 10,
                           fontWeight: FontWeight.w800,
                           color: Console.textSoft,
@@ -600,7 +599,7 @@ class _ProfileEditorSheetState extends State<_ProfileEditorSheet> {
                           fontSize: 10,
                           fontWeight: FontWeight.w800,
                           color: _model.text.trim() == suggestion
-                              ? Console.cyan
+                              ? Console.accent
                               : Console.textSoft,
                         ),
                         backgroundColor: Console.surfaceRaised,
@@ -656,7 +655,7 @@ class _ProfileEditorSheetState extends State<_ProfileEditorSheet> {
                     child: FilledButton(
                       onPressed: _submit,
                       style: FilledButton.styleFrom(
-                        backgroundColor: Console.cyan,
+                        backgroundColor: Console.accent,
                         foregroundColor: Console.ink,
                         padding: const EdgeInsets.symmetric(vertical: 14),
                         shape: RoundedRectangleBorder(
@@ -707,22 +706,22 @@ class _SheetField extends StatelessWidget {
         validator: validator,
         keyboardType: keyboardType,
         obscureText: obscure,
-        style: const TextStyle(color: Console.text, fontSize: 13),
+        style: TextStyle(color: Console.text, fontSize: 13),
         decoration: InputDecoration(
           labelText: label,
-          labelStyle: const TextStyle(color: Console.muted, fontSize: 12),
+          labelStyle: TextStyle(color: Console.muted, fontSize: 12),
           hintText: hint,
-          hintStyle: const TextStyle(color: Console.muted, fontSize: 12),
+          hintStyle: TextStyle(color: Console.muted, fontSize: 12),
           suffixIcon: suffix,
           filled: true,
-          fillColor: Console.surface,
+          fillColor: Console.surfaceRaised,
           border: OutlineInputBorder(
             borderRadius: BorderRadius.circular(14),
-            borderSide: const BorderSide(color: Console.border),
+            borderSide: BorderSide(color: Console.border),
           ),
           enabledBorder: OutlineInputBorder(
             borderRadius: BorderRadius.circular(14),
-            borderSide: const BorderSide(color: Console.border),
+            borderSide: BorderSide(color: Console.border),
           ),
         ),
       ),

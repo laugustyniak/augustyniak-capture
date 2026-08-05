@@ -4,13 +4,221 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
-/// Shared "Processing Console" palette and the small widgets every tab reuses.
-/// Kept in one place so Queue, Models, Logs and Config stay visually identical.
+/// One theme's worth of colour.
 ///
-/// Values come from the approved design (direction 1a, "console cards"). The
-/// hairlines are deliberately *translucent* rather than flattened to an opaque
-/// hex: the same border then reads correctly on the page background, on a card
-/// and inside a bottom sheet, which are three different base colours.
+/// Values are the augustyniak.ai design system's semantic tokens
+/// (`--background`, `--card`, `--accent`, …) resolved to hex. That system is
+/// built the same way this class is: one set of names, two sets of values, and
+/// `.dark` re-points every name at once. Nothing here is a hue picked for this
+/// app — reach for the token whose *role* matches, never for "the blue one".
+///
+/// The hairlines used to be translucent so a single value could sit correctly
+/// on the page, on a card and in a sheet. With two themes that trick stops
+/// paying: a translucent white is invisible on a white card. Both [border] and
+/// [borderStrong] are therefore opaque per theme, exactly as the design system
+/// ships them.
+@immutable
+class ConsolePalette {
+  const ConsolePalette({
+    required this.brightness,
+    required this.accent,
+    required this.accentDeep,
+    required this.background,
+    required this.surface,
+    required this.surfaceDeep,
+    required this.surfaceRaised,
+    required this.border,
+    required this.borderStrong,
+    required this.text,
+    required this.textSoft,
+    required this.muted,
+    required this.mutedSoft,
+    required this.dim,
+    required this.dimText,
+    required this.green,
+    required this.amber,
+    required this.violet,
+    required this.pink,
+    required this.red,
+    required this.redSoft,
+    required this.ink,
+    required this.greenDeep,
+    required this.redDeep,
+    required this.redBorder,
+    required this.track,
+    required this.shadow,
+  });
+
+  final Brightness brightness;
+
+  /// The house colour — `--accent`. Every emphatic element in the design is
+  /// this one value.
+  final Color accent;
+
+  /// `--primary`: the other half of the accent gradient (the record disc, the
+  /// wordmark tile). Never used for text — it is a fill partner for [accent],
+  /// not a step in the text hierarchy.
+  final Color accentDeep;
+
+  /// `--background` — the page itself.
+  final Color background;
+
+  /// `--card` — a raised panel.
+  final Color surface;
+
+  /// The header and bottom-navigation strips. `--card` in both themes: the
+  /// design floats them *above* the page rather than sinking them below it.
+  final Color surfaceDeep;
+
+  /// `--muted` — a raised control on top of a card, and the fill behind a text
+  /// field.
+  final Color surfaceRaised;
+
+  /// `--border`.
+  final Color border;
+
+  /// One step up from [border], for a control that has to read as tappable.
+  final Color borderStrong;
+
+  /// `--foreground`.
+  final Color text;
+  final Color textSoft;
+
+  /// `--muted-foreground` — meta lines, counters, unselected chips.
+  final Color muted;
+
+  /// Icon tint on a raised control.
+  final Color mutedSoft;
+
+  /// Tertiary *non-text* tint — a disabled control, a decorative fraction.
+  ///
+  /// Deliberately below the 4.5:1 text floor (2.7–3.5:1 against the surfaces):
+  /// legal for graphics (3:1) and for a disabled affordance, which is exempt,
+  /// and nothing else. Reach for [dimText] the moment the colour carries words.
+  final Color dim;
+
+  /// Tertiary *label* — the verification footer, timestamps, hint text. Clears
+  /// 4.5:1 on [background] and [surface] in both themes while staying a clear
+  /// step below [muted], so the three-level hierarchy survives.
+  final Color dimText;
+
+  /// `--success`, `--warning`, `--destructive` and the two category hues the
+  /// design names directly. [violet] and [pink] have no token of their own —
+  /// they exist because the capture categories need five distinguishable
+  /// colours, and these are the two the design picked.
+  final Color green;
+  final Color amber;
+  final Color violet;
+  final Color pink;
+  final Color red;
+
+  /// Error *text*. Lighter than [red] in the dark theme and darker in the
+  /// light one — the role is "readable on the error banner", not "a paler red".
+  final Color redSoft;
+
+  /// `--accent-foreground` — what sits on an [accent] fill.
+  final Color ink;
+
+  /// Confirmed-copy fill behind the check icon.
+  final Color greenDeep;
+
+  /// Error banner fill and its hairline.
+  final Color redDeep;
+  final Color redBorder;
+
+  /// Unfilled part of any progress bar.
+  final Color track;
+
+  /// Drop shadow under anything that floats over the list or the page.
+  final Color shadow;
+
+  /// Background of a square icon tile (the leading badge on a card) and of an
+  /// icon button while it is highlighted. Derived rather than stored: it is
+  /// [accent] at the design's 12 %, and storing it separately is one more way
+  /// for the two to drift.
+  Color get iconTile => accent.withValues(alpha: .12);
+
+  /// Background of a square icon *button* (play, edit, copy).
+  Color get surfaceButton => surfaceRaised;
+
+  /// Label colour on an unselected chip.
+  Color get chipLabel => muted;
+
+  static const ConsolePalette dark = ConsolePalette(
+    brightness: Brightness.dark,
+    accent: Color(0xFF59A0F8),
+    accentDeep: Color(0xFF3D84F5),
+    background: Color(0xFF131316),
+    surface: Color(0xFF1D1D20),
+    surfaceDeep: Color(0xFF1D1D20),
+    surfaceRaised: Color(0xFF2C2C30),
+    border: Color(0xFF35353B),
+    borderStrong: Color(0xFF52525B),
+    text: Color(0xFFEDEBE8),
+    textSoft: Color(0xFFD1CEC7),
+    muted: Color(0xFFA0A0AB),
+    mutedSoft: Color(0xFFB9B9C1),
+    dim: Color(0xFF6B6B76),
+    dimText: Color(0xFF8B8B98),
+    green: Color(0xFF31C467),
+    amber: Color(0xFFF6AE31),
+    violet: Color(0xFFAC8BF9),
+    pink: Color(0xFFF472B6),
+    red: Color(0xFFF07575),
+    redSoft: Color(0xFFF7A1A1),
+    ink: Color(0xFF17171C),
+    greenDeep: Color(0xFF12301E),
+    redDeep: Color(0xFF2E1414),
+    redBorder: Color(0xFF6E2A2A),
+    track: Color(0xFF3F3F46),
+    shadow: Color(0x99000000),
+  );
+
+  static const ConsolePalette light = ConsolePalette(
+    brightness: Brightness.light,
+    accent: Color(0xFF1056C6),
+    accentDeep: Color(0xFF0B60EA),
+    background: Color(0xFFFBFAF9),
+    surface: Color(0xFFFFFFFF),
+    surfaceDeep: Color(0xFFFFFFFF),
+    surfaceRaised: Color(0xFFECECEE),
+    border: Color(0xFFDFDFE2),
+    borderStrong: Color(0xFFBEBEC5),
+    text: Color(0xFF17171C),
+    textSoft: Color(0xFF3D3D48),
+    muted: Color(0xFF666670),
+    mutedSoft: Color(0xFF51515C),
+    dim: Color(0xFF84848F),
+    dimText: Color(0xFF6D6D78),
+    green: Color(0xFF117937),
+    amber: Color(0xFF9F6604),
+    violet: Color(0xFF732DEB),
+    // The design's own `#db2777` measures 4.41:1 on [background], and this
+    // colour only ever carries an 8.5 px category label. One step darker is
+    // the same pink over the AA floor.
+    pink: Color(0xFFC11D63),
+    red: Color(0xFFBC2424),
+    redSoft: Color(0xFF932525),
+    ink: Color(0xFFFFFFFF),
+    greenDeep: Color(0xFFE3F5EA),
+    redDeep: Color(0xFFFDECEC),
+    redBorder: Color(0xFFF3C0C0),
+    track: Color(0xFFE4E4E7),
+    shadow: Color(0x1A17171C),
+  );
+}
+
+/// The palette in force, plus the layout constants every tab shares.
+///
+/// The colours are **getters over mutable global state**, not constants, and
+/// that is the whole reason the theme can change at runtime without threading a
+/// `BuildContext` through four hundred call sites. It costs one rule, and the
+/// compiler enforces it: **a widget that paints a palette colour must not have
+/// a `const` constructor.** Flutter skips rebuilding a child that is
+/// `identical` to the previous one, so a `const` widget would keep painting the
+/// old theme after a swap. Every widget in this file therefore has a plain
+/// constructor, which makes every call site non-`const` too — the staleness is
+/// unrepresentable rather than merely avoided.
 class Console {
   const Console._();
 
@@ -30,87 +238,49 @@ class Console {
   /// insets the page beside it, so the two cannot drift apart.
   static const double railWidth = 216;
 
-  static const Color cyan = Color(0xFF22D3EE);
+  static ConsolePalette _palette = ConsolePalette.dark;
 
-  /// The darker half of the accent gradient — the record button in the rail and
-  /// the wordmark tile. Never used for text: it is a fill partner for [cyan],
-  /// not a step in the text hierarchy.
-  static const Color cyanDeep = Color(0xFF0891B2);
-  static const Color background = Color(0xFF0A1322);
-  static const Color surface = Color(0xFF101D31);
+  /// Swapped by `AugustyniakCaptureApp` from inside `MaterialApp.builder`,
+  /// which is the one place that both knows the resolved brightness and runs
+  /// before the tree below it builds. Nothing else may call it.
+  static void activate(ConsolePalette palette) => _palette = palette;
 
-  /// Bottom navigation and filled input fields.
-  static const Color surfaceDeep = Color(0xFF0C1728);
+  static ConsolePalette get palette => _palette;
+  static Brightness get brightness => _palette.brightness;
 
-  /// Raised control on top of a card — the note button, a disabled fill.
-  static const Color surfaceRaised = Color(0xFF14233A);
-
-  /// The design's `rgba(126,155,196,.16)` hairline, kept translucent.
-  static const Color border = Color(0x297E9BC4);
-
-  /// Same hairline at `.35`, for a control that has to read as tappable.
-  static const Color borderStrong = Color(0x597E9BC4);
-
-  static const Color text = Color(0xFFE8F0FA);
-  static const Color textSoft = Color(0xFFC8D7E4);
-
-  /// Secondary label — meta lines, counters, unselected chips.
-  static const Color muted = Color(0xFF8AA0BC);
-
-  /// Icon tint on a raised control.
-  static const Color mutedSoft = Color(0xFF9FB4D0);
-
-  /// Tertiary *non-text* tint — a disabled control, a decorative fraction.
-  ///
-  /// Deliberately below the 4.5:1 text floor: at 3.4–4.0:1 against the four
-  /// surfaces it is legal for graphics (3:1) and for a disabled affordance,
-  /// which is exempt, and nothing else. Reach for [dimText] the moment the
-  /// colour carries words.
-  static const Color dim = Color(0xFF5F7695);
-
-  /// Tertiary *label* — the verification footer, timestamps, hint text.
-  ///
-  /// Split out of [dim] because that value carried the whole `micro` scale at
-  /// 10.5 px and 3.63:1 on a card, i.e. the app's entire layer of facts sat
-  /// under AA. This one measures 5.19:1 on `surface` and 4.84:1 on
-  /// `surfaceRaised`, while staying a clear step below [muted] (6.31:1) so the
-  /// three-level hierarchy survives the fix.
-  static const Color dimText = Color(0xFF7A90B0);
-
-  static const Color green = Color(0xFF3DDC97);
-  static const Color amber = Color(0xFFFBBF24);
-  static const Color violet = Color(0xFFA78BFA);
-  static const Color red = Color(0xFFFF7A7A);
-  static const Color redSoft = Color(0xFFFF9B9B);
-
-  /// Foreground on a cyan fill.
-  static const Color ink = Color(0xFF06202B);
-
-  /// Label colour on an unselected chip.
-  static const Color chipLabel = muted;
-
-  /// Background of a square icon tile (the leading badge on a card).
-  static const Color iconTile = Color(0x1F22D3EE);
-
-  /// Background of a square icon *button* (play, edit, copy).
-  static const Color surfaceButton = Color(0xFF14233A);
+  static Color get accent => _palette.accent;
+  static Color get accentDeep => _palette.accentDeep;
+  static Color get background => _palette.background;
+  static Color get surface => _palette.surface;
+  static Color get surfaceDeep => _palette.surfaceDeep;
+  static Color get surfaceRaised => _palette.surfaceRaised;
+  static Color get border => _palette.border;
+  static Color get borderStrong => _palette.borderStrong;
+  static Color get text => _palette.text;
+  static Color get textSoft => _palette.textSoft;
+  static Color get muted => _palette.muted;
+  static Color get mutedSoft => _palette.mutedSoft;
+  static Color get dim => _palette.dim;
+  static Color get dimText => _palette.dimText;
+  static Color get green => _palette.green;
+  static Color get amber => _palette.amber;
+  static Color get violet => _palette.violet;
+  static Color get pink => _palette.pink;
+  static Color get red => _palette.red;
+  static Color get redSoft => _palette.redSoft;
+  static Color get ink => _palette.ink;
+  static Color get chipLabel => _palette.chipLabel;
+  static Color get iconTile => _palette.iconTile;
+  static Color get surfaceButton => _palette.surfaceButton;
+  static Color get greenDeep => _palette.greenDeep;
+  static Color get redDeep => _palette.redDeep;
+  static Color get redBorder => _palette.redBorder;
+  static Color get track => _palette.track;
+  static Color get shadow => _palette.shadow;
 
   /// NavigationBar selection indicator. The design marks the active tab by
   /// colouring its icon and label, not with a pill behind them.
   static const Color navIndicator = Color(0x00000000);
-
-  /// Confirmed-copy fill behind the check icon.
-  static const Color greenDeep = Color(0xFF13301F);
-
-  /// Error banner fill and its hairline.
-  static const Color redDeep = Color(0xFF2A1220);
-  static const Color redBorder = Color(0xFF5E2334);
-
-  /// Unfilled part of any progress bar.
-  static const Color track = Color(0x2E7E9BC4);
-
-  /// Drop shadow under anything that floats over the list or the page.
-  static const Color shadow = Color(0x80040A14);
 }
 
 /// The two families vendored under `assets/fonts`. Space Grotesk carries names
@@ -123,21 +293,58 @@ class ConsoleFont {
   static const String mono = 'JetBrainsMono';
 }
 
+/// Puts the palette matching the ambient `Theme` in force before [builder]
+/// runs, and rebuilds everything under it whenever that theme changes.
+///
+/// **Reading the brightness through `Theme.of(context)` is the load-bearing
+/// part**, and it has to happen *inside* the route rather than in
+/// `MaterialApp.builder`. That callback does not rebuild the route it has
+/// already pushed — `home:` only ever builds the first one — so activating the
+/// palette there leaves the global correct and the screen half in each theme:
+/// the page background follows (it comes off `ThemeData`) while every card,
+/// field and rail keeps painting the theme it was born in. Depending on the
+/// theme here marks this element dirty on a swap, including one the OS makes
+/// while the app is on `system`, which is the default.
+///
+/// It takes a **builder, not a child**, for the same reason the widgets in this
+/// file gave up their `const` constructors: a stored `child` is one widget
+/// instance, and Flutter skips rebuilding a child identical to the previous
+/// one. A modal route is a *sibling* of the route the shell wraps, so each
+/// sheet needs its own scope — see the `showModalBottomSheet` call sites.
+class ConsolePaletteScope extends StatelessWidget {
+  ConsolePaletteScope({super.key, required this.builder});
+
+  final WidgetBuilder builder;
+
+  @override
+  Widget build(BuildContext context) {
+    Console.activate(
+      Theme.of(context).brightness == Brightness.dark
+          ? ConsolePalette.dark
+          : ConsolePalette.light,
+    );
+    return builder(context);
+  }
+}
+
 /// Named text styles from the design. Prefer these over ad-hoc `TextStyle`s so
 /// the mono/display split stays consistent across tabs.
+///
+/// Anything carrying a colour is a getter for the reason [Console] is: a
+/// `const TextStyle` would pin one theme's foreground into every call site.
 class ConsoleText {
   const ConsoleText._();
 
   /// `AUGUSTYNIAK CAPTURE` above a page title.
-  static const TextStyle eyebrow = TextStyle(
+  static TextStyle get eyebrow => TextStyle(
     fontFamily: ConsoleFont.mono,
     fontSize: 10,
     fontWeight: FontWeight.w600,
     letterSpacing: 2.2,
-    color: Console.cyan,
+    color: Console.accent,
   );
 
-  static const TextStyle pageTitle = TextStyle(
+  static TextStyle get pageTitle => TextStyle(
     fontFamily: ConsoleFont.display,
     fontSize: 26,
     height: 1.05,
@@ -146,14 +353,14 @@ class ConsoleText {
   );
 
   /// Right-hand counter next to a page title.
-  static const TextStyle counter = TextStyle(
+  static TextStyle get counter => TextStyle(
     fontFamily: ConsoleFont.mono,
     fontSize: 11,
     fontWeight: FontWeight.w500,
     color: Console.muted,
   );
 
-  static const TextStyle cardTitle = TextStyle(
+  static TextStyle get cardTitle => TextStyle(
     fontFamily: ConsoleFont.display,
     fontSize: 14,
     fontWeight: FontWeight.w600,
@@ -161,14 +368,14 @@ class ConsoleText {
   );
 
   /// The `14:52 · 16 kHz mono · 10:24` line under a card title.
-  static const TextStyle cardMeta = TextStyle(
+  static TextStyle get cardMeta => TextStyle(
     fontFamily: ConsoleFont.mono,
     fontSize: 11,
     color: Console.muted,
   );
 
   /// Footer facts — `file verified · 6.8 MB · persisted`.
-  static const TextStyle micro = TextStyle(
+  static TextStyle get micro => TextStyle(
     fontFamily: ConsoleFont.mono,
     fontSize: 10.5,
     color: Console.dimText,
@@ -195,14 +402,14 @@ class ConsoleText {
   /// A rail destination. Display rather than mono, and a full 13 px, because
   /// the rail has the width to spell a destination out — the bottom bar's
   /// [navLabel] is cramped mono precisely because it does not.
-  static const TextStyle railLabel = TextStyle(
+  static TextStyle get railLabel => TextStyle(
     fontFamily: ConsoleFont.display,
     fontSize: 13,
     color: Console.muted,
   );
 
   /// Body copy inside a card or sheet.
-  static const TextStyle body = TextStyle(
+  static TextStyle get body => TextStyle(
     fontFamily: ConsoleFont.display,
     fontSize: 12,
     height: 1.5,
@@ -240,11 +447,11 @@ class ConsolePageWidth extends StatelessWidget {
   }
 }
 
-/// The page header from the design: cyan eyebrow, large title, optional
+/// The page header from the design: accent eyebrow, large title, optional
 /// right-hand counter. Replaces the `AppBar` — each tab draws its own so the
 /// title can sit inside the scroll area.
 class ConsoleHeader extends StatelessWidget {
-  const ConsoleHeader({
+  ConsoleHeader({
     super.key,
     required this.title,
     this.trailing,
@@ -334,14 +541,17 @@ class _PulseDotState extends State<PulseDot>
 /// never reaches "no frames scheduled" and `pumpAndSettle` on it hangs. Pump
 /// explicit frames instead.
 class ScanLine extends StatefulWidget {
-  const ScanLine({
+  ScanLine({
     super.key,
-    this.color = Console.cyan,
+    this.color,
     this.height = 4,
     this.period = const Duration(milliseconds: 1400),
   });
 
-  final Color color;
+  /// Null takes the accent. A palette colour cannot be a default value — it is
+  /// not a compile-time constant any more — so every "defaults to the accent"
+  /// parameter in this file is nullable and resolved at paint time instead.
+  final Color? color;
   final double height;
   final Duration period;
 
@@ -364,6 +574,7 @@ class _ScanLineState extends State<ScanLine>
 
   @override
   Widget build(BuildContext context) {
+    final Color color = widget.color ?? Console.accent;
     return ClipRRect(
       borderRadius: BorderRadius.circular(2),
       child: SizedBox(
@@ -389,11 +600,11 @@ class _ScanLineState extends State<ScanLine>
                   // than as something moving.
                   gradient: LinearGradient(
                     colors: <Color>[
-                      widget.color.withValues(alpha: 0),
-                      widget.color.withValues(alpha: .35),
-                      widget.color,
-                      widget.color.withValues(alpha: .35),
-                      widget.color.withValues(alpha: 0),
+                      color.withValues(alpha: 0),
+                      color.withValues(alpha: .35),
+                      color,
+                      color.withValues(alpha: .35),
+                      color.withValues(alpha: 0),
                     ],
                     stops: <double>[
                       (head - .3).clamp(0.0, 1.0),
@@ -418,7 +629,7 @@ class _ScanLineState extends State<ScanLine>
 /// their own chip.
 ///
 /// The design draws these as *outlined* pills rather than solid fills: a row of
-/// five solid chips competes with the cyan record button for attention, and the
+/// five solid chips competes with the accent record button for attention, and the
 /// selected one has to win that row without winning the screen.
 /// Hover is carried by the border rather than by the Material ink: the chip's
 /// unselected fill is transparent, so the ink *does* show through — but the
@@ -426,19 +637,21 @@ class _ScanLineState extends State<ScanLine>
 /// the edge of visible. This is the most-clicked control in the app and it has
 /// to answer a pointer.
 class ConsoleChip extends StatefulWidget {
-  const ConsoleChip({
+  ConsoleChip({
     super.key,
     required this.label,
     required this.selected,
     required this.onSelected,
-    this.selectedColor = Console.cyan,
+    this.selectedColor,
     this.count,
   });
 
   final String label;
   final bool selected;
   final VoidCallback onSelected;
-  final Color selectedColor;
+
+  /// Null takes the accent — see [ScanLine.color] for why it cannot default.
+  final Color? selectedColor;
 
   /// Rendered after the label (`READY 8`). Null hides it entirely — a chip with
   /// a bare `0` reads as broken, a chip with no count reads as a plain filter.
@@ -455,8 +668,9 @@ class _ConsoleChipState extends State<ConsoleChip> {
   @override
   Widget build(BuildContext context) {
     final bool selected = widget.selected;
+    final Color selectedColor = widget.selectedColor ?? Console.accent;
     final Color foreground = selected
-        ? widget.selectedColor
+        ? selectedColor
         : (_hovered || _focused ? Console.textSoft : Console.chipLabel);
     return Semantics(
       button: true,
@@ -474,12 +688,12 @@ class _ConsoleChipState extends State<ConsoleChip> {
             padding: const EdgeInsets.symmetric(horizontal: 11, vertical: 7),
             decoration: BoxDecoration(
               color: selected
-                  ? widget.selectedColor.withValues(alpha: .14)
+                  ? selectedColor.withValues(alpha: .14)
                   : Colors.transparent,
               borderRadius: BorderRadius.circular(999),
               border: Border.all(
                 color: selected
-                    ? widget.selectedColor.withValues(alpha: .4)
+                    ? selectedColor.withValues(alpha: .4)
                     : (_hovered || _focused
                           ? Console.borderStrong
                           : Console.border),
@@ -505,18 +719,20 @@ class _ConsoleChipState extends State<ConsoleChip> {
 
 /// Non-interactive square badge — the leading icon on a card or summary row.
 class ConsoleIconTile extends StatelessWidget {
-  const ConsoleIconTile({
+  ConsoleIconTile({
     super.key,
     required this.icon,
-    this.color = Console.cyan,
-    this.background = Console.iconTile,
+    this.color,
+    this.background,
     this.size = 38,
     this.animate = false,
   });
 
   final IconData icon;
-  final Color color;
-  final Color background;
+
+  /// Null takes the accent and its 12 % tile — see [ScanLine.color].
+  final Color? color;
+  final Color? background;
   final double size;
 
   /// The queue card cross-fades its tile colour when an item is reviewed.
@@ -525,10 +741,14 @@ class ConsoleIconTile extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final BoxDecoration decoration = BoxDecoration(
-      color: background,
+      color: background ?? Console.iconTile,
       borderRadius: BorderRadius.circular(10),
     );
-    final Widget child = Icon(icon, color: color, size: size * .45);
+    final Widget child = Icon(
+      icon,
+      color: color ?? Console.accent,
+      size: size * .45,
+    );
 
     if (!animate) {
       return Container(
@@ -561,12 +781,12 @@ class ConsoleIconTile extends StatelessWidget {
 /// `build` would be an async gap on every scroll frame, and `Image.file`
 /// already reports a missing file through the very same callback.
 class ConsolePosterTile extends StatelessWidget {
-  const ConsolePosterTile({
+  ConsolePosterTile({
     super.key,
     required this.poster,
     required this.fallbackIcon,
-    this.color = Console.cyan,
-    this.background = Console.iconTile,
+    this.color,
+    this.background,
     this.size = 38,
   });
 
@@ -577,17 +797,18 @@ class ConsolePosterTile extends StatelessWidget {
   final IconData fallbackIcon;
 
   /// Fallback tint, so a failed item keeps its red icon when the poster is
-  /// missing too.
-  final Color color;
-  final Color background;
+  /// missing too. Null takes the accent — see [ScanLine.color].
+  final Color? color;
+  final Color? background;
   final double size;
 
   @override
   Widget build(BuildContext context) {
+    final Color tile = background ?? Console.iconTile;
     final Widget fallback = ConsoleIconTile(
       icon: fallbackIcon,
       color: color,
-      background: background,
+      background: tile,
       size: size,
     );
     // A 320 px JPEG in a 38 px slot: decode at the size actually painted
@@ -606,7 +827,7 @@ class ConsolePosterTile extends StatelessWidget {
         // Behind the image, so the tile is never a hole in the row during the
         // frame or two the decode takes.
         decoration: BoxDecoration(
-          color: background,
+          color: tile,
           borderRadius: BorderRadius.circular(10),
         ),
         child: ClipRRect(
@@ -645,7 +866,7 @@ class ConsolePosterTile extends StatelessWidget {
 ///   them. Anything that must be visible has to move the container's own
 ///   decoration.
 class ConsoleIconButton extends StatefulWidget {
-  const ConsoleIconButton({
+  ConsoleIconButton({
     super.key,
     required this.icon,
     required this.onTap,
@@ -699,12 +920,12 @@ class _ConsoleIconButtonState extends State<ConsoleIconButton> {
                 color: highlighted ? Console.iconTile : Console.surfaceButton,
                 borderRadius: BorderRadius.circular(10),
                 border: Border.all(
-                  color: highlighted ? Console.cyan : Console.borderStrong,
+                  color: highlighted ? Console.accent : Console.borderStrong,
                 ),
               ),
               child: Icon(
                 widget.icon,
-                color: Console.cyan,
+                color: Console.accent,
                 size: widget.iconSize,
               ),
             ),
@@ -717,8 +938,10 @@ class _ConsoleIconButtonState extends State<ConsoleIconButton> {
 
 /// The app's one text input. Every field the user types into — the queue's
 /// search box, the note composer, the inline card editor — is this shape: a
-/// filled `surfaceDeep` well inside the same translucent hairline every other
-/// control uses, going cyan on focus.
+/// filled `surfaceRaised` well inside the same hairline every other control
+/// uses, going accent on focus. The fill is the `--muted` token rather than
+/// `--card` because the field sits *on* a card: with the card colour it would
+/// be a white box on a white panel in the light theme.
 ///
 /// It exists because the theme carries no `inputDecorationTheme`: without it
 /// each tab re-declared its own `OutlineInputBorder` and the three drifted. The
@@ -726,7 +949,7 @@ class _ConsoleIconButtonState extends State<ConsoleIconButton> {
 /// border — so a multi-line field and a one-line field are the same object at
 /// two heights rather than two similar-looking widgets.
 class ConsoleField extends StatelessWidget {
-  const ConsoleField({
+  ConsoleField({
     super.key,
     required this.controller,
     this.focusNode,
@@ -776,7 +999,7 @@ class ConsoleField extends StatelessWidget {
       textInputAction: textInputAction,
       onSubmitted: onSubmitted,
       onChanged: onChanged,
-      cursorColor: Console.cyan,
+      cursorColor: Console.accent,
       cursorWidth: 1.6,
       style: TextStyle(
         fontFamily: monospace ? ConsoleFont.mono : ConsoleFont.display,
@@ -787,7 +1010,7 @@ class ConsoleField extends StatelessWidget {
       decoration: InputDecoration(
         isDense: true,
         filled: true,
-        fillColor: Console.surfaceDeep,
+        fillColor: Console.surfaceRaised,
         hintText: hintText,
         hintStyle: TextStyle(color: Console.dimText, fontSize: fontSize),
         prefixIcon: prefixIcon,
@@ -799,7 +1022,7 @@ class ConsoleField extends StatelessWidget {
         ),
         border: _border(Console.border),
         enabledBorder: _border(Console.border),
-        focusedBorder: _border(Console.cyan.withValues(alpha: .55)),
+        focusedBorder: _border(Console.accent.withValues(alpha: .55)),
       ),
     );
   }
@@ -824,7 +1047,7 @@ Future<bool> confirmDestructive(
       backgroundColor: Console.surface,
       shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.circular(18),
-        side: const BorderSide(color: Console.border),
+        side: BorderSide(color: Console.border),
       ),
       title: Text(
         title,
@@ -854,7 +1077,7 @@ Future<bool> confirmDestructive(
 /// stateless. Feedback is inline — the icon morphs into a check and settles
 /// back — because the app deliberately uses no snackbars or dialogs anywhere.
 class CopyButton extends StatefulWidget {
-  const CopyButton({
+  CopyButton({
     super.key,
     required this.text,
     this.tooltip = 'Copy text',
@@ -925,7 +1148,7 @@ class _CopyButtonState extends State<CopyButton> {
                   color: _copied
                       ? Console.green
                       : (_hovered || _focused
-                            ? Console.cyan
+                            ? Console.accent
                             : Console.borderStrong),
                 ),
               ),
@@ -1007,7 +1230,7 @@ class StatusPill extends StatelessWidget {
 }
 
 class ErrorBanner extends StatelessWidget {
-  const ErrorBanner({super.key, required this.message});
+  ErrorBanner({super.key, required this.message});
 
   final String message;
 
@@ -1023,7 +1246,7 @@ class ErrorBanner extends StatelessWidget {
       ),
       child: Row(
         children: <Widget>[
-          const Icon(Icons.error_outline, color: Console.redSoft, size: 18),
+          Icon(Icons.error_outline, color: Console.redSoft, size: 18),
           const SizedBox(width: 10),
           Expanded(
             child: Text(
@@ -1040,7 +1263,7 @@ class ErrorBanner extends StatelessWidget {
 /// Uppercase section heading with an optional right-hand counter, e.g.
 /// `PROVIDER PROFILES   3 ITEMS`.
 class SectionHeader extends StatelessWidget {
-  const SectionHeader({super.key, required this.title, this.trailing});
+  SectionHeader({super.key, required this.title, this.trailing});
 
   final String title;
   final String? trailing;
@@ -1070,7 +1293,7 @@ class SectionHeader extends StatelessWidget {
 
 /// Bordered panel used for every non-list block (forms, info rows, warnings).
 class ConsoleCard extends StatelessWidget {
-  const ConsoleCard({
+  ConsoleCard({
     super.key,
     required this.child,
     this.padding = const EdgeInsets.all(14),
@@ -1097,7 +1320,7 @@ class ConsoleCard extends StatelessWidget {
 }
 
 class EmptyPanel extends StatelessWidget {
-  const EmptyPanel({
+  EmptyPanel({
     super.key,
     required this.icon,
     required this.title,
@@ -1119,7 +1342,7 @@ class EmptyPanel extends StatelessWidget {
       ),
       child: Column(
         children: <Widget>[
-          Icon(icon, size: 36, color: Console.cyan),
+          Icon(icon, size: 36, color: Console.accent),
           const SizedBox(height: 14),
           Text(
             title,
@@ -1136,7 +1359,7 @@ class EmptyPanel extends StatelessWidget {
 
 /// Key/value row for read-only facts (paths, counts, active model).
 class InfoRow extends StatelessWidget {
-  const InfoRow({
+  InfoRow({
     super.key,
     required this.label,
     required this.value,

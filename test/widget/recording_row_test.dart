@@ -1,6 +1,10 @@
 import 'dart:io';
 
+import 'package:augustyniak_capture/app/ui_kit.dart';
+import 'package:augustyniak_capture/features/recordings/domain/capture_category.dart';
 import 'package:augustyniak_capture/features/recordings/domain/recording.dart';
+import 'package:augustyniak_capture/features/recordings/presentation/card_parts.dart';
+import 'package:augustyniak_capture/features/recordings/presentation/queue_metrics.dart';
 import 'package:augustyniak_capture/features/recordings/presentation/queue_tab.dart';
 import 'package:augustyniak_capture/features/recordings/presentation/recording_card.dart';
 import 'package:augustyniak_capture/features/recordings/presentation/recording_row.dart';
@@ -136,5 +140,129 @@ void main() {
     expect(expanded, isFalse);
     expect(find.text('Hidden until expanded.'), findsNothing);
     expect(find.bySemanticsLabel('Mark as not done'), findsOneWidget);
+  });
+
+  group('compact header', () {
+    Future<RecordingsController> pumpQueue(
+      WidgetTester tester, {
+      List<Recording>? seed,
+    }) async {
+      tester.view.physicalSize = const Size(400, 900);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.reset);
+      final RecordingsController controller = await buildRecordingsController(
+        appDir,
+        seed:
+            seed ??
+            <Recording>[makeRecording(id: 'one', title: 'First capture')],
+      );
+      await tester.pumpWidget(
+        hostTab(() => QueueTab(controller: controller), listenable: controller),
+      );
+      await tester.pump();
+      return controller;
+    }
+
+    testWidgets('the review axis is a segmented control with its counts', (
+      WidgetTester tester,
+    ) async {
+      await pumpQueue(
+        tester,
+        seed: <Recording>[
+          makeRecording(id: 'a', title: 'On the desk'),
+          makeRecording(id: 'b', title: 'Handed off', isProcessedByUser: true),
+        ],
+      );
+
+      // The counts live on the segments the user taps, which is why the phone
+      // form drops the `n / m` strip entirely.
+      expect(find.text('DESK 1'), findsOneWidget);
+      expect(find.text('OFF DESK 1'), findsOneWidget);
+      expect(find.text('ANY 2'), findsOneWidget);
+      expect(find.byType(ReviewedStrip), findsNothing);
+    });
+
+    testWidgets('search and the status chips stay folded until asked', (
+      WidgetTester tester,
+    ) async {
+      await pumpQueue(tester);
+
+      expect(find.byType(TextField), findsNothing);
+      expect(find.text('ALL 1'), findsNothing);
+
+      await tester.tap(find.bySemanticsLabel('Toggle search'));
+      await tester.pump(const Duration(milliseconds: 200));
+      expect(find.byType(TextField), findsOneWidget);
+
+      await tester.tap(find.bySemanticsLabel('Toggle filters'));
+      await tester.pump(const Duration(milliseconds: 200));
+      expect(find.text('ALL 1'), findsOneWidget);
+    });
+
+    testWidgets('a panel whose control is engaged refuses to close', (
+      WidgetTester tester,
+    ) async {
+      await pumpQueue(tester);
+
+      final Finder filterToggle = find.bySemanticsLabel('Toggle filters');
+      await tester.tap(filterToggle);
+      await tester.pump(const Duration(milliseconds: 200));
+
+      await tester.tap(find.text('FAILED 0'));
+      await tester.pump(const Duration(milliseconds: 200));
+
+      // Tapping the toggle again would hide the chips — and with them the only
+      // explanation for an empty list. Filters that are *set* pin their panel
+      // open; that is the whole reason the strip was pinned before.
+      await tester.tap(filterToggle);
+      await tester.pump(const Duration(milliseconds: 200));
+      expect(find.text('FAILED 0'), findsOneWidget);
+
+      // The close was not lost, only deferred: the toggle already recorded the
+      // user's wish, and clearing the filter that pinned the panel open is what
+      // finally lets it take effect.
+      await tester.tap(find.text('ALL 1'));
+      await tester.pump(const Duration(milliseconds: 200));
+      expect(find.text('ALL 1'), findsNothing);
+    });
+
+    testWidgets('a typed query keeps the search box on screen', (
+      WidgetTester tester,
+    ) async {
+      await pumpQueue(tester);
+
+      await tester.tap(find.bySemanticsLabel('Toggle search'));
+      await tester.pump(const Duration(milliseconds: 200));
+      await tester.enterText(find.byType(TextField), 'first');
+      await tester.pump(const Duration(milliseconds: 200));
+
+      await tester.tap(find.bySemanticsLabel('Toggle search'));
+      await tester.pump(const Duration(milliseconds: 200));
+      expect(find.byType(TextField), findsOneWidget);
+    });
+
+    testWidgets('the badge takes the category colour, not a flat accent', (
+      WidgetTester tester,
+    ) async {
+      await pumpQueue(
+        tester,
+        seed: <Recording>[
+          makeRecording(
+            id: 'agent',
+            title: 'Agent work',
+            category: CaptureCategory.agentTask,
+          ),
+        ],
+      );
+
+      final StatusPill pill = tester.widget<StatusPill>(
+        find.ancestor(
+          of: find.text('AGENT TASK'),
+          matching: find.byType(StatusPill),
+        ),
+      );
+      expect(pill.color, categoryColorFor(CaptureCategory.agentTask));
+      expect(pill.color, isNot(Console.accent));
+    });
   });
 }

@@ -74,7 +74,7 @@ class RecordingRow extends StatelessWidget {
             borderRadius: BorderRadius.circular(11),
             border: Border.all(
               color: focused
-                  ? Console.cyan
+                  ? Console.accent
                   : expanded
                   ? Console.borderStrong
                   : Colors.transparent,
@@ -86,7 +86,17 @@ class RecordingRow extends StatelessWidget {
               Row(
                 children: <Widget>[
                   _StatusDot(
-                    color: failed ? Console.red : Console.cyan,
+                    // State outranks label, the same way the card's filled pill
+                    // does: a failure and a job still running are things that
+                    // change, and they have to win the one colour this row can
+                    // spare. Everything at rest is scanned by its category —
+                    // which, unlike the old flat accent, is what makes a column
+                    // of nine rows sortable by eye.
+                    color: failed
+                        ? Console.red
+                        : recording.status != RecordingStatus.completed
+                        ? Console.accent
+                        : categoryColorFor(recording.category),
                     pulse:
                         isEnriching ||
                         recording.status == RecordingStatus.transcribing,
@@ -136,7 +146,9 @@ class RecordingRow extends StatelessWidget {
                         if (projectName != null)
                           StatusPill(
                             label: projectName!,
-                            color: Console.violet,
+                            // Neutral — violet belongs to `agentTask` now. See
+                            // the same pill on `RecordingCard`.
+                            color: Console.mutedSoft,
                             outlined: true,
                           ),
                         for (final String tag in recording.tags)
@@ -159,7 +171,7 @@ class RecordingRow extends StatelessWidget {
                     padding: const EdgeInsets.fromLTRB(_indent, 8, 4, 0),
                     child: Row(
                       children: <Widget>[
-                        const Icon(
+                        Icon(
                           Icons.subdirectory_arrow_right_rounded,
                           size: 13,
                           color: Console.green,
@@ -286,17 +298,13 @@ class _CollapsedBadge extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     if (isEnriching) {
-      return const StatusPill(
-        label: 'ANALYZING',
-        color: Console.cyan,
-        pulse: true,
-      );
+      return StatusPill(label: 'ANALYZING', color: Console.accent, pulse: true);
     }
     if (recording.status != RecordingStatus.completed) {
       final (String label, Color color) = switch (recording.status) {
         RecordingStatus.saved => ('RAW', Console.muted),
         RecordingStatus.pendingTranscription => ('QUEUED', Console.amber),
-        RecordingStatus.transcribing => ('TRANSCRIBING', Console.cyan),
+        RecordingStatus.transcribing => ('TRANSCRIBING', Console.accent),
         RecordingStatus.failed => ('FAILED', Console.red),
         RecordingStatus.completed => ('READY', Console.green),
       };
@@ -305,11 +313,11 @@ class _CollapsedBadge extends StatelessWidget {
     if (recording.category != null) {
       return StatusPill(
         label: recording.category!.label,
-        color: Console.cyan,
+        color: categoryColorFor(recording.category),
         outlined: true,
       );
     }
-    return const StatusPill(label: 'READY', color: Console.green);
+    return StatusPill(label: 'READY', color: Console.green);
   }
 }
 
@@ -367,13 +375,13 @@ class _TagLabel extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
       decoration: BoxDecoration(
-        color: Console.cyan.withValues(alpha: .07),
+        color: Console.accent.withValues(alpha: .07),
         borderRadius: BorderRadius.circular(999),
-        border: Border.all(color: Console.cyan.withValues(alpha: .22)),
+        border: Border.all(color: Console.accent.withValues(alpha: .22)),
       ),
       child: Text(
         '#$label',
-        style: ConsoleText.micro.copyWith(color: Console.cyan),
+        style: ConsoleText.micro.copyWith(color: Console.accent),
       ),
     );
   }

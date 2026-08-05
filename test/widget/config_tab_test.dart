@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:augustyniak_capture/features/projects/domain/project.dart';
+import 'package:augustyniak_capture/features/settings/domain/app_theme_mode.dart';
 import 'package:augustyniak_capture/features/settings/domain/audio_config.dart';
 import 'package:augustyniak_capture/features/settings/presentation/config_tab.dart';
 import 'package:augustyniak_capture/features/settings/presentation/settings_controller.dart';
@@ -11,11 +12,20 @@ import '../support/harness.dart';
 /// move into a shared theme — the latter is a known visual change, so the
 /// behaviour needs pinning first.
 void main() {
+  /// The tab is a long form and the default 800x600 surface fits about a third
+  /// of it, so half these tests used to reach their target by dragging a fixed
+  /// distance. That is positional, and it broke the moment a section was added
+  /// above: the drag either stopped short or landed on the enrichment field's
+  /// own scrollable and was eaten by it. A surface tall enough to render the
+  /// whole form removes the class of failure rather than re-tuning the numbers.
   Future<void> pumpConfig(
     WidgetTester tester,
     SettingsController controller, {
     List<Project> projects = const <Project>[],
   }) async {
+    tester.view.physicalSize = const Size(1000, 3200);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
     await tester.pumpWidget(
       hostTab(
         () => ConfigTab(
@@ -46,6 +56,25 @@ void main() {
     expect(find.text('16 kHz (Recommended)'), findsOneWidget);
     expect(find.text('64 kbps (Recommended)'), findsOneWidget);
     expect(find.text('Mono'), findsOneWidget);
+  });
+
+  testWidgets('the theme picker starts on SYSTEM and persists a choice', (
+    WidgetTester tester,
+  ) async {
+    final SettingsController controller = buildSettingsController();
+    await controller.initialize();
+    await pumpConfig(tester, controller);
+
+    expect(find.text('APPEARANCE'), findsOneWidget);
+    expect(controller.themeMode, AppThemeMode.system);
+
+    await tester.tap(find.text('LIGHT'));
+    await tester.pumpAndSettle();
+
+    expect(controller.themeMode, AppThemeMode.light);
+    // Persisted like every other setting: the whole `settings.json` is
+    // rewritten, so the choice survives a restart rather than the session.
+    expect(controller.settings.themeMode, AppThemeMode.light);
   });
 
   testWidgets('picking a sample rate persists it through the controller', (

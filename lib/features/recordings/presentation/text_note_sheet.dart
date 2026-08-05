@@ -43,7 +43,7 @@ class _TextNoteSheetState extends State<TextNoteSheet> {
     final int characters = _controller.text.characters.length;
 
     return Container(
-      decoration: const BoxDecoration(
+      decoration: BoxDecoration(
         color: Console.surface,
         borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
         border: Border(
@@ -71,7 +71,7 @@ class _TextNoteSheetState extends State<TextNoteSheet> {
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: <Widget>[
-              const Text(
+              Text(
                 'New text note',
                 style: TextStyle(
                   fontFamily: ConsoleFont.display,
@@ -80,7 +80,7 @@ class _TextNoteSheetState extends State<TextNoteSheet> {
                   color: Console.text,
                 ),
               ),
-              const StatusPill(label: 'NO NETWORK', color: Console.cyan),
+              StatusPill(label: 'NO NETWORK', color: Console.accent),
             ],
           ),
           const SizedBox(height: 14),
@@ -89,27 +89,23 @@ class _TextNoteSheetState extends State<TextNoteSheet> {
             autofocus: true,
             maxLines: 7,
             minLines: 5,
-            style: const TextStyle(
-              color: Console.text,
-              fontSize: 14,
-              height: 1.55,
-            ),
+            style: TextStyle(color: Console.text, fontSize: 14, height: 1.55),
             decoration: InputDecoration(
               hintText: 'Type the note…',
-              hintStyle: const TextStyle(color: Console.dimText, fontSize: 14),
+              hintStyle: TextStyle(color: Console.dimText, fontSize: 14),
               filled: true,
               fillColor: Console.background,
               contentPadding: const EdgeInsets.all(14),
               border: _fieldBorder(Console.border),
               enabledBorder: _fieldBorder(Console.border),
-              focusedBorder: _fieldBorder(Console.cyan.withValues(alpha: .4)),
+              focusedBorder: _fieldBorder(Console.accent.withValues(alpha: .4)),
             ),
           ),
           const SizedBox(height: 10),
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: <Widget>[
-              const Text(
+              Text(
                 '.txt → verify → index → passthrough',
                 style: ConsoleText.micro,
               ),
@@ -149,7 +145,7 @@ class _TextNoteSheetState extends State<TextNoteSheet> {
   );
 }
 
-/// Sheet footer button. Primary is the cyan fill, secondary the outline —
+/// Sheet footer button. Primary is the accent fill, secondary the outline —
 /// there is no third weight anywhere in the design.
 class _SheetButton extends StatelessWidget {
   const _SheetButton({
@@ -176,7 +172,7 @@ class _SheetButton extends StatelessWidget {
           alignment: Alignment.center,
           decoration: BoxDecoration(
             color: primary
-                ? (enabled ? Console.cyan : Console.surfaceRaised)
+                ? (enabled ? Console.accent : Console.surfaceRaised)
                 : Colors.transparent,
             borderRadius: BorderRadius.circular(12),
             border: primary ? null : Border.all(color: Console.borderStrong),

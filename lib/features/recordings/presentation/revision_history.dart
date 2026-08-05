@@ -118,7 +118,7 @@ class _RevisionTile extends StatelessWidget {
                 label: revision.source.label,
                 color: revision.source == RevisionSource.user
                     ? Console.muted
-                    : Console.cyan,
+                    : Console.accent,
               ),
               const SizedBox(width: 8),
               Expanded(
@@ -152,7 +152,7 @@ class _RevisionTile extends StatelessWidget {
           Row(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: <Widget>[
-              const Text('→ ', style: TextStyle(color: Console.muted)),
+              Text('→ ', style: TextStyle(color: Console.muted)),
               Expanded(
                 child: Text(
                   _preview(revision.to),
