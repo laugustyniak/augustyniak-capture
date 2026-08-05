@@ -12,6 +12,7 @@ Your thought lands on disk *before* anything clever is attempted with it.
 [![Platforms](https://img.shields.io/badge/platforms-macOS%20%C2%B7%20Linux%20%C2%B7%20Windows%20%C2%B7%20Android%20%C2%B7%20iOS-555)](#-build--deploy)
 [![Offline first](https://img.shields.io/badge/offline-first-1056C6)](#-the-one-guarantee)
 [![License](https://img.shields.io/badge/license-see%20LICENSE-lightgrey)](LICENSE)
+[![Website](https://img.shields.io/badge/website-laugustyniak.github.io-1056C6)](https://laugustyniak.github.io/augustyniak-capture/)
 
 [Quick start](#-quick-start) ·
 [What it captures](#-what-it-captures) ·
