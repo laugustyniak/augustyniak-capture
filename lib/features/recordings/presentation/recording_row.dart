@@ -20,6 +20,7 @@ class RecordingRow extends StatelessWidget {
     required this.isPlaying,
     required this.isEnriching,
     required this.canRoute,
+    required this.canHandoff,
     required this.onTap,
     required this.onTogglePlay,
     required this.onOpen,
@@ -27,6 +28,7 @@ class RecordingRow extends StatelessWidget {
     required this.onEnrich,
     required this.onEdit,
     required this.onRoute,
+    required this.onHandoff,
     required this.onToggleProcessed,
     this.projectName,
   });
@@ -37,6 +39,7 @@ class RecordingRow extends StatelessWidget {
   final bool isPlaying;
   final bool isEnriching;
   final bool canRoute;
+  final bool canHandoff;
   final String? projectName;
   final VoidCallback onTap;
   final VoidCallback onTogglePlay;
@@ -45,6 +48,7 @@ class RecordingRow extends StatelessWidget {
   final VoidCallback onEnrich;
   final VoidCallback onEdit;
   final VoidCallback onRoute;
+  final VoidCallback onHandoff;
   final VoidCallback onToggleProcessed;
 
   static const double _indent = 16;
@@ -228,6 +232,12 @@ class RecordingRow extends StatelessWidget {
                           icon: Icons.play_arrow_rounded,
                           onTap: onOpen,
                           semanticLabel: RecordingCard.openVideoLabel,
+                        ),
+                      if (canHandoff && !reviewed)
+                        ConsoleIconButton(
+                          icon: Icons.smart_toy_outlined,
+                          onTap: onHandoff,
+                          semanticLabel: RecordingCard.handoffLabel,
                         ),
                       if (canRoute && !reviewed)
                         ConsoleIconButton(

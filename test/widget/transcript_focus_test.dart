@@ -26,6 +26,7 @@ void main() {
           onEdit: () {},
           onToggleProcessed: () {},
           onRoute: () {},
+          onHandoff: () {},
         ),
       ),
     );
@@ -65,6 +66,7 @@ void main() {
           onEdit: () {},
           onToggleProcessed: () {},
           onRoute: () {},
+          onHandoff: () {},
         ),
       ),
     );
@@ -112,6 +114,7 @@ void main() {
           onEdit: () => edited = true,
           onToggleProcessed: () {},
           onRoute: () {},
+          onHandoff: () {},
         ),
       ),
     );

@@ -206,8 +206,6 @@ class ProjectsController extends ChangeNotifier {
   ) => <String>[
     ...settings.additionalArgs,
     if (settings.initialPrompt case final String prompt)
-      ...agent == AgentKind.antigravity
-          ? <String>['--prompt-interactive', prompt]
-          : <String>[prompt],
+      ..._launcherAgent(agent).promptArguments(prompt),
   ];
 }

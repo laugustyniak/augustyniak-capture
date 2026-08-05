@@ -110,6 +110,7 @@ void main() {
             isPlaying: false,
             isEnriching: false,
             canRoute: false,
+            canHandoff: false,
             onTap: () => setState(() {
               rowTaps++;
               expanded = !expanded;
@@ -120,6 +121,7 @@ void main() {
             onEnrich: () {},
             onEdit: () {},
             onRoute: () {},
+            onHandoff: () {},
             onToggleProcessed: () => setState(() {
               reviewTaps++;
               reviewed = !reviewed;

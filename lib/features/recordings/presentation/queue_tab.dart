@@ -11,6 +11,7 @@ import '../domain/capture_category.dart';
 import '../domain/recording.dart';
 import 'card_parts.dart';
 import 'compact_queue_header.dart';
+import 'handoff_sheet.dart';
 import 'queue_metrics.dart';
 import 'recording_card.dart';
 import 'recording_editor.dart';
@@ -214,6 +215,9 @@ class _QueueTabState extends State<QueueTab> {
           ),
           onRoute: () => _onFocused(visible, (Recording item) {
             if (controller.canRoute(item)) controller.route(item.id);
+          }),
+          onHandoff: () => _onFocused(visible, (Recording item) {
+            if (controller.canHandoff(item)) _openHandoff(item);
           }),
           // `Ctrl+F` and `/` have to reveal the box before they can focus it —
           // on a phone it is behind the header's search button.
@@ -460,6 +464,8 @@ class _QueueTabState extends State<QueueTab> {
       focused: recording.id == focusedId,
       canRoute: controller.canRoute(recording),
       onRoute: () => controller.route(recording.id),
+      canHandoff: controller.canHandoff(recording),
+      onHandoff: () => _openHandoff(recording),
       onTogglePlay: () => controller.togglePlayback(recording.id),
       onOpen: () => controller.openSource(recording.id),
       onRetry: () => controller.retryTranscription(recording.id),
@@ -488,6 +494,7 @@ class _QueueTabState extends State<QueueTab> {
       isEnriching: controller.isEnriching(recording.id),
       projectName: _projectName(recording.projectId),
       canRoute: controller.canRoute(recording),
+      canHandoff: controller.canHandoff(recording),
       onTap: () => setState(() {
         focusedId = recording.id;
         expandedId = recording.id == expandedId ? null : recording.id;
@@ -498,10 +505,23 @@ class _QueueTabState extends State<QueueTab> {
       onEnrich: () => controller.retryEnrichment(recording.id),
       onEdit: () => setState(() => editingId = recording.id),
       onRoute: () => controller.route(recording.id),
+      onHandoff: () => _openHandoff(recording),
       onToggleProcessed: () async {
         unawaited(HapticFeedback.selectionClick());
         await controller.toggleProcessed(recording.id);
       },
+    );
+  }
+
+  /// The handoff is the one queue action that asks a question before it acts —
+  /// which agent, and with what opening line — so it opens a sheet where every
+  /// other control here fires on the tap.
+  void _openHandoff(Recording recording) {
+    showHandoffSheet(
+      context,
+      controller: widget.controller,
+      recording: recording,
+      projectName: _projectName(recording.projectId),
     );
   }
 
@@ -819,6 +839,7 @@ class _QueueShortcuts extends StatelessWidget {
     required this.onToggleProcessed,
     required this.onTogglePlay,
     required this.onRoute,
+    required this.onHandoff,
     required this.onSearch,
     required this.onClearFocus,
     required this.child,
@@ -831,6 +852,7 @@ class _QueueShortcuts extends StatelessWidget {
   final VoidCallback onToggleProcessed;
   final VoidCallback onTogglePlay;
   final VoidCallback onRoute;
+  final VoidCallback onHandoff;
   final VoidCallback onSearch;
   final VoidCallback onClearFocus;
   final Widget child;
@@ -847,6 +869,9 @@ class _QueueShortcuts extends StatelessWidget {
         const SingleActivator(LogicalKeyboardKey.keyE): onEdit,
         const SingleActivator(LogicalKeyboardKey.keyD): onToggleProcessed,
         const SingleActivator(LogicalKeyboardKey.keyR): onRoute,
+        // `A` for agent. `H` would have read as "handoff" for both of these,
+        // and the two destinations must not share a mnemonic.
+        const SingleActivator(LogicalKeyboardKey.keyA): onHandoff,
         const SingleActivator(LogicalKeyboardKey.space): onTogglePlay,
         const SingleActivator(LogicalKeyboardKey.escape): onClearFocus,
         // Both spellings: control on Linux/Windows, meta on macOS.

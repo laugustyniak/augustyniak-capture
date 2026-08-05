@@ -31,6 +31,8 @@ class RecordingCard extends StatelessWidget {
     required this.onToggleProcessed,
     required this.onRoute,
     this.canRoute = false,
+    required this.onHandoff,
+    this.canHandoff = false,
     this.focused = false,
   });
 
@@ -53,6 +55,12 @@ class RecordingCard extends StatelessWidget {
   /// user's desk *is* what closing means here, so stating it twice only invited
   /// the reader to look for a second effect.
   static const String routeLabel = "Hand off to the project's inbox";
+
+  /// The second destination, and the one that does something rather than
+  /// filing something — so it names the agent, not the gesture. Kept distinct
+  /// from [routeLabel] in wording as well as icon: two controls that both said
+  /// "hand off" would be one control the user has to guess at.
+  static const String handoffLabel = 'Start a coding agent on this capture';
 
   final Recording recording;
   final bool isPlaying;
@@ -89,6 +97,17 @@ class RecordingCard extends StatelessWidget {
   /// than disabling it: a permanently greyed button on every capture of an
   /// install with no projects is noise that never becomes an action.
   final bool canRoute;
+
+  /// Opens the handoff sheet — agent, prompt, launch. Unlike [onRoute] this one
+  /// deliberately does not act on the tap: it starts a process on the user's
+  /// machine, and which agent gets the work is a decision about the task rather
+  /// than a setting to be read silently off the project.
+  final VoidCallback onHandoff;
+
+  /// Whether any agent can be started for this capture. Hidden when false, for
+  /// the same reason as [canRoute] — an install with no repository configured
+  /// would otherwise carry a dead button on every row.
+  final bool canHandoff;
 
   /// This row is the one the keyboard is on.
   ///
@@ -354,6 +373,16 @@ class RecordingCard extends StatelessWidget {
                   semanticLabel: RecordingCard.openVideoLabel,
                   size: 30,
                   iconSize: 18,
+                ),
+                const SizedBox(width: 7),
+              ],
+              if (canHandoff && !reviewed) ...<Widget>[
+                ConsoleIconButton(
+                  icon: Icons.smart_toy_outlined,
+                  onTap: onHandoff,
+                  semanticLabel: RecordingCard.handoffLabel,
+                  size: 30,
+                  iconSize: 17,
                 ),
                 const SizedBox(width: 7),
               ],

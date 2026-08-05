@@ -46,6 +46,38 @@ The first launch opens Ghostty, creates a named Zellij session rooted in the
 repository, and starts exactly one selected agent. Later launches attach to that
 session instead of starting a duplicate agent.
 
+## Hand a capture to an agent
+
+The project card starts a session with no particular task in hand. To start one
+*on something you captured*, use the agent button on the capture itself — in the
+Queue, on a card or an expanded row, or with `A` on the focused row.
+
+The sheet that opens shows three things and launches on one tap:
+
+1. **Agent** — the project's default is preselected; choosing another applies to
+   this task only and does not change the project.
+2. **Opening prompt** — a single line pointing the agent at the brief. Editable,
+   so `only write tests` or `open a PR when green` costs one sentence.
+3. **The brief's path** — `.agent-tasks/<capture-id>.md` inside the repository.
+
+The full capture (title, summary, tags and the transcript or OCR text) is written
+to that file *before* the session opens; the prompt only points at it. That is
+why a twenty-minute dictated note travels intact where a command-line argument
+would have been truncated somewhere along the way without saying so.
+
+The capture then closes itself and records where it went, exactly as routing to
+the inbox does. A failed launch leaves it open and retryable.
+
+**Handing off twice appends.** The brief file gains a second `## Handoff`
+section rather than being rewritten, so anything the agent wrote underneath —
+notes, results, a PR link — survives. Add a `## Result` section there and it
+becomes the place to look when the session is over.
+
+**If the session was already running**, the sheet stays open and says so. Zellij
+attaches to a live session; it does not deliver a new prompt to the agent inside
+it. Copy the prompt from the sheet and paste it into that session, or close the
+session first and hand off again.
+
 ## Recommended repository brief
 
 Add an `AGENTS.md` at the repository root. Keep it operational and short enough

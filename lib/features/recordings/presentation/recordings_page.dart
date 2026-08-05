@@ -15,6 +15,7 @@ import '../../processing/data/video_audio_extractor.dart';
 import '../../processing/data/video_poster_extractor.dart';
 import '../../projects/data/ghostty_zellij_agent_session_launcher.dart';
 import '../../projects/data/projects_repository.dart';
+import '../../projects/domain/agent_session_launcher.dart';
 import '../../projects/domain/project.dart';
 import '../../settings/data/aes_gcm_token_cipher.dart';
 import '../../settings/data/secure_storage_master_key_store.dart';
@@ -37,11 +38,13 @@ import '../../transcription/data/chunked_transcription_service.dart';
 import '../../transcription/data/transcription_service.dart';
 import '../../transcription/domain/transcription_limits.dart';
 import '../data/markdown_note_vault.dart';
+import '../data/project_agent_handoff.dart';
 import '../data/project_inbox_router.dart';
 import '../data/recordings_repository.dart';
 import '../data/system_clipboard_sink.dart';
 import '../data/revisions_repository.dart';
 import '../data/system_media_opener.dart';
+import '../domain/agent_handoff.dart';
 import '../domain/capture_type.dart';
 import '../domain/recording.dart';
 import 'capture_dock.dart';
@@ -129,9 +132,16 @@ class _RecordingsPageState extends State<RecordingsPage> {
       ),
     );
     logs = LogStore(archive: FileLogArchive());
+    // One launcher, two entry points: the project card starts a session with no
+    // task in hand, the queue starts one on a capture. Sharing the instance is
+    // what keeps them landing in the same named session rather than opening a
+    // second agent on the same repository.
+    final AgentSessionLauncher? launcher = Platform.isMacOS
+        ? GhosttyZellijAgentSessionLauncher()
+        : null;
     projects = ProjectsController(
       repository: ProjectsRepository(),
-      launcher: Platform.isMacOS ? GhosttyZellijAgentSessionLauncher() : null,
+      launcher: launcher,
     );
     controller = RecordingsController(
       repository: repository,
@@ -156,6 +166,15 @@ class _RecordingsPageState extends State<RecordingsPage> {
       // reason the enrichment context does: a project can be created, renamed
       // or repointed long after this runs, and the destination must follow.
       captureRouter: ProjectInboxRouter(projectById: _projectById),
+      // The queue's other way out: a capture becomes an agent's opening task.
+      // Disabled wherever no launcher exists, which hides the control rather
+      // than offering one that can only fail.
+      agentHandoff: launcher == null
+          ? const DisabledAgentHandoff()
+          : ProjectAgentHandoff(
+              projectById: _projectById,
+              launcher: launcher,
+            ),
       // The second copy of every capture, as markdown. Reads its directory
       // through callbacks for the same reason the router reads its projects
       // live: the user can point it somewhere else at any time, and the very
