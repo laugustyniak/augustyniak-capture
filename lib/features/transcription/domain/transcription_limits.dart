@@ -92,11 +92,23 @@ class TranscriptionLimits {
   ///
   /// Matched on the name rather than an enum because the model field is free
   /// text: the user can type any string the endpoint accepts, and a closed list
-  /// would answer "no limit" for the one model that has it. Covers
-  /// `gpt-4o-transcribe`, `gpt-4o-mini-transcribe` and `gpt-4o-transcribe-diarize`.
+  /// would answer "no limit" for the one model that has it. Covers OpenAI's
+  /// LLM-based transcription family — `gpt-transcribe`, `gpt-4o-transcribe`,
+  /// `gpt-4o-mini-transcribe`, `gpt-4o-transcribe-diarize` — and deliberately
+  /// not `whisper-1` or a `whisper-large-v3` on Groq, which decode audio rather
+  /// than emit tokens and have no such ceiling.
+  ///
+  /// **The 2000-token figure was measured on the `gpt-4o` pair; for the newer
+  /// `gpt-transcribe` it is an extrapolation from the same architecture, not a
+  /// reading.** The two errors are not symmetric, which is what settles it: a
+  /// wrong "it truncates" ends a mobile recording at 8 minutes instead of ~52
+  /// and the user watches the countdown do it, while a wrong "it does not"
+  /// returns half a transcript under HTTP 200 with nothing downstream able to
+  /// tell — the exact failure this class exists for. Narrow it to the `gpt-4o`
+  /// pair again as soon as someone measures a long `gpt-transcribe` capture.
   static bool truncatesLongOutput(String? model) {
     if (model == null) return false;
     final String name = model.toLowerCase();
-    return name.contains('gpt-4o') && name.contains('transcribe');
+    return name.startsWith('gpt-') && name.contains('transcribe');
   }
 }

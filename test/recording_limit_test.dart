@@ -94,11 +94,16 @@ void main() {
       expect(ceiling.reason, contains('2000 output tokens'));
     });
 
-    test('the mini and diarize variants truncate the same way', () {
+    test('the whole OpenAI transcribe family truncates the same way', () {
       for (final String model in <String>[
         'gpt-4o-mini-transcribe',
         'gpt-4o-transcribe-diarize',
         'GPT-4o-Transcribe',
+        // The current generation. Measured on the gpt-4o pair and extended to
+        // this one on architecture rather than on a reading — see
+        // TranscriptionLimits.truncatesLongOutput for why the cautious
+        // direction is the one that ends a recording early.
+        'gpt-transcribe',
       ]) {
         expect(
           TranscriptionLimits.forRequest(model: model, audio: defaults)!.limit,
@@ -136,6 +141,10 @@ void main() {
         null,
         '',
         'whisper-large-v3-turbo',
+        // Whisper decodes audio instead of emitting tokens, so no amount of
+        // "gpt" in the neighbourhood makes it truncate — this one is on the
+        // safe side of a name match that now covers every gpt-*transcribe*.
+        'whisper-1',
       ]) {
         expect(
           TranscriptionLimits.forRequest(model: model, audio: defaults)!.limit,
