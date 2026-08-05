@@ -33,8 +33,23 @@ android/key.properties
 # Superpowers brainstorm tooling state
 .superpowers/
 
+# The queue's own routing destination. `CaptureRouter` appends whatever you
+# press `R` on to this file, so it fills with unfiltered thought — the raw
+# capture, not a summary of it. Tracking it publishes every future note the
+# moment someone runs `git add -A`, which is a channel no secret scan would
+# ever flag, because nothing has leaked yet. The file still works exactly as
+# before: it stays on disk, and the coding agent reading this repository finds
+# it there. Delivery was always the point; version control never was.
+inbox.md
+
 # Worktrees created by Claude Code sessions — each is its own git repo.
 .claude/worktrees/
+
+# Per-machine tool permissions. Not secret, but it is local state that nobody
+# else can use, and it is the one file under .claude/ that a blanket `git add`
+# would otherwise sweep in. Anything genuinely shared (project agents, skills)
+# stays trackable — this deliberately names one file rather than the directory.
+.claude/settings.local.json
 
 # A byte-for-byte copy of CLAUDE.md kept for another agent CLI. Two files
 # holding the same guidance drift apart the first time one is edited, so the
