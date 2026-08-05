@@ -121,7 +121,7 @@ void main() {
   ) async {
     await pumpRail(tester, reviewed: 34, total: 35);
 
-    expect(find.text('DONE 34 / 35'), findsOneWidget);
+    expect(find.text('CLEAR 34 / 35'), findsOneWidget);
     // 34/35 is 97.14%; a rounding-to-nearest would print `97%` here too, but
     // 99.6% would print `100%` on a queue that still holds work.
     expect(find.text('97%'), findsOneWidget);
@@ -132,7 +132,7 @@ void main() {
   ) async {
     await pumpRail(tester, reviewed: 0, total: 0);
 
-    expect(find.text('DONE 0 / 0'), findsOneWidget);
+    expect(find.text('CLEAR 0 / 0'), findsOneWidget);
     expect(find.text('0%'), findsOneWidget);
   });
 }

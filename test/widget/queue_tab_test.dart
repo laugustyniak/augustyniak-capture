@@ -674,10 +674,10 @@ void main() {
     // default view. Before, the queue held every capture ever taken and the
     // toggle only restyled a row, so the list could never shrink.
     expect(find.byIcon(Icons.check_circle_rounded), findsNothing);
-    expect(find.text('Inbox zero — everything is closed.'), findsOneWidget);
+    expect(find.text("Desk clear — it's all with someone."), findsOneWidget);
 
     // And it is not lost — it moved to the other side of the same axis.
-    await tester.tap(find.text('DONE 1'));
+    await tester.tap(find.text('OFF DESK 1'));
     await tester.pumpAndSettle();
     expect(find.byIcon(Icons.check_circle_rounded), findsOneWidget);
   });
@@ -697,8 +697,8 @@ void main() {
 
     // The three review chips split the queue and the ratio still reads against
     // the whole of it, not against whatever the chips currently show.
-    expect(find.text('INBOX 2'), findsOneWidget);
-    expect(find.text('DONE 1'), findsOneWidget);
+    expect(find.text('DESK 2'), findsOneWidget);
+    expect(find.text('OFF DESK 1'), findsOneWidget);
     expect(find.text('ANY 3'), findsOneWidget);
     expect(find.text('1 / 3'), findsOneWidget);
   });
@@ -712,7 +712,7 @@ void main() {
     );
     await pumpQueue(tester, controller);
 
-    await tester.tap(find.text('DONE 0'));
+    await tester.tap(find.text('OFF DESK 0'));
     await tester.pumpAndSettle();
     await tester.tap(find.text('FAILED 0'));
     await tester.pumpAndSettle();
