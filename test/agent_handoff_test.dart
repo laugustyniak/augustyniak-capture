@@ -100,13 +100,15 @@ void main() {
     expect(brief, contains('> One button from capture to session.'));
     expect(brief, contains('#ui'));
 
-    // The prompt is the one-line pointer, not the transcript.
+    // The prompt is the capture's own text. A session opened on an errand to go
+    // and read a file is a session waiting for a second turn, which is the one
+    // thing the handoff exists to skip.
     expect(launcher.requests, hasLength(1));
     final AgentSessionLaunchRequest request = launcher.requests.single;
     expect(request.repoPath, repo.path);
     expect(request.agent, ProjectAgent.claude);
     expect(request.arguments, <String>[
-      'Read .agent-tasks/r1.md and start on the task described there.',
+      'Dictate a note, then hand it to an agent.',
     ]);
 
     // Delivery happened, so the capture closes and records where it went.
@@ -204,8 +206,44 @@ void main() {
 
     expect(launcher.requests.single.arguments, <String>[
       '--prompt-interactive',
-      'Read .agent-tasks/r1.md and start on the task described there.',
+      'Body.',
     ]);
+  });
+
+  test('a multi-line capture reaches the agent whole', () async {
+    final _FakeLauncher launcher = _FakeLauncher();
+    // The shape the old pointer-prompt was built to avoid: newlines and quotes.
+    // They survive now because Ghostty passes an `-e` argument vector through
+    // verbatim and the Zellij layout is written to a file rather than to a
+    // command line — so nothing on the path can truncate it.
+    const String dictated =
+        'Fix the "save" button.\nIt drops the last edit.\n\nRepro: type, blur.';
+    final RecordingsController controller = await buildRecordingsController(
+      appDir,
+      seed: <Recording>[
+        makeRecording(id: 'r1', projectId: 'p1', transcript: dictated),
+      ],
+      agentHandoff: handoffFor(projectFor(repo), launcher),
+    );
+
+    await controller.handoff('r1', agentId: AgentKind.claudeCode.name);
+
+    expect(launcher.requests.single.arguments, const <String>[dictated]);
+  });
+
+  test('a capture with no text falls back to its title', () async {
+    final _FakeLauncher launcher = _FakeLauncher();
+    final RecordingsController controller = await buildRecordingsController(
+      appDir,
+      seed: <Recording>[
+        makeRecording(id: 'r1', projectId: 'p1', title: 'Rename the tab'),
+      ],
+      agentHandoff: handoffFor(projectFor(repo), launcher),
+    );
+
+    await controller.handoff('r1', agentId: AgentKind.claudeCode.name);
+
+    expect(launcher.requests.single.arguments, const <String>['Rename the tab']);
   });
 
   test('an edited instruction replaces the default', () async {
