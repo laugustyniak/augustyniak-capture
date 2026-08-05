@@ -24,6 +24,17 @@ abstract class TokenCipher {
   /// tab copy and the load-time migration decision.
   bool get encrypts;
 
+  /// Why [encrypts] is false, in one short human-readable line, or null when there
+  /// is nothing to explain (encryption is on, or this implementation never
+  /// encrypts by design).
+  ///
+  /// It exists because "no keyring" is the *only* way this layer can fail and
+  /// the failure is otherwise indistinguishable from a deliberate plaintext
+  /// fallback: the macOS entitlement bug that kept encryption off for the whole
+  /// life of the feature looked exactly like a headless Linux box with no
+  /// Secret Service. One line of cause on screen is what separates them.
+  String? get unavailableReason => null;
+
   /// Prepare the cipher (load or create the master key). Must never throw:
   /// a missing keyring degrades [encrypts] to false instead.
   Future<void> ensureReady();

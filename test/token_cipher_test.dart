@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:augustyniak_capture/features/settings/domain/token_cipher.dart';
 import 'package:augustyniak_capture/features/settings/data/aes_gcm_token_cipher.dart';
+import 'package:augustyniak_capture/features/settings/data/secure_storage_master_key_store.dart';
 
 /// In-memory keyring stand-in, same hand-written-fake convention as
 /// `_FakeSettingsRepository` in settings_test.dart.
@@ -25,6 +26,16 @@ class _BrokenKeyStore implements MasterKeyStore {
 
   @override
   Future<void> write(String next) async => throw StateError('no keyring');
+}
+
+/// A keyring that accepts a write and forgets it — the shape a keyring takes
+/// when it answers success without persisting anything.
+class _AmnesiacKeyStore implements MasterKeyStore {
+  @override
+  Future<String?> read() async => null;
+
+  @override
+  Future<void> write(String next) async {}
 }
 
 void main() {
@@ -146,6 +157,49 @@ void main() {
       expect(await cipher.unseal('enc:v1:blob'), 'enc:v1:blob');
     });
 
+    test('a refusal keeps the keyring\'s own words', () async {
+      // The whole point of the field: without it, an entitlement bug that kept
+      // encryption off on every macOS launch looked identical to a Linux box
+      // with no keyring daemon — both were one amber line reading "plaintext".
+      final AesGcmTokenCipher cipher = AesGcmTokenCipher(
+        keyStore: _BrokenKeyStore(),
+      );
+      await cipher.ensureReady();
+
+      expect(cipher.unavailableReason, contains('no keyring'));
+    });
+
+    test('a working cipher has nothing to explain', () async {
+      final AesGcmTokenCipher cipher = AesGcmTokenCipher(
+        keyStore: _MemoryKeyStore(),
+      );
+      await cipher.ensureReady();
+
+      expect(cipher.unavailableReason, isNull);
+    });
+
+    test('a store that accepts the key but drops it is reported', () async {
+      // Sealing under a key the keyring never persisted would make every token
+      // unreadable on the next launch, so this path stays off — and says why.
+      final AesGcmTokenCipher cipher = AesGcmTokenCipher(
+        keyStore: _AmnesiacKeyStore(),
+      );
+      await cipher.ensureReady();
+
+      expect(cipher.encrypts, isFalse);
+      expect(cipher.unavailableReason, contains('did not store it'));
+    });
+
+    test('a wrong-sized stored key says whose entry it is', () async {
+      final _MemoryKeyStore store = _MemoryKeyStore();
+      store.value = base64Encode(List<int>.filled(16, 7));
+      final AesGcmTokenCipher cipher = AesGcmTokenCipher(keyStore: store);
+
+      await cipher.ensureReady();
+
+      expect(cipher.unavailableReason, contains('did not write'));
+    });
+
     test(
       'a wrong-sized stored key is left untouched and disables encryption',
       () async {
@@ -161,5 +215,23 @@ void main() {
         expect(await cipher.seal('sk-secret'), 'sk-secret');
       },
     );
+  });
+
+  group('SecureStorageMasterKeyStore', () {
+    test('macOS uses the classic keychain, not the data protection one', () {
+      // The one line of this adapter that is not a pass-through, and the one
+      // that decides whether encryption runs at all on macOS. The plugin
+      // defaults it to true, which needs a `keychain-access-groups` entitlement
+      // and therefore a Team-ID signature; this app is ad-hoc signed, so every
+      // Keychain call answered -34018 and the tokens went to disk in plaintext
+      // — reported as "keyring unavailable", the same words a headless Linux
+      // box uses. Nothing else in the suite can see this decision: the value
+      // only matters inside a platform channel no test reaches.
+      expect(
+        SecureStorageMasterKeyStore.macOsOptions
+            .toMap()['useDataProtectionKeyChain'],
+        'false',
+      );
+    });
   });
 }

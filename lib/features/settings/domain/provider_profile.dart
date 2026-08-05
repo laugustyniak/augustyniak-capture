@@ -216,26 +216,32 @@ class ProviderPreset {
   final String? tokenHint;
 
   static const List<ProviderPreset> all = <ProviderPreset>[
+    // OpenAI's current recommendation for transcribing recorded speech.
+    // `gpt-4o-transcribe` and its mini variant still work but are the previous
+    // generation; whisper-1 keeps its own preset below for the one property it
+    // has and none of the LLM-based models do — see the note there.
+    ProviderPreset(
+      name: 'OpenAI transcribe',
+      endpoint: 'https://api.openai.com/v1/audio/transcriptions',
+      model: 'gpt-transcribe',
+      models: <String>[
+        'gpt-transcribe',
+        'gpt-4o-transcribe',
+        'gpt-4o-mini-transcribe',
+        'whisper-1',
+      ],
+      tokenHint: 'OpenAI API key (sk-…)',
+    ),
+    // Kept as its own preset, and not because it is older: whisper-1 is the
+    // only hosted model here with **no output-token ceiling**, so on mobile —
+    // where there is no ffmpeg to split with — it is the one that transcribes a
+    // 50-minute capture in full. `TranscriptionLimits` encodes that difference:
+    // it caps the LLM-based models at ~8 min and whisper-1 only at 25 MB.
     ProviderPreset(
       name: 'OpenAI Whisper',
       endpoint: 'https://api.openai.com/v1/audio/transcriptions',
       model: 'whisper-1',
-      models: <String>[
-        'whisper-1',
-        'gpt-4o-transcribe',
-        'gpt-4o-mini-transcribe',
-      ],
-      tokenHint: 'OpenAI API key (sk-…)',
-    ),
-    ProviderPreset(
-      name: 'OpenAI GPT-4o transcribe',
-      endpoint: 'https://api.openai.com/v1/audio/transcriptions',
-      model: 'gpt-4o-transcribe',
-      models: <String>[
-        'gpt-4o-transcribe',
-        'gpt-4o-mini-transcribe',
-        'whisper-1',
-      ],
+      models: <String>['whisper-1', 'gpt-transcribe'],
       tokenHint: 'OpenAI API key (sk-…)',
     ),
     ProviderPreset(
@@ -253,24 +259,47 @@ class ProviderPreset {
     // Enrichment presets double as OCR providers: the active enrichment
     // profile also powers image OCR, so every model listed here should be
     // vision-capable (or the provider ignores images gracefully).
+    // The default is the cheapest of the current family rather than the most
+    // capable one: this stage writes a title, a category, four tags and a
+    // summary from at most 12 000 characters, and it runs on every capture.
+    // The frontier models are listed for anyone who wants them.
     ProviderPreset(
       name: 'OpenAI',
       kind: ProfileKind.enrichment,
       endpoint: 'https://api.openai.com/v1/chat/completions',
-      model: 'gpt-4o-mini',
-      models: <String>['gpt-4o-mini', 'gpt-4o', 'gpt-4.1-mini', 'gpt-4.1'],
+      model: 'gpt-5.6-luna',
+      models: <String>[
+        'gpt-5.6-luna',
+        'gpt-5.6-terra',
+        'gpt-5.6-sol',
+        'gpt-4o-mini',
+      ],
       tokenHint: 'OpenAI API key (sk-…)',
     ),
     ProviderPreset(
       name: 'Anthropic',
       kind: ProfileKind.enrichment,
       // Anthropic's OpenAI-compatible endpoint — same request shape as the
-      // rest, so no dedicated adapter is needed.
+      // rest, so no dedicated adapter is needed. Two caveats that only bite
+      // here: the compatibility layer **ignores `response_format`**, so the
+      // JSON contract rests entirely on the prompt (which is why
+      // `_stripFence` and the field-by-field degrade in the parser matter more
+      // for this provider than for OpenAI); and `image_url` data URLs *are*
+      // supported, so the OCR path this profile also powers works.
       endpoint: 'https://api.anthropic.com/v1/chat/completions',
       model: 'claude-haiku-4-5',
-      models: <String>['claude-haiku-4-5', 'claude-sonnet-5', 'claude-opus-5'],
+      models: <String>[
+        'claude-haiku-4-5',
+        'claude-sonnet-5',
+        'claude-opus-5',
+        'claude-fable-5',
+      ],
       tokenHint: 'Anthropic API key (sk-ant-…)',
     ),
+    // Groq's production line-up has no vision model, so this profile enriches
+    // text well and cannot do OCR — an image capture on it lands `failed`,
+    // retryable, with the source intact. Pick OpenAI, Anthropic or a local
+    // vision model if you capture images.
     ProviderPreset(
       name: 'Groq chat',
       kind: ProfileKind.enrichment,
@@ -278,7 +307,8 @@ class ProviderPreset {
       model: 'llama-3.3-70b-versatile',
       models: <String>[
         'llama-3.3-70b-versatile',
-        'meta-llama/llama-4-scout-17b-16e-instruct',
+        'openai/gpt-oss-120b',
+        'openai/gpt-oss-20b',
       ],
       tokenHint: 'Groq API key (gsk_…)',
     ),
