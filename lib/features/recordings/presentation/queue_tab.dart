@@ -7,8 +7,10 @@ import 'package:flutter/services.dart';
 import '../../../app/ui_kit.dart';
 import '../../projects/domain/project.dart';
 import '../../projects/presentation/projects_controller.dart';
+import '../domain/agent_artifact.dart';
 import '../domain/capture_category.dart';
 import '../domain/recording.dart';
+import 'agent_artifact_viewer_modal.dart';
 import 'card_parts.dart';
 import 'compact_queue_header.dart';
 import 'handoff_sheet.dart';
@@ -466,6 +468,14 @@ class _QueueTabState extends State<QueueTab> {
       onRoute: () => controller.route(recording.id),
       canHandoff: controller.canHandoff(recording),
       onHandoff: () => _openHandoff(recording),
+      onSelectArtifact: (AgentArtifact artifact) {
+        showAgentArtifactViewer(
+          context,
+          controller: controller,
+          recording: recording,
+          artifact: artifact,
+        );
+      },
       onTogglePlay: () => controller.togglePlayback(recording.id),
       onOpen: () => controller.openSource(recording.id),
       onRetry: () => controller.retryTranscription(recording.id),

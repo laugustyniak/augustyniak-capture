@@ -156,6 +156,10 @@ class ProjectAgentHandoff implements AgentHandoff {
     if (first) {
       buffer
         ..writeln('# ${capture.title}')
+        ..writeln()
+        ..writeln(
+          '> **Output Contract**: Save your primary summary, deep research, or final results to `.agent-tasks/${request.captureId}-result.md`, or include `capture-id: ${request.captureId}` in created markdown notes.',
+        )
         ..writeln();
     }
     buffer

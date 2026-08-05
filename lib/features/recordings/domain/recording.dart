@@ -1,3 +1,4 @@
+import 'agent_artifact.dart';
 import 'capture_category.dart';
 import 'capture_type.dart';
 import 'route_record.dart';
@@ -39,6 +40,7 @@ class Recording {
     this.isProcessedByUser = false,
     this.processedAt,
     this.routes = const <RouteRecord>[],
+    this.artifacts = const <AgentArtifact>[],
   });
 
   final String id;
@@ -116,6 +118,10 @@ class Recording {
   /// happened, and the second does not undo the first.
   final List<RouteRecord> routes;
 
+  /// Agent output artifacts, connected notes, or research results produced for
+  /// this capture. Empty on legacy rows and captures without agent results.
+  final List<AgentArtifact> artifacts;
+
   Recording copyWith({
     RecordingStatus? status,
     String? transcript,
@@ -136,6 +142,7 @@ class Recording {
     DateTime? processedAt,
     bool clearProcessedAt = false,
     List<RouteRecord>? routes,
+    List<AgentArtifact>? artifacts,
   }) {
     return Recording(
       id: id,
@@ -157,6 +164,7 @@ class Recording {
       isProcessedByUser: isProcessedByUser ?? this.isProcessedByUser,
       processedAt: clearProcessedAt ? null : (processedAt ?? this.processedAt),
       routes: routes ?? this.routes,
+      artifacts: artifacts ?? this.artifacts,
     );
   }
 
@@ -180,6 +188,7 @@ class Recording {
     'isProcessedByUser': isProcessedByUser,
     'processedAt': processedAt?.toIso8601String(),
     'routes': routes.map((RouteRecord route) => route.toJson()).toList(),
+    'artifacts': artifacts.map((AgentArtifact a) => a.toJson()).toList(),
   };
 
   factory Recording.fromJson(Map<String, dynamic> json) {
@@ -230,6 +239,8 @@ class Recording {
       // are dropped one at a time rather than throwing out of the whole load —
       // the same rule `tags` and `category` follow.
       routes: RouteRecord.listFromJson(json['routes']),
+      artifacts: AgentArtifact.listFromJson(json['artifacts']),
     );
   }
 }
+

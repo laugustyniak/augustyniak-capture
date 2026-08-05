@@ -23,6 +23,9 @@ import '../data/media_importer.dart';
 import '../data/media_picker.dart';
 import '../data/recordings_repository.dart';
 import '../data/revisions_repository.dart';
+import '../../projects/domain/project.dart';
+import '../data/agent_artifact_scanner.dart';
+import '../domain/agent_artifact.dart';
 import '../domain/agent_handoff.dart';
 import '../domain/capture_category.dart';
 import '../domain/capture_type.dart';
@@ -59,6 +62,9 @@ class RecordingsController extends ChangeNotifier {
     CaptureRouter captureRouter = const DisabledCaptureRouter(),
     AgentHandoff agentHandoff = const DisabledAgentHandoff(),
     NoteVault noteVault = const DisabledNoteVault(),
+    Project? Function(String projectId)? projectById,
+    Directory? Function()? vaultDirectory,
+    AgentArtifactScanner artifactScanner = const AgentArtifactScanner(),
     RevisionsRepository? revisionsRepository,
     ProcessorRegistry? processorRegistry,
     MediaPicker? mediaPicker,
@@ -80,6 +86,9 @@ class RecordingsController extends ChangeNotifier {
        _captureRouter = captureRouter,
        _agentHandoff = agentHandoff,
        _noteVault = noteVault,
+       _projectById = projectById,
+       _vaultDirectory = vaultDirectory,
+       _artifactScanner = artifactScanner,
        _mediaPicker = mediaPicker ?? const FilePickerMediaPicker(),
        _importer = MediaImporter(repository),
        _recorder = recorder ?? AudioRecorder(),
@@ -122,6 +131,9 @@ class RecordingsController extends ChangeNotifier {
   final CaptureRouter _captureRouter;
   final AgentHandoff _agentHandoff;
   final NoteVault _noteVault;
+  final Project? Function(String projectId)? _projectById;
+  final Directory? Function()? _vaultDirectory;
+  final AgentArtifactScanner _artifactScanner;
   final MediaPicker _mediaPicker;
   final MediaImporter _importer;
   late final ProcessorRegistry _registry;
@@ -1209,7 +1221,80 @@ class RecordingsController extends ChangeNotifier {
           : 'Handed off to ${result.record.target} · brief at ${result.taskPath}',
       recordingId: id,
     );
+    unawaited(refreshArtifacts(id));
     return result;
+  }
+
+  /// Scans project repository and note vault for any artifacts or results
+  /// generated for capture [id], updating the capture's artifact list.
+  Future<List<AgentArtifact>> refreshArtifacts(String id) async {
+    final int index = _recordings.indexWhere((Recording item) => item.id == id);
+    if (index < 0) return const <AgentArtifact>[];
+    final Recording recording = _recordings[index];
+    final String? projectId = recording.projectId;
+    if (projectId == null || projectId.isEmpty) return recording.artifacts;
+
+    final Project? project = _projectById?.call(projectId);
+    if (project == null) return recording.artifacts;
+
+    final Directory? vaultDir = _vaultDirectory?.call();
+
+    final List<AgentArtifact> found = await _artifactScanner.scanForCapture(
+      recording: recording,
+      project: project,
+      vaultDirectory: vaultDir,
+    );
+
+    if (!_areArtifactsEqual(recording.artifacts, found)) {
+      await _update(
+        id,
+        (Recording item) => item.copyWith(artifacts: found),
+      );
+    }
+    return found;
+  }
+
+  /// Manually attaches a file/note as a connected artifact to capture [id].
+  Future<void> attachArtifact(String id, String filePath) async {
+    final int index = _recordings.indexWhere((Recording item) => item.id == id);
+    if (index < 0) return;
+    final Recording recording = _recordings[index];
+    final File file = File(filePath);
+    if (!await file.exists()) return;
+
+    final FileStat stat = await file.stat();
+    final String title = p.basenameWithoutExtension(filePath);
+    final AgentArtifact artifact = AgentArtifact(
+      id: filePath,
+      captureId: id,
+      title: title,
+      path: filePath,
+      updatedAt: stat.modified,
+      kind: AgentArtifactKind.connectedNote,
+    );
+
+    final List<AgentArtifact> updated = <AgentArtifact>[
+      ...recording.artifacts.where((AgentArtifact a) => a.path != filePath),
+      artifact,
+    ];
+
+    await _update(
+      id,
+      (Recording item) => item.copyWith(artifacts: updated),
+    );
+  }
+
+  static bool _areArtifactsEqual(
+    List<AgentArtifact> a,
+    List<AgentArtifact> b,
+  ) {
+    if (a.length != b.length) return false;
+    for (int i = 0; i < a.length; i++) {
+      if (a[i].path != b[i].path || a[i].updatedAt != b[i].updatedAt) {
+        return false;
+      }
+    }
+    return true;
   }
 
   /// Whether captures are being copied to a second location as markdown.
