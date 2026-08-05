@@ -8,6 +8,18 @@ enum ProjectAgent {
 
   /// Controlled executable name. Callers cannot provide an arbitrary command.
   final String executable;
+
+  /// How this CLI wants an opening prompt passed to it.
+  ///
+  /// One definition on the enum rather than a `switch` at each call site: there
+  /// are two callers now (a project's configured prompt and a capture handoff)
+  /// and a third would silently start every Antigravity session with its prompt
+  /// read as a positional argument — which that CLI does not treat as a prompt
+  /// at all, so the session would open with no task and no error.
+  List<String> promptArguments(String prompt) => switch (this) {
+    ProjectAgent.antigravity => <String>['--prompt-interactive', prompt],
+    ProjectAgent.codex || ProjectAgent.claude => <String>[prompt],
+  };
 }
 
 /// The complete, structured input needed to launch an agent.

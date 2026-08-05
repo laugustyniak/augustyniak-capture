@@ -23,6 +23,7 @@ import '../data/media_importer.dart';
 import '../data/media_picker.dart';
 import '../data/recordings_repository.dart';
 import '../data/revisions_repository.dart';
+import '../domain/agent_handoff.dart';
 import '../domain/capture_category.dart';
 import '../domain/capture_type.dart';
 import '../domain/clipboard_sink.dart';
@@ -55,6 +56,7 @@ class RecordingsController extends ChangeNotifier {
     ClipboardSink clipboardSink = const NoopClipboardSink(),
     MediaOpener mediaOpener = const NoopMediaOpener(),
     CaptureRouter captureRouter = const DisabledCaptureRouter(),
+    AgentHandoff agentHandoff = const DisabledAgentHandoff(),
     NoteVault noteVault = const DisabledNoteVault(),
     RevisionsRepository? revisionsRepository,
     ProcessorRegistry? processorRegistry,
@@ -74,6 +76,7 @@ class RecordingsController extends ChangeNotifier {
        _clipboardSink = clipboardSink,
        _mediaOpener = mediaOpener,
        _captureRouter = captureRouter,
+       _agentHandoff = agentHandoff,
        _noteVault = noteVault,
        _mediaPicker = mediaPicker ?? const FilePickerMediaPicker(),
        _importer = MediaImporter(repository),
@@ -113,6 +116,7 @@ class RecordingsController extends ChangeNotifier {
   final ClipboardSink _clipboardSink;
   final MediaOpener _mediaOpener;
   final CaptureRouter _captureRouter;
+  final AgentHandoff _agentHandoff;
   final NoteVault _noteVault;
   final MediaPicker _mediaPicker;
   final MediaImporter _importer;
@@ -1079,6 +1083,105 @@ class RecordingsController extends ChangeNotifier {
       ),
     );
     _logSink.log('Routed to ${record.target}.', recordingId: id);
+  }
+
+  /// Agents this capture can be handed to. Empty means the control is hidden,
+  /// the same rule [canRoute] follows.
+  List<HandoffAgent> handoffAgents(Recording recording) =>
+      _agentHandoff.agentsFor(recording.projectId);
+
+  bool canHandoff(Recording recording) => handoffAgents(recording).isNotEmpty;
+
+  /// Where the brief for [id] will be written, relative to the repository, and
+  /// the default one-line prompt that points an agent at it. Both are
+  /// synchronous so the handoff sheet can show exactly what it is about to do
+  /// before anything is written.
+  String handoffTaskPath(String id) => _agentHandoff.taskPathFor(id);
+
+  String handoffInstruction(String id) => _agentHandoff.instructionFor(id);
+
+  /// A handoff is in flight for this capture.
+  ///
+  /// In memory only, like `_enrichingIds` and `_postersInFlight`: starting a
+  /// session is not a state anything resumes, so it would be a compatibility
+  /// change to persist for no gain. It also single-flights the launch — a
+  /// double tap must not open two sessions racing on one repository.
+  bool isHandingOff(String id) => _handoffsInProgress.contains(id);
+
+  final Set<String> _handoffsInProgress = <String>{};
+
+  /// Write the capture's brief into its repository, start the chosen agent, and
+  /// close the item — the agent-session counterpart of [route].
+  ///
+  /// **Same order and the same reason.** The brief and the session come first,
+  /// and only a launch that actually happened is allowed to mark the capture as
+  /// dealt with. A throw leaves the item open, unrouted and retryable, which is
+  /// the honest state: the user can see the work is still theirs.
+  ///
+  /// Returns null when the handoff failed; [error] carries why. Success returns
+  /// the result so the caller can tell the user whether a *new* session was
+  /// started or an existing one merely reattached — a running agent does not
+  /// receive the new prompt, so that difference is the user's next action.
+  Future<AgentHandoffResult?> handoff(
+    String id, {
+    required String agentId,
+    String? instruction,
+  }) async {
+    final int index = _recordings.indexWhere((Recording item) => item.id == id);
+    if (index < 0) return null;
+    final Recording recording = _recordings[index];
+    if (!_handoffsInProgress.add(id)) return null;
+    notifyListeners();
+
+    final AgentHandoffResult result;
+    try {
+      result = await _agentHandoff.handoff(
+        AgentHandoffRequest(
+          captureId: id,
+          capture: RoutedCapture(
+            projectId: recording.projectId,
+            title: displayNameFor(recording),
+            body: recording.transcript ?? '',
+            capturedAt: recording.createdAt,
+            summary: recording.summary,
+            category: recording.category,
+            tags: recording.tags,
+          ),
+          agentId: agentId,
+          instruction: instruction?.trim().isNotEmpty == true
+              ? instruction!.trim()
+              : _agentHandoff.instructionFor(id),
+        ),
+      );
+    } catch (exception) {
+      _error = exception.toString();
+      _logSink.log(
+        'Agent handoff failed: $exception',
+        level: LogLevel.error,
+        recordingId: id,
+      );
+      _handoffsInProgress.remove(id);
+      notifyListeners();
+      return null;
+    }
+    _handoffsInProgress.remove(id);
+
+    _error = null;
+    await _update(
+      id,
+      (Recording item) => item.copyWith(
+        routes: <RouteRecord>[...item.routes, result.record],
+        isProcessedByUser: true,
+        processedAt: result.record.at,
+      ),
+    );
+    _logSink.log(
+      result.attachedToExistingSession
+          ? 'Attached to ${result.record.target} · brief at ${result.taskPath}'
+          : 'Handed off to ${result.record.target} · brief at ${result.taskPath}',
+      recordingId: id,
+    );
+    return result;
   }
 
   /// Whether captures are being copied to a second location as markdown.

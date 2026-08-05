@@ -796,6 +796,7 @@ void main() {
           onEdit: () {},
           onToggleProcessed: () {},
           onRoute: () {},
+          onHandoff: () {},
         ),
       ),
     );

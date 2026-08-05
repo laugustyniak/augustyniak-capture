@@ -8,6 +8,7 @@ import 'package:record/record.dart';
 import 'package:augustyniak_capture/features/logs/data/log_store.dart';
 import 'package:augustyniak_capture/features/recordings/data/media_picker.dart';
 import 'package:augustyniak_capture/features/recordings/data/recordings_repository.dart';
+import 'package:augustyniak_capture/features/recordings/domain/agent_handoff.dart';
 import 'package:augustyniak_capture/features/recordings/domain/capture_category.dart';
 import 'package:augustyniak_capture/features/recordings/domain/capture_type.dart';
 import 'package:augustyniak_capture/features/recordings/domain/media_opener.dart';
@@ -102,6 +103,7 @@ Future<RecordingsController> buildRecordingsController(
   TranscriptionService service = const DisabledTranscriptionService(),
   MediaOpener mediaOpener = const NoopMediaOpener(),
   CaptureRouter captureRouter = const DisabledCaptureRouter(),
+  AgentHandoff agentHandoff = const DisabledAgentHandoff(),
 }) async {
   final RecordingsController controller = RecordingsController(
     repository: FakeRecordingsRepository(appDir, seed: seed),
@@ -109,6 +111,7 @@ Future<RecordingsController> buildRecordingsController(
     mediaPicker: FakePicker(picked),
     mediaOpener: mediaOpener,
     captureRouter: captureRouter,
+    agentHandoff: agentHandoff,
     recorder: FakeRecorder(),
     player: FakePlayer(),
   );
