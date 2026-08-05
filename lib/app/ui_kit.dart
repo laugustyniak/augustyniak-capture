@@ -293,6 +293,40 @@ class ConsoleFont {
   static const String mono = 'JetBrainsMono';
 }
 
+/// Puts the palette matching the ambient `Theme` in force before [builder]
+/// runs, and rebuilds everything under it whenever that theme changes.
+///
+/// **Reading the brightness through `Theme.of(context)` is the load-bearing
+/// part**, and it has to happen *inside* the route rather than in
+/// `MaterialApp.builder`. That callback does not rebuild the route it has
+/// already pushed — `home:` only ever builds the first one — so activating the
+/// palette there leaves the global correct and the screen half in each theme:
+/// the page background follows (it comes off `ThemeData`) while every card,
+/// field and rail keeps painting the theme it was born in. Depending on the
+/// theme here marks this element dirty on a swap, including one the OS makes
+/// while the app is on `system`, which is the default.
+///
+/// It takes a **builder, not a child**, for the same reason the widgets in this
+/// file gave up their `const` constructors: a stored `child` is one widget
+/// instance, and Flutter skips rebuilding a child identical to the previous
+/// one. A modal route is a *sibling* of the route the shell wraps, so each
+/// sheet needs its own scope — see the `showModalBottomSheet` call sites.
+class ConsolePaletteScope extends StatelessWidget {
+  ConsolePaletteScope({super.key, required this.builder});
+
+  final WidgetBuilder builder;
+
+  @override
+  Widget build(BuildContext context) {
+    Console.activate(
+      Theme.of(context).brightness == Brightness.dark
+          ? ConsolePalette.dark
+          : ConsolePalette.light,
+    );
+    return builder(context);
+  }
+}
+
 /// Named text styles from the design. Prefer these over ad-hoc `TextStyle`s so
 /// the mono/display split stays consistent across tabs.
 ///
@@ -413,7 +447,7 @@ class ConsolePageWidth extends StatelessWidget {
   }
 }
 
-/// The page header from the design: cyan eyebrow, large title, optional
+/// The page header from the design: accent eyebrow, large title, optional
 /// right-hand counter. Replaces the `AppBar` — each tab draws its own so the
 /// title can sit inside the scroll area.
 class ConsoleHeader extends StatelessWidget {
@@ -595,7 +629,7 @@ class _ScanLineState extends State<ScanLine>
 /// their own chip.
 ///
 /// The design draws these as *outlined* pills rather than solid fills: a row of
-/// five solid chips competes with the cyan record button for attention, and the
+/// five solid chips competes with the accent record button for attention, and the
 /// selected one has to win that row without winning the screen.
 /// Hover is carried by the border rather than by the Material ink: the chip's
 /// unselected fill is transparent, so the ink *does* show through — but the

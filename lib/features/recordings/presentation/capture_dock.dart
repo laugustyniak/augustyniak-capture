@@ -5,10 +5,10 @@ import 'recordings_controller.dart';
 
 /// The capture controls that float over the bottom of the Queue.
 ///
-/// Two buttons, deliberately unequal: recording is one tap on a 64 px cyan
+/// Two buttons, deliberately unequal: recording is one tap on a 64 px accent
 /// target, everything else is one tap on a smaller neutral one. The gradient
 /// underneath is what makes that readable — without it the list scrolls into
-/// the buttons and the cyan disc lands on top of a card.
+/// the buttons and the accent disc lands on top of a card.
 class CaptureDock extends StatelessWidget {
   const CaptureDock({
     super.key,
@@ -112,7 +112,7 @@ class _SecondaryCaptureButton extends StatelessWidget {
   }
 }
 
-/// The 64 px cyan record disc. Starting a recording swaps the whole screen for
+/// The 64 px accent record disc. Starting a recording swaps the whole screen for
 /// the capture view, so this button only ever has to say "start" — the stop and
 /// save affordance lives there, where it cannot be mistaken for anything else.
 class _RecordButton extends StatelessWidget {

@@ -157,8 +157,10 @@ class ModelsTab extends StatelessWidget {
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(22)),
       ),
-      builder: (BuildContext sheetContext) =>
-          _ProfileEditorSheet(kind: kind, existing: existing),
+      builder: (BuildContext sheetContext) => ConsolePaletteScope(
+        builder: (BuildContext context) =>
+            _ProfileEditorSheet(kind: kind, existing: existing),
+      ),
     );
     if (draft == null) return;
 

@@ -49,11 +49,14 @@ class _AugustyniakCaptureAppState extends State<AugustyniakCaptureApp> {
           },
           theme: consoleTheme(ConsolePalette.light),
           darkTheme: consoleTheme(ConsolePalette.dark),
-          // The palette has to be in force *before* anything below paints, and
-          // this is the only callback that runs under the resolved `Theme` but
-          // ahead of `home`. Reading the brightness back off the theme rather
-          // than re-deriving it from `mode` is what makes `system` correct: only
-          // Material knows what the platform actually answered.
+          // Seeds the palette for the first frame, and for anything that
+          // paints before a route builds. It is deliberately **not** what
+          // carries a *change*: this callback does not rebuild the route it has
+          // already pushed, which is the whole reason `ConsolePaletteScope`
+          // exists and sits inside the route instead. Reading the brightness
+          // back off the theme rather than re-deriving it from `mode` is what
+          // makes `system` correct — only Material knows what the platform
+          // actually answered.
           builder: (BuildContext context, Widget? child) {
             Console.activate(
               Theme.of(context).brightness == Brightness.dark

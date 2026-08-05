@@ -145,7 +145,7 @@ class _TextNoteSheetState extends State<TextNoteSheet> {
   );
 }
 
-/// Sheet footer button. Primary is the cyan fill, secondary the outline —
+/// Sheet footer button. Primary is the accent fill, secondary the outline —
 /// there is no third weight anywhere in the design.
 class _SheetButton extends StatelessWidget {
   const _SheetButton({

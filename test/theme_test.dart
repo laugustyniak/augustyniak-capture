@@ -172,6 +172,126 @@ void main() {
     });
   });
 
+  group('ConsolePaletteScope', () {
+    /// The app as it actually ships: both themes supplied and `ThemeMode.system`
+    /// selected. That mode is the worst case and the default — nothing inside
+    /// the app notifies on a change, only the OS appearance moves — so the
+    /// scope's dependency on the ambient `Theme` is the *only* thing that can
+    /// carry the swap into a route `MaterialApp` has already pushed.
+    Future<void> pumpScope(
+      WidgetTester tester,
+      WidgetBuilder builder,
+    ) async {
+      await tester.pumpWidget(
+        MaterialApp(
+          theme: consoleTheme(ConsolePalette.light),
+          darkTheme: consoleTheme(ConsolePalette.dark),
+          themeMode: ThemeMode.system,
+          home: ConsolePaletteScope(builder: builder),
+        ),
+      );
+    }
+
+    /// `MaterialApp` crossfades the two themes over `kThemeAnimationDuration`,
+    /// and `ThemeData.lerp` only flips `brightness` at the halfway point — so a
+    /// single `pump` after the OS change still reads the palette being left.
+    /// Pumping the animation out is what makes every assertion below one about
+    /// the settled frame rather than about a frame mid-transition. It is a
+    /// bounded animation, which is why explicit frames suffice and no
+    /// `pumpAndSettle` is needed.
+    Future<void> settleTheme(WidgetTester tester) async {
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 400));
+    }
+
+    Color painted(WidgetTester tester) =>
+        tester.widget<ColoredBox>(find.byKey(_PaletteProbe.probeKey)).color;
+
+    /// Both globals this group touches are process-wide: `Console`'s palette
+    /// would otherwise leak the last brightness into every later test in the
+    /// file, and the platform brightness into every later widget test.
+    void restoreGlobals(WidgetTester tester) {
+      addTearDown(() => Console.activate(ConsolePalette.dark));
+      addTearDown(tester.platformDispatcher.clearPlatformBrightnessTestValue);
+    }
+
+    testWidgets('a repaint follows the OS appearance across the swap', (
+      WidgetTester tester,
+    ) async {
+      restoreGlobals(tester);
+      tester.platformDispatcher.platformBrightnessTestValue = Brightness.dark;
+
+      await pumpScope(
+        tester,
+        (BuildContext context) => _PaletteProbe(onBuild: () {}),
+      );
+      await settleTheme(tester);
+      expect(painted(tester), ConsolePalette.dark.background);
+
+      // The regression itself. Activating the palette in `MaterialApp.builder`
+      // left this frame painting the dark background under a light theme — the
+      // page followed (it comes off `ThemeData`) while everything the app draws
+      // itself did not, and the screen ended up half in each theme.
+      tester.platformDispatcher.platformBrightnessTestValue = Brightness.light;
+      await settleTheme(tester);
+      expect(painted(tester), ConsolePalette.light.background);
+
+      // Back again, because a scope that merely activates once on a change
+      // would pass the leg above and fail this one.
+      tester.platformDispatcher.platformBrightnessTestValue = Brightness.dark;
+      await settleTheme(tester);
+      expect(painted(tester), ConsolePalette.dark.background);
+    });
+
+    testWidgets('the swap reaches a descendant that never asks for the theme', (
+      WidgetTester tester,
+    ) async {
+      restoreGlobals(tester);
+      tester.platformDispatcher.platformBrightnessTestValue = Brightness.dark;
+
+      // Two plain `StatelessWidget`s sit between the scope and the paint, and
+      // neither calls `Theme.of`. Nothing but the scope's own rebuild can reach
+      // them — which is the claim the fix makes and the reason it takes a
+      // builder: the whole subtree has to be reconstructed, not just notified.
+      await pumpScope(
+        tester,
+        (BuildContext context) => _ProbeOuter(onBuild: () {}),
+      );
+      await settleTheme(tester);
+      expect(painted(tester), ConsolePalette.dark.background);
+
+      tester.platformDispatcher.platformBrightnessTestValue = Brightness.light;
+      await settleTheme(tester);
+      expect(painted(tester), ConsolePalette.light.background);
+    });
+
+    testWidgets('the builder is re-invoked on a brightness change', (
+      WidgetTester tester,
+    ) async {
+      restoreGlobals(tester);
+      tester.platformDispatcher.platformBrightnessTestValue = Brightness.dark;
+
+      int builds = 0;
+      await pumpScope(tester, (BuildContext context) {
+        builds++;
+        return _PaletteProbe(onBuild: () {});
+      });
+      await settleTheme(tester);
+
+      final int before = builds;
+      expect(before, greaterThan(0));
+
+      tester.platformDispatcher.platformBrightnessTestValue = Brightness.light;
+      await settleTheme(tester);
+
+      // A `child` would have been stored once and handed back `identical`, so
+      // Flutter would skip the subtree even with the scope itself dirty. The
+      // builder is what makes the dependency worth registering; counting its
+      // calls is the only way to see that from outside.
+      expect(builds, greaterThan(before));
+    });
+  });
+
   // The rule the whole runtime-theming design rests on, and the only one no
   // other test can observe: Flutter skips rebuilding a child `identical` to the
   // previous one, so a `const` widget that paints a palette colour keeps the
@@ -278,4 +398,47 @@ void main() {
 
     expect(offenders, isEmpty, reason: offenders.join('\n'));
   });
+}
+
+/// Paints whatever palette is in force at the moment it builds into something a
+/// test can read back. `Console.background` is read in `build`, exactly the way
+/// every card, field and rail in the app reads it — so a stale frame here is
+/// the same stale frame the screenshot showed.
+///
+/// The `onBuild` callback is not decoration: a closure is never a constant, so
+/// no call site of this probe can be written `const` and quietly pin one
+/// instance for the life of the test.
+class _PaletteProbe extends StatelessWidget {
+  const _PaletteProbe({required this.onBuild});
+
+  static const Key probeKey = ValueKey<String>('palette-probe');
+
+  final VoidCallback onBuild;
+
+  @override
+  Widget build(BuildContext context) {
+    onBuild();
+    return ColoredBox(key: probeKey, color: Console.background);
+  }
+}
+
+/// Depth between the scope and the paint. Neither this nor [_ProbeMiddle] ever
+/// touches `Theme.of`, so they are only reached by the scope rebuilding its
+/// subtree — which is what the nesting is here to prove.
+class _ProbeOuter extends StatelessWidget {
+  const _ProbeOuter({required this.onBuild});
+
+  final VoidCallback onBuild;
+
+  @override
+  Widget build(BuildContext context) => _ProbeMiddle(onBuild: onBuild);
+}
+
+class _ProbeMiddle extends StatelessWidget {
+  const _ProbeMiddle({required this.onBuild});
+
+  final VoidCallback onBuild;
+
+  @override
+  Widget build(BuildContext context) => _PaletteProbe(onBuild: onBuild);
 }
