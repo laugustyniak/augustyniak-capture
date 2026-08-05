@@ -30,12 +30,17 @@ enum RecordingFilter { all, queue, ready, failed, raw }
 /// claim a relationship between the two that does not exist. So they are two
 /// rows that compose by intersection.
 ///
-/// It exists because the header already promoted `DONE 27 / 28` to the biggest
-/// number on the screen while offering no way to act on it: the queue held
-/// every capture ever taken, and ticking one off changed a progress bar and
-/// nothing else. [inbox] is the default for that reason — it is what turns the
-/// review toggle from decoration into the control that empties the list.
-enum ReviewFilter { inbox, done, all }
+/// It exists because the header already promoted `CLEAR 27 / 28` to the
+/// biggest number on the screen while offering no way to act on it: the queue
+/// held every capture ever taken, and ticking one off changed a progress bar
+/// and nothing else. [desk] is the default for that reason — it is what turns
+/// the review toggle from decoration into the control that empties the list.
+///
+/// The names are the delegation vocabulary, not mail: a capture sits on the
+/// user's [desk] until they decide who executes it, and leaves as [handedOff].
+/// An inbox is what the world puts on you; this queue only ever holds your own
+/// thoughts, so the arrow points the other way.
+enum ReviewFilter { desk, handedOff, all }
 
 /// The original Phase-1 screen: header, review progress, search, status filters
 /// and the capture list. Owns only view state; every mutation goes through
@@ -52,7 +57,7 @@ class QueueTab extends StatefulWidget {
 
 class _QueueTabState extends State<QueueTab> {
   RecordingFilter selectedFilter = RecordingFilter.all;
-  ReviewFilter reviewFilter = ReviewFilter.inbox;
+  ReviewFilter reviewFilter = ReviewFilter.desk;
   String searchQuery = '';
   String? projectFilterId;
   final TextEditingController searchController = TextEditingController();
@@ -682,8 +687,8 @@ bool _matches(RecordingFilter filter, Recording item) => switch (filter) {
 /// the chip counts and the list must be answering the same question.
 bool _matchesReview(ReviewFilter filter, Recording item) => switch (filter) {
   ReviewFilter.all => true,
-  ReviewFilter.inbox => !item.isProcessedByUser,
-  ReviewFilter.done => item.isProcessedByUser,
+  ReviewFilter.desk => !item.isProcessedByUser,
+  ReviewFilter.handedOff => item.isProcessedByUser,
 };
 
 /// Keyboard control for the queue.
@@ -861,7 +866,7 @@ class _FilterRow extends StatelessWidget {
 /// [hasAny] separates "this install has captured nothing" from "the filters
 /// excluded everything", which is the same fact the panel's icon and blurb
 /// switch on. The review axis wins the wording when it is the one narrowing the
-/// list, because reaching inbox zero is an outcome worth naming rather than an
+/// list, because clearing the desk is an outcome worth naming rather than an
 /// absence to apologise for.
 String _emptyLabel(
   RecordingFilter filter,
@@ -874,8 +879,8 @@ String _emptyLabel(
   }
   if (filter == RecordingFilter.all) {
     return switch (review) {
-      ReviewFilter.inbox => 'Inbox zero — everything is closed.',
-      ReviewFilter.done => 'Nothing closed yet.',
+      ReviewFilter.desk => "Desk clear — it's all with someone.",
+      ReviewFilter.handedOff => 'Nothing handed off yet.',
       ReviewFilter.all => 'Nothing matches the current filters.',
     };
   }

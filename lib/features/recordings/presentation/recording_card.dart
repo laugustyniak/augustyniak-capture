@@ -47,7 +47,11 @@ class RecordingCard extends StatelessWidget {
 
   /// Names the destination, not the gesture: this is the one control that takes
   /// a capture out of the app, and "route" alone says nothing about where.
-  static const String routeLabel = "Send to the project's inbox and close";
+  ///
+  /// "Hand off" also absorbs the old trailing `and close`: the item leaving the
+  /// user's desk *is* what closing means here, so stating it twice only invited
+  /// the reader to look for a second effect.
+  static const String routeLabel = "Hand off to the project's inbox";
 
   final Recording recording;
   final bool isPlaying;
