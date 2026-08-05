@@ -153,7 +153,7 @@ class _CelebrationOverlayState extends State<CelebrationOverlay>
                                 Text(
                                   _currentMilestone!.title,
                                   textAlign: TextAlign.center,
-                                  style: ConsoleText.title.copyWith(
+                                  style: ConsoleText.cardTitle.copyWith(
                                     fontSize: 18,
                                     fontWeight: FontWeight.bold,
                                     color: Console.text,
@@ -164,7 +164,7 @@ class _CelebrationOverlayState extends State<CelebrationOverlay>
                                 Text(
                                   _currentMilestone!.description,
                                   textAlign: TextAlign.center,
-                                  style: ConsoleText.cardBody.copyWith(
+                                  style: ConsoleText.body.copyWith(
                                     color: Console.muted,
                                   ),
                                 ),
