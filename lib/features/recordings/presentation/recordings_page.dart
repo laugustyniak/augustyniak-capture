@@ -10,6 +10,7 @@ import '../../../app/ui_kit.dart';
 import '../../enrichment/data/composed_enrichment_context_source.dart';
 import '../../logs/data/log_store.dart';
 import '../../logs/presentation/logs_tab.dart';
+import '../../processing/data/native_media_processor.dart';
 import '../../processing/data/video_audio_extractor.dart';
 import '../../processing/data/video_poster_extractor.dart';
 import '../../projects/data/ghostty_zellij_agent_session_launcher.dart';
@@ -279,30 +280,31 @@ class _RecordingsPageState extends State<RecordingsPage> {
     _bootstrap();
   }
 
-  /// Desktop extracts the audio track with the system `ffmpeg` binary (fails
-  /// cleanly if absent), then reuses the transcription pipeline. Mobile has no
-  /// ffmpeg yet — ffmpeg_kit is a later add — so it degrades to "unavailable".
+  /// Mobile uses sandbox-safe platform codecs. Desktop retains its existing
+  /// ffmpeg backend until each desktop shell gets an equivalent native adapter.
   static VideoAudioExtractor _buildVideoAudioExtractor() {
+    if (Platform.isAndroid || Platform.isIOS) {
+      return const NativeMobileMediaProcessor();
+    }
     if (_isDesktop) {
       return const FfmpegVideoAudioExtractor();
     }
     return const UnavailableVideoAudioExtractor();
   }
 
-  /// Same story for the poster frame: desktop pulls one still with the system
-  /// `ffmpeg` (fails cleanly if absent, costing only the thumbnail), mobile has
-  /// no ffmpeg yet and degrades to "unavailable".
+  /// Poster extraction follows the same native-mobile/ffmpeg-desktop split.
   static VideoPosterExtractor _buildVideoPosterExtractor() {
+    if (Platform.isAndroid || Platform.isIOS) {
+      return const NativeMobileMediaProcessor();
+    }
     if (_isDesktop) {
       return const FfmpegVideoPosterExtractor();
     }
     return const UnavailableVideoPosterExtractor();
   }
 
-  /// Desktop cuts long audio into per-request pieces with the system `ffmpeg`
-  /// before sending, so no recording length is unsafe there. Mobile has no
-  /// ffmpeg yet, so the whole file has to survive one request — which is
-  /// precisely why the length cap in [_applySettings] is set only there.
+  /// Mobile splits with platform codecs and desktop with ffmpeg. A platform
+  /// without either keeps the whole-file fallback and the recording length cap.
   ///
   /// Built once and held, because two questions read this object — what wraps
   /// the transcription service, and whether recordings need a cap — and they
@@ -310,15 +312,17 @@ class _RecordingsPageState extends State<RecordingsPage> {
   final AudioSplitter _audioSplitter = _buildAudioSplitter();
 
   static AudioSplitter _buildAudioSplitter() {
+    if (Platform.isAndroid || Platform.isIOS) {
+      return const NativeMobileMediaProcessor();
+    }
     if (_isDesktop) {
       return const FfmpegAudioSplitter();
     }
     return const UnavailableAudioSplitter();
   }
 
-  /// Desktop is where the system `ffmpeg` binary and OS-wide hotkeys exist.
-  /// Mobile gets the disabled/no-op seams instead, so those features cost
-  /// nothing there and the Config tab hides the shortcuts section.
+  /// Desktop is where system ffmpeg and OS-wide hotkeys exist. Mobile uses
+  /// platform codecs and keeps the no-op shortcut seams.
   static bool get _isDesktop =>
       Platform.isLinux || Platform.isMacOS || Platform.isWindows;
 

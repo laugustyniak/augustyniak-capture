@@ -12,8 +12,8 @@ abstract interface class VideoAudioExtractor {
   Future<File> extractAudio(File video);
 }
 
-/// Default where no extractor is available (e.g. mobile before an ffmpeg_kit
-/// impl lands). Fails the item cleanly and retryably.
+/// Default where no extractor is available. Fails the item cleanly and
+/// retryably.
 class UnavailableVideoAudioExtractor implements VideoAudioExtractor {
   const UnavailableVideoAudioExtractor([
     this.reason = 'Video audio extraction is not available on this platform.',

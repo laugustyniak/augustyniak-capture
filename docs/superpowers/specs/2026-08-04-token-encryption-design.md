@@ -23,7 +23,7 @@ Three forks were decided during brainstorming:
    entries and a second atomic-write path; app-level key file — obfuscation
    only.)
 2. **Fallback:** when the keyring is unavailable, degrade to plaintext with a
-   visible UI warning, matching the project's tesseract/ffmpeg/xdotool
+   visible UI warning, matching the project's optional-processor/ffmpeg/xdotool
    degradation pattern. Never make transcription unusable over a missing
    keyring.
 3. **Migration:** auto-migrate on first load. `load()` rewrites a

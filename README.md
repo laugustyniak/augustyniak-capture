@@ -123,7 +123,7 @@ is still being transcribed — the queue simply grows.
 | 📝 | text note | `.txt` | passthrough, no network | everywhere |
 | 🎧 | audio upload | original ext | transcription | everywhere |
 | 🖼 | image | `.jpg` / `.png` | **OCR** — a vision model | everywhere |
-| 🎬 | video | `.mp4` / `.mov` | `ffmpeg` audio track → transcription | desktop |
+| 🎬 | video | `.mp4` / `.mov` | audio track → transcription | Android/iOS natively; desktop via `ffmpeg` |
 
 Image OCR is **LLM-only**. It sends the image to whichever vision model your
 enrichment profile points at — **OpenAI, Anthropic or Google Gemini**, all three
@@ -131,14 +131,11 @@ one click away in Models — and it behaves identically on a laptop and on a
 phone. There is no local OCR engine to install, no language packs, and no
 platform where images quietly work better than on another.
 
-That is a deliberate removal, not a gap: a `tesseract` fallback used to sit
-behind this on desktop. It made the same image succeed on Linux and fail on
-Android while the screen said nothing about the difference, and the result it
-produced was worse than the vision model the app was already configured to talk
-to. One endpoint now answers for both stages.
+That is deliberate, not a gap: one configured endpoint answers for both OCR and
+enrichment, with the same behavior on every platform.
 
 ```bash
-# the one optional desktop binary — video only
+# the one optional desktop binary — video and long-audio splitting
 sudo apt-get install ffmpeg     # Debian/Ubuntu
 brew install ffmpeg             # macOS
 winget install Gyan.FFmpeg      # Windows
@@ -1114,8 +1111,7 @@ second.
       Obsidian and any synced notes folder
 - [x] Image OCR on every platform, through the enrichment profile's vision model
 - [ ] **Export / import**, so a mobile reinstall stops being data loss
-- [ ] Video processing on mobile (`ffmpeg_kit`) — the last desktop-only capture
-      type
+- [x] Native Android/iOS video processing and long-audio splitting
 - [ ] `WorkManager` (Android) and `BGTaskScheduler` (iOS), so jobs survive
       backgrounding
 - [ ] Local on-device models — whisper.cpp via FFI

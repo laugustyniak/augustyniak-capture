@@ -189,17 +189,18 @@
               <p class="type__what">
                 OCR, vision model first: with an enrichment profile configured the
                 image goes to that endpoint on every platform, phones included. With
-                no profile it falls back to system tesseract.
+                no profile it fails readably and remains retryable.
               </p>
-              <span class="type__where">desktop fallback</span>
+              <span class="type__where">every platform</span>
             </div>
             <div class="type">
               <span class="type__name">video</span>
               <p class="type__what">
-                The audio track is pulled out with ffmpeg and transcribed; a single
-                frame becomes the row's poster. The video itself is never modified.
+                Native platform codecs extract and split audio on Android and iOS;
+                desktop uses ffmpeg. A frame becomes the row's poster. The source
+                video is never modified.
               </p>
-              <span class="type__where">desktop</span>
+              <span class="type__where">every app platform</span>
             </div>
           </div>
         </div>

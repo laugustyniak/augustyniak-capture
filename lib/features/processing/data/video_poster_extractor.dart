@@ -12,8 +12,8 @@ abstract interface class VideoPosterExtractor {
   Future<File> extractPoster(File video, File destination);
 }
 
-/// Default where no extractor is available (e.g. mobile before an ffmpeg_kit
-/// impl lands). The caller treats a throw as "no poster" and moves on.
+/// Default where no extractor is available. The caller treats a throw as "no
+/// poster" and moves on.
 class UnavailableVideoPosterExtractor implements VideoPosterExtractor {
   const UnavailableVideoPosterExtractor([
     this.reason = 'Video poster extraction is not available on this platform.',

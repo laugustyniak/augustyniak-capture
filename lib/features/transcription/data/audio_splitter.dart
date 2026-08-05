@@ -44,9 +44,9 @@ class AudioSegments {
 /// Cuts an audio file into pieces short enough for one transcription request.
 ///
 /// Same seam shape as `VideoAudioExtractor`: an interface in the feature's data
-/// layer, a real implementation that shells out to the system `ffmpeg`, and an
-/// unavailable default for platforms without it. The parts are derived — **the
-/// source is only ever read**, upholding the processor rule one level down.
+/// layer, native Android/iOS and desktop `ffmpeg` implementations, and an
+/// unavailable default for platforms without either. The parts are derived —
+/// **the source is only ever read**, upholding the processor rule one level down.
 abstract interface class AudioSplitter {
   Future<AudioSegments> split(File audio, Duration maxSegment);
 
@@ -57,9 +57,9 @@ abstract interface class AudioSplitter {
   bool get isAvailable;
 }
 
-/// Default where the system `ffmpeg` is absent (mobile). Answers with the whole
-/// file, so the decorator above it degrades to exactly the behaviour that
-/// shipped before splitting existed: one file, one request.
+/// Default where no splitter implementation exists. Answers with the whole file,
+/// so the decorator above it degrades to exactly the behaviour that shipped
+/// before splitting existed: one file, one request.
 class UnavailableAudioSplitter implements AudioSplitter {
   const UnavailableAudioSplitter();
 
@@ -135,10 +135,10 @@ class FfmpegAudioSplitter implements AudioSplitter {
 
       final List<File> parts =
           (await tempDir
-                  .list()
-                  .where((FileSystemEntity entity) => entity is File)
-                  .cast<File>()
-                  .toList())
+                .list()
+                .where((FileSystemEntity entity) => entity is File)
+                .cast<File>()
+                .toList())
             ..sort((File a, File b) => a.path.compareTo(b.path));
 
       if (parts.isEmpty) {

@@ -4,29 +4,11 @@ Local issue tracker (no GitHub remote yet). Move to `gh issue` once a remote exi
 
 ## Open
 
-### Mobile video processing
+### In-app video playback
 
-**Image OCR is closed**: it runs through `HttpVisionOcrService` off the
-enrichment profile, identically on every platform. The `TesseractOcrService`
-that once covered desktop has been removed rather than mirrored onto mobile —
-it made the same image succeed on desktop and fail on a phone, and it lost to
-the vision model already configured for enrichment. An on-device
-`MlKitOcrService` is no longer the plan; if it ever returns it is an *offline*
-feature, not a platform gap.
-
-Still open: **video**. `FfmpegVideoAudioExtractor` shells out to a system
-binary behind the `VideoAudioExtractor` seam, which mobile has not got. Add an
-`ffmpeg_kit_flutter_*`-backed impl and select it in `_buildVideoAudioExtractor`
-— a large mobile-only binary, left out of `pubspec.yaml` so far to keep the
-Linux build green.
-
-Until then mobile video degrades to unavailable (item `failed`, retryable).
-
-### Video poster + in-app playback
-
-Video items show a movie icon, not a poster. Extract a *derived*
-`<id>.thumb.jpg` (ffmpeg on desktop / `video_thumbnail` on mobile) — never
-confused with the source — and add an in-app or external video player.
+Poster extraction is implemented: Android uses `MediaMetadataRetriever`, iOS
+uses AVFoundation, and desktop uses system `ffmpeg`. Video playback still opens
+the platform player; add an in-app player if inline playback becomes valuable.
 
 ### Background transcription queue — job persistence across app suspension
 
