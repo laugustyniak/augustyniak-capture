@@ -101,11 +101,54 @@ Future<void> showTranscriptFocusModal(
               Divider(height: 1, color: Console.border),
               const SizedBox(height: 12),
 
-              // Summary / tags if available
+              // Summary / tags if available. Both carry their own copy button:
+              // this modal is where a capture is read before being pasted
+              // somewhere, and the enrichment output is as liftable as the
+              // transcript below it.
               if ((recording.summary ?? '').trim().isNotEmpty) ...<Widget>[
-                Text(
-                  recording.summary!.trim(),
-                  style: ConsoleText.cardMeta.copyWith(color: Console.textSoft),
+                Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: <Widget>[
+                    Expanded(
+                      child: Text(
+                        recording.summary!.trim(),
+                        style: ConsoleText.cardMeta.copyWith(
+                          color: Console.textSoft,
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    CopyButton(
+                      text: recording.summary!.trim(),
+                      tooltip: 'Copy summary',
+                      semanticLabel: 'Copy summary to clipboard',
+                      size: 28,
+                      iconSize: 14,
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 10),
+              ],
+              if (recording.tags.isNotEmpty) ...<Widget>[
+                Wrap(
+                  spacing: 6,
+                  runSpacing: 5,
+                  crossAxisAlignment: WrapCrossAlignment.center,
+                  children: <Widget>[
+                    for (final String tag in recording.tags)
+                      StatusPill(
+                        label: '#$tag',
+                        color: Console.accent,
+                        outlined: true,
+                      ),
+                    CopyButton(
+                      text: tagsClipboardText(recording.tags),
+                      tooltip: 'Copy tags',
+                      semanticLabel: 'Copy tags to clipboard',
+                      size: 24,
+                      iconSize: 12,
+                    ),
+                  ],
                 ),
                 const SizedBox(height: 10),
               ],

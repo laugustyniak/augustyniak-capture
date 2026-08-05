@@ -42,6 +42,8 @@ import '../../transcription/data/audio_splitter.dart';
 import '../../transcription/data/chunked_transcription_service.dart';
 import '../../transcription/data/transcription_service.dart';
 import '../../transcription/domain/transcription_limits.dart';
+import '../../gamification/presentation/celebration_overlay.dart';
+import '../../gamification/presentation/gamification_controller.dart';
 import '../data/markdown_note_vault.dart';
 import '../data/project_agent_handoff.dart';
 import '../data/project_inbox_router.dart';
@@ -104,6 +106,7 @@ class _RecordingsPageState extends State<RecordingsPage> {
   final RecordingsRepository repository = RecordingsRepository();
   late final SettingsController settings;
   late final LogStore logs;
+  late final GamificationController gamification;
   late final RecordingsController controller;
   late final ProjectsController projects;
   late final FocusTimerController timer;

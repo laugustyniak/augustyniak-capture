@@ -144,6 +144,120 @@ void main() {
     expect(find.bySemanticsLabel('Mark as not done'), findsOneWidget);
   });
 
+  group('processing strip', () {
+    /// Drives one row directly. The enrichment flag is never persisted — the
+    /// controller holds it only while an HTTP call is open — so this is the
+    /// only way to observe that window without a gated fake service behind the
+    /// whole queue. Never `pumpAndSettle`: `WaveBars`, `SparklePulse`,
+    /// `ScanLine` and the dot's `PulseDot` all repeat forever.
+    Future<void> pumpRow(
+      WidgetTester tester, {
+      required RecordingStatus status,
+      required bool isEnriching,
+    }) async {
+      await tester.pumpWidget(
+        hostTab(
+          () => RecordingRow(
+            recording: makeRecording(
+              id: 'busy',
+              title: 'Busy capture',
+              status: status,
+              transcript: status == RecordingStatus.completed
+                  ? 'gotowy tekst'
+                  : null,
+            ),
+            expanded: false,
+            focused: false,
+            isPlaying: false,
+            isEnriching: isEnriching,
+            canRoute: false,
+            canHandoff: false,
+            onTap: () {},
+            onTogglePlay: () {},
+            onOpen: () {},
+            onRetry: () {},
+            onEnrich: () {},
+            onEdit: () {},
+            onRoute: () {},
+            onHandoff: () {},
+            onToggleProcessed: () {},
+          ),
+        ),
+      );
+      await tester.pump();
+    }
+
+    testWidgets('a transcribing row animates a wave while still collapsed', (
+      WidgetTester tester,
+    ) async {
+      await pumpRow(
+        tester,
+        status: RecordingStatus.transcribing,
+        isEnriching: false,
+      );
+
+      // Collapsed, because that is the state a phone shows nine rows in: the
+      // one item still moving has to be findable without opening anything.
+      expect(find.byType(ProcessingStrip), findsOneWidget);
+      expect(find.text(ProcessingStrip.transcribingLabel), findsOneWidget);
+      expect(find.byType(WaveBars), findsOneWidget);
+      expect(find.byType(SparklePulse), findsNothing);
+
+      await tester.pump(const Duration(milliseconds: 400));
+      await tester.pump(const Duration(milliseconds: 400));
+      expect(tester.takeException(), isNull);
+    });
+
+    testWidgets('the LLM stage swaps the wave for the sparkle', (
+      WidgetTester tester,
+    ) async {
+      await pumpRow(
+        tester,
+        status: RecordingStatus.completed,
+        isEnriching: true,
+      );
+
+      // The two stages follow each other within seconds on the same row, so
+      // they are drawn by different animations *and* named in words — a user
+      // who looks up mid-way must be able to tell which one they are watching.
+      expect(find.text(ProcessingStrip.analyzingLabel), findsOneWidget);
+      expect(find.byType(SparklePulse), findsOneWidget);
+      expect(find.byType(WaveBars), findsNothing);
+
+      await tester.pump(const Duration(milliseconds: 400));
+      expect(tester.takeException(), isNull);
+    });
+
+    testWidgets('a queued row is silent — waiting is not running', (
+      WidgetTester tester,
+    ) async {
+      await pumpRow(
+        tester,
+        status: RecordingStatus.pendingTranscription,
+        isEnriching: false,
+      );
+
+      // The drain is single-flight, so an item behind it has not started.
+      // Animating it would claim work that is not happening.
+      expect(find.byType(ProcessingStrip), findsNothing);
+    });
+
+    testWidgets('a finished row draws nothing moving', (
+      WidgetTester tester,
+    ) async {
+      await pumpRow(
+        tester,
+        status: RecordingStatus.completed,
+        isEnriching: false,
+      );
+
+      expect(find.byType(ProcessingStrip), findsNothing);
+      expect(find.byType(ScanLine), findsNothing);
+      // No repeating animation is left on screen, so this one *can* settle.
+      await tester.pumpAndSettle();
+    });
+  });
+
   group('compact header', () {
     Future<RecordingsController> pumpQueue(
       WidgetTester tester, {

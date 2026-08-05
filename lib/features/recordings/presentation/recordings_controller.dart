@@ -37,6 +37,7 @@ import '../domain/route_record.dart';
 // Same layer, not a widget import: `displayNameFor` is the one definition of
 // what an untitled capture is called, and a destination heading must not be
 // allowed to drift from what the card shows.
+import '../../gamification/presentation/gamification_controller.dart';
 import 'card_parts.dart';
 
 class RecordingsController extends ChangeNotifier {
@@ -63,6 +64,7 @@ class RecordingsController extends ChangeNotifier {
     MediaPicker? mediaPicker,
     AudioRecorder? recorder,
     AudioPlayer? player,
+    GamificationController? gamificationController,
   }) : _repository = repository,
        _revisionsRepository = revisionsRepository,
        _transcriptionService = transcriptionService,
@@ -81,7 +83,8 @@ class RecordingsController extends ChangeNotifier {
        _mediaPicker = mediaPicker ?? const FilePickerMediaPicker(),
        _importer = MediaImporter(repository),
        _recorder = recorder ?? AudioRecorder(),
-       _player = player ?? AudioPlayer() {
+       _player = player ?? AudioPlayer(),
+       _gamificationController = gamificationController {
     // The default registry resolves the services lazily, so the Models/Config
     // tabs can keep swapping them without rebuilding the registry.
     _registry =
@@ -105,6 +108,7 @@ class RecordingsController extends ChangeNotifier {
   /// pure-Dart tests that never touch a platform channel keep working unchanged
   /// and the shell is the one place that opts in.
   final RevisionsRepository? _revisionsRepository;
+  final GamificationController? _gamificationController;
 
   /// Change history by capture id, newest first. Loaded once at [initialize]
   /// and kept in step by [_recordRevisions]; the file is append-only, so memory
@@ -354,6 +358,13 @@ class RecordingsController extends ChangeNotifier {
       return;
     }
     _logSink.log('Loaded ${_recordings.length} captures from disk.');
+    unawaited(
+      _gamificationController?.initialize(
+        totalExistingCaptures: _recordings.length,
+        totalExistingDone:
+            _recordings.where((Recording r) => r.isProcessedByUser).length,
+      ),
+    );
 
     // Supporting evidence, never a precondition: a history that will not load
     // costs the edit sheet's HISTORY section, not the queue.
@@ -612,6 +623,7 @@ class RecordingsController extends ChangeNotifier {
       // Critical invariant: persist metadata only after the audio file exists.
       _recordings = <Recording>[saved, ..._recordings];
       await _persistAll();
+      unawaited(_gamificationController?.onCaptureCreated(_recordings.length));
       _logSink.log(
         'File verified and saved · $sizeBytes B',
         recordingId: saved.id,
@@ -822,6 +834,7 @@ class RecordingsController extends ChangeNotifier {
       // Critical invariant: index the note only after the .txt exists on disk.
       _recordings = <Recording>[saved, ..._recordings];
       await _persistAll();
+      unawaited(_gamificationController?.onCaptureCreated(_recordings.length));
       _logSink.log('Note saved · $sizeBytes B', recordingId: saved.id);
 
       // Enqueue for background processing and return; the drain loop runs the
@@ -864,6 +877,7 @@ class RecordingsController extends ChangeNotifier {
       // Critical invariant: index only after the source is copied and verified.
       _recordings = <Recording>[saved, ..._recordings];
       await _persistAll();
+      unawaited(_gamificationController?.onCaptureCreated(_recordings.length));
       _logSink.log(
         'File imported · ${type.name} · ${await File(saved.filePath).length()} B',
         recordingId: saved.id,
@@ -1022,6 +1036,11 @@ class RecordingsController extends ChangeNotifier {
         clearProcessedAt: !nextValue,
       ),
     );
+    if (nextValue) {
+      final int totalDone =
+          _recordings.where((Recording item) => item.isProcessedByUser).length;
+      unawaited(_gamificationController?.onCaptureDone(totalDone));
+    }
   }
 
   /// Whether [route] has anywhere to send this capture. Synchronous because the
@@ -1082,6 +1101,9 @@ class RecordingsController extends ChangeNotifier {
         processedAt: record.at,
       ),
     );
+    final int totalDone =
+        _recordings.where((Recording item) => item.isProcessedByUser).length;
+    unawaited(_gamificationController?.onCaptureDone(totalDone));
     _logSink.log('Routed to ${record.target}.', recordingId: id);
   }
 

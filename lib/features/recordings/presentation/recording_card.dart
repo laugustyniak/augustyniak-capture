@@ -1,8 +1,10 @@
 import 'dart:io';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
 import '../../../app/ui_kit.dart';
+import '../../gamification/presentation/done_burst_animation.dart';
 import '../domain/capture_type.dart';
 import '../domain/recording.dart';
 import 'card_parts.dart';
@@ -246,13 +248,35 @@ class RecordingCard extends StatelessWidget {
               ),
             ],
           ),
+          // The model's own output, and the second thing worth lifting out of
+          // the app after the transcript itself: a summary is what gets pasted
+          // into a standup note or a ticket. It copies in full even though the
+          // card renders two lines of it — the same rule the transcript's copy
+          // button already follows.
           if ((recording.summary ?? '').trim().isNotEmpty) ...<Widget>[
             const SizedBox(height: 9),
-            Text(
-              recording.summary!.trim(),
-              maxLines: 2,
-              overflow: TextOverflow.ellipsis,
-              style: ConsoleText.cardMeta.copyWith(color: Console.textSoft),
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: <Widget>[
+                Expanded(
+                  child: Text(
+                    recording.summary!.trim(),
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                    style: ConsoleText.cardMeta.copyWith(
+                      color: Console.textSoft,
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 6),
+                CopyButton(
+                  text: recording.summary!.trim(),
+                  tooltip: 'Copy summary',
+                  semanticLabel: 'Copy summary to clipboard',
+                  size: 26,
+                  iconSize: 13,
+                ),
+              ],
             ),
           ],
           if (recording.tags.isNotEmpty) ...<Widget>[
@@ -260,8 +284,16 @@ class RecordingCard extends StatelessWidget {
             Wrap(
               spacing: 6,
               runSpacing: 5,
+              crossAxisAlignment: WrapCrossAlignment.center,
               children: <Widget>[
                 for (final String tag in recording.tags) _TagLabel(tag: tag),
+                CopyButton(
+                  text: tagsClipboardText(recording.tags),
+                  tooltip: 'Copy tags',
+                  semanticLabel: 'Copy tags to clipboard',
+                  size: 24,
+                  iconSize: 12,
+                ),
               ],
             ),
           ],
@@ -517,26 +549,34 @@ class _ReviewToggle extends StatelessWidget {
       checked: reviewed,
       label: reviewed ? 'Mark as not done' : 'Mark as done',
       child: InkResponse(
-        onTap: onTap,
+        onTap: () {
+          if (!reviewed) {
+            HapticFeedback.mediumImpact();
+          }
+          onTap();
+        },
         radius: 22,
-        child: AnimatedSwitcher(
-          duration: const Duration(milliseconds: 320),
-          transitionBuilder: (Widget child, Animation<double> animation) {
-            return ScaleTransition(
-              scale: CurvedAnimation(
-                parent: animation,
-                curve: Curves.easeOutBack,
-              ),
-              child: FadeTransition(opacity: animation, child: child),
-            );
-          },
-          child: Icon(
-            reviewed
-                ? Icons.check_circle_rounded
-                : Icons.radio_button_unchecked_rounded,
-            key: ValueKey<bool>(reviewed),
-            color: reviewed ? Console.green : Console.dimText,
-            size: 26,
+        child: DoneBurstAnimation(
+          reviewed: reviewed,
+          child: AnimatedSwitcher(
+            duration: const Duration(milliseconds: 320),
+            transitionBuilder: (Widget child, Animation<double> animation) {
+              return ScaleTransition(
+                scale: CurvedAnimation(
+                  parent: animation,
+                  curve: Curves.easeOutBack,
+                ),
+                child: FadeTransition(opacity: animation, child: child),
+              );
+            },
+            child: Icon(
+              reviewed
+                  ? Icons.check_circle_rounded
+                  : Icons.radio_button_unchecked_rounded,
+              key: ValueKey<bool>(reviewed),
+              color: reviewed ? Console.green : Console.dimText,
+              size: 26,
+            ),
           ),
         ),
       ),

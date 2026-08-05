@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:io';
+import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -624,6 +625,158 @@ class _ScanLineState extends State<ScanLine>
   }
 }
 
+/// A row of bars rising and falling like a level meter — "audio is being read
+/// right now". The transcription counterpart to [ScanLine], which says the same
+/// thing about text.
+///
+/// The two are deliberately different shapes rather than one shared animation:
+/// on a phone the transcription and the enrichment pass follow each other
+/// within seconds, both on the same row, and a user who looks away for one of
+/// them has no way to tell which stage they came back to if both draw the same
+/// band of light. A wave is audio; a sweep is reading.
+///
+/// Like [ScanLine] and [PulseDot] it repeats forever, so `pumpAndSettle` on a
+/// screen holding one never returns. Pump explicit frames instead.
+class WaveBars extends StatefulWidget {
+  WaveBars({
+    super.key,
+    this.color,
+    this.barCount = 5,
+    this.height = 14,
+    this.barWidth = 3,
+    this.spacing = 3,
+    this.period = const Duration(milliseconds: 1100),
+  });
+
+  /// Null takes the accent — see [ScanLine.color] for why it cannot default.
+  final Color? color;
+  final int barCount;
+  final double height;
+  final double barWidth;
+  final double spacing;
+  final Duration period;
+
+  @override
+  State<WaveBars> createState() => _WaveBarsState();
+}
+
+class _WaveBarsState extends State<WaveBars>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _controller = AnimationController(
+    vsync: this,
+    duration: widget.period,
+  )..repeat();
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final Color color = widget.color ?? Console.accent;
+    return SizedBox(
+      height: widget.height,
+      child: AnimatedBuilder(
+        animation: _controller,
+        builder: (BuildContext context, Widget? _) => Row(
+          mainAxisSize: MainAxisSize.min,
+          children: <Widget>[
+            for (int i = 0; i < widget.barCount; i++) ...<Widget>[
+              if (i > 0) SizedBox(width: widget.spacing),
+              _bar(i, color),
+            ],
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _bar(int index, Color color) {
+    // One controller, one sine, and a phase offset per bar: the row then reads
+    // as a single wave travelling across it. Five controllers started at the
+    // same instant would blink in unison, which looks like a loading spinner
+    // someone drew badly rather than like sound.
+    final double phase = index / widget.barCount;
+    final double wave =
+        (math.sin((_controller.value + phase) * 2 * math.pi) + 1) / 2;
+    final double floor = widget.height * .3;
+    return Container(
+      width: widget.barWidth,
+      height: floor + (widget.height - floor) * wave,
+      decoration: BoxDecoration(
+        // The tallest bar is also the brightest, so the crest stays legible
+        // against a card at the sizes this is used at (14 px of travel).
+        color: color.withValues(alpha: .4 + .6 * wave),
+        borderRadius: BorderRadius.circular(widget.barWidth),
+      ),
+    );
+  }
+}
+
+/// A glyph that breathes — used where a model is thinking about text the user
+/// can see. Pairs with [ScanLine]: the sweep runs under the text being read,
+/// this sits on the label that names the stage.
+///
+/// Repeats forever; the [PulseDot] caveat about `pumpAndSettle` applies.
+class SparklePulse extends StatefulWidget {
+  SparklePulse({
+    super.key,
+    this.color,
+    this.size = 13,
+    this.icon = Icons.auto_awesome_rounded,
+    this.period = const Duration(milliseconds: 1500),
+  });
+
+  /// Null takes the accent — see [ScanLine.color] for why it cannot default.
+  final Color? color;
+  final double size;
+  final IconData icon;
+  final Duration period;
+
+  @override
+  State<SparklePulse> createState() => _SparklePulseState();
+}
+
+class _SparklePulseState extends State<SparklePulse>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _controller = AnimationController(
+    vsync: this,
+    duration: widget.period,
+  )..repeat(reverse: true);
+
+  late final Animation<double> _curve = CurvedAnimation(
+    parent: _controller,
+    curve: Curves.easeInOut,
+  );
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final Color color = widget.color ?? Console.accent;
+    return AnimatedBuilder(
+      animation: _curve,
+      builder: (BuildContext context, Widget? child) {
+        final double t = _curve.value;
+        return Transform.rotate(
+          // A few degrees only. A full rotation would turn a state marker into
+          // a spinner, and a spinner is a promise that something finishes at a
+          // rate this stage cannot report.
+          angle: -.12 + .24 * t,
+          child: Transform.scale(scale: .88 + .18 * t, child: child),
+        );
+      },
+      child: Icon(widget.icon, size: widget.size, color: color),
+    );
+  }
+}
+
 /// Selectable pill used by every filter row (queue status, log level, audio
 /// parameters). [selectedColor] is overridable because the log levels colour
 /// their own chip.
@@ -1082,12 +1235,21 @@ class CopyButton extends StatefulWidget {
     required this.text,
     this.tooltip = 'Copy text',
     this.semanticLabel = 'Copy text to clipboard',
+    this.size = 34,
+    this.iconSize = 17,
   });
 
   /// Copied verbatim and in full, even when the caller renders it truncated.
   final String text;
   final String tooltip;
   final String semanticLabel;
+
+  /// The whole control, not the icon. It shrinks for the denser rows — a
+  /// summary line and a row of tag chips both sit under 24 px, and the default
+  /// 34 px square next to them reads as the primary action of the card rather
+  /// than as a footnote on one field.
+  final double size;
+  final double iconSize;
 
   @override
   State<CopyButton> createState() => _CopyButtonState();
@@ -1138,8 +1300,8 @@ class _CopyButtonState extends State<CopyButton> {
             onFocusChange: (bool value) => setState(() => _focused = value),
             child: AnimatedContainer(
               duration: const Duration(milliseconds: 260),
-              width: 34,
-              height: 34,
+              width: widget.size,
+              height: widget.size,
               alignment: Alignment.center,
               decoration: BoxDecoration(
                 color: _copied ? Console.greenDeep : Console.surfaceButton,
@@ -1167,7 +1329,7 @@ class _CopyButtonState extends State<CopyButton> {
                   _copied ? Icons.check_rounded : Icons.copy_rounded,
                   key: ValueKey<bool>(_copied),
                   color: _copied ? Console.green : Console.muted,
-                  size: 17,
+                  size: widget.iconSize,
                 ),
               ),
             ),
