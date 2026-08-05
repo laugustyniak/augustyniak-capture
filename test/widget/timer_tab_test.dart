@@ -3,6 +3,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:augustyniak_capture/features/settings/presentation/settings_controller.dart';
 import 'package:augustyniak_capture/features/timer/domain/alarm_player.dart';
 import 'package:augustyniak_capture/features/timer/domain/alarm_sound.dart';
+import 'package:augustyniak_capture/features/timer/domain/focus_session.dart';
 import 'package:augustyniak_capture/features/timer/presentation/focus_timer_controller.dart';
 import 'package:augustyniak_capture/features/timer/presentation/timer_tab.dart';
 
@@ -20,6 +21,20 @@ class _FakeClock {
   DateTime call() => now;
 
   void advance(Duration by) => now = now.add(by);
+}
+
+/// Seeded history, so the panel can be asserted without running sessions in
+/// real time.
+class _SeededSessionLog implements FocusSessionLog {
+  _SeededSessionLog(this.rows);
+
+  final List<FocusSession> rows;
+
+  @override
+  Future<List<FocusSession>> load() async => List<FocusSession>.of(rows);
+
+  @override
+  Future<void> append(FocusSession session) async => rows.add(session);
 }
 
 class _FakeAlarmPlayer implements AlarmPlayer {
@@ -47,6 +62,7 @@ void main() {
   Future<({FocusTimerController timer, SettingsController settings})> pumpTimer(
     WidgetTester tester, {
     _FakeClock? clock,
+    List<FocusSession> history = const <FocusSession>[],
   }) async {
     tester.view.physicalSize = const Size(1000, 2600);
     tester.view.devicePixelRatio = 1;
@@ -56,9 +72,11 @@ void main() {
     await settings.initialize();
     final FocusTimerController timer = FocusTimerController(
       alarmPlayer: alarm,
+      sessionLog: _SeededSessionLog(<FocusSession>[...history]),
       clock: clock?.call,
     );
     addTearDown(timer.dispose);
+    if (history.isNotEmpty) await timer.initialize();
     void apply() {
       timer.configure(settings.timerDuration);
       timer.setAlarmSound(settings.timerAlarm);
@@ -288,5 +306,71 @@ void main() {
     expect(find.text('write the dial'), findsNWidgets(2));
     expect(alarm.played, <AlarmSound>[AlarmSound.chime]);
     expect(find.text('START AGAIN'), findsOneWidget);
+  });
+
+  /// The clock the seeded rows are dated against, so they land inside the
+  /// seven-day window the panel shows.
+  FocusSession finished({
+    required String? projectId,
+    String? projectName,
+    int hour = 10,
+    int minutes = 40,
+  }) => FocusSession(
+    completedAt: DateTime(2026, 8, 5, hour),
+    duration: Duration(minutes: minutes),
+    projectId: projectId,
+    projectName: projectName,
+  );
+
+  testWidgets('the week splits by project, busiest first', (
+    WidgetTester tester,
+  ) async {
+    await pumpTimer(
+      tester,
+      clock: _FakeClock(),
+      history: <FocusSession>[
+        finished(projectId: 'p1', projectName: 'Capture', hour: 9),
+        finished(projectId: 'p1', projectName: 'Capture', hour: 11),
+        finished(projectId: 'p2', projectName: 'Vault', hour: 13),
+      ],
+    );
+
+    expect(find.text('BY PROJECT'), findsOneWidget);
+    expect(find.text('Capture'), findsOneWidget);
+    expect(find.text('2 · 80 min'), findsOneWidget);
+    expect(find.text('Vault'), findsOneWidget);
+    expect(find.text('1 · 40 min'), findsOneWidget);
+  });
+
+  testWidgets('time with no project active keeps a row of its own', (
+    WidgetTester tester,
+  ) async {
+    await pumpTimer(
+      tester,
+      clock: _FakeClock(),
+      history: <FocusSession>[
+        finished(projectId: 'p1', projectName: 'Capture', hour: 9),
+        finished(projectId: null, hour: 11),
+      ],
+    );
+
+    // Dropping it would make the rows stop adding up to the strip above.
+    expect(find.text('No project'), findsOneWidget);
+  });
+
+  testWidgets('a single project draws no split at all', (
+    WidgetTester tester,
+  ) async {
+    await pumpTimer(
+      tester,
+      clock: _FakeClock(),
+      history: <FocusSession>[
+        finished(projectId: 'p1', projectName: 'Capture'),
+      ],
+    );
+
+    // One row is either "all of it on your only project" or "all of it
+    // unattributed" — both just repeat the total above in more words.
+    expect(find.text('BY PROJECT'), findsNothing);
   });
 }

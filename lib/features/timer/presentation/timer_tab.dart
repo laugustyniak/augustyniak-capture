@@ -504,8 +504,114 @@ class _FocusHistory extends StatelessWidget {
             _DayRow(day: day, busiest: busiest),
             const SizedBox(height: 6),
           ],
+          _ProjectSplit(tallies: controller.projectTallies(windowDays)),
         ],
       ),
+    );
+  }
+}
+
+/// Where the week's finished sessions actually went, busiest project first.
+///
+/// It reads the same seven days the strip above does — the two panels have to
+/// answer the same question, or one reads as the explanation of the other while
+/// covering a different span.
+///
+/// **Drawn only when there is something to compare.** A single row is either
+/// "all of it on the one project you have" or "all of it unattributed", and in
+/// both cases it just repeats the total above it in more words. Nothing is a
+/// clearer answer there than a row.
+class _ProjectSplit extends StatelessWidget {
+  _ProjectSplit({required this.tallies});
+
+  final List<ProjectFocusTally> tallies;
+
+  /// Enough for a working week's worth of context without turning the panel
+  /// into a report. Anything past this is named rather than dropped silently —
+  /// a list that quietly ends is indistinguishable from a complete one.
+  static const int maxRows = 4;
+
+  @override
+  Widget build(BuildContext context) {
+    if (tallies.length < 2) return const SizedBox.shrink();
+
+    // The cap applies to projects, not to the residual. Unattributed time is
+    // already pinned last by `tallyByProject`, and letting it fall off the end
+    // would leave the rows silently failing to add up to the strip above —
+    // while `+1 more projects` counted something that is not a project.
+    final List<ProjectFocusTally> projects = tallies
+        .where((ProjectFocusTally tally) => tally.projectId != null)
+        .toList();
+    final ProjectFocusTally? unattributed = tallies
+        .where((ProjectFocusTally tally) => tally.projectId == null)
+        .firstOrNull;
+
+    final List<ProjectFocusTally> shown = <ProjectFocusTally>[
+      ...projects.take(maxRows),
+      ?unattributed,
+    ];
+    final int hidden = projects.length - projects.take(maxRows).length;
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: <Widget>[
+        Divider(color: Console.border, height: 22),
+        Text(
+          'BY PROJECT',
+          style: ConsoleText.chip.copyWith(
+            fontSize: 9.5,
+            letterSpacing: 1,
+            color: Console.muted,
+          ),
+        ),
+        const SizedBox(height: 8),
+        for (final ProjectFocusTally tally in shown) ...<Widget>[
+          _ProjectRow(tally: tally),
+          const SizedBox(height: 5),
+        ],
+        if (hidden > 0)
+          Text(
+            '+ $hidden more ${hidden == 1 ? 'project' : 'projects'}',
+            style: ConsoleText.micro.copyWith(color: Console.dimText),
+          ),
+      ],
+    );
+  }
+}
+
+/// One project's share of the week: name, sessions, focused minutes.
+///
+/// Unattributed time keeps its own row rather than being dropped — sessions run
+/// with no project active are a fact about the week worth seeing, and hiding
+/// them would make the rows fail to add up to the strip above.
+class _ProjectRow extends StatelessWidget {
+  _ProjectRow({required this.tally});
+
+  final ProjectFocusTally tally;
+
+  @override
+  Widget build(BuildContext context) {
+    final bool unattributed = tally.projectId == null;
+    return Row(
+      children: <Widget>[
+        Expanded(
+          child: Text(
+            tally.projectName,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: ConsoleText.micro.copyWith(
+              color: unattributed ? Console.dimText : Console.textSoft,
+            ),
+          ),
+        ),
+        const SizedBox(width: 10),
+        Text(
+          '${tally.sessions} · ${tally.focused.inMinutes} min',
+          style: ConsoleText.micro.copyWith(
+            color: unattributed ? Console.dimText : Console.text,
+          ),
+        ),
+      ],
     );
   }
 }
