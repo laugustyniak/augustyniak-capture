@@ -82,6 +82,7 @@ class _RecordingsPageState extends State<RecordingsPage> {
   // Indices used in code; Timer, Projects, Logs and Config are selected only by
   // the navigation itself.
   static const int queueIndex = 0;
+  static const int timerIndex = 1;
   static const int modelsIndex = 3;
 
   static const List<({IconData icon, String label, String shortLabel})>
@@ -230,6 +231,11 @@ class _RecordingsPageState extends State<RecordingsPage> {
     );
     shortcuts = ShortcutsCoordinator(
       recordings: controller,
+      // The one shortcut target that is not the capture pipeline. Handed the
+      // controller rather than a callback because the coordinator has to read
+      // the state back — whether the press started a session decides whether
+      // the window is raised at all.
+      focusTimer: timer,
       // Read lazily rather than capturing `context` here: a hotkey can fire long
       // after initState, and the sheet must open against the live element.
       composeTextNote: () async {
@@ -243,6 +249,14 @@ class _RecordingsPageState extends State<RecordingsPage> {
       revealQueue: () async {
         if (!mounted || navigationIndex == queueIndex) return;
         setState(() => navigationIndex = queueIndex);
+      },
+      // A session started from a hotkey is otherwise invisible: the dial, the
+      // countdown and the alarm choice all live on one tab, and a shortcut that
+      // cannot be told apart from an unregistered one is the failure this app
+      // keeps designing against.
+      revealTimer: () async {
+        if (!mounted || navigationIndex == timerIndex) return;
+        setState(() => navigationIndex = timerIndex);
       },
       registrar: _buildHotkeyRegistrar(),
       windowPresenter: _buildWindowPresenter(),

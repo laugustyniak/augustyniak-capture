@@ -1,0 +1,879 @@
+/* Augustyniak Capture — landing page.
+ *
+ * Every colour below is lifted verbatim from ConsolePalette._dark in
+ * lib/app/ui_kit.dart. The app owns these values; this file is a copy, so when
+ * the palette moves, move it here too rather than eyeballing a near-match.
+ *
+ * The layout obeys one rule borrowed from the app: ONE FILLED THING PER VIEW.
+ * In a queue row only the pipeline status is filled, because it is the only
+ * state there; everything else is a label and renders outlined. On this page
+ * the filled accent is reserved for the two pipeline steps that are not
+ * negotiable — verify and persist. Nothing else on the page may take it.
+ */
+
+:root {
+  --bg: #131316;
+  --surface: #1d1d20;
+  --raised: #2c2c30;
+  --border: #35353b;
+  --border-strong: #52525b;
+  --text: #edebe8;
+  --text-soft: #d1cec7;
+  --muted: #a0a0ab;
+  /* dim is pinned in the app between 3:1 (legal for graphics) and 4.5:1 (the
+   * threshold for small text) precisely so it can never carry words again — it
+   * once held the whole 10.5px scale at 3.63:1. On this background it measures
+   * 3.52:1. Anything with letters in it uses dim-text (5.56:1) instead; dim is
+   * kept here only so the distinction stays written down. */
+  --dim: #6b6b76;
+  --dim-text: #8b8b98;
+  --accent: #59a0f8;
+  --accent-deep: #3d84f5;
+  --green: #31c467;
+  --amber: #f6ae31;
+  --red: #f07575;
+  --violet: #ac8bf9;
+  --ink: #17171c;
+
+  --shell: 1080px;
+  --gut: clamp(1.25rem, 4vw, 2.5rem);
+}
+
+@font-face {
+  font-family: 'Space Grotesk';
+  src: url('fonts/SpaceGrotesk-Regular.ttf') format('truetype');
+  font-weight: 400;
+  font-display: swap;
+}
+@font-face {
+  font-family: 'Space Grotesk';
+  src: url('fonts/SpaceGrotesk-Bold.ttf') format('truetype');
+  font-weight: 700;
+  font-display: swap;
+}
+@font-face {
+  font-family: 'JetBrains Mono';
+  src: url('fonts/JetBrainsMono-Regular.ttf') format('truetype');
+  font-weight: 400;
+  font-display: swap;
+}
+@font-face {
+  font-family: 'JetBrains Mono';
+  src: url('fonts/JetBrainsMono-SemiBold.ttf') format('truetype');
+  font-weight: 600;
+  font-display: swap;
+}
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  html {
+    scroll-behavior: smooth;
+  }
+}
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text-soft);
+  font-family: 'Space Grotesk', system-ui, sans-serif;
+  font-size: 1.02rem;
+  line-height: 1.62;
+  -webkit-font-smoothing: antialiased;
+}
+
+a {
+  color: var(--accent);
+  text-decoration: none;
+}
+
+a:hover {
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 3px;
+  border-radius: 4px;
+}
+
+/* ── shared type roles ─────────────────────────────────────────────────── */
+
+.mono {
+  font-family: 'JetBrains Mono', ui-monospace, monospace;
+}
+
+.eyebrow {
+  font-family: 'JetBrains Mono', ui-monospace, monospace;
+  font-weight: 600;
+  font-size: 0.66rem;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--accent);
+  margin: 0 0 0.9rem;
+}
+
+.eyebrow--dim {
+  color: var(--dim-text);
+}
+
+h1,
+h2,
+h3 {
+  color: var(--text);
+  font-weight: 700;
+  letter-spacing: -0.025em;
+  line-height: 1.08;
+  margin: 0;
+}
+
+h2 {
+  font-size: clamp(1.7rem, 3.4vw, 2.35rem);
+  margin-bottom: 0.9rem;
+}
+
+h3 {
+  font-size: 1.06rem;
+  letter-spacing: -0.01em;
+  line-height: 1.35;
+}
+
+p {
+  margin: 0 0 1rem;
+  max-width: 62ch;
+}
+
+.lede {
+  font-size: clamp(1.05rem, 2vw, 1.22rem);
+  color: var(--text-soft);
+  max-width: 56ch;
+}
+
+.shell {
+  width: 100%;
+  max-width: var(--shell);
+  margin: 0 auto;
+  padding: 0 var(--gut);
+}
+
+.band {
+  padding: clamp(3.5rem, 8vw, 6rem) 0;
+  border-top: 1px solid var(--border);
+}
+
+/* ── masthead ──────────────────────────────────────────────────────────── */
+
+.masthead {
+  position: sticky;
+  top: 0;
+  z-index: 20;
+  background: rgba(19, 19, 22, 0.86);
+  backdrop-filter: blur(10px);
+  border-bottom: 1px solid var(--border);
+}
+
+.masthead__inner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  height: 60px;
+}
+
+.wordmark {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  color: var(--text);
+  font-weight: 700;
+  letter-spacing: -0.02em;
+}
+
+.wordmark:hover {
+  text-decoration: none;
+}
+
+.wordmark img {
+  width: 26px;
+  height: 26px;
+  border-radius: 7px;
+}
+
+.masthead__links {
+  display: flex;
+  align-items: center;
+  gap: clamp(0.9rem, 2.5vw, 1.6rem);
+  font-family: 'JetBrains Mono', ui-monospace, monospace;
+  font-size: 0.72rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.masthead__links a {
+  color: var(--muted);
+}
+
+.masthead__links a:hover {
+  color: var(--text);
+}
+
+.masthead__links .is-hideable {
+  display: none;
+}
+
+@media (min-width: 640px) {
+  .masthead__links .is-hideable {
+    display: inline;
+  }
+}
+
+/* ── hero ──────────────────────────────────────────────────────────────── */
+
+.hero {
+  padding: clamp(3rem, 8vw, 5.5rem) 0 clamp(2.5rem, 6vw, 4rem);
+}
+
+.hero h1 {
+  font-size: clamp(2.35rem, 6.2vw, 4.1rem);
+  letter-spacing: -0.035em;
+  max-width: 17ch;
+  margin-bottom: 1.4rem;
+}
+
+.hero h1 em {
+  font-style: normal;
+  color: var(--accent);
+}
+
+.hero__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  margin-top: 1.9rem;
+}
+
+.btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.55rem;
+  padding: 0.68rem 1.15rem;
+  border: 1px solid var(--border-strong);
+  border-radius: 10px;
+  color: var(--text);
+  font-family: 'JetBrains Mono', ui-monospace, monospace;
+  font-weight: 600;
+  font-size: 0.76rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  transition: border-color 0.15s ease, background 0.15s ease;
+}
+
+.btn:hover {
+  background: var(--raised);
+  border-color: var(--text-soft);
+  text-decoration: none;
+}
+
+.btn svg {
+  width: 15px;
+  height: 15px;
+  fill: currentColor;
+}
+
+/* ── the ledger: the signature element ─────────────────────────────────── */
+
+.ledger {
+  list-style: none;
+  margin: clamp(2.75rem, 6vw, 4rem) 0 0;
+  padding: 0;
+  display: grid;
+  gap: 0.55rem;
+}
+
+@media (min-width: 900px) {
+  .ledger {
+    grid-template-columns: repeat(6, 1fr);
+    gap: 0.5rem;
+  }
+}
+
+.step {
+  position: relative;
+  padding: 0.85rem 0.9rem 0.95rem;
+  border: 1px solid var(--border);
+  border-radius: 11px;
+  background: var(--surface);
+  display: flex;
+  flex-direction: column;
+  gap: 0.28rem;
+  opacity: 0;
+  transform: translateY(7px);
+  animation: rise 0.45s cubic-bezier(0.22, 0.8, 0.3, 1) forwards;
+  animation-delay: calc(var(--i) * 85ms + 250ms);
+}
+
+/* The two steps the app will not trade away. They are the only filled
+ * elements on the page — see the note at the top of this file. */
+.step--fixed {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--ink);
+}
+
+.step__n {
+  font-family: 'JetBrains Mono', ui-monospace, monospace;
+  font-weight: 600;
+  font-size: 0.62rem;
+  letter-spacing: 0.14em;
+  color: var(--dim-text);
+}
+
+/* 0.62 measured 3.34:1 against the accent — below AA for text this small. */
+.step--fixed .step__n {
+  color: rgba(23, 23, 28, 0.85);
+}
+
+.step__t {
+  font-family: 'JetBrains Mono', ui-monospace, monospace;
+  font-weight: 600;
+  font-size: 0.78rem;
+  letter-spacing: 0.02em;
+  color: var(--text);
+}
+
+.step--fixed .step__t {
+  color: var(--ink);
+}
+
+.step__s {
+  font-size: 0.79rem;
+  line-height: 1.45;
+  color: var(--muted);
+}
+
+.step--fixed .step__s {
+  color: rgba(23, 23, 28, 0.88);
+}
+
+.step__note {
+  margin-top: 0.3rem;
+  font-family: 'JetBrains Mono', ui-monospace, monospace;
+  font-size: 0.63rem;
+  letter-spacing: 0.05em;
+  color: var(--accent);
+  white-space: nowrap;
+}
+
+.ledger__outcomes {
+  position: relative;
+  display: grid;
+  gap: 0.55rem;
+  margin-top: 0.55rem;
+}
+
+@media (min-width: 900px) {
+  .ledger__outcomes {
+    grid-template-columns: repeat(6, 1fr);
+    gap: 0.5rem;
+  }
+
+  /* Both outcomes hang off step 06, which sits in the last column. */
+  .ledger__outcomes .outcome {
+    grid-column: 5 / 7;
+  }
+
+  /* The stub that makes them read as a fork off the tape rather than as a
+   * separate block underneath it. It bridges the grid gap above the first
+   * outcome, in the same column. */
+  .ledger__outcomes::before {
+    content: '';
+    position: absolute;
+    left: calc(83.333% + 1.1rem);
+    top: -0.6rem;
+    width: 1px;
+    height: 0.65rem;
+    background: var(--border-strong);
+  }
+}
+
+.outcome {
+  display: block;
+  padding: 0.6rem 0.9rem;
+  border: 1px solid var(--border);
+  border-left-width: 3px;
+  border-radius: 9px;
+  font-family: 'JetBrains Mono', ui-monospace, monospace;
+  font-size: 0.72rem;
+  line-height: 1.5;
+  letter-spacing: 0.03em;
+  opacity: 0;
+  animation: rise 0.45s cubic-bezier(0.22, 0.8, 0.3, 1) forwards;
+  animation-delay: calc(var(--i) * 85ms + 250ms);
+}
+
+.outcome--ok {
+  border-left-color: var(--green);
+  color: var(--green);
+}
+
+.outcome--fail {
+  border-left-color: var(--red);
+  color: var(--red);
+}
+
+.outcome span {
+  color: var(--muted);
+  letter-spacing: 0.02em;
+}
+
+.ledger__caption {
+  margin: 1.4rem 0 0;
+  font-size: 0.9rem;
+  color: var(--muted);
+  max-width: 68ch;
+}
+
+@keyframes rise {
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+/* ── two rules ─────────────────────────────────────────────────────────── */
+
+.rules {
+  display: grid;
+  gap: 1rem;
+  margin-top: 2rem;
+}
+
+@media (min-width: 760px) {
+  .rules {
+    grid-template-columns: 1fr 1fr;
+    gap: 1.1rem;
+  }
+}
+
+.rule {
+  padding: 1.4rem 1.5rem 1.5rem;
+  border: 1px solid var(--border);
+  border-radius: 13px;
+  background: var(--surface);
+}
+
+.rule h3 {
+  margin-bottom: 0.6rem;
+}
+
+.rule p {
+  margin: 0;
+  font-size: 0.94rem;
+  color: var(--muted);
+}
+
+.rule__tag {
+  display: block;
+  font-family: 'JetBrains Mono', ui-monospace, monospace;
+  font-weight: 600;
+  font-size: 0.62rem;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--dim-text);
+  margin-bottom: 0.75rem;
+}
+
+/* ── capture types ─────────────────────────────────────────────────────── */
+
+.types {
+  margin-top: 2rem;
+  border: 1px solid var(--border);
+  border-radius: 13px;
+  overflow: hidden;
+}
+
+.type {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 0.2rem 1rem;
+  padding: 1rem 1.2rem;
+  border-bottom: 1px solid var(--border);
+}
+
+.type:last-child {
+  border-bottom: 0;
+}
+
+@media (min-width: 720px) {
+  .type {
+    grid-template-columns: 12rem 1fr 9rem;
+    align-items: baseline;
+    gap: 1.2rem;
+  }
+}
+
+.type__name {
+  font-family: 'JetBrains Mono', ui-monospace, monospace;
+  font-weight: 600;
+  font-size: 0.8rem;
+  letter-spacing: 0.03em;
+  color: var(--text);
+}
+
+.type__what {
+  font-size: 0.92rem;
+  color: var(--muted);
+  max-width: none;
+  margin: 0;
+}
+
+.type__where {
+  font-family: 'JetBrains Mono', ui-monospace, monospace;
+  font-size: 0.68rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--dim-text);
+}
+
+/* ── annotated queue row ───────────────────────────────────────────────── */
+
+.rowdemo {
+  margin-top: 2rem;
+  display: grid;
+  gap: 1.6rem;
+}
+
+@media (min-width: 900px) {
+  .rowdemo {
+    grid-template-columns: 1.15fr 0.85fr;
+    gap: 2.4rem;
+    align-items: start;
+  }
+}
+
+.card {
+  padding: 0.95rem 1rem;
+  border: 1px solid var(--border);
+  border-radius: 13px;
+  background: var(--surface);
+  display: flex;
+  gap: 0.8rem;
+}
+
+.card__tile {
+  flex: 0 0 38px;
+  height: 38px;
+  border-radius: 10px;
+  background: var(--raised);
+  display: grid;
+  place-items: center;
+  color: var(--muted);
+  font-size: 1rem;
+}
+
+.card__body {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.card__top {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 0.8rem;
+}
+
+.card__title {
+  color: var(--text);
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  font-size: 0.98rem;
+}
+
+.card__acts {
+  display: flex;
+  gap: 0.35rem;
+  flex: 0 0 auto;
+}
+
+.card__acts span {
+  width: 26px;
+  height: 26px;
+  border-radius: 7px;
+  border: 1px solid var(--border);
+  display: grid;
+  place-items: center;
+  font-size: 0.72rem;
+  color: var(--muted);
+}
+
+.pills {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+  margin: 0.5rem 0 0.55rem;
+}
+
+.pill {
+  font-family: 'JetBrains Mono', ui-monospace, monospace;
+  font-weight: 600;
+  font-size: 0.6rem;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  padding: 0.2rem 0.5rem;
+  border-radius: 6px;
+  border: 1px solid currentColor;
+}
+
+.pill--category {
+  color: var(--accent);
+}
+
+.pill--project {
+  color: var(--muted);
+}
+
+.card__excerpt {
+  font-size: 0.9rem;
+  color: var(--muted);
+  margin: 0 0 0.6rem;
+  max-width: none;
+}
+
+.card__facts {
+  font-family: 'JetBrains Mono', ui-monospace, monospace;
+  font-size: 0.64rem;
+  letter-spacing: 0.06em;
+  color: var(--dim-text);
+}
+
+.notes {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 1.05rem;
+}
+
+.notes li {
+  padding-left: 1.9rem;
+  position: relative;
+  font-size: 0.9rem;
+  color: var(--muted);
+}
+
+.notes li::before {
+  content: attr(data-n);
+  position: absolute;
+  left: 0;
+  top: 0.05rem;
+  font-family: 'JetBrains Mono', ui-monospace, monospace;
+  font-weight: 600;
+  font-size: 0.62rem;
+  letter-spacing: 0.1em;
+  color: var(--dim-text);
+}
+
+.notes strong {
+  color: var(--text);
+  font-weight: 700;
+}
+
+/* ── destinations ──────────────────────────────────────────────────────── */
+
+.dests {
+  display: grid;
+  gap: 1.1rem;
+  margin-top: 2rem;
+}
+
+@media (min-width: 860px) {
+  .dests {
+    grid-template-columns: 1fr 1fr;
+    gap: 1.4rem;
+  }
+}
+
+.dest {
+  border: 1px solid var(--border);
+  border-radius: 13px;
+  background: var(--surface);
+  padding: 1.5rem 1.5rem 1.6rem;
+  display: flex;
+  flex-direction: column;
+}
+
+.dest h3 {
+  margin-bottom: 0.55rem;
+}
+
+.dest p {
+  font-size: 0.94rem;
+  color: var(--muted);
+  max-width: none;
+}
+
+.dest pre {
+  margin: auto 0 0;
+}
+
+/* ── code ──────────────────────────────────────────────────────────────── */
+
+/* Grid and flex children default to min-width: auto, which lets a child wider
+ * than its track — a <pre> holding a clone URL is the one here — push the grid
+ * out, then the shell, then the document, and the page scrolls sideways on a
+ * phone. overflow-x on the <pre> cannot fire while the element is still free to
+ * grow, so the fix belongs on the cell rather than on the code block. */
+.start > *,
+.dests > *,
+.rules > *,
+.rowdemo > *,
+.dest,
+.type {
+  min-width: 0;
+}
+
+pre {
+  max-width: 100%;
+  margin: 1.2rem 0 0;
+  padding: 1rem 1.1rem;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  overflow-x: auto;
+  font-family: 'JetBrains Mono', ui-monospace, monospace;
+  font-size: 0.76rem;
+  line-height: 1.75;
+  color: var(--text-soft);
+}
+
+pre .c {
+  color: var(--dim-text);
+}
+
+pre .k {
+  color: var(--accent);
+}
+
+pre .s {
+  color: var(--green);
+}
+
+/* ── quick start ───────────────────────────────────────────────────────── */
+
+.start {
+  display: grid;
+  gap: 1.6rem;
+  margin-top: 2rem;
+}
+
+@media (min-width: 860px) {
+  .start {
+    grid-template-columns: 1fr 1fr;
+    gap: 2.4rem;
+  }
+}
+
+.start pre {
+  margin-top: 0;
+}
+
+.platforms {
+  list-style: none;
+  margin: 1.2rem 0 0;
+  padding: 0;
+  display: grid;
+  gap: 0.55rem;
+}
+
+.platforms li {
+  display: flex;
+  justify-content: space-between;
+  gap: 1rem;
+  padding-bottom: 0.55rem;
+  border-bottom: 1px solid var(--border);
+  font-family: 'JetBrains Mono', ui-monospace, monospace;
+  font-size: 0.73rem;
+  letter-spacing: 0.04em;
+  color: var(--muted);
+}
+
+.platforms li:last-child {
+  border-bottom: 0;
+}
+
+.platforms b {
+  color: var(--text);
+  font-weight: 600;
+}
+
+/* ── footer ────────────────────────────────────────────────────────────── */
+
+.footer {
+  border-top: 1px solid var(--border);
+  padding: 2.6rem 0 3.4rem;
+}
+
+.footer__inner {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 1.2rem;
+  justify-content: space-between;
+  align-items: baseline;
+  font-family: 'JetBrains Mono', ui-monospace, monospace;
+  font-size: 0.7rem;
+  letter-spacing: 0.06em;
+  color: var(--dim-text);
+}
+
+.footer__links {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 1.2rem;
+}
+
+.footer__links a {
+  color: var(--muted);
+}
+
+/* ── scroll reveal ─────────────────────────────────────────────────────── */
+
+/* Hidden only once scripting has confirmed itself — the `js` class is set by an
+ * inline script in <head>. Written the other way round (.reveal hidden by
+ * default, revealed by the observer) a page with no JavaScript keeps half its
+ * content at opacity 0 for good. Same rule the app applies to every optional
+ * stage: losing the mechanism costs the effect, never the content. */
+.js .reveal {
+  opacity: 0;
+  transform: translateY(14px);
+  transition: opacity 0.6s ease, transform 0.6s cubic-bezier(0.22, 0.8, 0.3, 1);
+}
+
+.js .reveal.is-in {
+  opacity: 1;
+  transform: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  html {
+    scroll-behavior: auto;
+  }
+
+  .step,
+  .outcome {
+    opacity: 1;
+    transform: none;
+    animation: none;
+  }
+
+  .js .reveal {
+    opacity: 1;
+    transform: none;
+    transition: none;
+  }
+}

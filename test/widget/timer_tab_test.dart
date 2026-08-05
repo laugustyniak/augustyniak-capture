@@ -23,6 +23,7 @@ class _FakeClock {
   void advance(Duration by) => now = now.add(by);
 }
 
+
 class _FakeAlarmPlayer implements AlarmPlayer {
   final List<AlarmSound> played = <AlarmSound>[];
 
@@ -418,6 +419,62 @@ void main() {
 
   group('completed sessions panel — regressions', () {
     FocusSessionLog logWith(List<FocusSession> rows) => _StubSessionLog(rows);
+
+    testWidgets('the split is ordered busiest first', (
+      WidgetTester tester,
+    ) async {
+      await pumpTimer(
+        tester,
+        clock: _FakeClock(),
+        sessionLog: logWith(<FocusSession>[
+          FocusSession(
+            completedAt: DateTime(2026, 8, 5, 9),
+            duration: const Duration(minutes: 40),
+            projectId: 'p1',
+            projectName: 'Capture',
+          ),
+          FocusSession(
+            completedAt: DateTime(2026, 8, 5, 11),
+            duration: const Duration(minutes: 40),
+            projectId: 'p1',
+            projectName: 'Capture',
+          ),
+          FocusSession(
+            completedAt: DateTime(2026, 8, 5, 13),
+            duration: const Duration(minutes: 40),
+            projectId: 'p2',
+            projectName: 'Vault',
+          ),
+        ]),
+      );
+
+      expect(find.text('WHERE IT WENT'), findsOneWidget);
+      expect(find.text('Capture'), findsOneWidget);
+      expect(find.text('2 · 80m'), findsOneWidget);
+      expect(find.text('Vault'), findsOneWidget);
+      expect(find.text('1 · 40m'), findsOneWidget);
+    });
+
+    testWidgets('a single project draws no split at all', (
+      WidgetTester tester,
+    ) async {
+      await pumpTimer(
+        tester,
+        clock: _FakeClock(),
+        sessionLog: logWith(<FocusSession>[
+          FocusSession(
+            completedAt: DateTime(2026, 8, 5, 10),
+            duration: const Duration(minutes: 40),
+            projectId: 'p1',
+            projectName: 'Capture',
+          ),
+        ]),
+      );
+
+      // One row is either "all of it on your only project" or "all of it
+      // unattributed" — both just repeat the total above in more words.
+      expect(find.text('WHERE IT WENT'), findsNothing);
+    });
 
     testWidgets('the chosen window survives a session finishing', (
       WidgetTester tester,

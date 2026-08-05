@@ -34,13 +34,12 @@ class FocusSession {
 
   /// Which project was active when the session finished, if any.
   ///
-  /// **Both the id and the name are stored.** The id is what groups sessions
-  /// together; the name is what the panel can still show after the project has
-  /// been renamed or deleted. Resolving the name at read time would let a
-  /// deleted project erase the hours spent on it, which is exactly the history
-  /// this file exists to keep — the same reason `RouteRecord` stores its
-  /// destination as rendered text rather than as a reference to look up later,
-  /// though it keeps only the label where this keeps both.
+  /// **Both the id and the name are stored**, the same denormalisation
+  /// `RouteRecord.target` makes and for the same reason: the id is what groups
+  /// sessions together, while the name is what the panel can still show after
+  /// the project has been renamed or deleted. Resolving the name at read time
+  /// would make a deleted project erase the hours spent on it, which is exactly
+  /// the history this file exists to keep.
   final String? projectId;
   final String? projectName;
 
@@ -182,8 +181,19 @@ class ProjectFocusTally {
 
 /// Sessions grouped by project, busiest first.
 ///
-/// Ties break on name so the order cannot flicker between rebuilds — a list
-/// that reshuffles when nothing changed reads as a bug.
+/// Sessions first, because a pomodoro count is what this feature counts — then
+/// **focused time**, because two projects on one session each are not equally
+/// busy and putting the 25-minute one above the 40-minute one is the opposite
+/// of the answer the panel is asked for. Name breaks the remaining tie, so the
+/// order cannot flicker between rebuilds — a list that reshuffles when nothing
+/// changed reads as a bug.
+///
+/// **Unattributed time always sorts last**, however much of it there is. It is
+/// the residual, not a competitor: sorting it by count puts `No project` in the
+/// middle of the real ones, where it reads as a project you own and pushes work
+/// you did below work you did not file. Found by looking at the rendered panel
+/// — every ordering rule here is satisfied either way, so no assertion about
+/// counts could have caught it.
 List<ProjectFocusTally> tallyByProject(List<FocusSession> sessions) {
   final Map<String?, List<FocusSession>> byProject =
       <String?, List<FocusSession>>{};
@@ -213,8 +223,13 @@ List<ProjectFocusTally> tallyByProject(List<FocusSession> sessions) {
       ),
   ];
   tallies.sort((ProjectFocusTally a, ProjectFocusTally b) {
+    if ((a.projectId == null) != (b.projectId == null)) {
+      return a.projectId == null ? 1 : -1;
+    }
     final int bySessions = b.sessions.compareTo(a.sessions);
-    return bySessions != 0 ? bySessions : a.projectName.compareTo(b.projectName);
+    if (bySessions != 0) return bySessions;
+    final int byTime = b.focused.compareTo(a.focused);
+    return byTime != 0 ? byTime : a.projectName.compareTo(b.projectName);
   });
   return tallies;
 }

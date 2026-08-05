@@ -1,0 +1,57 @@
+# Publishes site/ to GitHub Pages.
+#
+# This is the one workflow that is enabled, while ci.yml stays parked as
+# ci.yml.disabled — Actions was metered while the repository was private, and
+# the budget blocked every job. Public repositories get unmetered Actions, so
+# the reason for parking CI is gone too; re-enable it by renaming that file.
+#
+# Two settings have to exist on the repository side before a run can succeed,
+# and neither is expressible here: Settings -> Pages -> Source must be
+# "GitHub Actions" (not "Deploy from a branch"), and the repository must be
+# public unless the account is on a paid plan. Without the first, deploy-pages
+# fails at the very end, after the artifact has already been built.
+name: Pages
+
+on:
+  push:
+    branches: [main]
+    # Only the site and this file can change what is published. A code-only
+    # commit re-deploying identical bytes buys nothing but a run.
+    paths:
+      - 'site/**'
+      - '.github/workflows/pages.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# One deployment at a time, and a running one is never cancelled: the cancel
+# would land between the upload and the swap, which is the one window where the
+# published site is neither the old one nor the new one.
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Check out
+        uses: actions/checkout@v4
+
+      - name: Configure Pages
+        uses: actions/configure-pages@v5
+
+      - name: Upload site/
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: site
+
+      - name: Deploy
+        id: deployment
+        uses: actions/deploy-pages@v4
