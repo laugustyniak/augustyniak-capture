@@ -82,10 +82,15 @@ void main() {
   late _FakeAlarmPlayer alarm;
   late _FakeSessionLog sessionLog;
 
-  FocusTimerController build({AlarmPlayer? player, FocusSessionLog? log}) {
+  FocusTimerController build({
+    AlarmPlayer? player,
+    FocusSessionLog? log,
+    FocusProjectResolver? activeProject,
+  }) {
     final FocusTimerController controller = FocusTimerController(
       alarmPlayer: player ?? alarm,
       sessionLog: log ?? sessionLog,
+      activeProject: activeProject,
       clock: clock.call,
     );
     addTearDown(controller.dispose);
@@ -991,6 +996,98 @@ void main() {
         timer.projectTallies(7).map((ProjectFocusTally p) => p.projectName),
         <String>['Acme', 'Zed'],
       );
+    });
+
+    test('an equal session count is broken by time, not by name', () async {
+      // Found by looking at the rendered panel: `Alpha · 25 min` sat above
+      // `Zebra · 40 min` purely on the alphabet, which is the opposite of the
+      // answer "where did the week go" asks for.
+      final FocusTimerController timer = build(
+        log: _FakeSessionLog(
+          stored: <FocusSession>[
+            FocusSession(
+              completedAt: DateTime(2026, 8, 5, 9),
+              duration: const Duration(minutes: 25),
+              projectId: 'a',
+              projectName: 'Alpha',
+            ),
+            FocusSession(
+              completedAt: DateTime(2026, 8, 5, 10),
+              duration: const Duration(minutes: 40),
+              projectId: 'z',
+              projectName: 'Zebra',
+            ),
+          ],
+        ),
+      );
+      await timer.initialize();
+
+      expect(
+        timer.projectTallies(7).map((ProjectFocusTally p) => p.projectName),
+        <String>['Zebra', 'Alpha'],
+      );
+    });
+
+    test('unattributed time sorts last however much of it there is', () async {
+      // It is the residual, not a competitor. Ordering it by count puts
+      // `No project` in the middle of the real rows, where it reads as a
+      // project you own and pushes work you filed below work you did not.
+      final FocusTimerController timer = build(
+        log: _FakeSessionLog(
+          stored: <FocusSession>[
+            for (int hour = 8; hour < 11; hour++)
+              FocusSession(
+                completedAt: DateTime(2026, 8, 5, hour),
+                duration: const Duration(minutes: 40),
+              ),
+            FocusSession(
+              completedAt: DateTime(2026, 8, 5, 11),
+              duration: const Duration(minutes: 40),
+              projectId: 'p1',
+              projectName: 'Capture',
+            ),
+            FocusSession(
+              completedAt: DateTime(2026, 8, 5, 12),
+              duration: const Duration(minutes: 40),
+              projectId: 'p2',
+              projectName: 'Zebra',
+            ),
+          ],
+        ),
+      );
+      await timer.initialize();
+
+      final List<ProjectFocusTally> tallies = timer.projectTallies(7);
+      expect(
+        tallies.map((ProjectFocusTally p) => p.projectName),
+        <String>['Capture', 'Zebra', 'No project'],
+      );
+      // Three of them, and still last.
+      expect(tallies.last.sessions, 3);
+    });
+
+    test('the round trip carries the project through the file format', () {
+      // The two new keys are otherwise never exercised against `fromJson`: every
+      // other suite uses an in-memory fake, and `focus-sessions.jsonl` is
+      // append-only, so a key typo would drop attribution on rows that can never
+      // be rewritten.
+      final FocusSession session = FocusSession(
+        completedAt: DateTime(2026, 8, 5, 9, 40),
+        duration: const Duration(minutes: 40),
+        goal: 'Ship it',
+        projectId: 'p1',
+        projectName: 'Acme',
+      );
+
+      final FocusSession? back = FocusSession.fromJson(
+        jsonDecode(jsonEncode(session.toJson())) as Object?,
+      );
+
+      expect(back!.projectId, 'p1');
+      expect(back.projectName, 'Acme');
+      expect(back.goal, 'Ship it');
+      expect(back.completedAt, session.completedAt);
+      expect(back.duration, session.duration);
     });
 
     test('a project id with no name still groups, under a stated placeholder', () async {

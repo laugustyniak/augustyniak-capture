@@ -16,6 +16,7 @@ import 'package:augustyniak_capture/features/shortcuts/domain/hotkey_registrar.d
 import 'package:augustyniak_capture/features/shortcuts/domain/shortcut_action.dart';
 import 'package:augustyniak_capture/features/shortcuts/domain/window_presenter.dart';
 import 'package:augustyniak_capture/features/shortcuts/presentation/shortcuts_coordinator.dart';
+import 'package:augustyniak_capture/features/timer/presentation/focus_timer_controller.dart';
 import 'package:augustyniak_capture/features/transcription/data/transcription_service.dart';
 
 class _FakeRepository extends RecordingsRepository {
@@ -135,8 +136,10 @@ void main() {
   late RecordingsController recordings;
   late _FakeRegistrar registrar;
   late _CountingPresenter presenter;
+  late FocusTimerController focusTimer;
   late int noteCalls;
   late int queueReveals;
+  late int timerReveals;
   late Completer<void>? noteGate;
   late bool noteThrows;
 
@@ -153,6 +156,11 @@ void main() {
       // calls setState behind an await.
       await Future<void>.delayed(Duration.zero);
       queueReveals++;
+    },
+    focusTimer: focusTimer,
+    revealTimer: () async {
+      await Future<void>.delayed(Duration.zero);
+      timerReveals++;
     },
     registrar: registrar,
     windowPresenter: presenter,
@@ -181,18 +189,65 @@ void main() {
     );
     registrar = _FakeRegistrar();
     presenter = _CountingPresenter();
+    focusTimer = FocusTimerController();
     noteCalls = 0;
     queueReveals = 0;
+    timerReveals = 0;
     noteGate = null;
     noteThrows = false;
   });
 
   tearDown(() {
+    focusTimer.dispose();
     recordings.dispose();
     appDir.deleteSync(recursive: true);
   });
 
   group('dispatch', () {
+    test('toggleTimer starts a session and surfaces the tab it runs on', () async {
+      final ShortcutsCoordinator coordinator = build();
+
+      await coordinator.handle(ShortcutAction.toggleTimer);
+
+      expect(focusTimer.isRunning, isTrue);
+      // Raised *after* the session started, never before — and on the Timer
+      // tab, because a session started from a hotkey is otherwise
+      // indistinguishable from a hotkey that was never registered.
+      expect(presenter.presents, 1);
+      expect(timerReveals, 1);
+      expect(queueReveals, 0);
+    });
+
+    test('pausing from the hotkey leaves the window where it was', () async {
+      final ShortcutsCoordinator coordinator = build();
+      await coordinator.handle(ShortcutAction.toggleTimer);
+      presenter.presents = 0;
+      timerReveals = 0;
+
+      await coordinator.handle(ShortcutAction.toggleTimer);
+
+      expect(focusTimer.isPaused, isTrue);
+      // The asymmetry is the design: pausing is a decision already taken, and
+      // dragging the app over the work would undo the point of a global hotkey.
+      expect(presenter.presents, 0);
+      expect(timerReveals, 0);
+    });
+
+    test('a host with no timer treats the action as a no-op', () async {
+      final ShortcutsCoordinator coordinator = ShortcutsCoordinator(
+        recordings: recordings,
+        composeTextNote: () async => noteCalls++,
+        registrar: registrar,
+        windowPresenter: presenter,
+      );
+
+      await coordinator.handle(ShortcutAction.toggleTimer);
+
+      // Nothing raised, nothing thrown — the same degradation as a missing
+      // `revealQueue`.
+      expect(presenter.presents, 0);
+    });
+
     test('showWindow raises the window and does nothing else', () async {
       final ShortcutsCoordinator coordinator = build();
 

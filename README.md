@@ -536,11 +536,18 @@ Config, stored in `settings.json`.
 | `Ctrl+Alt+R` | start / stop recording | ✅ ships bound |
 | `Ctrl+Alt+N` | new text note | ✅ ships bound |
 | — | upload audio / image / video | ⚪ bindable, ships unbound |
+| — | start / pause the focus timer | ⚪ bindable, ships unbound |
 
-Recording is the one action that does **not** raise the window first — the point
-of a global record hotkey is not leaving whatever you were in. It raises the
-window *after* the capture has started, so the microphone is never kept waiting,
-and leaves it alone on stop.
+Recording and the focus timer are the two actions that do **not** raise the
+window first — the point of those hotkeys is not leaving whatever you were in.
+Both raise it *after* a successful start (recording so the microphone is never
+kept waiting, the timer so a started session is visible on the tab that owns it)
+and leave the window alone when you stop or pause: that decision is already
+taken, and pulling the app forward would interrupt what you went back to.
+
+The timer shortcut ships unbound because `Ctrl+Alt+T` is GNOME's own *open a
+terminal*, and a global binding that quietly won over it would break something
+outside this app.
 
 > **Linux caveat:** `Shift` + a letter, digit or symbol binds successfully and
 > then never fires — `keybinder` grabs the *unshifted* keyval, so X resolves the
@@ -572,8 +579,44 @@ for stretching a session already under way.
 - The countdown reads the **clock**, not a counter. Close the laptop mid-session
   and open it an hour later: the timer has finished, rather than claiming the
   time you slept through is still yours.
-- The length and the alarm are saved in `settings.json`; the session itself is
+- The length and the alarm are saved in `settings.json`; the running session is
   never written to disk — there is nothing in a countdown worth resuming.
+
+### What actually got done
+
+`COMPLETED SESSIONS` counts pomodoros **that reached zero**. Pausing, resetting
+or abandoning one leaves it out entirely, which is the only reason the number is
+worth looking at — a count you can inflate by starting things is not a record of
+work.
+
+```
+3 sessions today                                        95 min focused
+
+Thu  ────────────────────────────────────────────────   –
+Fri  ────────────────────────────────────────────────   –
+Sat  ██████████──────────────────────────────────────   1
+Sun  ────────────────────────────────────────────────   –
+Mon  ██████████──────────────────────────────────────   1
+Tue  ██████████──────────────────────────────────────   1
+Wed  ██████████████████████████████──────────────────   3
+
+BY PROJECT
+Augustyniak Capture                              3 · 130 min
+Note vault                                        1 ·  25 min
+Reading                                           1 ·  40 min
+No project                                        1 ·  15 min
+```
+
+- The empty days are drawn on purpose: *three a day* and *three once a week* are
+  the same list of numbers and a very different working week.
+- A session is filed under the project that was active **when it ended**, and
+  both the id and the name are stored — so renaming a project keeps one row, and
+  deleting one does not erase the hours you spent on it.
+- Time with no project active keeps its own row at the bottom rather than being
+  hidden, because otherwise the rows stop adding up to the week above them.
+- It lives in `focus-sessions.jsonl`, appended one line at a time and never
+  rewritten. Nothing can reconstruct last Tuesday's four sessions, so the file
+  is never written whole.
 
 ## 💾 Files on disk
 

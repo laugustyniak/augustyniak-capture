@@ -552,12 +552,14 @@ class _FocusHistoryState extends State<_FocusHistory> {
             _DayBars(days: window)
           else
             _FocusCalendar(days: window),
-          // Hidden until at least one session carries a project. Before that
-          // the section's entire content would be a single full-width
-          // `No project` bar — honest, and worth no space at all.
-          if (projects.any(
-            (ProjectFocusTally project) => project.projectId != null,
-          )) ...<Widget>[
+          // Two conditions, and each rules out a different empty answer. With
+          // no project on any session the whole section is one full-width
+          // `No project` bar; with only one row it just restates the total
+          // above it in more words. Nothing is a clearer answer than either.
+          if (projects.length > 1 &&
+              projects.any(
+                (ProjectFocusTally project) => project.projectId != null,
+              )) ...<Widget>[
             const SizedBox(height: 18),
             Container(height: 1, color: Console.border),
             const SizedBox(height: 14),
@@ -823,9 +825,26 @@ class _ProjectSplit extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final List<ProjectFocusTally> shown = projects.take(maxRows).toList();
-    final List<ProjectFocusTally> rest = projects.skip(maxRows).toList();
-    final int busiest = shown.isEmpty ? 1 : shown.first.sessions;
+    // Partitioned before the cap. `tallyByProject` pins unattributed time last,
+    // so a plain `take(maxRows)` would drop the residual row exactly when there
+    // are five or more projects — and the `n more projects` tail would then be
+    // counting something that is not a project.
+    final List<ProjectFocusTally> named = projects
+        .where((ProjectFocusTally project) => project.projectId != null)
+        .toList();
+    final ProjectFocusTally? residual = projects
+        .where((ProjectFocusTally project) => project.projectId == null)
+        .firstOrNull;
+    final List<ProjectFocusTally> shown = <ProjectFocusTally>[
+      ...named.take(maxRows),
+      ?residual,
+    ];
+    final List<ProjectFocusTally> rest = named.skip(maxRows).toList();
+    final int busiest = shown.fold(
+      1,
+      (int peak, ProjectFocusTally project) =>
+          project.sessions > peak ? project.sessions : peak,
+    );
     final int restSessions = rest.fold(
       0,
       (int total, ProjectFocusTally project) => total + project.sessions,

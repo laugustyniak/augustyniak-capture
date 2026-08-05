@@ -1,0 +1,402 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Augustyniak Capture — offline-first capture queue</title>
+    <meta
+      name="description"
+      content="An offline-first capture queue for voice, text, images and video. The file is written and verified on disk before transcription, OCR or AI titling is ever attempted — and a failure in any of them never costs you the capture."
+    />
+    <link rel="icon" href="icon.png" />
+    <link rel="apple-touch-icon" href="icon.png" />
+    <meta property="og:type" content="website" />
+    <meta property="og:title" content="Augustyniak Capture" />
+    <meta
+      property="og:description"
+      content="Capture first, be clever afterwards. Offline-first capture queue for voice, text, images and video."
+    />
+    <meta property="og:image" content="icon.png" />
+    <meta name="twitter:card" content="summary" />
+    <link rel="stylesheet" href="styles.css" />
+    <script>
+      // Marks the document as scripted before the stylesheet paints, so the
+      // reveal animation can hide things without a no-JS visitor losing them.
+      document.documentElement.classList.add('js');
+    </script>
+  </head>
+  <body>
+    <header class="masthead">
+      <div class="shell masthead__inner">
+        <a class="wordmark" href="#top">
+          <img src="icon.png" alt="" />
+          Augustyniak Capture
+        </a>
+        <nav class="masthead__links">
+          <a class="is-hideable" href="#guarantee">Guarantee</a>
+          <a class="is-hideable" href="#captures">Captures</a>
+          <a href="#start">Get it</a>
+          <a href="https://github.com/laugustyniak/augustyniak-capture">GitHub</a>
+        </nav>
+      </div>
+    </header>
+
+    <main id="top">
+      <section class="hero shell">
+        <p class="eyebrow">Offline-first capture queue</p>
+        <h1>Capture first. Be clever <em>afterwards</em>.</h1>
+        <p class="lede">
+          Press a hotkey, talk, forget about it. The file is written and verified
+          on disk before transcription, OCR or AI titling is ever attempted — and
+          when one of them fails, it costs you a status, never the recording.
+        </p>
+
+        <div class="hero__actions">
+          <a class="btn" href="https://github.com/laugustyniak/augustyniak-capture">
+            <svg viewBox="0 0 16 16" aria-hidden="true">
+              <path
+                d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.012 8.012 0 0 0 16 8c0-4.42-3.58-8-8-8Z"
+              />
+            </svg>
+            View the source
+          </a>
+          <a class="btn" href="#start">Run it locally</a>
+        </div>
+
+        <ol class="ledger" aria-label="What happens to every capture, in order">
+          <li class="step" style="--i: 0">
+            <span class="step__n">01</span>
+            <span class="step__t">create source</span>
+            <span class="step__s">.m4a, .txt, or a copy of the file you picked</span>
+          </li>
+          <li class="step" style="--i: 1">
+            <span class="step__n">02</span>
+            <span class="step__t">finish the write</span>
+            <span class="step__s">the recorder is stopped and the handle closed</span>
+          </li>
+          <li class="step step--fixed" style="--i: 2">
+            <span class="step__n">03</span>
+            <span class="step__t">verify</span>
+            <span class="step__s">it exists, and its length is greater than zero</span>
+          </li>
+          <li class="step step--fixed" style="--i: 3">
+            <span class="step__n">04</span>
+            <span class="step__t">persist</span>
+            <span class="step__s">the index is rewritten atomically: .tmp, then rename</span>
+          </li>
+          <li class="step" style="--i: 4">
+            <span class="step__n">05</span>
+            <span class="step__t">queued</span>
+            <span class="step__s">nothing has been sent anywhere yet</span>
+            <span class="step__note">capture returns here &#8629;</span>
+          </li>
+          <li class="step" style="--i: 5">
+            <span class="step__n">06</span>
+            <span class="step__t">processing</span>
+            <span class="step__s">background, one job at a time, never on your path</span>
+          </li>
+        </ol>
+
+        <div class="ledger__outcomes">
+          <p class="outcome outcome--ok" style="--i: 6">
+            completed <span>· transcript, OCR text, or the note body</span>
+          </p>
+          <p class="outcome outcome--fail" style="--i: 7">
+            failed <span>· source intact, error readable, retry offered</span>
+          </p>
+        </div>
+
+        <p class="ledger__caption">
+          Steps 3 and 4 are the only part of this the app will not trade away, and
+          they are the reason it exists. Everything after step 5 is allowed to fail
+          — no network, no API key, a missing binary, a provider outage — without
+          ever reaching backwards to touch what you captured.
+        </p>
+      </section>
+
+      <section class="band" id="guarantee">
+        <div class="shell">
+          <p class="eyebrow eyebrow--dim">Two rules, both enforced in code</p>
+          <h2>What &ldquo;durable&rdquo; actually means here</h2>
+          <p>
+            Both of these were paid for once. The second one destroyed real
+            history before it was written down.
+          </p>
+
+          <div class="rules reveal">
+            <article class="rule">
+              <span class="rule__tag">Rule one</span>
+              <h3>A processor only ever reads the source file.</h3>
+              <p>
+                It never writes, moves or deletes it. Transcription, OCR and video
+                extraction all sit behind the same interface, and none of them can
+                reach the file you captured. A failure sets a status and offers a
+                retry; the bytes on disk are untouched either way.
+              </p>
+            </article>
+            <article class="rule">
+              <span class="rule__tag">Rule two</span>
+              <h3>A bad read of the index can never overwrite it.</h3>
+              <p>
+                The index is rewritten whole on every change, so anything that
+                makes it wrong in memory makes it permanently wrong on disk. An
+                unreadable index therefore freezes every write for the session and
+                says so on screen — instead of quietly writing emptiness over your
+                history, which is exactly how history was lost once.
+              </p>
+            </article>
+          </div>
+        </div>
+      </section>
+
+      <section class="band" id="captures">
+        <div class="shell">
+          <p class="eyebrow eyebrow--dim">Five things go in the same queue</p>
+          <h2>What it captures</h2>
+          <p>
+            The pipeline above is identical for all of them. Only step 6 differs,
+            and only step 6 is allowed to fail.
+          </p>
+
+          <div class="types reveal">
+            <div class="type">
+              <span class="type__name">microphone</span>
+              <p class="type__what">
+                Recorded to AAC-LC, transcribed afterwards. Long captures are split
+                into five-minute parts first, because one model family answers a
+                too-long request with HTTP 200 and a silently truncated transcript.
+              </p>
+              <span class="type__where">every platform</span>
+            </div>
+            <div class="type">
+              <span class="type__name">text note</span>
+              <p class="type__what">
+                Typed straight into the queue, passed through with no network call
+                at all. It is still written and verified before it is indexed.
+              </p>
+              <span class="type__where">every platform</span>
+            </div>
+            <div class="type">
+              <span class="type__name">audio upload</span>
+              <p class="type__what">
+                Any file you already have, copied into the store under its own
+                extension. Nothing is re-encoded.
+              </p>
+              <span class="type__where">every platform</span>
+            </div>
+            <div class="type">
+              <span class="type__name">image</span>
+              <p class="type__what">
+                OCR, vision model first: with an enrichment profile configured the
+                image goes to that endpoint on every platform, phones included. With
+                no profile it falls back to system tesseract.
+              </p>
+              <span class="type__where">desktop fallback</span>
+            </div>
+            <div class="type">
+              <span class="type__name">video</span>
+              <p class="type__what">
+                The audio track is pulled out with ffmpeg and transcribed; a single
+                frame becomes the row's poster. The video itself is never modified.
+              </p>
+              <span class="type__where">desktop</span>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section class="band">
+        <div class="shell">
+          <p class="eyebrow eyebrow--dim">One row, read closely</p>
+          <h2>Then a second model files it</h2>
+          <p>
+            Once the text exists, an optional enrichment pass gives the capture a
+            title, a summary, a category and tags. It runs last, after the item is
+            already saved, and it is allowed to fail too.
+          </p>
+
+          <div class="rowdemo">
+            <div class="card reveal" aria-hidden="true">
+              <div class="card__tile">&#9679;</div>
+              <div class="card__body">
+                <div class="card__top">
+                  <span class="card__title">Sprint planning — migration postponed</span>
+                  <span class="card__acts">
+                    <span>&#9654;</span><span>&#9998;</span><span>&#10003;</span>
+                  </span>
+                </div>
+                <div class="pills">
+                  <span class="pill pill--category">meetingNote</span>
+                  <span class="pill pill--project">backend-api</span>
+                </div>
+                <p class="card__excerpt">
+                  We agreed to postpone the migration until the index durability
+                  work lands, and to split the router…
+                </p>
+                <div class="card__facts">file verified · 6.8 MB · persisted</div>
+              </div>
+            </div>
+
+            <ul class="notes reveal">
+              <li data-n="01">
+                <strong>The title is written, never guessed from a filename.</strong>
+                With no model configured it reads &ldquo;Recording · 14:32&rdquo; — because a
+                column of uuids cannot be scanned by eye at all.
+              </li>
+              <li data-n="02">
+                <strong>Category is a routing destination, not a topic.</strong>
+                Seven values, closed list, which is what keeps it small enough for a
+                small model to classify reliably. You can correct it by hand.
+              </li>
+              <li data-n="03">
+                <strong>Both pills are outlined, and that is deliberate.</strong>
+                They are labels. Only the pipeline status is ever filled, because it
+                is the only actual state in the row — and at rest it draws nothing,
+                so one failing row never competes with a wall of green.
+              </li>
+              <li data-n="04">
+                <strong>The size is a measurement, not an estimate.</strong>
+                It comes from the very check that proved the file was non-empty in
+                step 3. Captures saved before it was recorded omit the segment
+                rather than printing &ldquo;0 B&rdquo;.
+              </li>
+            </ul>
+          </div>
+        </div>
+      </section>
+
+      <section class="band">
+        <div class="shell">
+          <p class="eyebrow eyebrow--dim">Two ways out, and they are not the same</p>
+          <h2>Where a capture goes next</h2>
+          <p>
+            A route is a delivery: it happens once and it closes the item. A mirror
+            holds the same thought over time, because enrichment names it minutes
+            later and you may correct the transcript a week later.
+          </p>
+
+          <div class="dests">
+            <article class="dest reveal">
+              <h3>Hand it to the repository</h3>
+              <p>
+                One keypress appends the capture to <span class="mono">inbox.md</span>
+                in its project, then marks it done. A plain file was chosen over any
+                tracker API on purpose: no token, no network, nothing traded away —
+                and the coding agent that reads that repo next finds it there.
+              </p>
+              <pre><span class="c">## Sprint planning — migration postponed</span>
+
+<span class="c">*2026-08-05T14:32 · meetingNote · #backend*</span>
+
+&gt; Migration deferred until index durability
+&gt; lands; router split agreed.</pre>
+            </article>
+
+            <article class="dest reveal">
+              <h3>Mirror it into your vault</h3>
+              <p>
+                Point the app at an Obsidian vault or any synced folder and every
+                capture is also written there as markdown with real front matter. A
+                note is located by capture id, so a title arriving later updates the
+                file instead of creating a second one.
+              </p>
+              <pre><span class="k">title</span>: <span class="s">"Sprint planning — migration postponed"</span>
+<span class="k">category</span>: meetingNote
+<span class="k">tags</span>: [<span class="s">"backend"</span>, <span class="s">"migration"</span>]
+<span class="k">capture-id</span>: 3f2a1c4e-…-c81b
+<span class="k">capture-hash</span>: 8f14e45fceea167a…</pre>
+            </article>
+          </div>
+
+          <p class="ledger__caption">
+            That hash is the sha-256 of the note body. If it no longer matches, you
+            edited the note — so the mirror steps back and leaves it alone. The
+            claim lives in the file rather than in the app's index, which is what
+            lets a vault rebuilt after a reinstall still know which notes it owns.
+          </p>
+        </div>
+      </section>
+
+      <section class="band" id="start">
+        <div class="shell">
+          <p class="eyebrow eyebrow--dim">No account, no key, no server</p>
+          <h2>Run it</h2>
+
+          <div class="start">
+            <div class="reveal">
+              <pre><span class="c"># Flutter 3.x, Dart ≥ 3.10</span>
+git clone https://github.com/laugustyniak/augustyniak-capture
+<span class="k">cd</span> augustyniak-capture
+flutter pub get
+flutter run</pre>
+              <p style="margin-top: 1.2rem; font-size: 0.94rem; color: var(--muted)">
+                That is genuinely all of it. Recording, notes, uploads, storage,
+                search, projects, the vault and the hand-off all work with no API
+                key at all — only transcription, OCR and titling need an endpoint,
+                and you add that in the app rather than in a config file.
+              </p>
+            </div>
+
+            <div class="reveal">
+              <ul class="platforms">
+                <li><b>macOS</b><span>flutter build macos</span></li>
+                <li><b>Linux</b><span>flutter build linux</span></li>
+                <li><b>Windows</b><span>flutter build windows</span></li>
+                <li><b>Android</b><span>flutter build appbundle</span></li>
+                <li><b>iOS</b><span>flutter build ipa</span></li>
+              </ul>
+              <p style="margin-top: 1.2rem; font-size: 0.94rem; color: var(--muted)">
+                Global hotkeys, OCR fallback and video handling are desktop
+                features; on phones the recording length is capped instead of split,
+                and the cap is shown counting down while you record. The README
+                covers every prerequisite, including the two Android toolchain pins
+                that are not optional.
+              </p>
+            </div>
+          </div>
+        </div>
+      </section>
+    </main>
+
+    <footer class="footer">
+      <div class="shell footer__inner">
+        <span>Augustyniak Capture · built with Flutter · offline-first</span>
+        <nav class="footer__links">
+          <a href="https://github.com/laugustyniak/augustyniak-capture">Source</a>
+          <a href="https://github.com/laugustyniak/augustyniak-capture#-build--deploy">Build</a>
+          <a href="https://github.com/laugustyniak/augustyniak-capture/blob/main/CLAUDE.md">Engineering notes</a>
+          <a href="https://github.com/laugustyniak/augustyniak-capture/blob/main/LICENSE">Licence</a>
+        </nav>
+      </div>
+    </footer>
+
+    <script>
+      // Scroll reveal. Everything is visible without it — the class is only
+      // added, never removed — so a failed script or a blocked observer costs
+      // an animation, never content.
+      (function () {
+        var targets = document.querySelectorAll('.reveal');
+        if (!('IntersectionObserver' in window)) {
+          targets.forEach(function (el) {
+            el.classList.add('is-in');
+          });
+          return;
+        }
+        var io = new IntersectionObserver(
+          function (entries) {
+            entries.forEach(function (entry) {
+              if (entry.isIntersecting) {
+                entry.target.classList.add('is-in');
+                io.unobserve(entry.target);
+              }
+            });
+          },
+          { rootMargin: '0px 0px -12% 0px', threshold: 0.08 }
+        );
+        targets.forEach(function (el) {
+          io.observe(el);
+        });
+      })();
+    </script>
+  </body>
+</html>
