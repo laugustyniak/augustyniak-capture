@@ -10,6 +10,7 @@ import 'package:augustyniak_capture/features/enrichment/domain/enrichment_defaul
 import 'package:augustyniak_capture/features/enrichment/domain/enrichment_service.dart';
 import 'package:augustyniak_capture/features/processing/data/http_vision_ocr_service.dart';
 import 'package:augustyniak_capture/features/processing/data/ocr_service.dart';
+import 'package:augustyniak_capture/features/recordings/domain/note_vault.dart';
 import 'package:augustyniak_capture/features/transcription/data/transcription_service.dart';
 
 /// In-memory stand-in so controller tests need no path_provider bindings.
@@ -205,6 +206,63 @@ void main() {
       expect(
         AppSettings.fromJson(<String, dynamic>{'themeMode': 7}).themeMode,
         AppThemeMode.system,
+      );
+    });
+
+    test('vault settings survive a round-trip', () {
+      const AppSettings original = AppSettings(
+        vaultPath: '/Users/me/Vault',
+        vaultFolder: 'Inbox/Capture',
+        vaultCopySources: false,
+      );
+
+      final AppSettings restored = AppSettings.fromJson(original.toJson());
+
+      expect(restored.vaultPath, '/Users/me/Vault');
+      expect(restored.vaultFolder, 'Inbox/Capture');
+      expect(restored.vaultCopySources, isFalse);
+      expect(restored.mirrorsToVault, isTrue);
+    });
+
+    test('an install that mirrors nothing writes no vault keys', () {
+      const AppSettings fresh = AppSettings();
+
+      expect(fresh.mirrorsToVault, isFalse);
+      expect(fresh.toJson().containsKey('vaultPath'), isFalse);
+      expect(fresh.toJson().containsKey('vaultFolder'), isFalse);
+      // A settings.json written before the vault existed loads with the mirror
+      // off and the shipped subfolder, exactly like a fresh install.
+      final AppSettings legacy = AppSettings.fromJson(<String, dynamic>{
+        'profiles': <dynamic>[],
+      });
+      expect(legacy.vaultPath, isNull);
+      expect(legacy.vaultFolder, VaultDefaults.folder);
+      expect(legacy.vaultCopySources, isTrue);
+    });
+
+    test('a hand-edited vault path of the wrong type is ignored', () {
+      final AppSettings restored = AppSettings.fromJson(<String, dynamic>{
+        'vaultPath': 42,
+        'vaultFolder': <String>['nope'],
+        'vaultCopySources': 'yes',
+      });
+
+      expect(restored.vaultPath, isNull);
+      expect(restored.vaultFolder, VaultDefaults.folder);
+      expect(restored.vaultCopySources, isTrue);
+    });
+
+    test('clearing the vault path is a decision copyWith preserves', () {
+      const AppSettings mirroring = AppSettings(vaultPath: '/Users/me/Vault');
+
+      expect(
+        mirroring.copyWith(clearVaultPath: true).vaultPath,
+        isNull,
+      );
+      // An unrelated save carries it through, like every other field here.
+      expect(
+        mirroring.copyWith(audio: const AudioConfig(sampleRate: 44100)).vaultPath,
+        '/Users/me/Vault',
       );
     });
 

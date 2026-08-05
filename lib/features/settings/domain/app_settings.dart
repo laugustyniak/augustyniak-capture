@@ -1,4 +1,5 @@
 import '../../enrichment/domain/enrichment_defaults.dart';
+import '../../recordings/domain/note_vault.dart';
 import '../../shortcuts/domain/hotkey_binding.dart';
 import '../../shortcuts/domain/shortcut_action.dart';
 import 'app_theme_mode.dart';
@@ -18,6 +19,9 @@ class AppSettings {
     String? enrichmentInstructions,
     this.audio = AudioConfig.defaults,
     this.themeMode = AppThemeMode.system,
+    this.vaultPath,
+    this.vaultFolder = VaultDefaults.folder,
+    this.vaultCopySources = true,
     Map<ShortcutAction, HotkeyBinding>? shortcuts,
   }) : _enrichmentInstructions = enrichmentInstructions,
        _shortcuts = shortcuts;
@@ -63,6 +67,35 @@ class AppSettings {
   /// unlike `shortcuts` and `enrichmentInstructions` — see [AppThemeMode.system]
   /// for why this one needs no "never configured" state.
   final AppThemeMode themeMode;
+
+  /// A second location every capture is copied to as a markdown note — an
+  /// Obsidian vault, a synced folder, a notes repository.
+  ///
+  /// **Null or blank is the off switch**, deliberately rather than a separate
+  /// `mirrorEnabled` flag: two fields would allow the state "enabled, nowhere
+  /// to write", which can only ever be reported as an error the user did not
+  /// ask for. Unlike `enrichmentInstructions` there is no default worth
+  /// shipping — where somebody keeps their notes is not something this app can
+  /// guess — so the plain nullable field says everything the three-state dance
+  /// would.
+  final String? vaultPath;
+
+  /// Subfolder inside [vaultPath] that notes land in. Blank falls back to
+  /// [VaultDefaults.folder] at write time, so an emptied field cannot start
+  /// spraying files into the root of somebody's vault.
+  final String vaultFolder;
+
+  /// Whether the source artifact is copied into the vault beside its note.
+  ///
+  /// On means an audio capture is playable from the reader's application; off
+  /// keeps the vault text-only and leaves the media where it already lives.
+  /// Worth a switch rather than a constant because the two answers differ by
+  /// gigabytes on a vault that syncs.
+  final bool vaultCopySources;
+
+  /// Whether notes are mirrored anywhere at all — the question the Config tab
+  /// and the controller both ask, so neither re-derives it from a blank check.
+  bool get mirrorsToVault => (vaultPath ?? '').trim().isNotEmpty;
 
   /// Null means "never configured". Kept private and nullable rather than
   /// defaulted in the constructor because the default map reads
@@ -120,6 +153,10 @@ class AppSettings {
     bool resetEnrichmentInstructions = false,
     AudioConfig? audio,
     AppThemeMode? themeMode,
+    String? vaultPath,
+    bool clearVaultPath = false,
+    String? vaultFolder,
+    bool? vaultCopySources,
     Map<ShortcutAction, HotkeyBinding>? shortcuts,
     bool resetShortcuts = false,
   }) {
@@ -139,6 +176,9 @@ class AppSettings {
           : (enrichmentInstructions ?? _enrichmentInstructions),
       audio: audio ?? this.audio,
       themeMode: themeMode ?? this.themeMode,
+      vaultPath: clearVaultPath ? null : (vaultPath ?? this.vaultPath),
+      vaultFolder: vaultFolder ?? this.vaultFolder,
+      vaultCopySources: vaultCopySources ?? this.vaultCopySources,
       shortcuts: resetShortcuts ? null : (shortcuts ?? _shortcuts),
     );
   }
@@ -153,6 +193,14 @@ class AppSettings {
       'activeEnrichmentProfileId': activeEnrichmentProfileId,
       'audio': audio.toJson(),
       'themeMode': themeMode.name,
+      // Omitted while unset, so an install that mirrors nothing carries no key
+      // claiming it does. The two settings below only mean anything alongside
+      // it, so they travel with it rather than on their own.
+      if (vaultPath != null) ...<String, dynamic>{
+        'vaultPath': vaultPath,
+        'vaultFolder': vaultFolder,
+        'vaultCopySources': vaultCopySources,
+      },
       // Omitted while untouched, for the same reason as `shortcuts`: a later
       // build that improves the default should still reach every user who never
       // wrote their own.
@@ -214,6 +262,17 @@ class AppSettings {
       themeMode: AppThemeMode.fromName(
         json['themeMode'] is String ? json['themeMode'] as String : null,
       ),
+      // Type-checked like every field above rather than cast: a hand-edited
+      // settings.json must not be able to take the profiles down with it.
+      vaultPath: json['vaultPath'] is String
+          ? json['vaultPath'] as String
+          : null,
+      vaultFolder: json['vaultFolder'] is String
+          ? json['vaultFolder'] as String
+          : VaultDefaults.folder,
+      vaultCopySources: json['vaultCopySources'] is bool
+          ? json['vaultCopySources'] as bool
+          : true,
       shortcuts: shortcuts,
     );
   }

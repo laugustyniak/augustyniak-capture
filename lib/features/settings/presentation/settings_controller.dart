@@ -293,6 +293,45 @@ class SettingsController extends ChangeNotifier {
   Future<void> resetEnrichmentInstructions() =>
       _persist(_settings.copyWith(resetEnrichmentInstructions: true));
 
+  /// Where captures are mirrored as markdown, or null when nothing is.
+  String? get vaultPath => _settings.vaultPath;
+  String get vaultFolder => _settings.vaultFolder;
+  bool get vaultCopySources => _settings.vaultCopySources;
+  bool get mirrorsToVault => _settings.mirrorsToVault;
+
+  /// Point the mirror at a directory, or clear it with a blank value.
+  ///
+  /// The path is stored as typed, not validated here: the field stays
+  /// authoritative on every platform (the browse dialog is desktop-only), and a
+  /// directory can be unmounted and remounted between now and the next capture.
+  /// The vault itself names a missing directory when it tries to write, which is
+  /// the only moment the answer is actually knowable.
+  ///
+  /// Like `setEnrichmentInstructions` there is no service cache to invalidate:
+  /// the vault reads this through a callback on every mirror, so a change
+  /// applies to the very next note.
+  Future<void> setVaultPath(String? value) async {
+    final String trimmed = value?.trim() ?? '';
+    if (trimmed.isEmpty) {
+      if (_settings.vaultPath == null) return;
+      await _persist(_settings.copyWith(clearVaultPath: true));
+      return;
+    }
+    if (trimmed == _settings.vaultPath) return;
+    await _persist(_settings.copyWith(vaultPath: trimmed));
+  }
+
+  Future<void> setVaultFolder(String value) async {
+    final String trimmed = value.trim();
+    if (trimmed == _settings.vaultFolder) return;
+    await _persist(_settings.copyWith(vaultFolder: trimmed));
+  }
+
+  Future<void> setVaultCopySources(bool value) async {
+    if (value == _settings.vaultCopySources) return;
+    await _persist(_settings.copyWith(vaultCopySources: value));
+  }
+
   Future<void> updateAudio(AudioConfig audio) async {
     await _persist(_settings.copyWith(audio: audio));
   }

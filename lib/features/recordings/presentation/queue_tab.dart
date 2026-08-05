@@ -47,10 +47,16 @@ enum ReviewFilter { desk, handedOff, all }
 /// and the capture list. Owns only view state; every mutation goes through
 /// [RecordingsController].
 class QueueTab extends StatefulWidget {
-  const QueueTab({super.key, required this.controller, this.projects});
+  const QueueTab({
+    super.key,
+    required this.controller,
+    this.projects,
+    this.initialProjectId,
+  });
 
   final RecordingsController controller;
   final ProjectsController? projects;
+  final String? initialProjectId;
 
   @override
   State<QueueTab> createState() => _QueueTabState();
@@ -102,6 +108,22 @@ class _QueueTabState extends State<QueueTab> {
   /// rather than on each row so the shortcuts work before anything is selected,
   /// and so the row widgets stay free of key handling.
   final FocusNode listFocus = FocusNode(debugLabel: 'queue-shortcuts');
+
+  @override
+  void initState() {
+    super.initState();
+    projectFilterId = widget.initialProjectId;
+  }
+
+  @override
+  void didUpdateWidget(QueueTab oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (widget.initialProjectId != oldWidget.initialProjectId) {
+      setState(() {
+        projectFilterId = widget.initialProjectId;
+      });
+    }
+  }
 
   @override
   void dispose() {

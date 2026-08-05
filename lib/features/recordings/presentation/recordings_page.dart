@@ -36,6 +36,7 @@ import '../../transcription/data/audio_splitter.dart';
 import '../../transcription/data/chunked_transcription_service.dart';
 import '../../transcription/data/transcription_service.dart';
 import '../../transcription/domain/transcription_limits.dart';
+import '../data/markdown_note_vault.dart';
 import '../data/project_inbox_router.dart';
 import '../data/recordings_repository.dart';
 import '../data/system_clipboard_sink.dart';
@@ -98,6 +99,7 @@ class _RecordingsPageState extends State<RecordingsPage> {
 
   int navigationIndex = queueIndex;
   String? storagePath;
+  String? activeQueueProjectFilterId;
 
   /// Reported by the registrar so the Config tab can flag a combination the OS
   /// refused instead of leaving it silently dead.
@@ -154,6 +156,16 @@ class _RecordingsPageState extends State<RecordingsPage> {
       // reason the enrichment context does: a project can be created, renamed
       // or repointed long after this runs, and the destination must follow.
       captureRouter: ProjectInboxRouter(projectById: _projectById),
+      // The second copy of every capture, as markdown. Reads its directory
+      // through callbacks for the same reason the router reads its projects
+      // live: the user can point it somewhere else at any time, and the very
+      // next capture must follow without rebuilding anything.
+      noteVault: MarkdownNoteVault(
+        vaultPath: () => settings.vaultPath,
+        folder: () => settings.vaultFolder,
+        copySources: () => settings.vaultCopySources,
+        projectName: (String id) => _projectById(id)?.name,
+      ),
       ocrService: _buildOcrService(),
       videoAudioExtractor: _buildVideoAudioExtractor(),
       videoPosterExtractor: _buildVideoPosterExtractor(),
@@ -470,8 +482,18 @@ class _RecordingsPageState extends State<RecordingsPage> {
                                 QueueTab(
                                   controller: controller,
                                   projects: projects,
+                                  initialProjectId: activeQueueProjectFilterId,
                                 ),
-                                ProjectsTab(controller: projects),
+                                ProjectsTab(
+                                  controller: projects,
+                                  recordingsController: controller,
+                                  onNavigateToQueue: (String projectId) {
+                                    setState(() {
+                                      activeQueueProjectFilterId = projectId;
+                                      navigationIndex = queueIndex;
+                                    });
+                                  },
+                                ),
                                 ModelsTab(controller: settings),
                                 LogsTab(store: logs),
                                 ConfigTab(
@@ -490,6 +512,12 @@ class _RecordingsPageState extends State<RecordingsPage> {
                                   rejectedShortcuts: rejectedShortcuts,
                                   runWithHotkeysSuspended:
                                       _runWithHotkeysSuspended,
+                                  // The backfill: every capture taken before a
+                                  // vault was configured, copied across on
+                                  // demand. The queue is the recordings
+                                  // controller's, so the sweep has to be its
+                                  // call rather than the settings tab's.
+                                  onMirrorAll: controller.mirrorAll,
                                 ),
                               ],
                             ),

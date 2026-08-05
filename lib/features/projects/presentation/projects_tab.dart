@@ -1,8 +1,11 @@
 import 'package:flutter/material.dart';
 
 import '../../../app/ui_kit.dart';
+import '../../recordings/domain/recording.dart';
+import '../../recordings/presentation/recordings_controller.dart';
 import '../data/directory_picker.dart';
 import '../domain/project.dart';
+import 'project_captures_sheet.dart';
 import 'projects_controller.dart';
 
 /// Project registry and the explicit entry point for opening coding-agent
@@ -11,14 +14,19 @@ class ProjectsTab extends StatelessWidget {
   const ProjectsTab({
     super.key,
     required this.controller,
+    this.recordingsController,
     this.directoryPicker = const FilePickerDirectoryPicker(),
+    this.onNavigateToQueue,
   });
 
   final ProjectsController controller;
+  final RecordingsController? recordingsController;
 
   /// Fills the repository-path field from a native folder dialog. Injectable so
   /// the widget suite never reaches `file_picker`'s platform channel.
   final DirectoryPicker directoryPicker;
+
+  final ValueChanged<String>? onNavigateToQueue;
 
   @override
   Widget build(BuildContext context) {
@@ -56,18 +64,26 @@ class ProjectsTab extends StatelessWidget {
             )
           else
             ...projects.map(
-              (Project project) => Padding(
-                padding: const EdgeInsets.only(bottom: 11),
-                child: _ProjectCard(
-                  key: ValueKey<String>('project-${project.id}'),
-                  project: project,
-                  controller: controller,
-                  active: controller.activeProjectId == project.id,
-                  onSelect: () => _select(context, project),
-                  onEdit: () => _openEditor(context, project),
-                  onDelete: () => _confirmDelete(context, project),
-                ),
-              ),
+              (Project project) {
+                final int count = recordingsController?.recordings
+                        .where((Recording r) => r.projectId == project.id)
+                        .length ??
+                    0;
+                return Padding(
+                  padding: const EdgeInsets.only(bottom: 11),
+                  child: _ProjectCard(
+                    key: ValueKey<String>('project-${project.id}'),
+                    project: project,
+                    controller: controller,
+                    active: controller.activeProjectId == project.id,
+                    onSelect: () => _select(context, project),
+                    onEdit: () => _openEditor(context, project),
+                    onDelete: () => _confirmDelete(context, project),
+                    onViewCaptures: () => _openCaptures(context, project),
+                    capturesCount: count,
+                  ),
+                );
+              },
             ),
           const SizedBox(height: 16),
           FilledButton.icon(
@@ -88,6 +104,26 @@ class ProjectsTab extends StatelessWidget {
             ),
           ),
         ],
+      ),
+    );
+  }
+
+  Future<void> _openCaptures(BuildContext context, Project project) async {
+    if (recordingsController == null) return;
+    await showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Console.surface,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(22)),
+      ),
+      builder: (BuildContext context) => ConsolePaletteScope(
+        builder: (BuildContext context) => ProjectCapturesSheet(
+          project: project,
+          recordingsController: recordingsController!,
+          projectsController: controller,
+          onNavigateToQueue: onNavigateToQueue,
+        ),
       ),
     );
   }
@@ -171,6 +207,8 @@ class _ProjectCard extends StatelessWidget {
     required this.onSelect,
     required this.onEdit,
     required this.onDelete,
+    this.onViewCaptures,
+    this.capturesCount = 0,
   });
 
   final Project project;
@@ -179,6 +217,8 @@ class _ProjectCard extends StatelessWidget {
   final VoidCallback onSelect;
   final VoidCallback onEdit;
   final VoidCallback onDelete;
+  final VoidCallback? onViewCaptures;
+  final int capturesCount;
 
   @override
   Widget build(BuildContext context) {
@@ -187,70 +227,77 @@ class _ProjectCard extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: <Widget>[
-          Row(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: <Widget>[
-              Container(
-                width: 38,
-                height: 38,
-                decoration: BoxDecoration(
-                  color: Console.iconTile,
-                  borderRadius: BorderRadius.circular(10),
-                ),
-                child: Icon(
-                  Icons.account_tree_outlined,
-                  color: Console.accent,
-                  size: 20,
-                ),
-              ),
-              const SizedBox(width: 11),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: <Widget>[
-                    Row(
+          MouseRegion(
+            cursor: SystemMouseCursors.click,
+            child: GestureDetector(
+              behavior: HitTestBehavior.opaque,
+              onTap: onViewCaptures,
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: <Widget>[
+                  Container(
+                    width: 38,
+                    height: 38,
+                    decoration: BoxDecoration(
+                      color: Console.iconTile,
+                      borderRadius: BorderRadius.circular(10),
+                    ),
+                    child: Icon(
+                      Icons.account_tree_outlined,
+                      color: Console.accent,
+                      size: 20,
+                    ),
+                  ),
+                  const SizedBox(width: 11),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
                       children: <Widget>[
-                        Flexible(
-                          child: Text(
-                            project.name,
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                            style: ConsoleText.cardTitle,
-                          ),
+                        Row(
+                          children: <Widget>[
+                            Flexible(
+                              child: Text(
+                                project.name,
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: ConsoleText.cardTitle,
+                              ),
+                            ),
+                            if (active) ...<Widget>[
+                              const SizedBox(width: 8),
+                              StatusPill(label: 'ACTIVE', color: Console.accent),
+                            ],
+                          ],
                         ),
-                        if (active) ...<Widget>[
-                          const SizedBox(width: 8),
-                          StatusPill(label: 'ACTIVE', color: Console.accent),
-                        ],
+                        const SizedBox(height: 4),
+                        SelectableText(
+                          project.repoPath,
+                          maxLines: 2,
+                          style: ConsoleText.cardMeta,
+                        ),
                       ],
                     ),
-                    const SizedBox(height: 4),
-                    SelectableText(
-                      project.repoPath,
-                      maxLines: 2,
-                      style: ConsoleText.cardMeta,
-                    ),
-                  ],
-                ),
+                  ),
+                  PopupMenuButton<String>(
+                    tooltip: 'Project actions',
+                    color: Console.surfaceRaised,
+                    iconColor: Console.mutedSoft,
+                    onSelected: (String value) {
+                      if (value == 'edit') onEdit();
+                      if (value == 'delete') onDelete();
+                    },
+                    itemBuilder: (BuildContext context) =>
+                        const <PopupMenuEntry<String>>[
+                          PopupMenuItem<String>(value: 'edit', child: Text('Edit')),
+                          PopupMenuItem<String>(
+                            value: 'delete',
+                            child: Text('Delete'),
+                          ),
+                        ],
+                  ),
+                ],
               ),
-              PopupMenuButton<String>(
-                tooltip: 'Project actions',
-                color: Console.surfaceRaised,
-                iconColor: Console.mutedSoft,
-                onSelected: (String value) {
-                  if (value == 'edit') onEdit();
-                  if (value == 'delete') onDelete();
-                },
-                itemBuilder: (BuildContext context) =>
-                    const <PopupMenuEntry<String>>[
-                      PopupMenuItem<String>(value: 'edit', child: Text('Edit')),
-                      PopupMenuItem<String>(
-                        value: 'delete',
-                        child: Text('Delete'),
-                      ),
-                    ],
-              ),
-            ],
+            ),
           ),
           if (project.description != null &&
               project.description!.trim().isNotEmpty) ...<Widget>[
@@ -267,6 +314,19 @@ class _ProjectCard extends StatelessWidget {
                   onPressed: onSelect,
                   icon: const Icon(Icons.radio_button_unchecked, size: 16),
                   label: const Text('SET ACTIVE'),
+                ),
+              if (onViewCaptures != null)
+                OutlinedButton.icon(
+                  key: ValueKey<String>('project-captures-${project.id}'),
+                  onPressed: onViewCaptures,
+                  style: OutlinedButton.styleFrom(
+                    foregroundColor: Console.accent,
+                    side: BorderSide(
+                      color: Console.accent.withValues(alpha: .5),
+                    ),
+                  ),
+                  icon: const Icon(Icons.description_outlined, size: 16),
+                  label: Text('CAPTURES ($capturesCount)'),
                 ),
               ...AgentKind.values.map(
                 (AgentKind agent) => _AgentButton(
