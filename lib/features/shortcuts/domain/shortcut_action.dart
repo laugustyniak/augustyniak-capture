@@ -20,7 +20,15 @@ enum ShortcutAction {
   uploadImage,
 
   /// Open the file picker for a video upload.
-  uploadVideo;
+  uploadVideo,
+
+  /// Start a focus session, or pause the one running.
+  ///
+  /// The one action here that does not touch the capture pipeline — it pulls the
+  /// same lever the Timer tab's primary button pulls, for the same reason every
+  /// other value does: a shortcut must never become a second path into a
+  /// feature's state machine.
+  toggleTimer;
 
   /// Unknown names come from a `settings.json` written by a different build.
   /// Unlike `CaptureType.fromName` there is no sensible legacy value to fall
@@ -36,14 +44,22 @@ enum ShortcutAction {
     ShortcutAction.uploadAudio => 'Upload audio file',
     ShortcutAction.uploadImage => 'Upload image',
     ShortcutAction.uploadVideo => 'Upload video',
+    ShortcutAction.toggleTimer => 'Start/pause focus timer',
   };
 
   /// Whether the action opens UI (a sheet or a file dialog) and therefore needs
   /// the window raised *before* it runs.
   ///
-  /// [toggleRecording] is excluded because it is the one action that must not
-  /// pay for the window before capturing — not because it never shows the
-  /// window. The coordinator raises it *after* a successful start, so the user
-  /// sees the running timer, and leaves it alone on stop.
-  bool get needsWindow => this != ShortcutAction.toggleRecording;
+  /// [toggleRecording] and [toggleTimer] are excluded because neither may pay
+  /// for the window *before* it acts — not because they never show it. A record
+  /// hotkey that spends a window-manager round trip before opening the mic loses
+  /// the first word, and a focus session started from inside the editor should
+  /// not drag the app over the work it was started for. The coordinator raises
+  /// the window *after* a successful start for both, so the user sees that it
+  /// ran, and leaves it alone when they stop or pause — that half is deliberate
+  /// too: the state is already recorded, and pulling the window forward would
+  /// interrupt whatever they went back to.
+  bool get needsWindow =>
+      this != ShortcutAction.toggleRecording &&
+      this != ShortcutAction.toggleTimer;
 }

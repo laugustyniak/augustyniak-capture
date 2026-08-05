@@ -3,6 +3,7 @@ import 'package:flutter/foundation.dart';
 import '../../logs/domain/log_event.dart';
 import '../../recordings/domain/capture_type.dart';
 import '../../recordings/presentation/recordings_controller.dart';
+import '../../timer/presentation/focus_timer_controller.dart';
 import '../domain/hotkey_binding.dart';
 import '../domain/hotkey_registrar.dart';
 import '../domain/shortcut_action.dart';
@@ -19,13 +20,17 @@ class ShortcutsCoordinator {
   ShortcutsCoordinator({
     required RecordingsController recordings,
     required Future<void> Function() composeTextNote,
+    FocusTimerController? focusTimer,
     Future<void> Function()? revealQueue,
+    Future<void> Function()? revealTimer,
     HotkeyRegistrar registrar = const NoopHotkeyRegistrar(),
     WindowPresenter windowPresenter = const NoopWindowPresenter(),
     LogSink logSink = const NoopLogSink(),
   }) : _recordings = recordings,
        _composeTextNote = composeTextNote,
+       _focusTimer = focusTimer,
        _revealQueue = revealQueue,
+       _revealTimer = revealTimer,
        _registrar = registrar,
        _windowPresenter = windowPresenter,
        _logSink = logSink;
@@ -33,9 +38,18 @@ class ShortcutsCoordinator {
   final RecordingsController _recordings;
   final Future<void> Function() _composeTextNote;
 
+  /// Null in a host with no timer — every pure-Dart shortcut test, and any
+  /// build where the tab is absent. The action then does nothing rather than
+  /// throwing, on the same rule as a missing `revealQueue`.
+  final FocusTimerController? _focusTimer;
+
   /// Switches the shell to the Queue tab. Optional so the pure-Dart tests can
   /// build a coordinator without a navigation shell behind it.
   final Future<void> Function()? _revealQueue;
+
+  /// Switches the shell to the Timer tab, so a session started from a hotkey is
+  /// visible on the tab that owns it rather than behind whichever one was open.
+  final Future<void> Function()? _revealTimer;
   final HotkeyRegistrar _registrar;
   final WindowPresenter _windowPresenter;
   final LogSink _logSink;
@@ -193,6 +207,18 @@ class ShortcutsCoordinator {
           await _recordings.addUpload(CaptureType.image);
         case ShortcutAction.uploadVideo:
           await _recordings.addUpload(CaptureType.video);
+        case ShortcutAction.toggleTimer:
+          final FocusTimerController? timer = _focusTimer;
+          if (timer == null) break;
+          timer.toggle();
+          // Surfaced only when the press *started* something. A session that was
+          // just paused needs no window: pausing is a decision already taken,
+          // and raising the app over the work would undo the point of a global
+          // hotkey. Exactly the asymmetry `toggleRecording` uses above.
+          if (timer.isRunning) {
+            await _windowPresenter.present();
+            await _revealTimer?.call();
+          }
       }
     } catch (exception) {
       _logSink.log(
