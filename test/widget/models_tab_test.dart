@@ -194,8 +194,8 @@ void main() {
     expect(controller.settings.activeProfileId, transcriptionActive);
   });
 
-  // The enrichment profile is also the OCR engine, and with the tesseract
-  // fallback gone it is the *only* one. So the three vision-capable presets have
+  // The enrichment profile is also the only OCR engine. So the three
+  // vision-capable presets have
   // to be reachable in the sheet, not merely present in `ProviderPreset.all`:
   // the chips live in a horizontally scrolling ListView that builds only what is
   // on screen, so a fourth preset added ahead of them would push one out of

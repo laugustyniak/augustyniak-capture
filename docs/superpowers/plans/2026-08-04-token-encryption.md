@@ -379,7 +379,7 @@ abstract class MasterKeyStore {
 /// [ensureReady] loads or creates the key and never throws: any key-store
 /// failure (no keyring daemon, locked Secret Service, missing plugin in a
 /// test binding) leaves [encrypts] false and every transform an identity —
-/// the same clean degradation as a missing `tesseract` binary.
+/// the same clean degradation as an unavailable optional processor.
 class AesGcmTokenCipher extends TokenCipher {
   AesGcmTokenCipher({required MasterKeyStore keyStore}) : _keyStore = keyStore;
 

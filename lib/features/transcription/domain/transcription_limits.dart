@@ -27,9 +27,10 @@ class TranscriptionCeiling {
 ///   enrichment titles the capture from half a meeting. The other two ceilings
 ///   report themselves; this one is the reason a cap exists at all.
 ///
-/// Where the audio can be split before sending — desktop, via `AudioSplitter` —
-/// none of this binds and [forRequest] is simply not consulted. A recording is
-/// only capped where the whole file has to travel in one request.
+/// Where the audio can be split before sending — natively on Android/iOS and
+/// via `ffmpeg` on desktop — none of this binds and [forRequest] is simply not
+/// consulted. A recording is only capped where the whole file has to travel in
+/// one request.
 class TranscriptionLimits {
   const TranscriptionLimits._();
 

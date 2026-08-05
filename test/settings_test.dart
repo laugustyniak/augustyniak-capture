@@ -779,8 +779,8 @@ void main() {
       );
     });
 
-    // With `TesseractOcrService` gone, OCR has no local engine behind it on any
-    // platform: an image capture works only through a hosted vision endpoint.
+    // OCR has no local engine behind it on any platform: an image capture works
+    // only through a hosted vision endpoint.
     // These three are what the README offers as the ready-made way to get one,
     // so a preset that quietly stopped building a real service — a typo in the
     // endpoint is enough, since `toOcrService` degrades rather than throwing —

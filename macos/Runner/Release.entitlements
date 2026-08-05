@@ -3,8 +3,8 @@
 <plist version="1.0">
 <dict>
 	<!-- The App Sandbox is deliberately OFF, and that is load-bearing rather
-	     than an oversight. Three shipped features shell out to system binaries
-	     via `Process.run` — `tesseract` (OcrService), `ffmpeg` (video audio and
+	     than an oversight. Two shipped features shell out to system binaries
+	     via `Process.run` — `ffmpeg` (video audio and
 	     poster extraction) and `open` (SystemMediaOpener). A sandboxed process
 	     hands its sandbox down to every child it spawns, so those binaries
 	     could not read the recordings directory and `open` could not reach

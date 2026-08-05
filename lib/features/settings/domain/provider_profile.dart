@@ -233,10 +233,10 @@ class ProviderPreset {
       tokenHint: 'OpenAI API key (sk-…)',
     ),
     // Kept as its own preset, and not because it is older: whisper-1 is the
-    // only hosted model here with **no output-token ceiling**, so on mobile —
-    // where there is no ffmpeg to split with — it is the one that transcribes a
-    // 50-minute capture in full. `TranscriptionLimits` encodes that difference:
-    // it caps the LLM-based models at ~8 min and whisper-1 only at 25 MB.
+    // only hosted model here with **no output-token ceiling**. This still
+    // matters for an unsplit request and on any platform without a splitter;
+    // `TranscriptionLimits` caps the LLM-based models at ~8 min and whisper-1
+    // only at 25 MB.
     ProviderPreset(
       name: 'OpenAI Whisper',
       endpoint: 'https://api.openai.com/v1/audio/transcriptions',
