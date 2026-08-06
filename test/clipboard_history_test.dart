@@ -5,6 +5,7 @@ import 'package:augustyniak_capture/features/clipboard/domain/clipboard_item.dar
 import 'package:augustyniak_capture/features/clipboard/domain/clipboard_watcher_service.dart';
 import 'package:augustyniak_capture/features/clipboard/presentation/clipboard_history_sheet.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {
@@ -109,7 +110,7 @@ void main() {
           ),
         ),
       );
-      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 100));
 
       expect(find.text('SCHOWEK SYSTEMOWY'), findsOneWidget);
       expect(find.text('Schowek jest pusty'), findsOneWidget);
@@ -117,7 +118,7 @@ void main() {
       service.dispose();
     });
 
-    testWidgets('renders list with items and filters by search', (WidgetTester tester) async {
+    testWidgets('renders list with items and navigates with arrow keys and enter', (WidgetTester tester) async {
       final ClipboardRepository repository = ClipboardRepository();
       await repository.initialize();
       await repository.addItem(
@@ -148,13 +149,22 @@ void main() {
           ),
         ),
       );
-      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 100));
 
       expect(find.text('Apple Pie Recipe'), findsOneWidget);
       expect(find.text('Banana Smoothie'), findsOneWidget);
 
+      // Press Arrow Down to navigate selection
+      await tester.sendKeyEvent(LogicalKeyboardKey.arrowDown);
+      await tester.pump(const Duration(milliseconds: 100));
+
+      // Press Arrow Up to navigate back
+      await tester.sendKeyEvent(LogicalKeyboardKey.arrowUp);
+      await tester.pump(const Duration(milliseconds: 100));
+
+      // Filter text
       await tester.enterText(find.byType(TextField), 'Banana');
-      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 100));
 
       expect(find.text('Apple Pie Recipe'), findsNothing);
       expect(find.text('Banana Smoothie'), findsOneWidget);
