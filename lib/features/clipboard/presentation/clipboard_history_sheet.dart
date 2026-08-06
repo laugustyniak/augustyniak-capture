@@ -68,25 +68,10 @@ class _ClipboardHistorySheetState extends State<ClipboardHistorySheet> {
   void _selectAndCopy(BuildContext context, ClipboardItem item) async {
     await widget.watcherService.copyToClipboard(item);
     if (context.mounted) {
-      Navigator.of(context).pop();
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Row(
-            children: <Widget>[
-              Icon(Icons.check_circle_outline, color: Console.green, size: 20),
-              const SizedBox(width: 10),
-              const Text('Skopiowano do schowka'),
-            ],
-          ),
-          duration: const Duration(seconds: 2),
-          backgroundColor: Console.surface,
-          behavior: SnackBarBehavior.floating,
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(8),
-            side: BorderSide(color: Console.border),
-          ),
-        ),
-      );
+      if (Navigator.of(context).canPop()) {
+        Navigator.of(context).pop();
+      }
+      await widget.watcherService.pasteToActiveApp();
     }
   }
 

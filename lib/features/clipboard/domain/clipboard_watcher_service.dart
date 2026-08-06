@@ -147,6 +147,12 @@ class ClipboardWatcherService extends ChangeNotifier {
     }
   }
 
+  Future<void> pasteToActiveApp() async {
+    try {
+      const MethodChannel('ai.augustyniak.capture/clipboard').invokeMethod('autoPaste');
+    } catch (_) {}
+  }
+
   Future<void> toggleItemCollection(String id, String collectionName) async {
     await _repository.toggleItemCollection(id, collectionName);
     notifyListeners();

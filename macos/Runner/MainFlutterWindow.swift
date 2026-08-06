@@ -29,6 +29,9 @@ class MainFlutterWindow: NSWindow {
         } else {
           result(false)
         }
+      } else if call.method == "autoPaste" {
+        self.autoPaste()
+        result(true)
       } else {
         result(FlutterMethodNotImplemented)
       }
@@ -97,5 +100,23 @@ class MainFlutterWindow: NSWindow {
     pasteboard.clearContents()
     pasteboard.writeObjects([image])
     lastChangeCount = pasteboard.changeCount
+  }
+
+  private func autoPaste() {
+    NSApp.hide(nil)
+
+    DispatchQueue.main.asyncAfter(deadline: .now() + 0.12) {
+      let source = CGEventSource(stateID: .combinedSessionState)
+      let vKeyCode: CGKeyCode = 0x09 // Virtual keycode for 'v'
+
+      let keyDown = CGEvent(keyboardEventSource: source, virtualKey: vKeyCode, keyDown: true)
+      keyDown?.flags = .maskCommand
+
+      let keyUp = CGEvent(keyboardEventSource: source, virtualKey: vKeyCode, keyDown: false)
+      keyUp?.flags = .maskCommand
+
+      keyDown?.post(tap: .cghidEventTap)
+      keyUp?.post(tap: .cghidEventTap)
+    }
   }
 }
