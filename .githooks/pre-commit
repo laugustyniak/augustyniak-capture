@@ -1,0 +1,42 @@
+#!/usr/bin/env bash
+# Refuse to commit the user's own captured thinking.
+#
+# This repository is public, and the app writes the user's captures into the very
+# directory it is developed in: `.agent-tasks/<capture-id>.md` for every hand-off,
+# `inbox.md` for every route. Both are gitignored — but `git add -A` after a
+# `git add -f`, a tool that stages on the user's behalf, or an ignore rule added
+# after the file was already tracked all get past that.
+#
+# It has happened: a brief containing notes about a prospective client was
+# committed and pushed to a public repo, and clearing it needed a history
+# rewrite. Once pushed, `refs/pull/*` keeps the blob reachable even after that
+# rewrite, so the only reliable point to stop it is before the commit exists.
+#
+# Enable once per clone (same setting the pre-push hook uses):
+#   git config core.hooksPath .githooks
+# Deliberate override, if a file here ever genuinely belongs in the repo:
+#   git commit --no-verify
+set -euo pipefail
+
+# Paths that hold captured content rather than source. Anchored at the repo root,
+# matched against the staged path list.
+blocked_re='^(\.agent-tasks/|inbox\.md$)'
+
+staged=$(git diff --cached --name-only --diff-filter=ACMR | grep -E "$blocked_re" || true)
+
+if [ -n "$staged" ]; then
+  echo "pre-commit: refusing to commit captured content." >&2
+  echo >&2
+  echo "These files are the user's own captures — dictated notes, meeting" >&2
+  echo "records, client work — written here by the app itself. They are input" >&2
+  echo "to an agent, never source, and this repository is public:" >&2
+  echo >&2
+  printf '  %s\n' $staged >&2
+  echo >&2
+  echo "Unstage them:" >&2
+  printf '  git restore --staged %s\n' $staged >&2
+  echo >&2
+  echo "They are already in .gitignore; something staged them anyway." >&2
+  echo "If one truly belongs in the repo, commit with --no-verify." >&2
+  exit 1
+fi
