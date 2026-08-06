@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import '../../../app/ui_kit.dart';
+import '../../recordings/domain/capture_type.dart';
 import '../../recordings/presentation/recordings_controller.dart';
 import '../domain/clipboard_item.dart';
 import '../domain/clipboard_watcher_service.dart';
@@ -86,9 +87,36 @@ class _ClipboardHistorySheetState extends State<ClipboardHistorySheet> {
   }
 
   void _convertToCapture(BuildContext context, ClipboardItem item) async {
-    final String? text = item.text;
-    if (widget.recordingsController != null && text != null && text.trim().isNotEmpty) {
-      await widget.recordingsController!.addTextNote(text);
+    if (widget.recordingsController == null) return;
+
+    if (item.type == ClipboardItemType.image && item.imagePath != null) {
+      final File imageFile = File(item.imagePath!);
+      if (await imageFile.exists()) {
+        await widget.recordingsController!.addImportedFile(imageFile, CaptureType.image);
+        if (context.mounted) {
+          Navigator.of(context).pop();
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Row(
+                children: <Widget>[
+                  Icon(Icons.auto_awesome, color: Console.accent, size: 20),
+                  const SizedBox(width: 10),
+                  const Text('Obraz przekazano do analizy Vision LLM / OCR ✨'),
+                ],
+              ),
+              duration: const Duration(seconds: 2),
+              backgroundColor: Console.surface,
+              behavior: SnackBarBehavior.floating,
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(8),
+                side: BorderSide(color: Console.accent),
+              ),
+            ),
+          );
+        }
+      }
+    } else if (item.text != null && item.text!.trim().isNotEmpty) {
+      await widget.recordingsController!.addTextNote(item.text!);
       if (context.mounted) {
         Navigator.of(context).pop();
         ScaffoldMessenger.of(context).showSnackBar(
@@ -454,7 +482,8 @@ class _ClipboardHistorySheetState extends State<ClipboardHistorySheet> {
                                 timeLabel: _formatTime(item.copiedAt),
                                 isSelected: isSelected,
                                 onTap: () => _selectAndCopy(context, item),
-                                onConvertToCapture: widget.recordingsController != null && item.text != null
+                                onConvertToCapture: widget.recordingsController != null &&
+                                        (item.text != null || item.imagePath != null)
                                     ? () => _convertToCapture(context, item)
                                     : null,
                                 onAddCollection: () => _manageItemCollections(context, item),
@@ -598,15 +627,27 @@ class _ClipboardItemTile extends StatelessWidget {
                       ),
                       const SizedBox(height: 4),
                       if (isImage && item.imagePath != null) ...<Widget>[
+                        const SizedBox(height: 6),
                         ClipRRect(
-                          borderRadius: BorderRadius.circular(6),
-                          child: Image.file(
-                            File(item.imagePath!),
-                            height: 80,
-                            fit: BoxFit.cover,
-                            errorBuilder: (BuildContext context, Object error, StackTrace? stackTrace) => Text(
-                              '[Obraz nieodczytany]',
-                              style: TextStyle(color: Console.red, fontSize: 13),
+                          borderRadius: BorderRadius.circular(8),
+                          child: Container(
+                            constraints: const BoxConstraints(maxHeight: 120),
+                            decoration: BoxDecoration(
+                              border: Border.all(color: Console.border),
+                              borderRadius: BorderRadius.circular(8),
+                            ),
+                            child: Image.file(
+                              File(item.imagePath!),
+                              height: 110,
+                              fit: BoxFit.cover,
+                              alignment: Alignment.centerLeft,
+                              errorBuilder: (BuildContext context, Object error, StackTrace? stackTrace) => Padding(
+                                padding: const EdgeInsets.all(8.0),
+                                child: Text(
+                                  '[Nie można wczytać obrazu]',
+                                  style: TextStyle(color: Console.red, fontSize: 12),
+                                ),
+                              ),
                             ),
                           ),
                         ),

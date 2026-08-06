@@ -895,6 +895,42 @@ class RecordingsController extends ChangeNotifier {
     }
   }
 
+  /// Direct file import (e.g. from clipboard image or system drop).
+  Future<void> addImportedFile(File file, CaptureType type) async {
+    if (_isRecording || _isBusy) return;
+    _isBusy = true;
+    _error = null;
+    notifyListeners();
+
+    try {
+      final String id = const Uuid().v4();
+      final Recording imported = await _importer.importFile(
+        id: id,
+        type: type,
+        source: file,
+        mimeType: null,
+        createdAt: DateTime.now(),
+      );
+      final Recording saved = imported.copyWith(projectId: activeProjectId);
+
+      _recordings = <Recording>[saved, ..._recordings];
+      await _persistAll();
+      unawaited(_gamificationController?.onCaptureCreated(_recordings.length));
+      _logSink.log(
+        'File imported · ${type.name} · ${await File(saved.filePath).length()} B',
+        recordingId: saved.id,
+      );
+
+      await _enqueueProcessing(saved.id);
+    } catch (exception) {
+      _error = exception.toString();
+      _logSink.log('Failed to import file: $exception', level: LogLevel.error);
+    } finally {
+      _isBusy = false;
+      notifyListeners();
+    }
+  }
+
   /// Play the recording's audio, or stop it if it is already playing.
   /// Independent of the transcription pipeline and the `_isBusy` lock.
   Future<void> togglePlayback(String id) async {
