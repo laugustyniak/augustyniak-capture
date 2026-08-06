@@ -5,7 +5,6 @@ import android.content.Context
 import android.inputmethodservice.InputMethodService
 import android.graphics.Color
 import android.graphics.Typeface
-import android.os.Environment
 import android.view.Gravity
 import android.view.View
 import android.view.ViewGroup
@@ -21,6 +20,7 @@ import java.io.File
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
+import java.util.TimeZone
 import java.util.UUID
 
 class CaptureInputMethodService : InputMethodService(), ClipboardManager.OnPrimaryClipChangedListener {
@@ -130,8 +130,7 @@ class CaptureInputMethodService : InputMethodService(), ClipboardManager.OnPrima
     }
 
     private fun getStorageFile(): File {
-        val docsDir = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOCUMENTS)
-        val appDir = File(docsDir, "AugustyniakCapture")
+        val appDir = File(filesDir, "AugustyniakCapture")
         if (!appDir.exists()) {
             appDir.mkdirs()
         }
@@ -171,7 +170,10 @@ class CaptureInputMethodService : InputMethodService(), ClipboardManager.OnPrima
             val newObj = JSONObject().apply {
                 put("id", UUID.randomUUID().toString())
                 put("type", "text")
-                put("copiedAt", SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss.SSS'Z'", Locale.US).format(Date()))
+                val utcFormat = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss.SSS'Z'", Locale.US).apply {
+                    timeZone = TimeZone.getTimeZone("UTC")
+                }
+                put("copiedAt", utcFormat.format(Date()))
                 put("text", text)
                 put("preview", if (text.length > 120) text.substring(0, 120) + "..." else text)
             }
@@ -182,7 +184,12 @@ class CaptureInputMethodService : InputMethodService(), ClipboardManager.OnPrima
                 newArray.put(array.get(i))
             }
 
-            file.writeText(newArray.toString())
+            val temporary = File(file.parentFile, "${file.name}.tmp")
+            temporary.writeText(newArray.toString())
+            if (!temporary.renameTo(file)) {
+                file.writeText(newArray.toString())
+                temporary.delete()
+            }
         } catch (_: Exception) {}
     }
 }

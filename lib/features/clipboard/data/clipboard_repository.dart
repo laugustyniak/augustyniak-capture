@@ -75,6 +75,16 @@ class LocalJsonClipboardRepository implements ClipboardRepository {
         }
       }
     } catch (_) {
+      final File? unreadable = _dataFile;
+      if (unreadable != null && await unreadable.exists()) {
+        try {
+          await unreadable.copy(
+            '${unreadable.path}.corrupt-${DateTime.now().millisecondsSinceEpoch}',
+          );
+        } catch (_) {
+          // Loading still degrades to an empty history if even backup fails.
+        }
+      }
       _items = <ClipboardItem>[];
     }
     _initialized = true;

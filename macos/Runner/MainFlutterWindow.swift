@@ -20,6 +20,8 @@ class MainFlutterWindow: NSWindow {
       guard let self = self else { return }
       if call.method == "getClipboardImage" {
         result(self.getClipboardImage())
+      } else if call.method == "getClipboardHistoryDirectory" {
+        result(self.clipboardHistoryDirectory()?.path)
       } else if call.method == "copyImageToClipboard" {
         if let args = call.arguments as? [String: Any], let path = args["path"] as? String {
           self.copyImageToClipboard(path: path)
@@ -33,6 +35,20 @@ class MainFlutterWindow: NSWindow {
     }
 
     super.awakeFromNib()
+  }
+
+  private func clipboardHistoryDirectory() -> URL? {
+    guard let baseURL = FileManager.default.urls(
+      for: .applicationSupportDirectory,
+      in: .userDomainMask
+    ).first else { return nil }
+    let directory = baseURL.appendingPathComponent("AugustyniakCapture", isDirectory: true)
+    do {
+      try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+      return directory
+    } catch {
+      return nil
+    }
   }
 
   private func getClipboardImage() -> String? {

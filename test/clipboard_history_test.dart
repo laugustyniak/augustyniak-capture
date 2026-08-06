@@ -129,6 +129,21 @@ void main() {
         expect(await deleted.exists(), isFalse);
       },
     );
+
+    test('preserves an unreadable history before starting empty', () async {
+      final File index = File('${tempDir.path}/clipboard_history.json');
+      await index.writeAsString('{not-json');
+
+      await repository.initialize();
+
+      expect(repository.items, isEmpty);
+      expect(
+        tempDir.listSync().whereType<File>().where(
+          (File file) => file.path.contains('.corrupt-'),
+        ),
+        hasLength(1),
+      );
+    });
   });
 
   group('ClipboardWatcherService & Sheet Widget', () {
@@ -282,23 +297,26 @@ void main() {
       },
     );
 
-    test('still captures text when native image support is unavailable', () async {
-      final _MemoryClipboardRepository repository =
-          _MemoryClipboardRepository();
-      final _FakeClipboardGateway gateway = _FakeClipboardGateway(
-        text: 'Portable text',
-        imageReadError: MissingPluginException(),
-      );
-      final ClipboardWatcherService service = ClipboardWatcherService(
-        repository: repository,
-        gateway: gateway,
-      );
+    test(
+      'still captures text when native image support is unavailable',
+      () async {
+        final _MemoryClipboardRepository repository =
+            _MemoryClipboardRepository();
+        final _FakeClipboardGateway gateway = _FakeClipboardGateway(
+          text: 'Portable text',
+          imageReadError: MissingPluginException(),
+        );
+        final ClipboardWatcherService service = ClipboardWatcherService(
+          repository: repository,
+          gateway: gateway,
+        );
 
-      await service.checkNow();
+        await service.checkNow();
 
-      expect(repository.items.single.text, 'Portable text');
-      service.dispose();
-    });
+        expect(repository.items.single.text, 'Portable text');
+        service.dispose();
+      },
+    );
   });
 }
 

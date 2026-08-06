@@ -1,5 +1,9 @@
 import UIKit
 
+private final class ClipButton: UIButton {
+    var clipText = ""
+}
+
 class CaptureKeyboardViewController: UIInputViewController {
 
     private var stackView: UIStackView!
@@ -65,10 +69,12 @@ class CaptureKeyboardViewController: UIInputViewController {
 
         var clips: [String] = []
 
-        // Try App Group container first, fallback to Documents directory
-        let sharedContainer = FileManager.default.containerURL(forSecurityApplicationGroupIdentifier: "group.com.augustyniak.capture")
-        let fileURL = sharedContainer?.appendingPathComponent("clipboard_history.json") ??
-            FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first?.appendingPathComponent("AugustyniakCapture/clipboard_history.json")
+        let sharedContainer = FileManager.default.containerURL(
+            forSecurityApplicationGroupIdentifier: "group.ai.augustyniak.capture"
+        )
+        let fileURL = sharedContainer?
+            .appendingPathComponent("AugustyniakCapture", isDirectory: true)
+            .appendingPathComponent("clipboard_history.json")
 
         if let url = fileURL, let data = try? Data(contentsOf: url),
            let jsonArray = (try? JSONSerialization.jsonObject(with: data, options: [])) as? [[String: Any]] {
@@ -89,7 +95,8 @@ class CaptureKeyboardViewController: UIInputViewController {
         }
 
         for clipText in clips {
-            let button = UIButton(type: .system)
+            let button = ClipButton(type: .system)
+            button.clipText = clipText
             let preview = clipText.count > 30 ? String(clipText.prefix(30)) + "..." : clipText
             button.setTitle(preview, for: .normal)
             button.setTitleColor(.white, for: .normal)
@@ -98,12 +105,13 @@ class CaptureKeyboardViewController: UIInputViewController {
             button.contentEdgeInsets = UIEdgeInsets(top: 8, left: 14, bottom: 8, right: 14)
             button.layer.cornerRadius = 8
 
-            let action = UIAction { [weak self] _ in
-                self?.textDocumentProxy.insertText(clipText)
-            }
-            button.addAction(action, for: .touchUpInside)
+            button.addTarget(self, action: #selector(insertClip(_:)), for: .touchUpInside)
 
             clipsStackView.addArrangedSubview(button)
         }
+    }
+
+    @objc private func insertClip(_ sender: ClipButton) {
+        textDocumentProxy.insertText(sender.clipText)
     }
 }

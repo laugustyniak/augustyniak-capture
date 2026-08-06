@@ -145,15 +145,7 @@ class AppSettings {
   Map<ShortcutAction, HotkeyBinding> get shortcuts {
     final Map<ShortcutAction, HotkeyBinding>? stored = _shortcuts;
     if (stored == null) return ShortcutDefaults.bindings;
-    final Map<ShortcutAction, HotkeyBinding> merged =
-        Map<ShortcutAction, HotkeyBinding>.from(stored);
-    for (final MapEntry<ShortcutAction, HotkeyBinding> entry
-        in ShortcutDefaults.bindings.entries) {
-      if (!merged.containsKey(entry.key)) {
-        merged[entry.key] = entry.value;
-      }
-    }
-    return Map<ShortcutAction, HotkeyBinding>.unmodifiable(merged);
+    return Map<ShortcutAction, HotkeyBinding>.unmodifiable(stored);
   }
 
   /// False while the defaults are still in force, so the UI can disable its

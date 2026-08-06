@@ -29,6 +29,17 @@ class MainActivity : FlutterActivity() {
             flutterEngine.dartExecutor.binaryMessenger,
             MEDIA_CHANNEL,
         ).setMethodCallHandler(::handleMediaCall)
+        MethodChannel(
+            flutterEngine.dartExecutor.binaryMessenger,
+            CLIPBOARD_CHANNEL,
+        ).setMethodCallHandler { call, result ->
+            if (call.method == "getClipboardHistoryDirectory") {
+                val directory = File(filesDir, CLIPBOARD_DIRECTORY).apply { mkdirs() }
+                result.success(directory.path)
+            } else {
+                result.notImplemented()
+            }
+        }
     }
 
     override fun onDestroy() {
@@ -242,5 +253,7 @@ class MainActivity : FlutterActivity() {
 
     companion object {
         private const val MEDIA_CHANNEL = "ai.augustyniak.capture/media_processing"
+        private const val CLIPBOARD_CHANNEL = "ai.augustyniak.capture/clipboard"
+        private const val CLIPBOARD_DIRECTORY = "AugustyniakCapture"
     }
 }

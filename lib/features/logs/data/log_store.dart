@@ -130,19 +130,23 @@ class FileLogArchive implements LogArchive {
 
   @override
   Future<List<LogEvent>> load() async {
-    final File file = await _file();
-    if (!await file.exists()) return <LogEvent>[];
+    try {
+      final File file = await _file();
+      if (!await file.exists()) return <LogEvent>[];
 
-    final String raw = await file.readAsString();
-    if (raw.trim().isEmpty) return <LogEvent>[];
+      final String raw = await file.readAsString();
+      if (raw.trim().isEmpty) return <LogEvent>[];
 
-    final dynamic decoded = jsonDecode(raw);
-    if (decoded is! List<dynamic>) return <LogEvent>[];
+      final dynamic decoded = jsonDecode(raw);
+      if (decoded is! List<dynamic>) return <LogEvent>[];
 
-    return decoded
-        .whereType<Map<String, dynamic>>()
-        .map(LogEvent.fromJson)
-        .toList();
+      return decoded
+          .whereType<Map<String, dynamic>>()
+          .map(LogEvent.fromJson)
+          .toList();
+    } catch (_) {
+      return <LogEvent>[];
+    }
   }
 
   @override

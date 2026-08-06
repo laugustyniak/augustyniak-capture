@@ -51,9 +51,30 @@ jobs:
       - name: Test
         run: flutter test
 
-  # Slow gate, and the one that actually matters for the desktop-only features
-  # (global hotkeys, OCR, video): it is the only step that compiles the native
-  # plugin registrations. Analyze alone would never catch a broken one.
+      - name: Build Android
+        run: flutter build apk --debug
+
+  build-apple:
+    name: Build macOS + iOS
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      - run: flutter pub get
+
+      - name: Build macOS
+        run: flutter build macos --debug
+
+      - name: Build iOS simulator
+        run: flutter build ios --simulator --debug --no-codesign
+
+  # Windows-specific native gate for global hotkeys, OCR and media plugins.
+  # Analyze alone would never catch a broken native registration.
   build-windows:
     name: Build Windows
     runs-on: windows-latest
