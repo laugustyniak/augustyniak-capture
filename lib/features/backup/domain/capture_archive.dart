@@ -45,11 +45,11 @@ class RestoreSummary {
   /// [CaptureArchive.importFrom] for why the incoming copy never wins.
   final int alreadyPresent;
 
-  /// Rows in the archive that could not be parsed. Skipped individually, the
-  /// same per-row degradation `RecordingsRepository.loadAll` applies.
+  /// Rows that could not be parsed or safely paired with a source artifact.
+  /// Skipped individually, so one bad capture never costs the rest.
   final int unreadable;
 
-  /// Source artifacts and posters copied in.
+  /// Immutable source artifacts copied in. Derived posters are regenerated.
   final int filesRestored;
 }
 
@@ -84,10 +84,11 @@ abstract interface class CaptureArchive {
   /// restore that rewrote `recordings.json` from an archive is precisely the
   /// shape that once destroyed it. So:
   ///
-  /// * a row whose id is already present is left **exactly** as it is, and the
-  ///   incoming copy is discarded. The local one has been edited, enriched and
-  ///   routed since the archive was taken; the archived one is by definition
-  ///   older. Counting it as [RestoreSummary.alreadyPresent] says so.
+  /// * a row whose source hash exists in the pre-import local library is left
+  ///   **exactly** as it is, and the incoming copy is discarded. Legacy rows
+  ///   without a hash fall back to id. The local one may have been edited,
+  ///   enriched and routed since the archive was taken; the archived one is by
+  ///   definition older. Counting it as [RestoreSummary.alreadyPresent] says so.
   /// * a source file already on disk is never overwritten.
   /// * files are written **before** the rows that point at them. A row with no
   ///   file is a broken capture with nothing to recover; a file with no row is

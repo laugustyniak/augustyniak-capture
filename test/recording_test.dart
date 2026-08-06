@@ -55,6 +55,30 @@ void main() {
     expect(legacy.sizeBytes, 0);
   });
 
+  test('contentHash round-trips, and legacy rows leave it uncomputed', () {
+    const String hash =
+        '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef';
+    final Recording original = Recording(
+      id: 'hashed',
+      filePath: '/tmp/hashed.m4a',
+      createdAt: DateTime.utc(2026, 8, 6),
+      durationMs: 1200,
+      status: RecordingStatus.completed,
+      contentHash: hash,
+    );
+
+    expect(Recording.fromJson(original.toJson()).contentHash, hash);
+    expect(original.copyWith(title: 'edited').contentHash, hash);
+
+    final Map<String, dynamic> legacyJson = original.toJson()
+      ..remove('contentHash');
+    expect(Recording.fromJson(legacyJson).contentHash, isNull);
+
+    final Map<String, dynamic> malformedJson = original.toJson()
+      ..['contentHash'] = 'not-a-sha256';
+    expect(Recording.fromJson(malformedJson).contentHash, isNull);
+  });
+
   test('copyWith edits transcript and title, and clears the title', () {
     final Recording original = Recording(
       id: 'x',
@@ -164,9 +188,17 @@ void main() {
       'durationMs': 1000,
       'status': 'completed',
       'routes': <Object?>[
-        <String, dynamic>{'kind': 'telepathy', 'at': '2026-01-01T00:00:00.000', 'target': 'x'},
+        <String, dynamic>{
+          'kind': 'telepathy',
+          'at': '2026-01-01T00:00:00.000',
+          'target': 'x',
+        },
         <String, dynamic>{'kind': 'file', 'at': 'not-a-date', 'target': 'x'},
-        <String, dynamic>{'kind': 'file', 'at': '2026-01-02T00:00:00.000', 'target': 'inbox.md'},
+        <String, dynamic>{
+          'kind': 'file',
+          'at': '2026-01-02T00:00:00.000',
+          'target': 'inbox.md',
+        },
         'nonsense',
       ],
     });

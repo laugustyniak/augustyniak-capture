@@ -230,6 +230,7 @@ void main() {
 
       await controller.initialize();
       await controller.recoverOrphans();
+      await controller.waitForProcessing();
 
       final List<Recording> items = controller.recordings;
       expect(items, hasLength(2));
@@ -244,6 +245,11 @@ void main() {
       );
       expect(recovered.type, CaptureType.audioRecording);
       expect(recovered.transcript, isNull);
+      expect(
+        recovered.contentHash,
+        matches(RegExp(r'^[0-9a-f]{64}$')),
+        reason: 'a recovered source must remain deduplicable in an import',
+      );
 
       // The existing row keeps everything it had.
       final Recording untouched = items.firstWhere(

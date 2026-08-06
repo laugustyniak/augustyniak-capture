@@ -75,6 +75,7 @@ class ZipCaptureArchive implements CaptureArchive {
   static bool _isPayload(String name) =>
       !excludedFiles.contains(name) &&
       !isDiagnosticCopy(name) &&
+      !name.endsWith('.thumb.jpg') &&
       name != manifestName;
 
   @override
@@ -92,6 +93,13 @@ class ZipCaptureArchive implements CaptureArchive {
     members.sort((File a, File b) => a.path.compareTo(b.path));
 
     final int captures = await _countCaptures(directory);
+    final List<Map<String, Object>> manifestFiles = <Map<String, Object>>[];
+    for (final File member in members) {
+      manifestFiles.add(<String, Object>{
+        'name': p.basename(member.path),
+        'size': await member.length(),
+      });
+    }
 
     final ZipFileEncoder encoder = ZipFileEncoder();
     // Streamed to disk rather than built in memory: an archive is mostly audio,
@@ -105,6 +113,7 @@ class ZipCaptureArchive implements CaptureArchive {
             'format': formatVersion,
             'createdAt': DateTime.now().toIso8601String(),
             'captures': captures,
+            'files': manifestFiles,
           }),
         ),
       );
@@ -137,67 +146,143 @@ class ZipCaptureArchive implements CaptureArchive {
     } catch (exception) {
       throw ArchiveUnreadableException(source.path, '$exception');
     }
-    if (archive.findFile(manifestName) == null) {
-      throw ArchiveUnreadableException(
-        source.path,
-        'no $manifestName inside — this is not a capture archive',
-      );
-    }
+    _validateManifest(archive, source.path);
 
     final Directory directory = await _directoryProvider();
     if (!await directory.exists()) await directory.create(recursive: true);
+
+    final _RecordingImportPlan plan = await _planRecordings(archive, directory);
 
     // **Files before rows.** A row pointing at a file that is not there is a
     // capture with nothing behind it and no way back; a file with no row is an
     // orphan, and `recoverOrphans()` already walks those into the queue. The
     // order is chosen so a failure lands in the recoverable half.
-    int filesRestored = 0;
-    for (final ArchiveFile entry in archive) {
-      final String name = p.basename(entry.name);
-      if (!entry.isFile) continue;
-      if (!_isPayload(name)) continue;
-      if (indexFiles.contains(name) || journalFiles.contains(name)) continue;
-
-      final File target = File(p.join(directory.path, name));
-      // Never overwrite: the local copy is the one the queue is pointing at,
-      // and a source artifact is immutable once captured anyway.
-      if (await target.exists()) continue;
-      final List<int>? bytes = entry.readBytes();
-      if (bytes == null) continue;
-      await target.writeAsBytes(bytes, flush: true);
-      filesRestored++;
-    }
+    await _restoreSources(archive, directory, plan);
 
     for (final String name in journalFiles) {
       await _mergeJournal(archive, directory, name);
     }
     await _mergeProjects(archive);
-    return _mergeRecordings(archive, directory, filesRestored);
+    return _commitRecordings(plan);
   }
 
-  /// Rows the archive holds that the local index does not, with their paths
-  /// re-pointed at this install's recordings directory.
-  Future<RestoreSummary> _mergeRecordings(
+  /// Validate the whole archive contract before writing a byte into the app's
+  /// directory. File sizes make a truncated member distinguishable from a
+  /// valid empty library, while an explicit format refusal prevents a newer
+  /// archive from being half-understood by an older build.
+  void _validateManifest(Archive archive, String sourcePath) {
+    final ArchiveFile? entry = archive.findFile(manifestName);
+    if (entry == null) {
+      throw ArchiveUnreadableException(
+        sourcePath,
+        'no $manifestName inside — this is not a capture archive',
+      );
+    }
+
+    final dynamic decoded;
+    try {
+      decoded = jsonDecode(utf8.decode(entry.readBytes() ?? <int>[]));
+    } catch (exception) {
+      throw ArchiveUnreadableException(
+        manifestName,
+        'the manifest is not JSON: $exception',
+      );
+    }
+    if (decoded is! Map<String, dynamic>) {
+      throw const ArchiveUnreadableException(
+        manifestName,
+        'the manifest is not an object',
+      );
+    }
+    if (decoded['format'] != formatVersion) {
+      throw ArchiveUnreadableException(
+        manifestName,
+        'unsupported format ${decoded['format']} (this build reads $formatVersion)',
+      );
+    }
+    final Object? rawFiles = decoded['files'];
+    if (rawFiles is! List<dynamic>) {
+      throw const ArchiveUnreadableException(
+        manifestName,
+        'the manifest has no file inventory',
+      );
+    }
+
+    final Set<String> seen = <String>{};
+    for (final dynamic raw in rawFiles) {
+      if (raw is! Map<String, dynamic> ||
+          raw['name'] is! String ||
+          raw['size'] is! int) {
+        throw const ArchiveUnreadableException(
+          manifestName,
+          'the file inventory contains an unreadable row',
+        );
+      }
+      final String name = raw['name'] as String;
+      final int size = raw['size'] as int;
+      if (name.isEmpty ||
+          p.basename(name) != name ||
+          size < 0 ||
+          !seen.add(name)) {
+        throw ArchiveUnreadableException(
+          manifestName,
+          'invalid or duplicate file inventory entry: $name',
+        );
+      }
+      final ArchiveFile? member = archive.findFile(name);
+      if (member == null ||
+          !member.isFile ||
+          member.isSymbolicLink ||
+          member.size != size) {
+        throw ArchiveUnreadableException(
+          name,
+          'missing or truncated (expected $size bytes)',
+        );
+      }
+    }
+    for (final ArchiveFile member in archive) {
+      final String name = p.basename(member.name);
+      if (member.name != name || member.isSymbolicLink) {
+        throw ArchiveUnreadableException(
+          member.name,
+          'archive members must be flat regular files',
+        );
+      }
+      if (member.isFile && _isPayload(name) && !seen.contains(name)) {
+        throw ArchiveUnreadableException(
+          manifestName,
+          'archive member is missing from the file inventory: $name',
+        );
+      }
+    }
+  }
+
+  /// Decide which archived rows are additions before extracting their files.
+  /// Hashes are compared only with the library that existed before this import:
+  /// two deliberate duplicate captures inside one archive therefore remain two
+  /// rows, while importing either one onto a device that already has the bytes
+  /// skips it.
+  Future<_RecordingImportPlan> _planRecordings(
     Archive archive,
     Directory directory,
-    int filesRestored,
   ) async {
     final ArchiveFile? entry = archive.findFile('recordings.json');
+    final List<Recording> local = await _recordings.loadAll();
+    final _RecordingImportPlan plan = _RecordingImportPlan(local);
     if (entry == null) {
-      return RestoreSummary(
-        added: 0,
-        alreadyPresent: 0,
-        unreadable: 0,
-        filesRestored: filesRestored,
-      );
+      return plan;
     }
 
     // Throws IndexUnreadableException if the *local* index is broken, and that
     // is the right outcome: merging into an index we cannot read would write a
     // partial list over real history — the exact failure this app is hardened
     // against. Refusing to import is the recoverable answer.
-    final List<Recording> local = await _recordings.loadAll();
-    final Set<String> known = local.map((Recording item) => item.id).toSet();
+    final Set<String> localIds = local.map((Recording item) => item.id).toSet();
+    final Set<String> localHashes = local
+        .map((Recording item) => item.contentHash)
+        .whereType<String>()
+        .toSet();
+    final Set<String> acceptedIds = <String>{};
 
     final dynamic decoded;
     try {
@@ -215,10 +300,6 @@ class ZipCaptureArchive implements CaptureArchive {
       );
     }
 
-    int added = 0;
-    int alreadyPresent = 0;
-    int unreadable = 0;
-    final List<Recording> merged = List<Recording>.from(local);
     for (final dynamic row in decoded) {
       final Recording incoming;
       try {
@@ -226,32 +307,98 @@ class ZipCaptureArchive implements CaptureArchive {
       } catch (_) {
         // Per-row degradation, the same rule `loadAll` applies: one bad row
         // must not cost the rest of the archive.
-        unreadable++;
+        plan.unreadable++;
         continue;
       }
-      if (known.contains(incoming.id)) {
+      final bool sameLocalBytes =
+          incoming.contentHash != null &&
+          localHashes.contains(incoming.contentHash);
+      if (localIds.contains(incoming.id) || sameLocalBytes) {
         // The local copy has been edited, enriched and possibly routed since
         // the archive was taken. The archived one is older by definition, so
         // it never wins — a restore must not be able to undo work.
-        alreadyPresent++;
+        plan.alreadyPresent++;
         continue;
       }
-      merged.add(_relocate(incoming, directory));
-      known.add(incoming.id);
-      added++;
+      if (!acceptedIds.add(incoming.id)) {
+        plan.unreadable++;
+        continue;
+      }
+      final String sourceName = p.basename(incoming.filePath);
+      final ArchiveFile? source = archive.findFile(sourceName);
+      final bool conventionalName =
+          p.basenameWithoutExtension(sourceName) == incoming.id &&
+          _isPayload(sourceName) &&
+          !indexFiles.contains(sourceName) &&
+          !journalFiles.contains(sourceName);
+      if (!conventionalName ||
+          source == null ||
+          !source.isFile ||
+          source.isSymbolicLink ||
+          source.size <= 0) {
+        plan.unreadable++;
+        continue;
+      }
+      plan.additions.add(_relocate(incoming, directory));
     }
+    return plan;
+  }
 
-    if (added > 0) {
-      merged.sort(
-        (Recording a, Recording b) => b.createdAt.compareTo(a.createdAt),
-      );
+  /// Extract only sources whose rows survived the deduplication plan. Writing
+  /// through a temporary file prevents a failed unzip from leaving a partial
+  /// source under the final capture name.
+  Future<void> _restoreSources(
+    Archive archive,
+    Directory directory,
+    _RecordingImportPlan plan,
+  ) async {
+    final List<Recording> restored = <Recording>[];
+    for (final Recording item in plan.additions) {
+      final String name = p.basename(item.filePath);
+      final ArchiveFile entry = archive.findFile(name)!;
+      final File target = File(p.join(directory.path, name));
+      if (await target.exists()) {
+        // A source without an index row is recoverable and may be valuable.
+        // Never overwrite it or point an imported row at unknown bytes.
+        plan.unreadable++;
+        continue;
+      }
+      final File temporary = File('${target.path}.importing');
+      final OutputFileStream output = OutputFileStream(temporary.path);
+      try {
+        entry.writeContent(output);
+      } finally {
+        output.closeSync();
+      }
+      if (!await temporary.exists() || await temporary.length() != entry.size) {
+        if (await temporary.exists()) await temporary.delete();
+        throw ArchiveUnreadableException(
+          name,
+          'extracted size did not match ${entry.size} bytes',
+        );
+      }
+      await temporary.rename(target.path);
+      restored.add(item);
+      plan.filesRestored++;
+    }
+    plan.additions
+      ..clear()
+      ..addAll(restored);
+  }
+
+  Future<RestoreSummary> _commitRecordings(_RecordingImportPlan plan) async {
+    if (plan.additions.isNotEmpty) {
+      final List<Recording> merged = <Recording>[
+        ...plan.local,
+        ...plan.additions,
+      ]..sort((Recording a, Recording b) => b.createdAt.compareTo(a.createdAt));
       await _recordings.saveAll(merged);
     }
     return RestoreSummary(
-      added: added,
-      alreadyPresent: alreadyPresent,
-      unreadable: unreadable,
-      filesRestored: filesRestored,
+      added: plan.additions.length,
+      alreadyPresent: plan.alreadyPresent,
+      unreadable: plan.unreadable,
+      filesRestored: plan.filesRestored,
     );
   }
 
@@ -273,12 +420,13 @@ class ZipCaptureArchive implements CaptureArchive {
       durationMs: recording.durationMs,
       status: recording.status,
       sizeBytes: recording.sizeBytes,
+      contentHash: recording.contentHash,
       type: recording.type,
       sourceMimeType: recording.sourceMimeType,
       transcript: recording.transcript,
-      thumbPath: recording.thumbPath == null
-          ? null
-          : p.join(directory.path, p.basename(recording.thumbPath!)),
+      // Posters are derived and intentionally excluded from the archive; the
+      // normal startup backfill recreates one for restored videos.
+      thumbPath: null,
       title: recording.title,
       category: recording.category,
       summary: recording.summary,
@@ -385,4 +533,14 @@ class ZipCaptureArchive implements CaptureArchive {
       return 0;
     }
   }
+}
+
+class _RecordingImportPlan {
+  _RecordingImportPlan(this.local);
+
+  final List<Recording> local;
+  final List<Recording> additions = <Recording>[];
+  int alreadyPresent = 0;
+  int unreadable = 0;
+  int filesRestored = 0;
 }

@@ -29,6 +29,8 @@ dependencies:
   # QR Code generation on desktop and scanning on mobile
   qr_flutter: ^4.1.0
   mobile_scanner: ^7.4.0
+  # Streaming SHA-256 fingerprints for cross-device/archive deduplication.
+  crypto: ^3.0.6
   # Zip reader/writer for the portable capture archive
   archive: ^4.0.9
 
