@@ -483,6 +483,10 @@ class _QueueTabState extends State<QueueTab> {
     final String query = searchQuery.trim().toLowerCase();
     return recordings.where((Recording item) {
       if (item.id == editingId) return true;
+      // Keep an optimistically updated row visible until its disk write
+      // settles, otherwise the default Desk filter removes the very spinner
+      // that tells the user the Done action is still in progress.
+      if (markingDoneIds.contains(item.id)) return true;
       if (!_matchesReview(reviewFilter, item)) return false;
       if (!_matches(selectedFilter, item)) return false;
       if (effectiveProjectFilterId != null &&

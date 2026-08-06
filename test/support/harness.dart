@@ -30,14 +30,22 @@ import 'package:augustyniak_capture/features/transcription/data/transcription_se
 /// Keeps the index in memory and puts source files in a temp dir — no
 /// path_provider, no real `recordings.json`.
 class FakeRecordingsRepository extends RecordingsRepository {
-  FakeRecordingsRepository(this.directory, {this.seed = const <Recording>[]});
+  FakeRecordingsRepository(
+    this.directory, {
+    this.seed = const <Recording>[],
+    this.saveGate,
+    this.saveError,
+  });
 
   final Directory directory;
 
   /// What `initialize()` will load. Seeding through the repository keeps the
   /// production controller free of a test-only mutation hook.
   final List<Recording> seed;
+  final Future<void>? saveGate;
+  final Object? saveError;
   List<Recording> saved = <Recording>[];
+  int saveCalls = 0;
 
   @override
   Future<File> createSourceFile(String id, String extension) async =>
@@ -48,6 +56,9 @@ class FakeRecordingsRepository extends RecordingsRepository {
 
   @override
   Future<void> saveAll(List<Recording> recordings) async {
+    saveCalls++;
+    if (saveGate != null) await saveGate;
+    if (saveError != null) throw saveError!;
     saved = List<Recording>.from(recordings);
   }
 }
@@ -104,9 +115,10 @@ Future<RecordingsController> buildRecordingsController(
   MediaOpener mediaOpener = const NoopMediaOpener(),
   CaptureRouter captureRouter = const DisabledCaptureRouter(),
   AgentHandoff agentHandoff = const DisabledAgentHandoff(),
+  FakeRecordingsRepository? repository,
 }) async {
   final RecordingsController controller = RecordingsController(
-    repository: FakeRecordingsRepository(appDir, seed: seed),
+    repository: repository ?? FakeRecordingsRepository(appDir, seed: seed),
     transcriptionService: service,
     mediaPicker: FakePicker(picked),
     mediaOpener: mediaOpener,

@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
@@ -683,6 +684,63 @@ void main() {
     await tester.tap(find.text('OFF DESK 1'));
     await tester.pumpAndSettle();
     expect(find.byIcon(Icons.check_circle_rounded), findsOneWidget);
+  });
+
+  testWidgets('Done shows a busy state and ignores a second tap while saving', (
+    WidgetTester tester,
+  ) async {
+    final Completer<void> saveGate = Completer<void>();
+    final FakeRecordingsRepository repository = FakeRecordingsRepository(
+      appDir,
+      seed: <Recording>[makeRecording(id: 'x')],
+      saveGate: saveGate.future,
+    );
+    final RecordingsController controller = await buildRecordingsController(
+      appDir,
+      repository: repository,
+    );
+    await pumpQueue(tester, controller);
+
+    final Finder doneControl = find.bySemanticsLabel('Mark as done');
+    final Offset doneButton = tester.getCenter(doneControl);
+    await tester.tap(doneControl);
+    await tester.pump(const Duration(milliseconds: 100));
+    expect(repository.saveCalls, 1);
+    expect(find.byKey(const ValueKey<String>('marking-done')), findsOneWidget);
+    expect(find.text('MOVING TO DONE…'), findsOneWidget);
+
+    await tester.tapAt(doneButton);
+    await tester.pump();
+    expect(repository.saveCalls, 1);
+
+    saveGate.complete();
+    await tester.pump();
+    await settleIo(tester);
+    expect(find.text('MOVED TO DONE'), findsOneWidget);
+  });
+
+  testWidgets('a failed Done write rolls back and offers a retry', (
+    WidgetTester tester,
+  ) async {
+    final FakeRecordingsRepository repository = FakeRecordingsRepository(
+      appDir,
+      seed: <Recording>[makeRecording(id: 'x')],
+      saveError: FileSystemException('disk full'),
+    );
+    final RecordingsController controller = await buildRecordingsController(
+      appDir,
+      repository: repository,
+    );
+    await pumpQueue(tester, controller);
+
+    await tester.tap(find.byIcon(Icons.radio_button_unchecked_rounded));
+    await tester.pump();
+    await settleIo(tester);
+
+    expect(controller.recordings.single.isProcessedByUser, isFalse);
+    expect(find.text('COULD NOT MOVE · TRY AGAIN'), findsOneWidget);
+    expect(find.byIcon(Icons.radio_button_unchecked_rounded), findsOneWidget);
+    expect(tester.takeException(), isNull);
   });
 
   testWidgets('the reviewed strip counts reviewed against the whole queue', (

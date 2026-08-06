@@ -7,6 +7,9 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 
 import '../../../app/ui_kit.dart';
+import '../../clipboard/domain/clipboard_watcher_service.dart';
+import '../../clipboard/presentation/clipboard_history_sheet.dart';
+import '../../clipboard/presentation/clipboard_tab.dart';
 import '../../enrichment/data/composed_enrichment_context_source.dart';
 import '../../logs/data/log_store.dart';
 import '../../logs/presentation/logs_tab.dart';
@@ -45,8 +48,6 @@ import '../../transcription/domain/transcription_limits.dart';
 import '../../gamification/presentation/celebration_overlay.dart';
 import '../../gamification/presentation/gamification_controller.dart';
 import '../../clipboard/data/clipboard_repository.dart';
-import '../../clipboard/domain/clipboard_watcher_service.dart';
-import '../../clipboard/presentation/clipboard_history_sheet.dart';
 import '../data/markdown_note_vault.dart';
 import '../data/project_agent_handoff.dart';
 import '../data/project_inbox_router.dart';
@@ -88,7 +89,7 @@ class _RecordingsPageState extends State<RecordingsPage> {
   // the navigation itself.
   static const int queueIndex = 0;
   static const int timerIndex = 1;
-  static const int modelsIndex = 3;
+  static const int modelsIndex = 4;
 
   static const List<({IconData icon, String label, String shortLabel})>
   destinations = <({IconData icon, String label, String shortLabel})>[
@@ -101,6 +102,7 @@ class _RecordingsPageState extends State<RecordingsPage> {
     // you *do*, on the same footing as capturing, not something you set up once.
     (icon: Icons.timer_outlined, label: 'TIMER', shortLabel: 'TIMER'),
     (icon: Icons.account_tree_outlined, label: 'PROJECTS', shortLabel: 'PROJ'),
+    (icon: Icons.content_paste_rounded, label: 'CLIPBOARD', shortLabel: 'CLIP'),
     (icon: Icons.memory_rounded, label: 'MODELS', shortLabel: 'MODELS'),
     (icon: Icons.chevron_right_rounded, label: 'LOGS', shortLabel: 'LOGS'),
     (icon: Icons.tune_rounded, label: 'CONFIG', shortLabel: 'CONFIG'),
@@ -241,7 +243,7 @@ class _RecordingsPageState extends State<RecordingsPage> {
       logSink: logs,
     );
     clipboardWatcher = ClipboardWatcherService(
-      repository: ClipboardRepository(),
+      repository: LocalJsonClipboardRepository(),
     );
     shortcuts = ShortcutsCoordinator(
       recordings: controller,
@@ -600,6 +602,10 @@ class _RecordingsPageState extends State<RecordingsPage> {
                                       });
                                     },
                                   ),
+                                  ClipboardTab(
+                                    watcherService: clipboardWatcher,
+                                    recordingsController: controller,
+                                  ),
                                   ModelsTab(controller: settings),
                                   LogsTab(store: logs),
                                   ConfigTab(
@@ -723,7 +729,11 @@ class _RecordingsPageState extends State<RecordingsPage> {
             label: _titleCase(destinations[index].label),
             // Only the Queue gets a count. A destination showing a bare `0`
             // reads as broken; one with no count reads as a plain link.
-            count: index == queueIndex ? total : null,
+            count: index == queueIndex
+                ? total
+                : index == 3
+                    ? clipboardWatcher.items.length
+                    : null,
             warn: index == modelsIndex && settings.activeProfile == null,
           ),
       ],

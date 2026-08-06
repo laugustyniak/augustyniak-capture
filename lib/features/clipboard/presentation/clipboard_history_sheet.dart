@@ -13,10 +13,14 @@ class ClipboardHistorySheet extends StatefulWidget {
     super.key,
     required this.watcherService,
     this.recordingsController,
+    this.onConvertText,
+    this.onConvertImage,
   });
 
   final ClipboardWatcherService watcherService;
   final RecordingsController? recordingsController;
+  final Future<void> Function(String text)? onConvertText;
+  final Future<void> Function(File image)? onConvertImage;
 
   @override
   State<ClipboardHistorySheet> createState() => _ClipboardHistorySheetState();
@@ -87,12 +91,23 @@ class _ClipboardHistorySheetState extends State<ClipboardHistorySheet> {
   }
 
   void _convertToCapture(BuildContext context, ClipboardItem item) async {
-    if (widget.recordingsController == null) return;
+    final bool canConvertText =
+        widget.onConvertText != null || widget.recordingsController != null;
+    final bool canConvertImage =
+        widget.onConvertImage != null || widget.recordingsController != null;
 
     if (item.type == ClipboardItemType.image && item.imagePath != null) {
+      if (!canConvertImage) return;
       final File imageFile = File(item.imagePath!);
       if (await imageFile.exists()) {
-        await widget.recordingsController!.addImportedFile(imageFile, CaptureType.image);
+        if (widget.onConvertImage != null) {
+          await widget.onConvertImage!(imageFile);
+        } else {
+          await widget.recordingsController!.addImportedFile(
+            imageFile,
+            CaptureType.image,
+          );
+        }
         if (context.mounted) {
           Navigator.of(context).pop();
           ScaffoldMessenger.of(context).showSnackBar(
@@ -116,7 +131,12 @@ class _ClipboardHistorySheetState extends State<ClipboardHistorySheet> {
         }
       }
     } else if (item.text != null && item.text!.trim().isNotEmpty) {
-      await widget.recordingsController!.addTextNote(item.text!);
+      if (!canConvertText) return;
+      if (widget.onConvertText != null) {
+        await widget.onConvertText!(item.text!);
+      } else {
+        await widget.recordingsController!.addTextNote(item.text!);
+      }
       if (context.mounted) {
         Navigator.of(context).pop();
         ScaffoldMessenger.of(context).showSnackBar(
@@ -170,7 +190,9 @@ class _ClipboardHistorySheetState extends State<ClipboardHistorySheet> {
       }
     } else if (event.logicalKey == LogicalKeyboardKey.enter ||
         event.logicalKey == LogicalKeyboardKey.numpadEnter) {
-      if (items.isNotEmpty && _selectedIndex >= 0 && _selectedIndex < items.length) {
+      if (items.isNotEmpty &&
+          _selectedIndex >= 0 &&
+          _selectedIndex < items.length) {
         _selectAndCopy(context, items[_selectedIndex]);
       }
     }
@@ -185,7 +207,11 @@ class _ClipboardHistorySheetState extends State<ClipboardHistorySheet> {
           backgroundColor: Console.surface,
           title: Text(
             'NOWA KOLEKCJA',
-            style: TextStyle(fontFamily: ConsoleFont.display, fontSize: 16, color: Console.text),
+            style: TextStyle(
+              fontFamily: ConsoleFont.display,
+              fontSize: 16,
+              color: Console.text,
+            ),
           ),
           content: TextField(
             controller: nameController,
@@ -225,9 +251,19 @@ class _ClipboardHistorySheetState extends State<ClipboardHistorySheet> {
     }
   }
 
-  Future<void> _manageItemCollections(BuildContext context, ClipboardItem item) async {
-    final Set<String> existingCollections = widget.watcherService.allCollections;
-    final Set<String> defaultSuggestions = {'Ulubione', 'Kod', 'Prompty', 'Ważne', ...existingCollections};
+  Future<void> _manageItemCollections(
+    BuildContext context,
+    ClipboardItem item,
+  ) async {
+    final Set<String> existingCollections =
+        widget.watcherService.allCollections;
+    final Set<String> defaultSuggestions = {
+      'Ulubione',
+      'Kod',
+      'Prompty',
+      'Ważne',
+      ...existingCollections,
+    };
 
     await showModalBottomSheet<void>(
       context: context,
@@ -235,10 +271,8 @@ class _ClipboardHistorySheetState extends State<ClipboardHistorySheet> {
         builder: (BuildContext context) => ListenableBuilder(
           listenable: widget.watcherService,
           builder: (BuildContext context, Widget? child) {
-            final ClipboardItem liveItem = widget.watcherService.items.firstWhere(
-              (e) => e.id == item.id,
-              orElse: () => item,
-            );
+            final ClipboardItem liveItem = widget.watcherService.items
+                .firstWhere((e) => e.id == item.id, orElse: () => item);
 
             return Container(
               padding: const EdgeInsets.all(20),
@@ -249,7 +283,11 @@ class _ClipboardHistorySheetState extends State<ClipboardHistorySheet> {
                 children: <Widget>[
                   Text(
                     'DODAJ DO KOLEKCJI',
-                    style: TextStyle(fontFamily: ConsoleFont.display, fontSize: 15, color: Console.text),
+                    style: TextStyle(
+                      fontFamily: ConsoleFont.display,
+                      fontSize: 15,
+                      color: Console.text,
+                    ),
                   ),
                   const SizedBox(height: 12),
                   Wrap(
@@ -261,13 +299,18 @@ class _ClipboardHistorySheetState extends State<ClipboardHistorySheet> {
                           selected: liveItem.collections.contains(collection),
                           label: Text(collection),
                           labelStyle: TextStyle(
-                            color: liveItem.collections.contains(collection) ? Console.accent : Console.text,
+                            color: liveItem.collections.contains(collection)
+                                ? Console.accent
+                                : Console.text,
                             fontSize: 13,
                           ),
                           selectedColor: Console.accent.withValues(alpha: .2),
                           backgroundColor: Console.surfaceRaised,
                           onSelected: (_) async {
-                            await widget.watcherService.toggleItemCollection(liveItem.id, collection);
+                            await widget.watcherService.toggleItemCollection(
+                              liveItem.id,
+                              collection,
+                            );
                           },
                         ),
                     ],
@@ -287,11 +330,17 @@ class _ClipboardHistorySheetState extends State<ClipboardHistorySheet> {
       listenable: widget.watcherService,
       builder: (BuildContext context, Widget? child) {
         final List<ClipboardItem> allItems = widget.watcherService.items;
-        final Set<String> collections = {'Ulubione', 'Kod', 'Prompty', ...widget.watcherService.allCollections};
+        final Set<String> collections = {
+          'Ulubione',
+          'Kod',
+          'Prompty',
+          ...widget.watcherService.allCollections,
+        };
 
         final List<ClipboardItem> filteredItems = allItems.where((item) {
           // Filter by collection
-          if (_selectedCollection != null && !item.collections.contains(_selectedCollection)) {
+          if (_selectedCollection != null &&
+              !item.collections.contains(_selectedCollection)) {
             return false;
           }
           // Filter by search text
@@ -318,7 +367,9 @@ class _ClipboardHistorySheetState extends State<ClipboardHistorySheet> {
             ),
             decoration: BoxDecoration(
               color: Console.surface,
-              borderRadius: const BorderRadius.vertical(top: Radius.circular(20)),
+              borderRadius: const BorderRadius.vertical(
+                top: Radius.circular(20),
+              ),
               border: Border(
                 top: BorderSide(color: Console.borderStrong),
                 left: BorderSide(color: Console.borderStrong),
@@ -343,7 +394,11 @@ class _ClipboardHistorySheetState extends State<ClipboardHistorySheet> {
                     padding: const EdgeInsets.symmetric(horizontal: 20),
                     child: Row(
                       children: <Widget>[
-                        Icon(Icons.content_paste_rounded, color: Console.accent, size: 22),
+                        Icon(
+                          Icons.content_paste_rounded,
+                          color: Console.accent,
+                          size: 22,
+                        ),
                         const SizedBox(width: 10),
                         Text(
                           'SCHOWEK SYSTEMOWY',
@@ -361,10 +416,17 @@ class _ClipboardHistorySheetState extends State<ClipboardHistorySheet> {
                             onPressed: () async {
                               await widget.watcherService.clearHistory();
                             },
-                            icon: Icon(Icons.delete_sweep_outlined, size: 18, color: Console.red),
+                            icon: Icon(
+                              Icons.delete_sweep_outlined,
+                              size: 18,
+                              color: Console.red,
+                            ),
                             label: Text(
                               'Wyczyszcz',
-                              style: TextStyle(color: Console.red, fontSize: 13),
+                              style: TextStyle(
+                                color: Console.red,
+                                fontSize: 13,
+                              ),
                             ),
                           ),
                       ],
@@ -379,17 +441,31 @@ class _ClipboardHistorySheetState extends State<ClipboardHistorySheet> {
                       style: TextStyle(color: Console.text, fontSize: 14),
                       decoration: InputDecoration(
                         hintText: 'Pisz aby szukać... (użyj ↑ ↓ oraz Enter)',
-                        hintStyle: TextStyle(color: Console.dimText, fontSize: 13),
-                        prefixIcon: Icon(Icons.search, color: Console.dimText, size: 20),
+                        hintStyle: TextStyle(
+                          color: Console.dimText,
+                          fontSize: 13,
+                        ),
+                        prefixIcon: Icon(
+                          Icons.search,
+                          color: Console.dimText,
+                          size: 20,
+                        ),
                         suffixIcon: _filter.isNotEmpty
                             ? IconButton(
-                                icon: Icon(Icons.clear, color: Console.dimText, size: 18),
+                                icon: Icon(
+                                  Icons.clear,
+                                  color: Console.dimText,
+                                  size: 18,
+                                ),
                                 onPressed: () => _searchController.clear(),
                               )
                             : null,
                         filled: true,
                         fillColor: Console.surfaceRaised,
-                        contentPadding: const EdgeInsets.symmetric(vertical: 10, horizontal: 14),
+                        contentPadding: const EdgeInsets.symmetric(
+                          vertical: 10,
+                          horizontal: 14,
+                        ),
                         border: OutlineInputBorder(
                           borderRadius: BorderRadius.circular(10),
                           borderSide: BorderSide(color: Console.border),
@@ -418,33 +494,52 @@ class _ClipboardHistorySheetState extends State<ClipboardHistorySheet> {
                           selectedColor: Console.accent.withValues(alpha: .25),
                           backgroundColor: Console.surfaceRaised,
                           labelStyle: TextStyle(
-                            color: _selectedCollection == null ? Console.accent : Console.muted,
-                            fontWeight: _selectedCollection == null ? FontWeight.bold : FontWeight.normal,
+                            color: _selectedCollection == null
+                                ? Console.accent
+                                : Console.muted,
+                            fontWeight: _selectedCollection == null
+                                ? FontWeight.bold
+                                : FontWeight.normal,
                             fontSize: 12,
                           ),
-                          onSelected: (_) => setState(() => _selectedCollection = null),
+                          onSelected: (_) =>
+                              setState(() => _selectedCollection = null),
                         ),
                         const SizedBox(width: 6),
                         for (final String colName in collections) ...<Widget>[
                           ChoiceChip(
                             label: Text(colName),
                             selected: _selectedCollection == colName,
-                            selectedColor: Console.accent.withValues(alpha: .25),
+                            selectedColor: Console.accent.withValues(
+                              alpha: .25,
+                            ),
                             backgroundColor: Console.surfaceRaised,
                             labelStyle: TextStyle(
-                              color: _selectedCollection == colName ? Console.accent : Console.muted,
-                              fontWeight: _selectedCollection == colName ? FontWeight.bold : FontWeight.normal,
+                              color: _selectedCollection == colName
+                                  ? Console.accent
+                                  : Console.muted,
+                              fontWeight: _selectedCollection == colName
+                                  ? FontWeight.bold
+                                  : FontWeight.normal,
                               fontSize: 12,
                             ),
-                            onSelected: (_) => setState(() => _selectedCollection = colName),
+                            onSelected: (_) =>
+                                setState(() => _selectedCollection = colName),
                           ),
                           const SizedBox(width: 6),
                         ],
                         ActionChip(
-                          avatar: Icon(Icons.add, size: 16, color: Console.accent),
+                          avatar: Icon(
+                            Icons.add,
+                            size: 16,
+                            color: Console.accent,
+                          ),
                           label: const Text('Nowa'),
                           backgroundColor: Console.surfaceRaised,
-                          labelStyle: TextStyle(color: Console.accent, fontSize: 12),
+                          labelStyle: TextStyle(
+                            color: Console.accent,
+                            fontSize: 12,
+                          ),
                           onPressed: () => _promptNewCollection(context),
                         ),
                       ],
@@ -458,22 +553,34 @@ class _ClipboardHistorySheetState extends State<ClipboardHistorySheet> {
                             child: Column(
                               mainAxisAlignment: MainAxisAlignment.center,
                               children: <Widget>[
-                                Icon(Icons.assignment_outlined, size: 48, color: Console.dim),
+                                Icon(
+                                  Icons.assignment_outlined,
+                                  size: 48,
+                                  color: Console.dim,
+                                ),
                                 const SizedBox(height: 12),
                                 Text(
                                   _filter.isEmpty && _selectedCollection == null
                                       ? 'Schowek jest pusty'
                                       : 'Brak wyników w tej kolekcji / wyszukiwaniu',
-                                  style: TextStyle(color: Console.muted, fontSize: 14),
+                                  style: TextStyle(
+                                    color: Console.muted,
+                                    fontSize: 14,
+                                  ),
                                 ),
                               ],
                             ),
                           )
                         : ListView.separated(
                             controller: _scrollController,
-                            padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 16),
+                            padding: const EdgeInsets.symmetric(
+                              vertical: 8,
+                              horizontal: 16,
+                            ),
                             itemCount: filteredItems.length,
-                            separatorBuilder: (BuildContext context, int index) => const SizedBox(height: 6),
+                            separatorBuilder:
+                                (BuildContext context, int index) =>
+                                    const SizedBox(height: 6),
                             itemBuilder: (BuildContext context, int index) {
                               final ClipboardItem item = filteredItems[index];
                               final bool isSelected = index == _selectedIndex;
@@ -482,13 +589,20 @@ class _ClipboardHistorySheetState extends State<ClipboardHistorySheet> {
                                 timeLabel: _formatTime(item.copiedAt),
                                 isSelected: isSelected,
                                 onTap: () => _selectAndCopy(context, item),
-                                onConvertToCapture: widget.recordingsController != null &&
-                                        (item.text != null || item.imagePath != null)
+                                onConvertToCapture:
+                                    (widget.recordingsController != null ||
+                                            widget.onConvertText != null ||
+                                            widget.onConvertImage != null) &&
+                                        (item.text != null ||
+                                            item.imagePath != null)
                                     ? () => _convertToCapture(context, item)
                                     : null,
-                                onAddCollection: () => _manageItemCollections(context, item),
+                                onAddCollection: () =>
+                                    _manageItemCollections(context, item),
                                 onDelete: () async {
-                                  await widget.watcherService.deleteItem(item.id);
+                                  await widget.watcherService.deleteItem(
+                                    item.id,
+                                  );
                                 },
                               );
                             },
@@ -529,7 +643,9 @@ class _ClipboardItemTile extends StatelessWidget {
     final String previewText = item.text ?? '';
 
     return Material(
-      color: isSelected ? Console.accent.withValues(alpha: .18) : Console.surfaceRaised,
+      color: isSelected
+          ? Console.accent.withValues(alpha: .18)
+          : Console.surfaceRaised,
       borderRadius: BorderRadius.circular(10),
       clipBehavior: Clip.antiAlias,
       child: Container(
@@ -551,7 +667,9 @@ class _ClipboardItemTile extends StatelessWidget {
                   margin: const EdgeInsets.only(top: 2),
                   padding: const EdgeInsets.all(8),
                   decoration: BoxDecoration(
-                    color: isImage ? Console.pink.withValues(alpha: .15) : Console.accent.withValues(alpha: .15),
+                    color: isImage
+                        ? Console.pink.withValues(alpha: .15)
+                        : Console.accent.withValues(alpha: .15),
                     borderRadius: BorderRadius.circular(8),
                   ),
                   child: Icon(
@@ -572,21 +690,32 @@ class _ClipboardItemTile extends StatelessWidget {
                             style: TextStyle(
                               fontFamily: ConsoleFont.mono,
                               fontSize: 11,
-                              color: isSelected ? Console.accent : Console.dimText,
-                              fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
+                              color: isSelected
+                                  ? Console.accent
+                                  : Console.dimText,
+                              fontWeight: isSelected
+                                  ? FontWeight.bold
+                                  : FontWeight.normal,
                             ),
                           ),
                           const SizedBox(width: 8),
-                          for (final String col in item.collections) ...<Widget>[
+                          for (final String col
+                              in item.collections) ...<Widget>[
                             Container(
-                              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1),
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 6,
+                                vertical: 1,
+                              ),
                               decoration: BoxDecoration(
                                 color: Console.accent.withValues(alpha: .15),
                                 borderRadius: BorderRadius.circular(4),
                               ),
                               child: Text(
                                 col,
-                                style: TextStyle(color: Console.accent, fontSize: 10),
+                                style: TextStyle(
+                                  color: Console.accent,
+                                  fontSize: 10,
+                                ),
                               ),
                             ),
                             const SizedBox(width: 4),
@@ -599,8 +728,13 @@ class _ClipboardItemTile extends StatelessWidget {
                               child: Padding(
                                 padding: const EdgeInsets.all(4.0),
                                 child: Tooltip(
-                                  message: 'Przekaż do przetworzenia LLM (Capture ✨)',
-                                  child: Icon(Icons.auto_awesome, size: 16, color: Console.accent),
+                                  message:
+                                      'Przekaż do przetworzenia LLM (Capture ✨)',
+                                  child: Icon(
+                                    Icons.auto_awesome,
+                                    size: 16,
+                                    color: Console.accent,
+                                  ),
                                 ),
                               ),
                             ),
@@ -611,7 +745,11 @@ class _ClipboardItemTile extends StatelessWidget {
                             borderRadius: BorderRadius.circular(4),
                             child: Padding(
                               padding: const EdgeInsets.all(4.0),
-                              child: Icon(Icons.bookmark_border_rounded, size: 16, color: Console.muted),
+                              child: Icon(
+                                Icons.bookmark_border_rounded,
+                                size: 16,
+                                color: Console.muted,
+                              ),
                             ),
                           ),
                           const SizedBox(width: 4),
@@ -620,7 +758,11 @@ class _ClipboardItemTile extends StatelessWidget {
                             borderRadius: BorderRadius.circular(4),
                             child: Padding(
                               padding: const EdgeInsets.all(4.0),
-                              child: Icon(Icons.close, size: 16, color: Console.dimText),
+                              child: Icon(
+                                Icons.close,
+                                size: 16,
+                                color: Console.dimText,
+                              ),
                             ),
                           ),
                         ],
@@ -641,13 +783,21 @@ class _ClipboardItemTile extends StatelessWidget {
                               height: 110,
                               fit: BoxFit.cover,
                               alignment: Alignment.centerLeft,
-                              errorBuilder: (BuildContext context, Object error, StackTrace? stackTrace) => Padding(
-                                padding: const EdgeInsets.all(8.0),
-                                child: Text(
-                                  '[Nie można wczytać obrazu]',
-                                  style: TextStyle(color: Console.red, fontSize: 12),
-                                ),
-                              ),
+                              errorBuilder:
+                                  (
+                                    BuildContext context,
+                                    Object error,
+                                    StackTrace? stackTrace,
+                                  ) => Padding(
+                                    padding: const EdgeInsets.all(8.0),
+                                    child: Text(
+                                      '[Nie można wczytać obrazu]',
+                                      style: TextStyle(
+                                        color: Console.red,
+                                        fontSize: 12,
+                                      ),
+                                    ),
+                                  ),
                             ),
                           ),
                         ),
@@ -660,7 +810,9 @@ class _ClipboardItemTile extends StatelessWidget {
                             fontFamily: ConsoleFont.mono,
                             fontSize: 13,
                             color: Console.text,
-                            fontWeight: isSelected ? FontWeight.w500 : FontWeight.normal,
+                            fontWeight: isSelected
+                                ? FontWeight.w500
+                                : FontWeight.normal,
                           ),
                         ),
                       ],

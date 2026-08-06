@@ -361,8 +361,9 @@ class RecordingsController extends ChangeNotifier {
     unawaited(
       _gamificationController?.initialize(
         totalExistingCaptures: _recordings.length,
-        totalExistingDone:
-            _recordings.where((Recording r) => r.isProcessedByUser).length,
+        totalExistingDone: _recordings
+            .where((Recording r) => r.isProcessedByUser)
+            .length,
       ),
     );
 
@@ -1073,8 +1074,9 @@ class RecordingsController extends ChangeNotifier {
       ),
     );
     if (nextValue) {
-      final int totalDone =
-          _recordings.where((Recording item) => item.isProcessedByUser).length;
+      final int totalDone = _recordings
+          .where((Recording item) => item.isProcessedByUser)
+          .length;
       unawaited(_gamificationController?.onCaptureDone(totalDone));
     }
   }
@@ -1137,8 +1139,9 @@ class RecordingsController extends ChangeNotifier {
         processedAt: record.at,
       ),
     );
-    final int totalDone =
-        _recordings.where((Recording item) => item.isProcessedByUser).length;
+    final int totalDone = _recordings
+        .where((Recording item) => item.isProcessedByUser)
+        .length;
     unawaited(_gamificationController?.onCaptureDone(totalDone));
     _logSink.log('Routed to ${record.target}.', recordingId: id);
   }
@@ -1837,6 +1840,7 @@ class RecordingsController extends ChangeNotifier {
     // nobody is waiting for.
     if (index < 0) return;
     final Recording before = _recordings[index];
+    final List<Recording> beforeUpdate = _recordings;
 
     _recordings = _recordings
         .map((Recording item) => item.id == id ? transform(item) : item)
@@ -1844,7 +1848,14 @@ class RecordingsController extends ChangeNotifier {
 
     // Persist even after dispose: the drain can be mid-job when the shell tears
     // the page down, and the status it just computed still belongs on disk.
-    await _persistAll();
+    try {
+      await _persistAll();
+    } catch (_) {
+      // A failed write is not a completed mutation. Restore the in-memory
+      // snapshot so a rebuild cannot show state that never reached disk.
+      _recordings = beforeUpdate;
+      rethrow;
+    }
 
     // Deliberately *after* the persist, never before. `_persistAll` can refuse
     // (an unreadable index) or throw (a full disk), and a history entry for a
