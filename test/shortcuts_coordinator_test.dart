@@ -140,6 +140,7 @@ void main() {
   late int noteCalls;
   late int queueReveals;
   late int timerReveals;
+  late int clipboardHistoryCalls;
   late Completer<void>? noteGate;
   late bool noteThrows;
 
@@ -150,6 +151,9 @@ void main() {
       final Completer<void>? gate = noteGate;
       if (gate != null) await gate.future;
       if (noteThrows) throw StateError('sheet blew up');
+    },
+    onToggleClipboardHistory: () async {
+      clipboardHistoryCalls++;
     },
     revealQueue: () async {
       // A real suspension point, like the presenter: the shell's version
@@ -193,6 +197,7 @@ void main() {
     noteCalls = 0;
     queueReveals = 0;
     timerReveals = 0;
+    clipboardHistoryCalls = 0;
     noteGate = null;
     noteThrows = false;
   });
@@ -309,6 +314,15 @@ void main() {
 
       expect(presenter.presents, 1);
       expect(noteCalls, 1);
+    });
+
+    test('toggleClipboardHistory raises window and executes callback', () async {
+      final ShortcutsCoordinator coordinator = build();
+
+      await coordinator.handle(ShortcutAction.toggleClipboardHistory);
+
+      expect(presenter.presents, 1);
+      expect(clipboardHistoryCalls, 1);
     });
 
     test('upload shortcuts route to the matching capture type', () async {

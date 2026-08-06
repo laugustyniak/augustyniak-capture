@@ -284,6 +284,11 @@ class ShortcutDefaults {
             logical: LogicalKeyboardKey.keyN,
             modifiers: _controlAlt,
           ),
+          ShortcutAction.toggleClipboardHistory: HotkeyBinding.fromKeys(
+            physical: PhysicalKeyboardKey.keyV,
+            logical: LogicalKeyboardKey.keyV,
+            modifiers: _controlAlt,
+          ),
         },
       );
 

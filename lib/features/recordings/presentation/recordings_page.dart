@@ -44,6 +44,9 @@ import '../../transcription/data/transcription_service.dart';
 import '../../transcription/domain/transcription_limits.dart';
 import '../../gamification/presentation/celebration_overlay.dart';
 import '../../gamification/presentation/gamification_controller.dart';
+import '../../clipboard/data/clipboard_repository.dart';
+import '../../clipboard/domain/clipboard_watcher_service.dart';
+import '../../clipboard/presentation/clipboard_history_sheet.dart';
 import '../data/markdown_note_vault.dart';
 import '../data/project_agent_handoff.dart';
 import '../data/project_inbox_router.dart';
@@ -111,6 +114,7 @@ class _RecordingsPageState extends State<RecordingsPage> {
   late final ProjectsController projects;
   late final FocusTimerController timer;
   late final ShortcutsCoordinator shortcuts;
+  late final ClipboardWatcherService clipboardWatcher;
   late final Listenable listenable;
 
   int navigationIndex = queueIndex;
@@ -236,6 +240,9 @@ class _RecordingsPageState extends State<RecordingsPage> {
       },
       logSink: logs,
     );
+    clipboardWatcher = ClipboardWatcherService(
+      repository: ClipboardRepository(),
+    );
     shortcuts = ShortcutsCoordinator(
       recordings: controller,
       // The one shortcut target that is not the capture pipeline. Handed the
@@ -248,6 +255,10 @@ class _RecordingsPageState extends State<RecordingsPage> {
       composeTextNote: () async {
         if (!mounted) return;
         await _composeTextNote(context);
+      },
+      onToggleClipboardHistory: () async {
+        if (!mounted) return;
+        await _showClipboardHistory(context);
       },
       // The capture screen overlays whichever tab is showing, so a
       // hotkey-started recording is visible immediately. This still runs, so
@@ -354,6 +365,7 @@ class _RecordingsPageState extends State<RecordingsPage> {
     // because it is one small file and an initial frame showing "0 today" that
     // corrects itself a moment later reads as data loss.
     await timer.initialize();
+    await clipboardWatcher.initialize();
     _applyActiveProject();
     await controller.initialize();
     // After loading, never inside it: this reads the recordings *directory*, so
@@ -467,6 +479,18 @@ class _RecordingsPageState extends State<RecordingsPage> {
     }
   }
 
+  Future<void> _showClipboardHistory(BuildContext context) async {
+    await showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      builder: (BuildContext context) => ConsolePaletteScope(
+        builder: (BuildContext context) => ClipboardHistorySheet(
+          watcherService: clipboardWatcher,
+        ),
+      ),
+    );
+  }
+
   Future<void> _openCaptureMenu(BuildContext context) async {
     final _CaptureAction? action = await showModalBottomSheet<_CaptureAction>(
       context: context,
@@ -496,6 +520,7 @@ class _RecordingsPageState extends State<RecordingsPage> {
     // awaited here, so the coordinator sets its `_disposed` flag synchronously
     // and refuses presses landing in the gap before the unregister completes.
     unawaited(shortcuts.dispose());
+    clipboardWatcher.dispose();
     controller.dispose();
     projects.dispose();
     timer.dispose();

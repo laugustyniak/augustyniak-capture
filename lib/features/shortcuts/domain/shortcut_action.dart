@@ -28,7 +28,10 @@ enum ShortcutAction {
   /// same lever the Timer tab's primary button pulls, for the same reason every
   /// other value does: a shortcut must never become a second path into a
   /// feature's state machine.
-  toggleTimer;
+  toggleTimer,
+
+  /// Open the clipboard history sheet.
+  toggleClipboardHistory;
 
   /// Unknown names come from a `settings.json` written by a different build.
   /// Unlike `CaptureType.fromName` there is no sensible legacy value to fall
@@ -45,6 +48,7 @@ enum ShortcutAction {
     ShortcutAction.uploadImage => 'Upload image',
     ShortcutAction.uploadVideo => 'Upload video',
     ShortcutAction.toggleTimer => 'Start/pause focus timer',
+    ShortcutAction.toggleClipboardHistory => 'Show clipboard history',
   };
 
   /// Whether the action opens UI (a sheet or a file dialog) and therefore needs

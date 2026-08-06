@@ -20,6 +20,7 @@ class ShortcutsCoordinator {
   ShortcutsCoordinator({
     required RecordingsController recordings,
     required Future<void> Function() composeTextNote,
+    Future<void> Function()? onToggleClipboardHistory,
     FocusTimerController? focusTimer,
     Future<void> Function()? revealQueue,
     Future<void> Function()? revealTimer,
@@ -28,6 +29,7 @@ class ShortcutsCoordinator {
     LogSink logSink = const NoopLogSink(),
   }) : _recordings = recordings,
        _composeTextNote = composeTextNote,
+       _onToggleClipboardHistory = onToggleClipboardHistory,
        _focusTimer = focusTimer,
        _revealQueue = revealQueue,
        _revealTimer = revealTimer,
@@ -37,6 +39,7 @@ class ShortcutsCoordinator {
 
   final RecordingsController _recordings;
   final Future<void> Function() _composeTextNote;
+  final Future<void> Function()? _onToggleClipboardHistory;
 
   /// Null in a host with no timer — every pure-Dart shortcut test, and any
   /// build where the tab is absent. The action then does nothing rather than
@@ -219,6 +222,8 @@ class ShortcutsCoordinator {
             await _windowPresenter.present();
             await _revealTimer?.call();
           }
+        case ShortcutAction.toggleClipboardHistory:
+          await _onToggleClipboardHistory?.call();
       }
     } catch (exception) {
       _logSink.log(
