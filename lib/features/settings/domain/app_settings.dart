@@ -142,10 +142,19 @@ class AppSettings {
   /// Handed out unmodifiable — `_shortcuts` is a plain map, and callers pass it
   /// straight into the coordinator, so an in-place mutation would desync
   /// persisted state from what is registered with the OS.
-  Map<ShortcutAction, HotkeyBinding> get shortcuts =>
-      Map<ShortcutAction, HotkeyBinding>.unmodifiable(
-        _shortcuts ?? ShortcutDefaults.bindings,
-      );
+  Map<ShortcutAction, HotkeyBinding> get shortcuts {
+    final Map<ShortcutAction, HotkeyBinding>? stored = _shortcuts;
+    if (stored == null) return ShortcutDefaults.bindings;
+    final Map<ShortcutAction, HotkeyBinding> merged =
+        Map<ShortcutAction, HotkeyBinding>.from(stored);
+    for (final MapEntry<ShortcutAction, HotkeyBinding> entry
+        in ShortcutDefaults.bindings.entries) {
+      if (!merged.containsKey(entry.key)) {
+        merged[entry.key] = entry.value;
+      }
+    }
+    return Map<ShortcutAction, HotkeyBinding>.unmodifiable(merged);
+  }
 
   /// False while the defaults are still in force, so the UI can disable its
   /// "restore defaults" button.
