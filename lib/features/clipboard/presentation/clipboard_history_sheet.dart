@@ -21,8 +21,9 @@ class ClipboardHistorySheet extends StatefulWidget {
 class _ClipboardHistorySheetState extends State<ClipboardHistorySheet> {
   final TextEditingController _searchController = TextEditingController();
   final ScrollController _scrollController = ScrollController();
-  final FocusNode _focusNode = FocusNode();
+  final FocusNode _searchFocusNode = FocusNode();
   String _filter = '';
+  String? _selectedCollection; // null = Wszystkie
   int _selectedIndex = 0;
 
   @override
@@ -43,7 +44,7 @@ class _ClipboardHistorySheetState extends State<ClipboardHistorySheet> {
     _searchController.removeListener(_onSearchChanged);
     _searchController.dispose();
     _scrollController.dispose();
-    _focusNode.dispose();
+    _searchFocusNode.dispose();
     super.dispose();
   }
 
@@ -83,7 +84,7 @@ class _ClipboardHistorySheetState extends State<ClipboardHistorySheet> {
 
   void _scrollToSelected(int index) {
     if (!_scrollController.hasClients) return;
-    const double itemHeight = 72.0; // approximate height per item tile
+    const double itemHeight = 72.0;
     final double targetOffset = (index * itemHeight).clamp(
       0.0,
       _scrollController.position.maxScrollExtent,
@@ -116,33 +117,145 @@ class _ClipboardHistorySheetState extends State<ClipboardHistorySheet> {
     }
   }
 
+  Future<void> _promptNewCollection(BuildContext context) async {
+    final TextEditingController nameController = TextEditingController();
+    final String? collectionName = await showDialog<String>(
+      context: context,
+      builder: (BuildContext context) => ConsolePaletteScope(
+        builder: (BuildContext context) => AlertDialog(
+          backgroundColor: Console.surface,
+          title: Text(
+            'NOWA KOLEKCJA',
+            style: TextStyle(fontFamily: ConsoleFont.display, fontSize: 16, color: Console.text),
+          ),
+          content: TextField(
+            controller: nameController,
+            autofocus: true,
+            style: TextStyle(color: Console.text),
+            decoration: InputDecoration(
+              hintText: 'Nazwa kolekcji (np. Prompty, Kod)...',
+              hintStyle: TextStyle(color: Console.dimText),
+              filled: true,
+              fillColor: Console.surfaceRaised,
+            ),
+          ),
+          actions: <Widget>[
+            TextButton(
+              onPressed: () => Navigator.of(context).pop(),
+              child: Text('Anuluj', style: TextStyle(color: Console.dimText)),
+            ),
+            ElevatedButton(
+              style: ElevatedButton.styleFrom(backgroundColor: Console.accent),
+              onPressed: () {
+                final String text = nameController.text.trim();
+                if (text.isNotEmpty) {
+                  Navigator.of(context).pop(text);
+                }
+              },
+              child: Text('Dodaj', style: TextStyle(color: Console.ink)),
+            ),
+          ],
+        ),
+      ),
+    );
+
+    if (collectionName != null && collectionName.isNotEmpty) {
+      setState(() {
+        _selectedCollection = collectionName;
+      });
+    }
+  }
+
+  Future<void> _manageItemCollections(BuildContext context, ClipboardItem item) async {
+    final Set<String> existingCollections = widget.watcherService.allCollections;
+    final Set<String> defaultSuggestions = {'Ulubione', 'Kod', 'Prompty', 'Ważne', ...existingCollections};
+
+    await showModalBottomSheet<void>(
+      context: context,
+      builder: (BuildContext context) => ConsolePaletteScope(
+        builder: (BuildContext context) => ListenableBuilder(
+          listenable: widget.watcherService,
+          builder: (BuildContext context, Widget? child) {
+            final ClipboardItem liveItem = widget.watcherService.items.firstWhere(
+              (e) => e.id == item.id,
+              orElse: () => item,
+            );
+
+            return Container(
+              padding: const EdgeInsets.all(20),
+              color: Console.surface,
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: <Widget>[
+                  Text(
+                    'DODAJ DO KOLEKCJI',
+                    style: TextStyle(fontFamily: ConsoleFont.display, fontSize: 15, color: Console.text),
+                  ),
+                  const SizedBox(height: 12),
+                  Wrap(
+                    spacing: 8,
+                    runSpacing: 8,
+                    children: <Widget>[
+                      for (final String collection in defaultSuggestions)
+                        FilterChip(
+                          selected: liveItem.collections.contains(collection),
+                          label: Text(collection),
+                          labelStyle: TextStyle(
+                            color: liveItem.collections.contains(collection) ? Console.accent : Console.text,
+                            fontSize: 13,
+                          ),
+                          selectedColor: Console.accent.withValues(alpha: .2),
+                          backgroundColor: Console.surfaceRaised,
+                          onSelected: (_) async {
+                            await widget.watcherService.toggleItemCollection(liveItem.id, collection);
+                          },
+                        ),
+                    ],
+                  ),
+                ],
+              ),
+            );
+          },
+        ),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return ListenableBuilder(
       listenable: widget.watcherService,
       builder: (BuildContext context, Widget? child) {
         final List<ClipboardItem> allItems = widget.watcherService.items;
-        final List<ClipboardItem> items = _filter.isEmpty
-            ? allItems
-            : allItems.where((item) {
-                final String text = (item.text ?? '').toLowerCase();
-                return text.contains(_filter);
-              }).toList();
+        final Set<String> collections = {'Ulubione', 'Kod', 'Prompty', ...widget.watcherService.allCollections};
 
-        // Ensure selection index stays valid when items change
-        if (items.isEmpty) {
+        final List<ClipboardItem> filteredItems = allItems.where((item) {
+          // Filter by collection
+          if (_selectedCollection != null && !item.collections.contains(_selectedCollection)) {
+            return false;
+          }
+          // Filter by search text
+          if (_filter.isNotEmpty) {
+            final String text = (item.text ?? '').toLowerCase();
+            if (!text.contains(_filter)) return false;
+          }
+          return true;
+        }).toList();
+
+        // Ensure selection index stays valid
+        if (filteredItems.isEmpty) {
           _selectedIndex = 0;
-        } else if (_selectedIndex >= items.length) {
-          _selectedIndex = items.length - 1;
+        } else if (_selectedIndex >= filteredItems.length) {
+          _selectedIndex = filteredItems.length - 1;
         }
 
         return KeyboardListener(
-          focusNode: _focusNode,
-          autofocus: true,
-          onKeyEvent: (KeyEvent event) => _handleKeyEvent(event, items),
+          focusNode: _searchFocusNode,
+          onKeyEvent: (KeyEvent event) => _handleKeyEvent(event, filteredItems),
           child: Container(
             constraints: BoxConstraints(
-              maxHeight: MediaQuery.of(context).size.height * 0.85,
+              maxHeight: MediaQuery.of(context).size.height * 0.88,
             ),
             decoration: BoxDecoration(
               color: Console.surface,
@@ -203,10 +316,10 @@ class _ClipboardHistorySheetState extends State<ClipboardHistorySheet> {
                     padding: const EdgeInsets.symmetric(horizontal: 20),
                     child: TextField(
                       controller: _searchController,
-                      autofocus: false,
+                      autofocus: true,
                       style: TextStyle(color: Console.text, fontSize: 14),
                       decoration: InputDecoration(
-                        hintText: 'Szukaj w schowku... (użyj ↑ ↓ oraz Enter)',
+                        hintText: 'Pisz aby szukać... (użyj ↑ ↓ oraz Enter)',
                         hintStyle: TextStyle(color: Console.dimText, fontSize: 13),
                         prefixIcon: Icon(Icons.search, color: Console.dimText, size: 20),
                         suffixIcon: _filter.isNotEmpty
@@ -233,10 +346,55 @@ class _ClipboardHistorySheetState extends State<ClipboardHistorySheet> {
                       ),
                     ),
                   ),
-                  const SizedBox(height: 12),
+                  const SizedBox(height: 10),
+                  // Collections strip
+                  SingleChildScrollView(
+                    scrollDirection: Axis.horizontal,
+                    padding: const EdgeInsets.symmetric(horizontal: 20),
+                    child: Row(
+                      children: <Widget>[
+                        ChoiceChip(
+                          label: const Text('Wszystkie'),
+                          selected: _selectedCollection == null,
+                          selectedColor: Console.accent.withValues(alpha: .25),
+                          backgroundColor: Console.surfaceRaised,
+                          labelStyle: TextStyle(
+                            color: _selectedCollection == null ? Console.accent : Console.muted,
+                            fontWeight: _selectedCollection == null ? FontWeight.bold : FontWeight.normal,
+                            fontSize: 12,
+                          ),
+                          onSelected: (_) => setState(() => _selectedCollection = null),
+                        ),
+                        const SizedBox(width: 6),
+                        for (final String colName in collections) ...<Widget>[
+                          ChoiceChip(
+                            label: Text(colName),
+                            selected: _selectedCollection == colName,
+                            selectedColor: Console.accent.withValues(alpha: .25),
+                            backgroundColor: Console.surfaceRaised,
+                            labelStyle: TextStyle(
+                              color: _selectedCollection == colName ? Console.accent : Console.muted,
+                              fontWeight: _selectedCollection == colName ? FontWeight.bold : FontWeight.normal,
+                              fontSize: 12,
+                            ),
+                            onSelected: (_) => setState(() => _selectedCollection = colName),
+                          ),
+                          const SizedBox(width: 6),
+                        ],
+                        ActionChip(
+                          avatar: Icon(Icons.add, size: 16, color: Console.accent),
+                          label: const Text('Nowa'),
+                          backgroundColor: Console.surfaceRaised,
+                          labelStyle: TextStyle(color: Console.accent, fontSize: 12),
+                          onPressed: () => _promptNewCollection(context),
+                        ),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(height: 10),
                   Divider(height: 1, color: Console.border),
                   Expanded(
-                    child: items.isEmpty
+                    child: filteredItems.isEmpty
                         ? Center(
                             child: Column(
                               mainAxisAlignment: MainAxisAlignment.center,
@@ -244,10 +402,10 @@ class _ClipboardHistorySheetState extends State<ClipboardHistorySheet> {
                                 Icon(Icons.assignment_outlined, size: 48, color: Console.dim),
                                 const SizedBox(height: 12),
                                 Text(
-                                  _filter.isEmpty
+                                  _filter.isEmpty && _selectedCollection == null
                                       ? 'Schowek jest pusty'
-                                      : 'Brak wyników wyszukiwania',
-                                  style: TextStyle(color: Console.muted, fontSize: 15),
+                                      : 'Brak wyników w tej kolekcji / wyszukiwaniu',
+                                  style: TextStyle(color: Console.muted, fontSize: 14),
                                 ),
                               ],
                             ),
@@ -255,16 +413,17 @@ class _ClipboardHistorySheetState extends State<ClipboardHistorySheet> {
                         : ListView.separated(
                             controller: _scrollController,
                             padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 16),
-                            itemCount: items.length,
+                            itemCount: filteredItems.length,
                             separatorBuilder: (BuildContext context, int index) => const SizedBox(height: 6),
                             itemBuilder: (BuildContext context, int index) {
-                              final ClipboardItem item = items[index];
+                              final ClipboardItem item = filteredItems[index];
                               final bool isSelected = index == _selectedIndex;
                               return _ClipboardItemTile(
                                 item: item,
                                 timeLabel: _formatTime(item.copiedAt),
                                 isSelected: isSelected,
                                 onTap: () => _selectAndCopy(context, item),
+                                onAddCollection: () => _manageItemCollections(context, item),
                                 onDelete: () async {
                                   await widget.watcherService.deleteItem(item.id);
                                 },
@@ -288,6 +447,7 @@ class _ClipboardItemTile extends StatelessWidget {
     required this.timeLabel,
     required this.isSelected,
     required this.onTap,
+    required this.onAddCollection,
     required this.onDelete,
   });
 
@@ -295,6 +455,7 @@ class _ClipboardItemTile extends StatelessWidget {
   final String timeLabel;
   final bool isSelected;
   final VoidCallback onTap;
+  final VoidCallback onAddCollection;
   final VoidCallback onDelete;
 
   @override
@@ -350,7 +511,31 @@ class _ClipboardItemTile extends StatelessWidget {
                               fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
                             ),
                           ),
+                          const SizedBox(width: 8),
+                          for (final String col in item.collections) ...<Widget>[
+                            Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1),
+                              decoration: BoxDecoration(
+                                color: Console.accent.withValues(alpha: .15),
+                                borderRadius: BorderRadius.circular(4),
+                              ),
+                              child: Text(
+                                col,
+                                style: TextStyle(color: Console.accent, fontSize: 10),
+                              ),
+                            ),
+                            const SizedBox(width: 4),
+                          ],
                           const Spacer(),
+                          InkWell(
+                            onTap: onAddCollection,
+                            borderRadius: BorderRadius.circular(4),
+                            child: Padding(
+                              padding: const EdgeInsets.all(4.0),
+                              child: Icon(Icons.bookmark_border_rounded, size: 16, color: Console.muted),
+                            ),
+                          ),
+                          const SizedBox(width: 4),
                           InkWell(
                             onTap: onDelete,
                             borderRadius: BorderRadius.circular(4),

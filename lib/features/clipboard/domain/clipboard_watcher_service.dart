@@ -22,6 +22,7 @@ class ClipboardWatcherService extends ChangeNotifier {
 
   bool get isWatching => _isWatching;
   List<ClipboardItem> get items => _repository.items;
+  Set<String> get allCollections => _repository.allCollections;
 
   Future<void> initialize() async {
     await _repository.initialize();
@@ -71,6 +72,11 @@ class ClipboardWatcherService extends ChangeNotifier {
       await Clipboard.setData(ClipboardData(text: item.text!));
       notifyListeners();
     }
+  }
+
+  Future<void> toggleItemCollection(String id, String collectionName) async {
+    await _repository.toggleItemCollection(id, collectionName);
+    notifyListeners();
   }
 
   Future<void> deleteItem(String id) async {

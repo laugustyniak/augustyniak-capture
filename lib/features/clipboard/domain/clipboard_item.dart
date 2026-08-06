@@ -21,6 +21,7 @@ class ClipboardItem {
     this.text,
     this.imagePath,
     this.preview,
+    this.collections = const <String>{},
   });
 
   final String id;
@@ -29,6 +30,7 @@ class ClipboardItem {
   final String? text;
   final String? imagePath;
   final String? preview;
+  final Set<String> collections;
 
   Map<String, dynamic> toJson() => <String, dynamic>{
         'id': id,
@@ -37,9 +39,15 @@ class ClipboardItem {
         if (text != null) 'text': text,
         if (imagePath != null) 'imagePath': imagePath,
         if (preview != null) 'preview': preview,
+        if (collections.isNotEmpty) 'collections': collections.toList(),
       };
 
   factory ClipboardItem.fromJson(Map<String, dynamic> json) {
+    final dynamic rawCollections = json['collections'];
+    final Set<String> parsedCollections = rawCollections is List
+        ? rawCollections.map((e) => e.toString()).toSet()
+        : const <String>{};
+
     return ClipboardItem(
       id: json['id'] as String,
       type: ClipboardItemType.fromName(json['type'] as String?),
@@ -47,6 +55,7 @@ class ClipboardItem {
       text: json['text'] as String?,
       imagePath: json['imagePath'] as String?,
       preview: json['preview'] as String?,
+      collections: parsedCollections,
     );
   }
 
@@ -57,6 +66,7 @@ class ClipboardItem {
     String? text,
     String? imagePath,
     String? preview,
+    Set<String>? collections,
   }) {
     return ClipboardItem(
       id: id ?? this.id,
@@ -65,6 +75,7 @@ class ClipboardItem {
       text: text ?? this.text,
       imagePath: imagePath ?? this.imagePath,
       preview: preview ?? this.preview,
+      collections: collections ?? this.collections,
     );
   }
 
@@ -78,8 +89,17 @@ class ClipboardItem {
           copiedAt == other.copiedAt &&
           text == other.text &&
           imagePath == other.imagePath &&
-          preview == other.preview;
+          preview == other.preview &&
+          setEquals(collections, other.collections);
 
   @override
-  int get hashCode => Object.hash(id, type, copiedAt, text, imagePath, preview);
+  int get hashCode => Object.hash(
+        id,
+        type,
+        copiedAt,
+        text,
+        imagePath,
+        preview,
+        Object.hashAllUnordered(collections),
+      );
 }

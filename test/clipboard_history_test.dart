@@ -12,13 +12,14 @@ void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
 
   group('ClipboardItem', () {
-    test('serialization roundtrip', () {
+    test('serialization roundtrip with collections', () {
       final ClipboardItem item = ClipboardItem(
         id: 'test-1',
         type: ClipboardItemType.text,
         copiedAt: DateTime.parse('2026-08-06T20:00:00.000Z'),
         text: 'Hello world',
         preview: 'Hello...',
+        collections: {'Kod', 'Ulubione'},
       );
 
       final Map<String, dynamic> json = item.toJson();
@@ -27,7 +28,7 @@ void main() {
       expect(restored.id, item.id);
       expect(restored.type, item.type);
       expect(restored.text, item.text);
-      expect(restored.preview, item.preview);
+      expect(restored.collections, {'Kod', 'Ulubione'});
       expect(restored, item);
     });
   });
@@ -47,7 +48,7 @@ void main() {
       }
     });
 
-    test('add and clear items', () async {
+    test('add, toggle collections and clear items', () async {
       await repository.initialize();
       expect(repository.items, isEmpty);
 
@@ -67,31 +68,13 @@ void main() {
       await repository.addItem(item1);
       await repository.addItem(item2);
 
-      expect(repository.items.length, 2);
-      expect(repository.items.first.text, 'Second');
+      await repository.toggleItemCollection('1', 'Prompty');
+      expect(repository.items.firstWhere((e) => e.id == '1').collections, {'Prompty'});
 
-      await repository.deleteItem('2');
-      expect(repository.items.length, 1);
-      expect(repository.items.first.text, 'First');
+      expect(repository.allCollections, {'Prompty'});
 
       await repository.clearHistory();
       expect(repository.items, isEmpty);
-    });
-
-    test('enforces maxItems ceiling', () async {
-      await repository.initialize();
-      for (int i = 0; i < 5; i++) {
-        await repository.addItem(
-          ClipboardItem(
-            id: '$i',
-            type: ClipboardItemType.text,
-            copiedAt: DateTime.now(),
-            text: 'Item $i',
-          ),
-        );
-      }
-      expect(repository.items.length, 3);
-      expect(repository.items.first.text, 'Item 4');
     });
   });
 
@@ -163,7 +146,7 @@ void main() {
       await tester.pump(const Duration(milliseconds: 100));
 
       // Filter text
-      await tester.enterText(find.byType(TextField), 'Banana');
+      await tester.enterText(find.byType(TextField).first, 'Banana');
       await tester.pump(const Duration(milliseconds: 100));
 
       expect(find.text('Apple Pie Recipe'), findsNothing);

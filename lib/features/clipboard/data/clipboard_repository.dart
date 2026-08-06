@@ -16,6 +16,14 @@ class ClipboardRepository {
 
   List<ClipboardItem> get items => List<ClipboardItem>.unmodifiable(_items);
 
+  Set<String> get allCollections {
+    final Set<String> set = <String>{};
+    for (final ClipboardItem item in _items) {
+      set.addAll(item.collections);
+    }
+    return set;
+  }
+
   Future<void> initialize() async {
     if (_initialized) return;
     try {
@@ -80,6 +88,22 @@ class ClipboardRepository {
     }
 
     await _save();
+  }
+
+  Future<void> toggleItemCollection(String id, String collectionName) async {
+    if (!_initialized) await initialize();
+    final int index = _items.indexWhere((item) => item.id == id);
+    if (index != -1) {
+      final ClipboardItem current = _items[index];
+      final Set<String> updatedCollections = Set<String>.from(current.collections);
+      if (updatedCollections.contains(collectionName)) {
+        updatedCollections.remove(collectionName);
+      } else {
+        updatedCollections.add(collectionName);
+      }
+      _items[index] = current.copyWith(collections: updatedCollections);
+      await _save();
+    }
   }
 
   Future<void> deleteItem(String id) async {
