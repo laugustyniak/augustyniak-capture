@@ -55,3 +55,8 @@ inbox.md
 # holding the same guidance drift apart the first time one is edited, so the
 # copy stays local rather than becoming a second source of truth in the repo.
 gemini.md
+
+# Hand-off briefs written by the app itself. These are the user's own captured
+# thoughts — meeting notes, client work, half-formed ideas — landing in whatever
+# repo the capture was filed under. They are input to an agent, never source.
+.agent-tasks/
