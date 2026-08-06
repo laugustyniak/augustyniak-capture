@@ -24,6 +24,7 @@ class RecordingCard extends StatelessWidget {
     required this.recording,
     required this.isPlaying,
     this.isEnriching = false,
+    this.isMarkingDone = false,
     this.projectName,
     required this.onTogglePlay,
     required this.onOpen,
@@ -73,6 +74,11 @@ class RecordingCard extends StatelessWidget {
   /// considers finished — a card in this state stays in the READY bucket and
   /// keeps every control it had.
   final bool isEnriching;
+
+  /// The durable review write is in flight. This is deliberately view-only:
+  /// the check mark still comes from [recording.isProcessedByUser], so a slow
+  /// or failed disk write can never make the card claim it is already done.
+  final bool isMarkingDone;
 
   /// Resolved name of the item's project, or null when it has none. Resolved by
   /// the caller rather than looked up here: the card never reaches past the
@@ -436,7 +442,11 @@ class RecordingCard extends StatelessWidget {
                 iconSize: 16,
               ),
               const SizedBox(width: 7),
-              _ReviewToggle(reviewed: reviewed, onTap: onToggleProcessed),
+              _ReviewToggle(
+                reviewed: reviewed,
+                busy: isMarkingDone,
+                onTap: onToggleProcessed,
+              ),
             ],
           ),
         ],
@@ -537,9 +547,14 @@ class _GhostButton extends StatelessWidget {
 /// that is never gated on status: completion is a user-owned axis, independent
 /// of whatever the processing pipeline is doing to the item.
 class _ReviewToggle extends StatelessWidget {
-  const _ReviewToggle({required this.reviewed, required this.onTap});
+  const _ReviewToggle({
+    required this.reviewed,
+    required this.busy,
+    required this.onTap,
+  });
 
   final bool reviewed;
+  final bool busy;
   final VoidCallback onTap;
 
   @override
@@ -547,14 +562,20 @@ class _ReviewToggle extends StatelessWidget {
     return Semantics(
       button: true,
       checked: reviewed,
-      label: reviewed ? 'Mark as not done' : 'Mark as done',
+      label: busy
+          ? 'Moving capture to Done'
+          : reviewed
+          ? 'Mark as not done'
+          : 'Mark as done',
       child: InkResponse(
-        onTap: () {
-          if (!reviewed) {
-            HapticFeedback.mediumImpact();
-          }
-          onTap();
-        },
+        onTap: busy
+            ? null
+            : () {
+                if (!reviewed) {
+                  HapticFeedback.mediumImpact();
+                }
+                onTap();
+              },
         radius: 22,
         child: DoneBurstAnimation(
           reviewed: reviewed,
@@ -569,14 +590,24 @@ class _ReviewToggle extends StatelessWidget {
                 child: FadeTransition(opacity: animation, child: child),
               );
             },
-            child: Icon(
-              reviewed
-                  ? Icons.check_circle_rounded
-                  : Icons.radio_button_unchecked_rounded,
-              key: ValueKey<bool>(reviewed),
-              color: reviewed ? Console.green : Console.dimText,
-              size: 26,
-            ),
+            child: busy
+                ? SizedBox.square(
+                    key: const ValueKey<String>('marking-done'),
+                    dimension: 19,
+                    child: CircularProgressIndicator(
+                      strokeWidth: 2,
+                      color: Console.green,
+                      backgroundColor: Console.green.withValues(alpha: .16),
+                    ),
+                  )
+                : Icon(
+                    reviewed
+                        ? Icons.check_circle_rounded
+                        : Icons.radio_button_unchecked_rounded,
+                    key: ValueKey<bool>(reviewed),
+                    color: reviewed ? Console.green : Console.dimText,
+                    size: 26,
+                  ),
           ),
         ),
       ),
@@ -682,8 +713,9 @@ class _CardTranscriptSectionState extends State<_CardTranscriptSection> {
                 child: Text(
                   transcript,
                   maxLines: _expanded ? null : 3,
-                  overflow:
-                      _expanded ? TextOverflow.clip : TextOverflow.ellipsis,
+                  overflow: _expanded
+                      ? TextOverflow.clip
+                      : TextOverflow.ellipsis,
                   style: ConsoleText.body,
                 ),
               ),

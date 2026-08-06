@@ -94,6 +94,16 @@ class _QueueTabState extends State<QueueTab> {
   /// the selection onto whatever item slid into that slot.
   String? focusedId;
 
+  /// Desktop completion feedback has to outlive the card: the default Desk
+  /// filter removes a capture the moment its durable review write lands. The
+  /// in-card spinner covers the write; this small overlay carries the result
+  /// across that removal so the disappearing row reads as an outcome, not a
+  /// glitch.
+  final Set<String> markingDoneIds = <String>{};
+  _DoneFeedbackState? doneFeedback;
+  int _doneFeedbackSequence = 0;
+  Timer? _doneFeedbackTimer;
+
   /// Whether the compact header's two panels are open *by the user's hand*.
   ///
   /// Not the whole answer: a panel whose control is engaged is forced open
@@ -128,6 +138,7 @@ class _QueueTabState extends State<QueueTab> {
 
   @override
   void dispose() {
+    _doneFeedbackTimer?.cancel();
     searchController.dispose();
     searchFocus.dispose();
     listFocus.dispose();
@@ -205,10 +216,7 @@ class _QueueTabState extends State<QueueTab> {
           onEdit: () => _onFocused(visible, (Recording item) {
             setState(() => editingId = item.id);
           }),
-          onToggleProcessed: () => _onFocused(
-            visible,
-            (Recording item) => controller.toggleProcessed(item.id),
-          ),
+          onToggleProcessed: () => _onFocused(visible, _toggleProcessed),
           onTogglePlay: () => _onFocused(
             visible,
             (Recording item) => controller.togglePlayback(item.id),
@@ -226,186 +234,232 @@ class _QueueTabState extends State<QueueTab> {
             searchFocus.requestFocus();
           },
           onClearFocus: () => setState(() => focusedId = null),
-          child: SafeArea(
-            bottom: false,
-            child: Column(
-              children: <Widget>[
-                // No page title on a phone. It is the one screen that can spare
-                // none: the header, the progress strip and the always-open
-                // controls took roughly a third of a 393x852 device before the
-                // first capture was drawn, and Queue is the tab the app opens
-                // on. The four other tabs keep theirs — they are destinations
-                // the user navigated to, and each needs to say what it is.
-                if (!compact)
-                  Padding(
-                    padding: const EdgeInsets.fromLTRB(20, 14, 20, 0),
-                    child: ConsoleHeader(
-                      title: 'Queue',
-                      trailing:
-                          '${all.length} ${all.length == 1 ? 'capture' : 'captures'}',
-                    ),
-                  ),
-                if (controller.error != null) ...<Widget>[
-                  const SizedBox(height: 10),
-                  ErrorBanner(message: controller.error!),
-                ],
-                // Pinned above the scroll area, not scrolled with it.
-                //
-                // These four are the screen's entire navigation, and as list children
-                // they left the screen on the first drag. The consequence is worse
-                // than the inconvenience: with the chips off-screen, "empty because a
-                // filter excludes everything" and "empty because there is nothing"
-                // become the same picture, and the user has no way to tell which one
-                // they are looking at without scrolling back up to check.
-                if (compact)
-                  CompactQueueHeader(
-                    total: all.length,
-                    reviewed: reviewedCount,
-                    filter: reviewFilter,
-                    onFilterChanged: (ReviewFilter value) {
-                      setState(() => reviewFilter = value);
-                    },
-                    searchOpen: searchOpen,
-                    // Toggles the user's own flag, never the resolved one: a
-                    // panel forced open by a live filter must stay open, and
-                    // folding the two together would also make "clear the
-                    // filter" close the panel out from under the finger that
-                    // cleared it.
-                    onToggleSearch: () {
-                      setState(() => searchPanelOpen = !searchPanelOpen);
-                      if (searchPanelOpen) searchFocus.requestFocus();
-                    },
-                    search: _SearchField(
-                      controller: searchController,
-                      focusNode: searchFocus,
-                      value: searchQuery,
-                      onChanged: (String value) {
-                        setState(() => searchQuery = value);
-                      },
-                    ),
-                    filtersOpen: filtersOpen,
-                    onToggleFilters: () {
-                      setState(() => filterPanelOpen = !filterPanelOpen);
-                    },
-                    filters: Column(
-                      crossAxisAlignment: CrossAxisAlignment.stretch,
-                      children: <Widget>[
-                        if (projects.isNotEmpty) ...<Widget>[
-                          _ProjectFilter(
-                            projects: projects,
-                            selectedId: effectiveProjectFilterId,
-                            onChanged: (String? value) {
-                              setState(() => projectFilterId = value);
-                            },
-                          ),
-                          const SizedBox(height: 10),
-                        ],
-                        _FilterRow(
-                          selected: selectedFilter,
-                          counts: counts,
-                          onSelected: (RecordingFilter value) {
-                            setState(() => selectedFilter = value);
-                          },
+          child: Stack(
+            children: <Widget>[
+              SafeArea(
+                bottom: false,
+                child: Column(
+                  children: <Widget>[
+                    // No page title on a phone. It is the one screen that can spare
+                    // none: the header, the progress strip and the always-open
+                    // controls took roughly a third of a 393x852 device before the
+                    // first capture was drawn, and Queue is the tab the app opens
+                    // on. The four other tabs keep theirs — they are destinations
+                    // the user navigated to, and each needs to say what it is.
+                    if (!compact)
+                      Padding(
+                        padding: const EdgeInsets.fromLTRB(20, 14, 20, 0),
+                        child: ConsoleHeader(
+                          title: 'Queue',
+                          trailing:
+                              '${all.length} ${all.length == 1 ? 'capture' : 'captures'}',
                         ),
-                      ],
-                    ),
-                  )
-                else
-                  Padding(
-                    padding: const EdgeInsets.fromLTRB(20, 14, 20, 0),
-                    child: Column(
-                      children: <Widget>[
-                        ReviewedStrip(
-                          total: all.length,
-                          reviewed: reviewedCount,
-                          filter: reviewFilter,
-                          onFilterChanged: (ReviewFilter value) {
-                            setState(() => reviewFilter = value);
-                          },
-                        ),
-                        const SizedBox(height: 10),
-                        Padding(
-                          padding: const EdgeInsets.symmetric(horizontal: 4),
-                          child: _QueueControls(
-                            searchController: searchController,
-                            searchFocusNode: searchFocus,
-                            searchQuery: searchQuery,
-                            onSearchChanged: (String value) {
-                              setState(() => searchQuery = value);
-                            },
-                            projects: projects,
-                            selectedProjectId: effectiveProjectFilterId,
-                            onProjectChanged: (String? value) {
-                              setState(() => projectFilterId = value);
-                            },
-                            selectedFilter: selectedFilter,
-                            counts: counts,
-                            onFilterSelected: (RecordingFilter value) {
-                              setState(() => selectedFilter = value);
-                            },
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                Expanded(
-                  child: ListView(
-                    // Tighter on a phone, and starting closer to the header:
-                    // the compact row draws its own margin and its own border,
-                    // so a wide gutter here only shrinks the one column of text
-                    // the screen exists to show.
-                    padding: compact
-                        ? const EdgeInsets.fromLTRB(10, 6, 10, 24)
-                        : const EdgeInsets.fromLTRB(16, 14, 16, 190),
-                    children: <Widget>[
-                      if (visible.isEmpty)
-                        Padding(
-                          padding: const EdgeInsets.symmetric(horizontal: 4),
-                          child: EmptyPanel(
-                            // An empty list has two very different causes and they
-                            // look identical: nothing was captured, or a filter is
-                            // hiding what was. Naming the filter that emptied the
-                            // list is the whole difference between "you are done"
-                            // and "you cannot see your work".
-                            icon: all.isEmpty
-                                ? Icons.graphic_eq
-                                : Icons.inbox_outlined,
-                            title: _emptyLabel(
-                              selectedFilter,
-                              reviewFilter,
-                              hasAny: all.isNotEmpty,
-                            ),
-                            blurb: all.isEmpty
-                                ? 'Every capture is written to disk and verified '
-                                      'before processing is even attempted.'
-                                : 'Adjust the review, status, project, or search '
-                                      'filters to broaden the queue.',
-                          ),
-                        )
-                      else
-                        ...visible.map(
-                          (Recording recording) => Padding(
-                            padding: const EdgeInsets.fromLTRB(4, 0, 4, 10),
-                            // The row grows into the editor in place. Animating the
-                            // height is what keeps the rows below from jumping — the
-                            // edited item has to stay under the finger that opened it.
-                            child: AnimatedSize(
-                              duration: const Duration(milliseconds: 220),
-                              curve: Curves.easeOutCubic,
-                              alignment: Alignment.topCenter,
-                              child: recording.id == editingId
-                                  ? _buildEditor(recording)
-                                  : compact
-                                  ? _buildMobileRow(recording)
-                                  : _buildCard(recording),
-                            ),
-                          ),
-                        ),
+                      ),
+                    if (controller.error != null) ...<Widget>[
+                      const SizedBox(height: 10),
+                      ErrorBanner(message: controller.error!),
                     ],
+                    // Pinned above the scroll area, not scrolled with it.
+                    //
+                    // These four are the screen's entire navigation, and as list children
+                    // they left the screen on the first drag. The consequence is worse
+                    // than the inconvenience: with the chips off-screen, "empty because a
+                    // filter excludes everything" and "empty because there is nothing"
+                    // become the same picture, and the user has no way to tell which one
+                    // they are looking at without scrolling back up to check.
+                    if (compact)
+                      CompactQueueHeader(
+                        total: all.length,
+                        reviewed: reviewedCount,
+                        filter: reviewFilter,
+                        onFilterChanged: (ReviewFilter value) {
+                          setState(() => reviewFilter = value);
+                        },
+                        searchOpen: searchOpen,
+                        // Toggles the user's own flag, never the resolved one: a
+                        // panel forced open by a live filter must stay open, and
+                        // folding the two together would also make "clear the
+                        // filter" close the panel out from under the finger that
+                        // cleared it.
+                        onToggleSearch: () {
+                          setState(() => searchPanelOpen = !searchPanelOpen);
+                          if (searchPanelOpen) searchFocus.requestFocus();
+                        },
+                        search: _SearchField(
+                          controller: searchController,
+                          focusNode: searchFocus,
+                          value: searchQuery,
+                          onChanged: (String value) {
+                            setState(() => searchQuery = value);
+                          },
+                        ),
+                        filtersOpen: filtersOpen,
+                        onToggleFilters: () {
+                          setState(() => filterPanelOpen = !filterPanelOpen);
+                        },
+                        filters: Column(
+                          crossAxisAlignment: CrossAxisAlignment.stretch,
+                          children: <Widget>[
+                            if (projects.isNotEmpty) ...<Widget>[
+                              _ProjectFilter(
+                                projects: projects,
+                                selectedId: effectiveProjectFilterId,
+                                onChanged: (String? value) {
+                                  setState(() => projectFilterId = value);
+                                },
+                              ),
+                              const SizedBox(height: 10),
+                            ],
+                            _FilterRow(
+                              selected: selectedFilter,
+                              counts: counts,
+                              onSelected: (RecordingFilter value) {
+                                setState(() => selectedFilter = value);
+                              },
+                            ),
+                          ],
+                        ),
+                      )
+                    else
+                      Padding(
+                        padding: const EdgeInsets.fromLTRB(20, 14, 20, 0),
+                        child: Column(
+                          children: <Widget>[
+                            ReviewedStrip(
+                              total: all.length,
+                              reviewed: reviewedCount,
+                              filter: reviewFilter,
+                              onFilterChanged: (ReviewFilter value) {
+                                setState(() => reviewFilter = value);
+                              },
+                            ),
+                            const SizedBox(height: 10),
+                            Padding(
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 4,
+                              ),
+                              child: _QueueControls(
+                                searchController: searchController,
+                                searchFocusNode: searchFocus,
+                                searchQuery: searchQuery,
+                                onSearchChanged: (String value) {
+                                  setState(() => searchQuery = value);
+                                },
+                                projects: projects,
+                                selectedProjectId: effectiveProjectFilterId,
+                                onProjectChanged: (String? value) {
+                                  setState(() => projectFilterId = value);
+                                },
+                                selectedFilter: selectedFilter,
+                                counts: counts,
+                                onFilterSelected: (RecordingFilter value) {
+                                  setState(() => selectedFilter = value);
+                                },
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    Expanded(
+                      child: ListView(
+                        // Tighter on a phone, and starting closer to the header:
+                        // the compact row draws its own margin and its own border,
+                        // so a wide gutter here only shrinks the one column of text
+                        // the screen exists to show.
+                        padding: compact
+                            ? const EdgeInsets.fromLTRB(10, 6, 10, 24)
+                            : const EdgeInsets.fromLTRB(16, 14, 16, 190),
+                        children: <Widget>[
+                          if (visible.isEmpty)
+                            Padding(
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 4,
+                              ),
+                              child: EmptyPanel(
+                                // An empty list has two very different causes and they
+                                // look identical: nothing was captured, or a filter is
+                                // hiding what was. Naming the filter that emptied the
+                                // list is the whole difference between "you are done"
+                                // and "you cannot see your work".
+                                icon: all.isEmpty
+                                    ? Icons.graphic_eq
+                                    : Icons.inbox_outlined,
+                                title: _emptyLabel(
+                                  selectedFilter,
+                                  reviewFilter,
+                                  hasAny: all.isNotEmpty,
+                                ),
+                                blurb: all.isEmpty
+                                    ? 'Every capture is written to disk and verified '
+                                          'before processing is even attempted.'
+                                    : 'Adjust the review, status, project, or search '
+                                          'filters to broaden the queue.',
+                              ),
+                            )
+                          else
+                            ...visible.map(
+                              (Recording recording) => Padding(
+                                padding: const EdgeInsets.fromLTRB(4, 0, 4, 10),
+                                // The row grows into the editor in place. Animating the
+                                // height is what keeps the rows below from jumping — the
+                                // edited item has to stay under the finger that opened it.
+                                child: AnimatedSize(
+                                  duration: const Duration(milliseconds: 220),
+                                  curve: Curves.easeOutCubic,
+                                  alignment: Alignment.topCenter,
+                                  child: recording.id == editingId
+                                      ? _buildEditor(recording)
+                                      : compact
+                                      ? _buildMobileRow(recording)
+                                      : _buildCard(recording),
+                                ),
+                              ),
+                            ),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              Positioned(
+                right: 20,
+                bottom: 22,
+                child: IgnorePointer(
+                  child: AnimatedSwitcher(
+                    duration: const Duration(milliseconds: 180),
+                    reverseDuration: const Duration(milliseconds: 140),
+                    transitionBuilder:
+                        (Widget child, Animation<double> animation) {
+                          final Animation<Offset> offset =
+                              Tween<Offset>(
+                                begin: const Offset(0, .18),
+                                end: Offset.zero,
+                              ).animate(
+                                CurvedAnimation(
+                                  parent: animation,
+                                  curve: Curves.easeOutCubic,
+                                ),
+                              );
+                          return FadeTransition(
+                            opacity: animation,
+                            child: SlideTransition(
+                              position: offset,
+                              child: child,
+                            ),
+                          );
+                        },
+                    child: doneFeedback == null
+                        ? const SizedBox.shrink()
+                        : _DoneFeedback(
+                            key: ValueKey<String>(
+                              '${doneFeedback!.id}:${doneFeedback!.phase.name}',
+                            ),
+                            state: doneFeedback!,
+                          ),
                   ),
                 ),
-              ],
-            ),
+              ),
+            ],
           ),
         );
       },
@@ -462,6 +516,7 @@ class _QueueTabState extends State<QueueTab> {
       isEnriching: controller.isEnriching(recording.id),
       projectName: _projectName(recording.projectId),
       focused: recording.id == focusedId,
+      isMarkingDone: markingDoneIds.contains(recording.id),
       canRoute: controller.canRoute(recording),
       onRoute: () => controller.route(recording.id),
       canHandoff: controller.canHandoff(recording),
@@ -471,14 +526,69 @@ class _QueueTabState extends State<QueueTab> {
       onRetry: () => controller.retryTranscription(recording.id),
       onEnrich: () => controller.retryEnrichment(recording.id),
       onEdit: () => setState(() => editingId = recording.id),
-      onToggleProcessed: () async {
-        // Fire-and-forget: the haptic is cosmetic and must not gate a durable
-        // state write. Awaiting it means the review flag waits on the platform
-        // answering — which, on a host that never does, is forever.
-        unawaited(HapticFeedback.selectionClick());
-        await controller.toggleProcessed(recording.id);
-      },
+      onToggleProcessed: () => _toggleProcessed(recording),
     );
+  }
+
+  Future<void> _toggleProcessed(Recording recording) async {
+    final RecordingsController controller = widget.controller;
+    // Reopening an off-desk item is an immediate reversible action. The richer
+    // sequence is reserved for Done, where the default filter removes the card
+    // and would otherwise erase all visual feedback with it.
+    if (recording.isProcessedByUser) {
+      await controller.toggleProcessed(recording.id);
+      return;
+    }
+    if (markingDoneIds.contains(recording.id)) return;
+
+    final int sequence = ++_doneFeedbackSequence;
+    setState(() {
+      markingDoneIds.add(recording.id);
+      doneFeedback = _DoneFeedbackState(
+        id: recording.id,
+        phase: _DoneFeedbackPhase.saving,
+      );
+    });
+    // Cosmetic feedback never gates the disk write.
+    unawaited(HapticFeedback.selectionClick());
+
+    try {
+      await controller.toggleProcessed(recording.id);
+    } catch (_) {
+      if (!mounted) return;
+      setState(() {
+        markingDoneIds.remove(recording.id);
+        if (sequence == _doneFeedbackSequence) {
+          doneFeedback = _DoneFeedbackState(
+            id: recording.id,
+            phase: _DoneFeedbackPhase.failed,
+          );
+        }
+      });
+      _scheduleFeedbackDismiss(sequence, const Duration(milliseconds: 1800));
+      return;
+    }
+
+    if (!mounted) return;
+    setState(() {
+      markingDoneIds.remove(recording.id);
+      if (sequence == _doneFeedbackSequence) {
+        doneFeedback = _DoneFeedbackState(
+          id: recording.id,
+          phase: _DoneFeedbackPhase.done,
+        );
+      }
+    });
+    _scheduleFeedbackDismiss(sequence, const Duration(milliseconds: 1100));
+  }
+
+  void _scheduleFeedbackDismiss(int sequence, Duration delay) {
+    if (sequence != _doneFeedbackSequence) return;
+    _doneFeedbackTimer?.cancel();
+    _doneFeedbackTimer = Timer(delay, () {
+      if (!mounted || sequence != _doneFeedbackSequence) return;
+      setState(() => doneFeedback = null);
+    });
   }
 
   /// Narrow layouts use an accordion row, while the desktop path above remains
@@ -611,6 +721,82 @@ class _QueueTabState extends State<QueueTab> {
       if (project.id == id) return project.name;
     }
     return 'Missing project';
+  }
+}
+
+enum _DoneFeedbackPhase { saving, done, failed }
+
+class _DoneFeedbackState {
+  const _DoneFeedbackState({required this.id, required this.phase});
+
+  final String id;
+  final _DoneFeedbackPhase phase;
+}
+
+/// A compact desktop status capsule rather than a snackbar: it belongs to the
+/// queue action, never covers content, and does not ask to be dismissed.
+class _DoneFeedback extends StatelessWidget {
+  const _DoneFeedback({super.key, required this.state});
+
+  final _DoneFeedbackState state;
+
+  @override
+  Widget build(BuildContext context) {
+    final bool failed = state.phase == _DoneFeedbackPhase.failed;
+    final bool saving = state.phase == _DoneFeedbackPhase.saving;
+    final Color color = failed ? Console.redSoft : Console.green;
+    final String label = failed
+        ? 'Could not move · try again'
+        : saving
+        ? 'Moving to Done…'
+        : 'Moved to Done';
+
+    return Semantics(
+      liveRegion: true,
+      label: label,
+      excludeSemantics: true,
+      child: Container(
+        constraints: const BoxConstraints(minHeight: 42),
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+        decoration: BoxDecoration(
+          color: Console.surface,
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(color: color.withValues(alpha: .42)),
+          boxShadow: <BoxShadow>[
+            BoxShadow(
+              color: Console.shadow,
+              blurRadius: 18,
+              offset: const Offset(0, 6),
+            ),
+          ],
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: <Widget>[
+            if (saving)
+              SizedBox.square(
+                dimension: 16,
+                child: CircularProgressIndicator(
+                  strokeWidth: 2,
+                  color: color,
+                  backgroundColor: color.withValues(alpha: .16),
+                ),
+              )
+            else
+              Icon(
+                failed ? Icons.error_outline_rounded : Icons.check_rounded,
+                size: 18,
+                color: color,
+              ),
+            const SizedBox(width: 9),
+            Text(
+              label.toUpperCase(),
+              style: ConsoleText.chip.copyWith(color: color),
+            ),
+          ],
+        ),
+      ),
+    );
   }
 }
 

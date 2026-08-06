@@ -250,6 +250,34 @@ class ConfigTab extends StatelessWidget {
             ),
           ],
           const SizedBox(height: 22),
+          SectionHeader(title: 'MOBILE KEYBOARD'),
+          const SizedBox(height: 12),
+          ConsoleCard(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: <Widget>[
+                InfoRow(
+                  label: 'KEYBOARD EXTENSION',
+                  value: 'Ready for iOS & Android',
+                  valueColor: Console.accent,
+                ),
+                InfoRow(
+                  label: 'CLIPBOARD SYNC',
+                  value: 'Multi-Clipboard Active',
+                ),
+                const SizedBox(height: 8),
+                Text(
+                  'To use Augustyniak Capture as your system keyboard on mobile, open your device Settings -> Keyboards -> Add New Keyboard -> Augustyniak Capture. All copied items and collections will be available for 1-tap pasting across any app.',
+                  style: TextStyle(
+                    color: Console.mutedSoft,
+                    fontSize: 11,
+                    height: 1.45,
+                  ),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 22),
           SectionHeader(title: 'STORAGE'),
           const SizedBox(height: 12),
           ConsoleCard(

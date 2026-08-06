@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import '../../../app/ui_kit.dart';
+import '../../recordings/presentation/recordings_controller.dart';
 import '../domain/clipboard_item.dart';
 import '../domain/clipboard_watcher_service.dart';
 
@@ -10,9 +11,11 @@ class ClipboardHistorySheet extends StatefulWidget {
   const ClipboardHistorySheet({
     super.key,
     required this.watcherService,
+    this.recordingsController,
   });
 
   final ClipboardWatcherService watcherService;
+  final RecordingsController? recordingsController;
 
   @override
   State<ClipboardHistorySheet> createState() => _ClipboardHistorySheetState();
@@ -79,6 +82,34 @@ class _ClipboardHistorySheetState extends State<ClipboardHistorySheet> {
           ),
         ),
       );
+    }
+  }
+
+  void _convertToCapture(BuildContext context, ClipboardItem item) async {
+    final String? text = item.text;
+    if (widget.recordingsController != null && text != null && text.trim().isNotEmpty) {
+      await widget.recordingsController!.addTextNote(text);
+      if (context.mounted) {
+        Navigator.of(context).pop();
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Row(
+              children: <Widget>[
+                Icon(Icons.auto_awesome, color: Console.accent, size: 20),
+                const SizedBox(width: 10),
+                const Text('Przekazano do przetworzenia LLM (Capture ✨)'),
+              ],
+            ),
+            duration: const Duration(seconds: 2),
+            backgroundColor: Console.surface,
+            behavior: SnackBarBehavior.floating,
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(8),
+              side: BorderSide(color: Console.accent),
+            ),
+          ),
+        );
+      }
     }
   }
 
@@ -423,6 +454,9 @@ class _ClipboardHistorySheetState extends State<ClipboardHistorySheet> {
                                 timeLabel: _formatTime(item.copiedAt),
                                 isSelected: isSelected,
                                 onTap: () => _selectAndCopy(context, item),
+                                onConvertToCapture: widget.recordingsController != null && item.text != null
+                                    ? () => _convertToCapture(context, item)
+                                    : null,
                                 onAddCollection: () => _manageItemCollections(context, item),
                                 onDelete: () async {
                                   await widget.watcherService.deleteItem(item.id);
@@ -447,6 +481,7 @@ class _ClipboardItemTile extends StatelessWidget {
     required this.timeLabel,
     required this.isSelected,
     required this.onTap,
+    this.onConvertToCapture,
     required this.onAddCollection,
     required this.onDelete,
   });
@@ -455,6 +490,7 @@ class _ClipboardItemTile extends StatelessWidget {
   final String timeLabel;
   final bool isSelected;
   final VoidCallback onTap;
+  final VoidCallback? onConvertToCapture;
   final VoidCallback onAddCollection;
   final VoidCallback onDelete;
 
@@ -527,6 +563,20 @@ class _ClipboardItemTile extends StatelessWidget {
                             const SizedBox(width: 4),
                           ],
                           const Spacer(),
+                          if (onConvertToCapture != null) ...<Widget>[
+                            InkWell(
+                              onTap: onConvertToCapture,
+                              borderRadius: BorderRadius.circular(4),
+                              child: Padding(
+                                padding: const EdgeInsets.all(4.0),
+                                child: Tooltip(
+                                  message: 'Przekaż do przetworzenia LLM (Capture ✨)',
+                                  child: Icon(Icons.auto_awesome, size: 16, color: Console.accent),
+                                ),
+                              ),
+                            ),
+                            const SizedBox(width: 4),
+                          ],
                           InkWell(
                             onTap: onAddCollection,
                             borderRadius: BorderRadius.circular(4),

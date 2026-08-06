@@ -486,6 +486,7 @@ class _RecordingsPageState extends State<RecordingsPage> {
       builder: (BuildContext context) => ConsolePaletteScope(
         builder: (BuildContext context) => ClipboardHistorySheet(
           watcherService: clipboardWatcher,
+          recordingsController: controller,
         ),
       ),
     );

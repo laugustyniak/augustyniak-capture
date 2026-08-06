@@ -663,11 +663,14 @@ void main() {
     await pumpQueue(tester, controller);
 
     await tester.tap(find.byIcon(Icons.radio_button_unchecked_rounded));
-    await tester.pumpAndSettle();
+    await tester.pump();
+    await settleIo(tester);
     expect(controller.recordings.single.isProcessedByUser, isTrue);
+    expect(find.text('MOVED TO DONE'), findsOneWidget);
 
-    // The toggle is async, so the notification lands after the settle above;
-    // pump again to render the state the controller now holds.
+    // The acknowledgement deliberately outlives the card, then leaves without
+    // requiring a dismissal.
+    await tester.pump(const Duration(milliseconds: 1200));
     await tester.pumpAndSettle();
 
     // The point of the review axis: closing an item *removes* it from the
