@@ -23,7 +23,7 @@ abstract class ClipboardRepository {
 
 class LocalJsonClipboardRepository implements ClipboardRepository {
   LocalJsonClipboardRepository({
-    this.maxItems = 100,
+    this.maxItems = 100000,
     ClipboardStorageDirectoryProvider? storageDirectoryProvider,
   }) : _storageDirectoryProvider =
            storageDirectoryProvider ?? _defaultStorageDirectory;

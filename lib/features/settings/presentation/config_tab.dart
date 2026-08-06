@@ -265,6 +265,11 @@ class ConfigTab extends StatelessWidget {
                   label: 'CLIPBOARD SYNC',
                   value: 'Multi-Clipboard Active',
                 ),
+                InfoRow(
+                  label: 'CLIPBOARD CAPACITY',
+                  value: '100,000 items (100k)',
+                  monospace: true,
+                ),
                 const SizedBox(height: 8),
                 Text(
                   'To use Augustyniak Capture as your system keyboard on mobile, open your device Settings -> Keyboards -> Add New Keyboard -> Augustyniak Capture. All copied items and collections will be available for 1-tap pasting across any app.',
