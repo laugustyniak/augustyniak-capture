@@ -4,7 +4,7 @@ Status: **proposed** · Owner: laugustyniak · Scope: `agentTask` captures leave
 through the Command control plane and report an outcome back, and the
 Ghostty/Zellij launcher is demoted to the offline case it is actually good at.
 
-> The contract this implements is **RFC-0008** in the `relay` repo
+> The contract this implements is **RFC-0008** in the Augustyniak Command repo
 > (`docs/rfc/0008-capture-intake-contract.md`, issue #87). Where this plan and
 > that document disagree, the RFC is the contract and this file is the bug —
 > it is normative on the other side of an HTTP boundary neither repo can test
@@ -93,7 +93,7 @@ PUT  {aggregator}/api/{host}/workspaces/{workspace}/briefs
   → 201 {brief_id, path}
 
 POST {aggregator}/api/sessions/{host}
-     {workspace, engine: "relay-plan", prompt: "<brief_id>"}
+     {workspace, engine: "command-plan", prompt: "<brief_id>"}
   → 201 {tmux_session, pid}
 ```
 
@@ -198,7 +198,7 @@ local launcher. No new dependency, no settings, nothing to configure.
   delimiter; Polish diacritics survive; appending a second `## Handoff` leaves
   everything written underneath intact (today's behaviour, now pinned).
 
-Value on its own: the brief becomes readable by `relay plan --brief`, which
+Value on its own: the brief becomes readable by `augustyniak-command plan --brief`, which
 already exists on the Command side. A user with `ssh` can pipe it today.
 
 ### Slice 1 — the client and the binding
