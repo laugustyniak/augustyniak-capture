@@ -437,6 +437,35 @@ class RecordingsController extends ChangeNotifier {
     unawaited(_posterBackfill!);
   }
 
+  /// Reloads recordings from SQLite storage into RAM and notifies listeners.
+  Future<void> reloadFromStorage() async {
+    _recordings = await _repository.loadAll();
+    notifyListeners();
+  }
+
+  /// Triggers Turso sync and reloads local recordings into RAM.
+  Future<bool> syncTurso() async {
+    try {
+      final AppDatabase db = await AppDatabase.getInstance();
+      final AppSettings settings = await SettingsRepository().load() ?? AppSettings.empty;
+      if (settings.tursoDbUrl != null && settings.tursoAuthToken != null && settings.tursoSyncEnabled) {
+        final TursoSyncService syncService = TursoSyncService(db: db);
+        final bool synced = await syncService.pullFromTurso(
+          dbUrl: settings.tursoDbUrl!,
+          authToken: settings.tursoAuthToken!,
+        );
+        if (synced) {
+          await reloadFromStorage();
+          _logSink.log('Synced ${_recordings.length} captures from Turso Cloud.');
+          return true;
+        }
+      }
+    } catch (e) {
+      _logSink.log('Turso sync skipped: $e', level: LogLevel.warn);
+    }
+    return false;
+  }
+
   /// Bring source files with no index row back into the queue.
   ///
   /// The counterpart to the write guard: that stops history from being lost

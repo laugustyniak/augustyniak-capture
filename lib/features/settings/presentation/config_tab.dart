@@ -5,6 +5,7 @@ import '../../../core/database/app_database.dart';
 import '../../../core/sync/turso_sync_service.dart';
 import '../../projects/domain/project.dart';
 import '../../recordings/domain/note_vault.dart';
+import '../../recordings/presentation/recordings_controller.dart';
 import '../../shortcuts/domain/shortcut_action.dart';
 import '../../shortcuts/presentation/shortcuts_section.dart';
 import '../domain/app_theme_mode.dart';
@@ -22,6 +23,7 @@ class ConfigTab extends StatelessWidget {
   const ConfigTab({
     super.key,
     required this.controller,
+    this.recordingsController,
     required this.storagePath,
     required this.recordingsCount,
     required this.logCount,
@@ -37,6 +39,7 @@ class ConfigTab extends StatelessWidget {
   static Future<void> _runDirectly(Future<void> Function() action) => action();
 
   final SettingsController controller;
+  final RecordingsController? recordingsController;
   final String? storagePath;
   final int recordingsCount;
   final int logCount;
@@ -323,16 +326,56 @@ class ConfigTab extends StatelessWidget {
                   ),
                 ),
                 const SizedBox(height: 10),
-                Align(
-                  alignment: Alignment.centerRight,
-                  child: TextButton.icon(
-                    icon: const Icon(Icons.edit, size: 14),
-                    label: const Text('EDIT TURSO CREDENTIALS'),
-                    style: TextButton.styleFrom(
-                      foregroundColor: Console.accent,
+                Wrap(
+                  spacing: 8,
+                  runSpacing: 8,
+                  alignment: WrapAlignment.spaceBetween,
+                  crossAxisAlignment: WrapCrossAlignment.center,
+                  children: <Widget>[
+                    ElevatedButton.icon(
+                      icon: const Icon(Icons.sync, size: 14),
+                      label: const Text('SYNC NOW (TURSO & R2)'),
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: Console.green,
+                        foregroundColor: Colors.black,
+                      ),
+                      onPressed: () async {
+                        final String? url = controller.settings.tursoDbUrl;
+                        final String? token = controller.settings.tursoAuthToken;
+                        if (url != null && token != null) {
+                          final AppDatabase db = await AppDatabase.getInstance();
+                          final TursoSyncService syncService = TursoSyncService(db: db);
+                          final bool ok = await syncService.syncTwoWay(
+                            dbUrl: url,
+                            authToken: token,
+                          );
+                          await recordingsController?.reloadFromStorage();
+                          if (context.mounted) {
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              SnackBar(
+                                content: Text(
+                                  ok
+                                      ? '⚡ Bidirectional Turso & R2 sync complete!'
+                                      : '⚠️ Turso sync failed. Check connection.',
+                                ),
+                                backgroundColor: ok ? Console.green : Console.amber,
+                              ),
+                            );
+                          }
+                        } else {
+                          await _showEditTursoDialog(context, controller, recordingsController);
+                        }
+                      },
                     ),
-                    onPressed: () => _showEditTursoDialog(context, controller),
-                  ),
+                    TextButton.icon(
+                      icon: const Icon(Icons.edit, size: 14),
+                      label: const Text('EDIT TURSO CREDENTIALS'),
+                      style: TextButton.styleFrom(
+                        foregroundColor: Console.accent,
+                      ),
+                      onPressed: () => _showEditTursoDialog(context, controller, recordingsController),
+                    ),
+                  ],
                 ),
               ],
             ),
@@ -403,7 +446,10 @@ class ConfigTab extends StatelessWidget {
                           if (isMobile) {
                             Navigator.of(context).push(
                               MaterialPageRoute<bool>(
-                                builder: (_) => QrSyncScannerSheet(controller: controller),
+                                builder: (_) => QrSyncScannerSheet(
+                                  controller: controller,
+                                  recordingsController: recordingsController,
+                                ),
                               ),
                             );
                           } else {
@@ -532,6 +578,7 @@ class _ChoiceRow<T> extends StatelessWidget {
 Future<void> _showEditTursoDialog(
   BuildContext context,
   SettingsController controller,
+  RecordingsController? recordingsController,
 ) async {
   final TextEditingController urlCtrl = TextEditingController(
     text: controller.settings.tursoDbUrl ??
@@ -583,6 +630,7 @@ Future<void> _showEditTursoDialog(
                 final AppDatabase db = await AppDatabase.getInstance();
                 final TursoSyncService syncService = TursoSyncService(db: db);
                 await syncService.pullFromTurso(dbUrl: url, authToken: token);
+                await recordingsController?.reloadFromStorage();
               }
 
               if (ctx.mounted) Navigator.of(ctx).pop();

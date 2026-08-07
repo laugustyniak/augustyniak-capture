@@ -106,12 +106,15 @@ class SettingsRepository {
     final AppSettings stored = AppSettings.fromJson(decoded);
     AppSettings settings = await unsealTokens(stored);
 
-    if (settings.tursoDbUrl == null || settings.r2Bucket == null) {
+    const String defaultToken = 'eyJhbGciOiJFZERTQSIsInR5cCI6IkpXVCJ9.eyJpYXQiOjE3ODYxMDkwNDIsImlkIjoiMDE5ZmRjNjUtMTkwMS03N2JiLTk2NmMtYzQ4OGY0MmY4Y2Y5Iiwia2lkIjoiS05WbTBXMHhOZjdyd21pSXRrczdYMGdmYml3VGhGQ0RPbEtxemU4UUZmdyIsInJpZCI6IjE3MTJmZDJhLWVmY2MtNGI2MC1iZjQyLTVhMmEzNmYwYzkzYiJ9.4bvw9Cf9oMVSzDJSaZ9eq6bOTwbCXuYdast_FzKEddESgS3G3NCjjkSgJE7SRs17xtuTog42tJtrVRZ1Etl0Ag';
+
+    if (settings.tursoDbUrl == null || settings.r2Bucket == null || settings.tursoAuthToken == null || TokenCipher.isSealed(settings.tursoAuthToken!)) {
       settings = settings.copyWith(
         tursoDbUrl: settings.tursoDbUrl ??
             'libsql://augustyniak-capture-laugustyniak.aws-us-east-1.turso.io',
-        tursoAuthToken: settings.tursoAuthToken ??
-            'eyJhbGciOiJFZERTQSIsInR5cCI6IkpXVCJ9.eyJpYXQiOjE3ODYxMDkwNDIsImlkIjoiMDE5ZmRjNjUtMTkwMS03N2JiLTk2NmMtYzQ4OGY0MmY4Y2Y5Iiwia2lkIjoiS05WbTBXMHhOZjdyd21pSXRrczdYMGdmYml3VGhGQ0RPbEtxemU4UUZmdyIsInJpZCI6IjE3MTJmZDJhLWVmY2MtNGI2MC1iZjQyLTVhMmEzNmYwYzkzYiJ9.4bvw9Cf9oMVSzDJSaZ9eq6bOTwbCXuYdast_FzKEddESgS3G3NCjjkSgJE7SRs17xtuTog42tJtrVRZ1Etl0Ag',
+        tursoAuthToken: (settings.tursoAuthToken != null && !TokenCipher.isSealed(settings.tursoAuthToken!))
+            ? settings.tursoAuthToken
+            : defaultToken,
         tursoSyncEnabled: true,
         r2Endpoint: settings.r2Endpoint ??
             'https://e779027f883e48c2e7f31c5850408dba.r2.cloudflarestorage.com',

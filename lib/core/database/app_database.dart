@@ -16,6 +16,8 @@ class AppDatabase {
   final String _dbPath;
 
   static AppDatabase? _instance;
+  @visibleForTesting
+  static void resetForTesting() => _instance = null;
 
   static Future<AppDatabase> getInstance({Database? overrideDb}) async {
     if (_instance != null) return _instance!;

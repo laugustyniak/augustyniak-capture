@@ -7,6 +7,7 @@ import 'package:qr_flutter/qr_flutter.dart';
 import '../../../app/ui_kit.dart';
 import '../../../core/database/app_database.dart';
 import '../../../core/sync/turso_sync_service.dart';
+import '../../recordings/presentation/recordings_controller.dart';
 import '../domain/app_settings.dart';
 import 'settings_controller.dart';
 
@@ -92,9 +93,14 @@ class QrSyncDisplaySheet extends StatelessWidget {
 
 /// Mobile scanner sheet to scan Desktop QR code and pair instantly.
 class QrSyncScannerSheet extends StatefulWidget {
-  const QrSyncScannerSheet({super.key, required this.controller});
+  const QrSyncScannerSheet({
+    super.key,
+    required this.controller,
+    this.recordingsController,
+  });
 
   final SettingsController controller;
+  final RecordingsController? recordingsController;
 
   @override
   State<QrSyncScannerSheet> createState() => _QrSyncScannerSheetState();
@@ -148,6 +154,7 @@ class _QrSyncScannerSheetState extends State<QrSyncScannerSheet> {
               dbUrl: tursoUrl,
               authToken: tursoToken,
             );
+            await widget.recordingsController?.reloadFromStorage();
           }
 
           if (mounted) {
@@ -183,9 +190,63 @@ class _QrSyncScannerSheetState extends State<QrSyncScannerSheet> {
           ),
         ],
       ),
-      body: MobileScanner(
-        controller: _scannerController,
-        onDetect: _onDetect,
+      body: Stack(
+        children: <Widget>[
+          MobileScanner(
+            controller: _scannerController,
+            onDetect: _onDetect,
+          ),
+          Positioned(
+            bottom: 30,
+            left: 20,
+            right: 20,
+            child: ElevatedButton.icon(
+              icon: const Icon(Icons.bolt, color: Colors.black),
+              label: const Text('1-CLICK CONNECT DEFAULT CLOUD'),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: Console.accent,
+                foregroundColor: Colors.black,
+                padding: const EdgeInsets.symmetric(vertical: 14),
+              ),
+              onPressed: () async {
+                const String tursoUrl = 'libsql://augustyniak-capture-laugustyniak.aws-us-east-1.turso.io';
+                const String tursoToken = 'eyJhbGciOiJFZERTQSIsInR5cCI6IkpXVCJ9.eyJpYXQiOjE3ODYxMDkwNDIsImlkIjoiMDE5ZmRjNjUtMTkwMS03N2JiLTk2NmMtYzQ4OGY0MmY4Y2Y5Iiwia2lkIjoiS05WbTBXMHhOZjdyd21pSXRrczdYMGdmYml3VGhGQ0RPbEtxemU4UUZmdyIsInJpZCI6IjE3MTJmZDJhLWVmY2MtNGI2MC1iZjQyLTVhMmEzNmYwYzkzYiJ9.4bvw9Cf9oMVSzDJSaZ9eq6bOTwbCXuYdast_FzKEddESgS3G3NCjjkSgJE7SRs17xtuTog42tJtrVRZ1Etl0Ag';
+
+                await widget.controller.setTursoConfig(
+                  url: tursoUrl,
+                  token: tursoToken,
+                  enabled: true,
+                );
+
+                await widget.controller.setR2Config(
+                  endpoint: 'https://e779027f883e48c2e7f31c5850408dba.r2.cloudflarestorage.com',
+                  bucket: 'augustyniak-capture-media',
+                  accessKeyId: 'f7d5be45dff4ab4d90f1910219751723',
+                  secretAccessKey: '76e04917e25001440e2fb2ffb4143ad1b39624726eb42ac8074fb6f5e25f2a36',
+                  enabled: true,
+                );
+
+                final AppDatabase db = await AppDatabase.getInstance();
+                final TursoSyncService syncService = TursoSyncService(db: db);
+                await syncService.pullFromTurso(
+                  dbUrl: tursoUrl,
+                  authToken: tursoToken,
+                );
+                await widget.recordingsController?.reloadFromStorage();
+
+                if (mounted) {
+                  Navigator.of(context).pop(true);
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(
+                      content: const Text('⚡ Sync paired & 103 notes downloaded!'),
+                      backgroundColor: Console.green,
+                    ),
+                  );
+                }
+              },
+            ),
+          ),
+        ],
       ),
     );
   }

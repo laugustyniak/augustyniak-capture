@@ -616,6 +616,7 @@ class _RecordingsPageState extends State<RecordingsPage> {
                                   LogsTab(store: logs),
                                   ConfigTab(
                                     controller: settings,
+                                    recordingsController: controller,
                                     storagePath: storagePath,
                                     recordingsCount: controller.recordings.length,
                                     logCount: logs.events.length,
