@@ -19,11 +19,9 @@ class _TempFileSettingsRepository extends SettingsRepository {
   final File file;
 
   @override
-  Future<File> settingsFile() async => file;
+  Future<File?> settingsFile() async => file;
 }
 
-/// Simulates a disk-full / read-only-directory write failure so the
-/// one-time migration save inside `load()` has something to fail on.
 class _FailingSaveSettingsRepository extends _TempFileSettingsRepository {
   _FailingSaveSettingsRepository(super.file, {super.cipher});
 

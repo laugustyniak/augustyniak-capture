@@ -30,6 +30,12 @@
 @import record_ios;
 #endif
 
+#if __has_include(<sqlite3_flutter_libs/Sqlite3FlutterLibsPlugin.h>)
+#import <sqlite3_flutter_libs/Sqlite3FlutterLibsPlugin.h>
+#else
+@import sqlite3_flutter_libs;
+#endif
+
 @implementation GeneratedPluginRegistrant
 
 + (void)registerWithRegistry:(NSObject<FlutterPluginRegistry>*)registry {
@@ -37,6 +43,7 @@
   [FilePickerPlugin registerWithRegistrar:[registry registrarForPlugin:@"FilePickerPlugin"]];
   [FlutterSecureStoragePlugin registerWithRegistrar:[registry registrarForPlugin:@"FlutterSecureStoragePlugin"]];
   [RecordIosPlugin registerWithRegistrar:[registry registrarForPlugin:@"RecordIosPlugin"]];
+  [Sqlite3FlutterLibsPlugin registerWithRegistrar:[registry registrarForPlugin:@"Sqlite3FlutterLibsPlugin"]];
 }
 
 @end

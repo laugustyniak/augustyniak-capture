@@ -24,6 +24,9 @@ dependencies:
   # flutter_secure_storage needs libsecret-1-dev at build time on Linux.
   flutter_secure_storage: ^9.2.2
   cryptography: ^2.7.0
+  # Cross-platform SQLite engine with FTS5 support and Turso/libSQL compatibility
+  sqlite3: ^2.5.0
+  sqlite3_flutter_libs: ^0.5.26
 
 dev_dependencies:
   flutter_test:

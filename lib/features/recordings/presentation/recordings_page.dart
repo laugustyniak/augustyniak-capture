@@ -47,7 +47,7 @@ import '../../transcription/data/transcription_service.dart';
 import '../../transcription/domain/transcription_limits.dart';
 import '../../gamification/presentation/celebration_overlay.dart';
 import '../../gamification/presentation/gamification_controller.dart';
-import '../../clipboard/data/clipboard_repository.dart';
+import '../../clipboard/data/sqlite_clipboard_repository.dart';
 import '../data/markdown_note_vault.dart';
 import '../data/project_agent_handoff.dart';
 import '../data/project_inbox_router.dart';
@@ -243,7 +243,7 @@ class _RecordingsPageState extends State<RecordingsPage> {
       logSink: logs,
     );
     clipboardWatcher = ClipboardWatcherService(
-      repository: LocalJsonClipboardRepository(),
+      repository: SqliteClipboardRepository(),
     );
     shortcuts = ShortcutsCoordinator(
       recordings: controller,
