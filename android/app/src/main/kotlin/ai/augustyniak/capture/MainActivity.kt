@@ -40,6 +40,43 @@ class MainActivity : FlutterActivity() {
                 result.notImplemented()
             }
         }
+        MethodChannel(
+            flutterEngine.dartExecutor.binaryMessenger,
+            SESSION_CHANNEL,
+        ).setMethodCallHandler(::handleSessionCall)
+    }
+
+    /**
+     * Starting and stopping the microphone foreground service.
+     *
+     * Handled on the main thread rather than on [mediaExecutor]: these calls
+     * are two intents and must land *before* the recorder opens the input, so
+     * queueing them behind a running media job would be exactly the wrong
+     * order. See [CaptureForegroundService] for why the service is needed.
+     */
+    private fun handleSessionCall(call: MethodCall, result: MethodChannel.Result) {
+        try {
+            when (call.method) {
+                "begin" -> {
+                    CaptureForegroundService.start(this)
+                    result.success(true)
+                }
+                "end" -> {
+                    CaptureForegroundService.stop(this)
+                    result.success(true)
+                }
+                else -> result.notImplemented()
+            }
+        } catch (error: Throwable) {
+            // Reported rather than swallowed here; the Dart side decides that a
+            // capture is worth more than its background guarantee and carries
+            // on. Losing the error too would leave no trace at all.
+            result.error(
+                "capture_session_error",
+                error.message ?: error.javaClass.simpleName,
+                null,
+            )
+        }
     }
 
     override fun onDestroy() {
@@ -255,5 +292,6 @@ class MainActivity : FlutterActivity() {
         private const val MEDIA_CHANNEL = "ai.augustyniak.capture/media_processing"
         private const val CLIPBOARD_CHANNEL = "ai.augustyniak.capture/clipboard"
         private const val CLIPBOARD_DIRECTORY = "AugustyniakCapture"
+        private const val SESSION_CHANNEL = "ai.augustyniak.capture/capture_session"
     }
 }

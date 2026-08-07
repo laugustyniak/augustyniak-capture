@@ -279,14 +279,17 @@ class _QueueTabState extends State<QueueTab> {
                           trailing:
                               '${all.length} ${all.length == 1 ? 'capture' : 'captures'}',
                           action: ElevatedButton.icon(
-                            icon: Icon(
-                              _isSyncing ? Icons.sync_rounded : Icons.sync_rounded,
+                            icon: SyncSpinIcon(
+                              isSyncing: _isSyncing,
                               size: 14,
+                              color: Colors.black,
                             ),
                             label: Text(_isSyncing ? 'SYNCING…' : 'SYNC TURSO'),
                             style: ElevatedButton.styleFrom(
                               backgroundColor: Console.green,
                               foregroundColor: Colors.black,
+                              disabledBackgroundColor: Console.green.withValues(alpha: 0.8),
+                              disabledForegroundColor: Colors.black,
                               padding: const EdgeInsets.symmetric(
                                 horizontal: 12,
                                 vertical: 8,

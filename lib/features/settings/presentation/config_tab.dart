@@ -332,40 +332,9 @@ class ConfigTab extends StatelessWidget {
                   alignment: WrapAlignment.spaceBetween,
                   crossAxisAlignment: WrapCrossAlignment.center,
                   children: <Widget>[
-                    ElevatedButton.icon(
-                      icon: const Icon(Icons.sync, size: 14),
-                      label: const Text('SYNC NOW (TURSO & R2)'),
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: Console.green,
-                        foregroundColor: Colors.black,
-                      ),
-                      onPressed: () async {
-                        final String? url = controller.settings.tursoDbUrl;
-                        final String? token = controller.settings.tursoAuthToken;
-                        if (url != null && token != null) {
-                          final AppDatabase db = await AppDatabase.getInstance();
-                          final TursoSyncService syncService = TursoSyncService(db: db);
-                          final bool ok = await syncService.syncTwoWay(
-                            dbUrl: url,
-                            authToken: token,
-                          );
-                          await recordingsController?.reloadFromStorage();
-                          if (context.mounted) {
-                            ScaffoldMessenger.of(context).showSnackBar(
-                              SnackBar(
-                                content: Text(
-                                  ok
-                                      ? '⚡ Bidirectional Turso & R2 sync complete!'
-                                      : '⚠️ Turso sync failed. Check connection.',
-                                ),
-                                backgroundColor: ok ? Console.green : Console.amber,
-                              ),
-                            );
-                          }
-                        } else {
-                          await _showEditTursoDialog(context, controller, recordingsController);
-                        }
-                      },
+                    _SyncNowButton(
+                      controller: controller,
+                      recordingsController: recordingsController,
                     ),
                     TextButton.icon(
                       icon: const Icon(Icons.edit, size: 14),
@@ -717,4 +686,77 @@ Future<void> _showEditR2Dialog(
       );
     },
   );
+}
+
+class _SyncNowButton extends StatefulWidget {
+  const _SyncNowButton({
+    required this.controller,
+    required this.recordingsController,
+  });
+
+  final SettingsController controller;
+  final RecordingsController? recordingsController;
+
+  @override
+  State<_SyncNowButton> createState() => _SyncNowButtonState();
+}
+
+class _SyncNowButtonState extends State<_SyncNowButton> {
+  bool _isSyncing = false;
+
+  @override
+  Widget build(BuildContext context) {
+    return ElevatedButton.icon(
+      icon: SyncSpinIcon(
+        isSyncing: _isSyncing,
+        size: 14,
+        color: Colors.black,
+      ),
+      label: Text(_isSyncing ? 'SYNCING…' : 'SYNC NOW (TURSO & R2)'),
+      style: ElevatedButton.styleFrom(
+        backgroundColor: Console.green,
+        foregroundColor: Colors.black,
+        disabledBackgroundColor: Console.green.withValues(alpha: 0.8),
+        disabledForegroundColor: Colors.black,
+      ),
+      onPressed: _isSyncing
+          ? null
+          : () async {
+              final String? url = widget.controller.settings.tursoDbUrl;
+              final String? token = widget.controller.settings.tursoAuthToken;
+              if (url != null && token != null) {
+                setState(() => _isSyncing = true);
+                try {
+                  final AppDatabase db = await AppDatabase.getInstance();
+                  final TursoSyncService syncService = TursoSyncService(db: db);
+                  final bool ok = await syncService.syncTwoWay(
+                    dbUrl: url,
+                    authToken: token,
+                  );
+                  await widget.recordingsController?.reloadFromStorage();
+                  if (context.mounted) {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      SnackBar(
+                        content: Text(
+                          ok
+                              ? '⚡ Bidirectional Turso & R2 sync complete!'
+                              : '⚠️ Turso sync failed. Check connection.',
+                        ),
+                        backgroundColor: ok ? Console.green : Console.amber,
+                      ),
+                    );
+                  }
+                } finally {
+                  if (mounted) setState(() => _isSyncing = false);
+                }
+              } else {
+                await _showEditTursoDialog(
+                  context,
+                  widget.controller,
+                  widget.recordingsController,
+                );
+              }
+            },
+    );
+  }
 }

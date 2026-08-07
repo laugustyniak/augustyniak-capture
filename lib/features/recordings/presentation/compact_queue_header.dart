@@ -43,6 +43,7 @@ class CompactQueueHeader extends StatelessWidget {
     required this.onToggleFilters,
     required this.filters,
     this.onSync,
+    this.isSyncing = false,
   });
 
   final int total;
@@ -59,6 +60,7 @@ class CompactQueueHeader extends StatelessWidget {
   final Widget filters;
 
   final Future<void> Function()? onSync;
+  final bool isSyncing;
 
   @override
   Widget build(BuildContext context) {
@@ -91,8 +93,8 @@ class CompactQueueHeader extends StatelessWidget {
               const SizedBox(width: 6),
               if (onSync != null) ...<Widget>[
                 _HeaderToggle(
-                  icon: Icons.sync_rounded,
-                  active: false,
+                  child: SyncSpinIcon(isSyncing: isSyncing, size: 17),
+                  active: isSyncing,
                   onTap: () async => onSync!(),
                   semanticLabel: 'Sync Turso Cloud',
                 ),
@@ -213,13 +215,15 @@ class _ReviewSegments extends StatelessWidget {
 /// A 36 px square that opens one of the header's two panels.
 class _HeaderToggle extends StatelessWidget {
   _HeaderToggle({
-    required this.icon,
+    this.icon,
+    this.child,
     required this.active,
     required this.onTap,
     required this.semanticLabel,
   });
 
-  final IconData icon;
+  final IconData? icon;
+  final Widget? child;
   final bool active;
   final VoidCallback onTap;
   final String semanticLabel;
@@ -228,8 +232,6 @@ class _HeaderToggle extends StatelessWidget {
   Widget build(BuildContext context) {
     return Semantics(
       button: true,
-      // The label spells the action out and the icon carries no text of its
-      // own, so nothing here would be announced twice.
       label: semanticLabel,
       child: InkWell(
         onTap: onTap,
@@ -243,10 +245,13 @@ class _HeaderToggle extends StatelessWidget {
             borderRadius: BorderRadius.circular(9),
             border: Border.all(color: active ? Console.accent : Console.border),
           ),
-          child: Icon(
-            icon,
-            size: 17,
-            color: active ? Console.accent : Console.muted,
+          child: Center(
+            child: child ??
+                Icon(
+                  icon,
+                  size: 17,
+                  color: active ? Console.accent : Console.muted,
+                ),
           ),
         ),
       ),

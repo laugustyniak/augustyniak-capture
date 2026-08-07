@@ -2,6 +2,22 @@
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.CAMERA" />
+    <!--
+      Microphone access is "while-in-use" from Android 9 on: without a
+      foreground service the system takes the input away the moment the activity
+      stops being visible, so locking the screen mid-capture ended the recording
+      with nothing reporting it. FOREGROUND_SERVICE_MICROPHONE is the Android 14
+      half of the same permission, and both are required for the service below
+      to be allowed to declare its type.
+    -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
+    <!--
+      Android 13+. Denying it does not stop the service or the recording — it
+      only suppresses the notification the service posts, so the capture keeps
+      running and merely loses its indicator.
+    -->
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
 
     <application
         android:label="Augustyniak Capture"
@@ -35,6 +51,15 @@
                 android:name="android.view.im"
                 android:resource="@xml/method" />
         </service>
+        <!--
+          Not exported: nothing outside this app has any business starting a
+          recording indicator. The type must be declared here as well as passed
+          to startForeground() — Android 14 checks both.
+        -->
+        <service
+            android:name=".CaptureForegroundService"
+            android:exported="false"
+            android:foregroundServiceType="microphone" />
         <meta-data android:name="flutterEmbedding" android:value="2" />
     </application>
 </manifest>

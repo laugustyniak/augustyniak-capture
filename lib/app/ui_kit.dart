@@ -494,6 +494,73 @@ class ConsoleHeader extends StatelessWidget {
   }
 }
 
+/// Rotating sync icon that smoothly spins while [isSyncing] is true.
+class SyncSpinIcon extends StatefulWidget {
+  const SyncSpinIcon({
+    super.key,
+    required this.isSyncing,
+    this.size = 17,
+    this.color,
+    this.icon = Icons.sync_rounded,
+  });
+
+  final bool isSyncing;
+  final double size;
+  final Color? color;
+  final IconData icon;
+
+  @override
+  State<SyncSpinIcon> createState() => _SyncSpinIconState();
+}
+
+class _SyncSpinIconState extends State<SyncSpinIcon>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _controller;
+
+  @override
+  void initState() {
+    super.initState();
+    _controller = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 900),
+    );
+    if (widget.isSyncing) {
+      _controller.repeat();
+    }
+  }
+
+  @override
+  void didUpdateWidget(SyncSpinIcon oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (widget.isSyncing != oldWidget.isSyncing) {
+      if (widget.isSyncing) {
+        _controller.repeat();
+      } else {
+        _controller.stop();
+        _controller.reset();
+      }
+    }
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return RotationTransition(
+      turns: _controller,
+      child: Icon(
+        widget.icon,
+        size: widget.size,
+        color: widget.color ?? (widget.isSyncing ? Console.accent : Console.text),
+      ),
+    );
+  }
+}
+
 /// Small filled circle that fades in and out, marking live work (a running
 /// transcription, an armed recorder). Purely decorative — never the only signal
 /// that something is happening, the adjacent label always says so too.
