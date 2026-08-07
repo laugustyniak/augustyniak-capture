@@ -116,11 +116,34 @@ class _QueueTabState extends State<QueueTab> {
   bool filterPanelOpen = false;
 
   final FocusNode searchFocus = FocusNode();
-
-  /// Owns the arrow keys and the single-letter actions. It sits above the list
-  /// rather than on each row so the shortcuts work before anything is selected,
-  /// and so the row widgets stay free of key handling.
   final FocusNode listFocus = FocusNode(debugLabel: 'queue-shortcuts');
+
+  bool _isSyncing = false;
+
+  Future<void> _handleSync(
+    BuildContext context,
+    RecordingsController controller,
+  ) async {
+    if (_isSyncing) return;
+    setState(() => _isSyncing = true);
+    try {
+      final bool ok = await controller.syncTurso();
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              ok
+                  ? '⚡ Turso & R2 sync complete!'
+                  : '⚠️ Turso sync skipped or failed.',
+            ),
+            backgroundColor: ok ? Console.green : Console.amber,
+          ),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _isSyncing = false);
+    }
+  }
 
   @override
   void initState() {
@@ -255,6 +278,24 @@ class _QueueTabState extends State<QueueTab> {
                           title: 'Queue',
                           trailing:
                               '${all.length} ${all.length == 1 ? 'capture' : 'captures'}',
+                          action: ElevatedButton.icon(
+                            icon: Icon(
+                              _isSyncing ? Icons.sync_rounded : Icons.sync_rounded,
+                              size: 14,
+                            ),
+                            label: Text(_isSyncing ? 'SYNCING…' : 'SYNC TURSO'),
+                            style: ElevatedButton.styleFrom(
+                              backgroundColor: Console.green,
+                              foregroundColor: Colors.black,
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 12,
+                                vertical: 8,
+                              ),
+                            ),
+                            onPressed: _isSyncing
+                                ? null
+                                : () => _handleSync(context, controller),
+                          ),
                         ),
                       ),
                     if (controller.error != null) ...<Widget>[
@@ -277,6 +318,7 @@ class _QueueTabState extends State<QueueTab> {
                         onFilterChanged: (ReviewFilter value) {
                           setState(() => reviewFilter = value);
                         },
+                        onSync: () => _handleSync(context, controller),
                         searchOpen: searchOpen,
                         // Toggles the user's own flag, never the resolved one: a
                         // panel forced open by a live filter must stay open, and
@@ -363,61 +405,54 @@ class _QueueTabState extends State<QueueTab> {
                         ),
                       ),
                     Expanded(
-                      child: ListView(
-                        // Tighter on a phone, and starting closer to the header:
-                        // the compact row draws its own margin and its own border,
-                        // so a wide gutter here only shrinks the one column of text
-                        // the screen exists to show.
-                        padding: compact
-                            ? const EdgeInsets.fromLTRB(10, 6, 10, 24)
-                            : const EdgeInsets.fromLTRB(16, 14, 16, 190),
-                        children: <Widget>[
-                          if (visible.isEmpty)
-                            Padding(
-                              padding: const EdgeInsets.symmetric(
-                                horizontal: 4,
-                              ),
-                              child: EmptyPanel(
-                                // An empty list has two very different causes and they
-                                // look identical: nothing was captured, or a filter is
-                                // hiding what was. Naming the filter that emptied the
-                                // list is the whole difference between "you are done"
-                                // and "you cannot see your work".
-                                icon: all.isEmpty
-                                    ? Icons.graphic_eq
-                                    : Icons.inbox_outlined,
-                                title: _emptyLabel(
-                                  selectedFilter,
-                                  reviewFilter,
-                                  hasAny: all.isNotEmpty,
+                      child: RefreshIndicator(
+                        onRefresh: () => _handleSync(context, controller),
+                        color: Console.accent,
+                        backgroundColor: Console.surface,
+                        child: ListView(
+                          padding: compact
+                              ? const EdgeInsets.fromLTRB(10, 6, 10, 24)
+                              : const EdgeInsets.fromLTRB(16, 14, 16, 190),
+                          children: <Widget>[
+                            if (visible.isEmpty)
+                              Padding(
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 4,
                                 ),
-                                blurb: all.isEmpty
-                                    ? 'Every capture is written to disk and verified '
-                                          'before processing is even attempted.'
-                                    : 'Adjust the review, status, project, or search '
-                                          'filters to broaden the queue.',
-                              ),
-                            )
-                          else
-                            ...visible.map(
-                              (Recording recording) => Padding(
-                                padding: const EdgeInsets.fromLTRB(4, 0, 4, 10),
-                                // The row grows into the editor in place. Animating the
-                                // height is what keeps the rows below from jumping — the
-                                // edited item has to stay under the finger that opened it.
-                                child: AnimatedSize(
-                                  duration: const Duration(milliseconds: 220),
-                                  curve: Curves.easeOutCubic,
-                                  alignment: Alignment.topCenter,
-                                  child: recording.id == editingId
-                                      ? _buildEditor(recording)
-                                      : compact
-                                      ? _buildMobileRow(recording)
-                                      : _buildCard(recording),
+                                child: EmptyPanel(
+                                  icon: all.isEmpty
+                                      ? Icons.graphic_eq
+                                      : Icons.inbox_outlined,
+                                  title: _emptyLabel(
+                                    selectedFilter,
+                                    reviewFilter,
+                                    hasAny: all.isNotEmpty,
+                                  ),
+                                  blurb: all.isEmpty
+                                      ? 'Every capture is written to disk and verified '
+                                            'before processing is even attempted.'
+                                      : 'Adjust the review, status, project, or search '
+                                            'filters to broaden the queue.',
+                                ),
+                              )
+                            else
+                              ...visible.map(
+                                (Recording recording) => Padding(
+                                  padding: const EdgeInsets.fromLTRB(4, 0, 4, 10),
+                                  child: AnimatedSize(
+                                    duration: const Duration(milliseconds: 220),
+                                    curve: Curves.easeOutCubic,
+                                    alignment: Alignment.topCenter,
+                                    child: recording.id == editingId
+                                        ? _buildEditor(recording)
+                                        : compact
+                                        ? _buildMobileRow(recording)
+                                        : _buildCard(recording),
+                                  ),
                                 ),
                               ),
-                            ),
-                        ],
+                          ],
+                        ),
                       ),
                     ),
                   ],

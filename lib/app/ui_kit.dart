@@ -457,6 +457,7 @@ class ConsoleHeader extends StatelessWidget {
     required this.title,
     this.trailing,
     this.eyebrow = 'AUGUSTYNIAK CAPTURE',
+    this.action,
   });
 
   final String title;
@@ -464,6 +465,7 @@ class ConsoleHeader extends StatelessWidget {
   /// Small mono counter on the right, e.g. `12 captures`.
   final String? trailing;
   final String eyebrow;
+  final Widget? action;
 
   @override
   Widget build(BuildContext context) {
@@ -473,9 +475,13 @@ class ConsoleHeader extends StatelessWidget {
         Text(eyebrow, style: ConsoleText.eyebrow),
         const SizedBox(height: 4),
         Row(
-          crossAxisAlignment: CrossAxisAlignment.end,
+          crossAxisAlignment: CrossAxisAlignment.center,
           children: <Widget>[
             Expanded(child: Text(title, style: ConsoleText.pageTitle)),
+            if (action != null) ...<Widget>[
+              action!,
+              const SizedBox(width: 12),
+            ],
             if (trailing != null)
               Padding(
                 padding: const EdgeInsets.only(bottom: 3),

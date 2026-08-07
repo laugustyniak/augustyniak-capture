@@ -42,6 +42,7 @@ class CompactQueueHeader extends StatelessWidget {
     required this.filtersOpen,
     required this.onToggleFilters,
     required this.filters,
+    this.onSync,
   });
 
   final int total;
@@ -56,6 +57,8 @@ class CompactQueueHeader extends StatelessWidget {
   final bool filtersOpen;
   final VoidCallback onToggleFilters;
   final Widget filters;
+
+  final Future<void> Function()? onSync;
 
   @override
   Widget build(BuildContext context) {
@@ -85,7 +88,16 @@ class CompactQueueHeader extends StatelessWidget {
                   ),
                 ),
               ),
-              const SizedBox(width: 8),
+              const SizedBox(width: 6),
+              if (onSync != null) ...<Widget>[
+                _HeaderToggle(
+                  icon: Icons.sync_rounded,
+                  active: false,
+                  onTap: () async => onSync!(),
+                  semanticLabel: 'Sync Turso Cloud',
+                ),
+                const SizedBox(width: 6),
+              ],
               _HeaderToggle(
                 icon: Icons.search_rounded,
                 active: searchOpen,
