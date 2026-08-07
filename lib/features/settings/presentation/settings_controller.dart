@@ -296,6 +296,20 @@ class SettingsController extends ChangeNotifier {
   Future<void> resetEnrichmentInstructions() =>
       _persist(_settings.copyWith(resetEnrichmentInstructions: true));
 
+  Future<void> setTursoConfig({
+    String? url,
+    String? token,
+    bool? enabled,
+  }) async {
+    await _persist(
+      _settings.copyWith(
+        tursoDbUrl: url,
+        tursoAuthToken: token,
+        tursoSyncEnabled: enabled,
+      ),
+    );
+  }
+
   /// Where captures are mirrored as markdown, or null when nothing is.
   String? get vaultPath => _settings.vaultPath;
   String get vaultFolder => _settings.vaultFolder;

@@ -140,11 +140,29 @@ class SettingsRepository {
         profiles.add(profile.copyWith(bearerToken: value));
       }
     }
-    return changed ? settings.copyWith(profiles: profiles) : settings;
+
+    String? tursoToken = settings.tursoAuthToken;
+    if (tursoToken != null && tursoToken.isNotEmpty) {
+      final String value = await transform(tursoToken);
+      if (value != tursoToken) {
+        changed = true;
+        tursoToken = value;
+      }
+    }
+
+    return changed
+        ? settings.copyWith(profiles: profiles, tursoAuthToken: tursoToken)
+        : settings;
   }
 
-  static bool _hasPlaintextToken(AppSettings settings) =>
-      settings.profiles.any((ProviderProfile profile) =>
-          profile.bearerToken != null &&
-          !TokenCipher.isSealed(profile.bearerToken!));
+  static bool _hasPlaintextToken(AppSettings settings) {
+    if (settings.tursoAuthToken != null &&
+        settings.tursoAuthToken!.isNotEmpty &&
+        !TokenCipher.isSealed(settings.tursoAuthToken!)) {
+      return true;
+    }
+    return settings.profiles.any((ProviderProfile profile) =>
+        profile.bearerToken != null &&
+        !TokenCipher.isSealed(profile.bearerToken!));
+  }
 }
