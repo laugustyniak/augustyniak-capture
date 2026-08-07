@@ -23,7 +23,25 @@ class IndexUnreadableException implements Exception {
       '${backupPath == null ? '' : ' (kept a copy at $backupPath)'}';
 }
 
+/// Same seam shape as `ProjectsDirectoryProvider`, and for the same reason:
+/// the default reaches `path_provider`, which needs a platform binding, so a
+/// pure-Dart suite has no way to exercise the real load/save path against a
+/// temp directory without it. The subclassing fakes in `test/support` stand in
+/// for the *whole* repository; this lets a caller keep the real behaviour and
+/// only move where it happens.
+typedef RecordingsDirectoryProvider = Future<Directory> Function();
+
 class RecordingsRepository {
+  RecordingsRepository({RecordingsDirectoryProvider? directoryProvider})
+    : _directoryProvider = directoryProvider ?? _defaultDirectory;
+
+  final RecordingsDirectoryProvider _directoryProvider;
+
+  static Future<Directory> _defaultDirectory() async {
+    final Directory appDirectory = await getApplicationDocumentsDirectory();
+    return Directory(p.join(appDirectory.path, 'recordings'));
+  }
+
   static String extensionFor(CaptureType type, {String? sourceMimeType}) =>
       policy.extensionFor(type, mimeType: sourceMimeType);
 
@@ -44,10 +62,7 @@ class RecordingsRepository {
   }
 
   Future<Directory> recordingsDirectory() async {
-    final Directory appDirectory = await getApplicationDocumentsDirectory();
-    final Directory directory = Directory(
-      p.join(appDirectory.path, 'recordings'),
-    );
+    final Directory directory = await _directoryProvider();
     if (!await directory.exists()) {
       await directory.create(recursive: true);
     }

@@ -28,6 +28,18 @@
 	<true/>
 	<key>NSMicrophoneUsageDescription</key>
 	<string>Augustyniak Capture needs the microphone to record voice notes.</string>
+	<!--
+		The whole of iOS background recording. `record_ios` already sets the
+		audio session to `.playAndRecord` and activates it, so this key is the
+		only thing that was missing: without it the process is suspended when it
+		leaves the screen and the capture stops mid-sentence, with no error on
+		either side. It is also what the App Store checks the app actually uses,
+		which this one does on every recording.
+	-->
+	<key>UIBackgroundModes</key>
+	<array>
+		<string>audio</string>
+	</array>
 	<key>UIApplicationSceneManifest</key>
 	<dict>
 		<key>UIApplicationSupportsMultipleScenes</key>

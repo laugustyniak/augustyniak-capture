@@ -49,7 +49,9 @@ import '../../transcription/domain/transcription_limits.dart';
 import '../../gamification/presentation/celebration_overlay.dart';
 import '../../gamification/presentation/gamification_controller.dart';
 import '../../clipboard/data/sqlite_clipboard_repository.dart';
+import '../data/foreground_capture_session.dart';
 import '../data/markdown_note_vault.dart';
+import '../domain/capture_session.dart';
 import '../data/project_agent_handoff.dart';
 import '../data/project_inbox_router.dart';
 import '../data/recordings_repository.dart';
@@ -224,6 +226,16 @@ class _RecordingsPageState extends State<RecordingsPage> {
       // Video plays in whatever the platform already uses for it; tests get the
       // no-op default.
       mediaOpener: const SystemMediaOpener(),
+      // **Android only.** Its microphone access is "while-in-use", so without a
+      // foreground service the input is cut the moment the activity stops being
+      // visible — a locked screen ended the capture and nothing reported it.
+      // iOS needs no counterpart: `record_ios` already activates a
+      // `.playAndRecord` session, so the whole of background recording there is
+      // the `UIBackgroundModes: audio` key in `Info.plist`. Every desktop keeps
+      // its microphone in the background and gets the no-op default.
+      captureSession: Platform.isAndroid
+          ? const ForegroundCaptureSession()
+          : const NoopCaptureSession(),
     );
     // Its own `AudioPlayer` inside `AssetAlarmPlayer`, never the recordings
     // controller's: an alarm must not stop a clip being reviewed, and a review

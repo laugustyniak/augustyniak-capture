@@ -32,6 +32,7 @@ import '../domain/capture_type.dart';
 import '../domain/clipboard_sink.dart';
 import '../domain/capture_router.dart';
 import '../domain/media_opener.dart';
+import '../domain/capture_session.dart';
 import '../domain/note_vault.dart';
 import '../domain/recording.dart';
 import '../domain/recording_revision.dart';
@@ -62,6 +63,7 @@ class RecordingsController extends ChangeNotifier {
     CaptureRouter captureRouter = const DisabledCaptureRouter(),
     AgentHandoff agentHandoff = const DisabledAgentHandoff(),
     NoteVault noteVault = const DisabledNoteVault(),
+    CaptureSession captureSession = const NoopCaptureSession(),
     Project? Function(String projectId)? projectById,
     Directory? Function()? vaultDirectory,
     AgentArtifactScanner artifactScanner = const AgentArtifactScanner(),
@@ -86,6 +88,7 @@ class RecordingsController extends ChangeNotifier {
        _captureRouter = captureRouter,
        _agentHandoff = agentHandoff,
        _noteVault = noteVault,
+       _captureSession = captureSession,
        _projectById = projectById,
        _vaultDirectory = vaultDirectory,
        _artifactScanner = artifactScanner,
@@ -131,6 +134,10 @@ class RecordingsController extends ChangeNotifier {
   final CaptureRouter _captureRouter;
   final AgentHandoff _agentHandoff;
   final NoteVault _noteVault;
+
+  /// Keeps the OS off a running capture. Noop everywhere but Android; see
+  /// [CaptureSession] for what it is holding back.
+  final CaptureSession _captureSession;
   final Project? Function(String projectId)? _projectById;
   final Directory? Function()? _vaultDirectory;
   final AgentArtifactScanner _artifactScanner;
@@ -500,6 +507,22 @@ class RecordingsController extends ChangeNotifier {
     // before it opens.
     _recordingProjectId = activeProjectId;
 
+    // Inside a try for the same reason the amplitude subscription is: this
+    // buys the capture the right to *continue* off-screen, and a capture that
+    // works while the app is visible is strictly better than none. A phone
+    // that refuses the service costs the background guarantee, never the
+    // recording.
+    try {
+      await _captureSession.begin();
+    } catch (exception) {
+      _logSink.log(
+        'Background capture unavailable — recording will stop if the app '
+        'leaves the screen: $exception',
+        level: LogLevel.warn,
+        recordingId: id,
+      );
+    }
+
     await _recorder.start(
       RecordConfig(
         encoder: AudioEncoder.aacLc,
@@ -673,8 +696,29 @@ class RecordingsController extends ChangeNotifier {
       // Cleared with the rest of the per-capture state: the next recording
       // seeds its own from the active project.
       _recordingProjectId = null;
+      // Here rather than after the try, so a save that threw still takes the
+      // "recording" notification down. One left standing over a capture that
+      // has ended claims the microphone is open when it is not.
+      _endCaptureSession();
       notifyListeners();
     }
+  }
+
+  /// Releases the OS hold, swallowing whatever it throws.
+  ///
+  /// Unawaited on purpose: it is two platform messages with nothing to report,
+  /// and every caller is a teardown path that must not gain a new way to
+  /// block. The `ClipboardSink` contract, applied to the one seam whose
+  /// failure would otherwise be visible as a stuck notification.
+  void _endCaptureSession() {
+    unawaited(
+      _captureSession.end().catchError((Object exception) {
+        _logSink.log(
+          'Could not release the background capture hold: $exception',
+          level: LogLevel.warn,
+        );
+      }),
+    );
   }
 
   /// Abandon the recording in progress: stop the recorder and delete the file
@@ -731,6 +775,10 @@ class RecordingsController extends ChangeNotifier {
       _activeFilePath = null;
       _activeId = null;
       _recordingProjectId = null;
+      // A discard ends the capture as surely as a save does, and the hold has
+      // to come off on both — this is the path where forgetting it would leave
+      // a "recording" notification over nothing at all.
+      _endCaptureSession();
       notifyListeners();
     }
   }
@@ -2007,6 +2055,10 @@ class RecordingsController extends ChangeNotifier {
     _playerCompleteSub?.cancel();
     _player.dispose();
     _recorder.dispose();
+    // A controller disposed mid-capture — a hot restart, the activity being
+    // torn down — leaves the service running with no one to stop it, and the
+    // notification outlives the app that posted it.
+    if (_isRecording) _endCaptureSession();
     super.dispose();
   }
 }
