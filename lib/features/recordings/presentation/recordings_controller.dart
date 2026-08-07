@@ -2043,9 +2043,26 @@ class RecordingsController extends ChangeNotifier {
     _saveInFlight = mine;
     try {
       await mine;
+      _pushToTursoInBackground();
     } finally {
       if (identical(_saveInFlight, mine)) _saveInFlight = null;
     }
+  }
+
+  void _pushToTursoInBackground() {
+    unawaited(Future<void>(() async {
+      try {
+        final AppDatabase db = await AppDatabase.getInstance();
+        final AppSettings settings = await SettingsRepository().load() ?? AppSettings.empty;
+        if (settings.tursoDbUrl != null && settings.tursoAuthToken != null && settings.tursoSyncEnabled) {
+          final TursoSyncService syncService = TursoSyncService(db: db);
+          await syncService.pushToTurso(
+            dbUrl: settings.tursoDbUrl!,
+            authToken: settings.tursoAuthToken!,
+          );
+        }
+      } catch (_) {}
+    }));
   }
 
   @override
