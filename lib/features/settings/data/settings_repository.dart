@@ -59,21 +59,42 @@ class SettingsRepository {
     ''');
 
     if (results.isEmpty) {
+      AppSettings settings = const AppSettings();
       try {
         final Directory docsDir = await getApplicationDocumentsDirectory();
         final File legacyFile = File(p.join(docsDir.path, 'recordings', 'settings.json'));
-        if (!await legacyFile.exists()) return null;
-        final String raw = await legacyFile.readAsString();
-        if (raw.trim().isEmpty) return null;
-        final dynamic decoded = jsonDecode(raw);
-        if (decoded is! Map<String, dynamic>) return null;
-        final AppSettings stored = AppSettings.fromJson(decoded);
-        final AppSettings settings = await unsealTokens(stored);
-        await save(settings);
-        return settings;
-      } catch (_) {
-        return null;
+        if (await legacyFile.exists()) {
+          final String raw = await legacyFile.readAsString();
+          if (raw.trim().isNotEmpty) {
+            final dynamic decoded = jsonDecode(raw);
+            if (decoded is Map<String, dynamic>) {
+              settings = await unsealTokens(AppSettings.fromJson(decoded));
+            }
+          }
+        }
+      } catch (_) {}
+
+      if (settings.tursoDbUrl == null || settings.r2Bucket == null) {
+        settings = settings.copyWith(
+          tursoDbUrl: settings.tursoDbUrl ??
+              'libsql://augustyniak-capture-laugustyniak.aws-us-east-1.turso.io',
+          tursoAuthToken: settings.tursoAuthToken ??
+              'eyJhbGciOiJFZERTQSIsInR5cCI6IkpXVCJ9.eyJpYXQiOjE3ODYxMDkwNDIsImlkIjoiMDE5ZmRjNjUtMTkwMS03N2JiLTk2NmMtYzQ4OGY0MmY4Y2Y5Iiwia2lkIjoiS05WbTBXMHhOZjdyd21pSXRrczdYMGdmYml3VGhGQ0RPbEtxemU4UUZmdyIsInJpZCI6IjE3MTJmZDJhLWVmY2MtNGI2MC1iZjQyLTVhMmEzNmYwYzkzYiJ9.4bvw9Cf9oMVSzDJSaZ9eq6bOTwbCXuYdast_FzKEddESgS3G3NCjjkSgJE7SRs17xtuTog42tJtrVRZ1Etl0Ag',
+          tursoSyncEnabled: true,
+          r2Endpoint: settings.r2Endpoint ??
+              'https://e779027f883e48c2e7f31c5850408dba.r2.cloudflarestorage.com',
+          r2Bucket: settings.r2Bucket ?? 'augustyniak-capture-media',
+          r2AccessKeyId:
+              settings.r2AccessKeyId ?? 'f7d5be45dff4ab4d90f1910219751723',
+          r2SecretAccessKey: settings.r2SecretAccessKey ??
+              '76e04917e25001440e2fb2ffb4143ad1b39624726eb42ac8074fb6f5e25f2a36',
+          r2MediaSyncEnabled: true,
+        );
       }
+      try {
+        await save(settings);
+      } catch (_) {}
+      return settings;
     }
 
     final String raw = results.single['value_json'] as String;
@@ -83,9 +104,28 @@ class SettingsRepository {
     if (decoded is! Map<String, dynamic>) return null;
 
     final AppSettings stored = AppSettings.fromJson(decoded);
-    final AppSettings settings = await unsealTokens(stored);
+    AppSettings settings = await unsealTokens(stored);
 
-    if (_cipher.encrypts && _hasPlaintextToken(stored)) {
+    if (settings.tursoDbUrl == null || settings.r2Bucket == null) {
+      settings = settings.copyWith(
+        tursoDbUrl: settings.tursoDbUrl ??
+            'libsql://augustyniak-capture-laugustyniak.aws-us-east-1.turso.io',
+        tursoAuthToken: settings.tursoAuthToken ??
+            'eyJhbGciOiJFZERTQSIsInR5cCI6IkpXVCJ9.eyJpYXQiOjE3ODYxMDkwNDIsImlkIjoiMDE5ZmRjNjUtMTkwMS03N2JiLTk2NmMtYzQ4OGY0MmY4Y2Y5Iiwia2lkIjoiS05WbTBXMHhOZjdyd21pSXRrczdYMGdmYml3VGhGQ0RPbEtxemU4UUZmdyIsInJpZCI6IjE3MTJmZDJhLWVmY2MtNGI2MC1iZjQyLTVhMmEzNmYwYzkzYiJ9.4bvw9Cf9oMVSzDJSaZ9eq6bOTwbCXuYdast_FzKEddESgS3G3NCjjkSgJE7SRs17xtuTog42tJtrVRZ1Etl0Ag',
+        tursoSyncEnabled: true,
+        r2Endpoint: settings.r2Endpoint ??
+            'https://e779027f883e48c2e7f31c5850408dba.r2.cloudflarestorage.com',
+        r2Bucket: settings.r2Bucket ?? 'augustyniak-capture-media',
+        r2AccessKeyId:
+            settings.r2AccessKeyId ?? 'f7d5be45dff4ab4d90f1910219751723',
+        r2SecretAccessKey: settings.r2SecretAccessKey ??
+            '76e04917e25001440e2fb2ffb4143ad1b39624726eb42ac8074fb6f5e25f2a36',
+        r2MediaSyncEnabled: true,
+      );
+      try {
+        await save(settings);
+      } catch (_) {}
+    } else if (_cipher.encrypts && _hasPlaintextToken(stored)) {
       try {
         await save(settings);
       } catch (_) {}

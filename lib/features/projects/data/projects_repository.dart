@@ -46,6 +46,54 @@ class ProjectsRepository {
 
   Future<List<Project>> loadAll() async {
     _loadedActiveProjectId = null;
+
+    try {
+      final AppDatabase db = await AppDatabase.getInstance();
+      await db.migrateFromLegacyJsonIfNeeded();
+
+      final ResultSet activeResults = db.rawDb.select('''
+        SELECT value_json FROM settings WHERE key = 'active_project_id';
+      ''');
+      if (activeResults.isNotEmpty) {
+        final String raw = activeResults.single['value_json'] as String;
+        try {
+          _loadedActiveProjectId = jsonDecode(raw) as String?;
+        } catch (_) {}
+      }
+
+      final ResultSet results = db.rawDb.select('''
+        SELECT id, name, color_hex, repository_path, created_at, json_payload
+        FROM projects
+        ORDER BY created_at ASC;
+      ''');
+
+      if (results.isNotEmpty) {
+        final List<Project> projects = <Project>[];
+        for (final Row row in results) {
+          final String? jsonPayload = row['json_payload'] as String?;
+          if (jsonPayload != null && jsonPayload.isNotEmpty) {
+            try {
+              projects.add(
+                Project.fromJson(
+                  jsonDecode(jsonPayload) as Map<String, dynamic>,
+                ),
+              );
+              continue;
+            } catch (_) {}
+          }
+          projects.add(
+            Project(
+              id: row['id'] as String,
+              name: (row['name'] ?? row['title'] ?? '') as String,
+              repoPath: (row['repository_path'] ?? '') as String,
+              description: row['description'] as String?,
+            ),
+          );
+        }
+        return projects;
+      }
+    } catch (_) {}
+
     final File file = await projectsFile();
     if (await file.exists()) {
       final String raw;
@@ -93,47 +141,7 @@ class ProjectsRepository {
       return projects;
     }
 
-    try {
-      final AppDatabase db = await AppDatabase.getInstance();
-      await db.migrateFromLegacyJsonIfNeeded();
-
-      final ResultSet activeResults = db.rawDb.select('''
-        SELECT value_json FROM settings WHERE key = 'active_project_id';
-      ''');
-      if (activeResults.isNotEmpty) {
-        final String raw = activeResults.single['value_json'] as String;
-        try {
-          _loadedActiveProjectId = jsonDecode(raw) as String?;
-        } catch (_) {}
-      }
-
-      final ResultSet results = db.rawDb.select('''
-        SELECT id, name, color_hex, repository_path, created_at, json_payload
-        FROM projects
-        ORDER BY created_at ASC;
-      ''');
-
-      final List<Project> projects = <Project>[];
-      for (final Row row in results) {
-        final String? jsonPayload = row['json_payload'] as String?;
-        if (jsonPayload != null && jsonPayload.isNotEmpty) {
-          try {
-            projects.add(Project.fromJson(jsonDecode(jsonPayload) as Map<String, dynamic>));
-            continue;
-          } catch (_) {}
-        }
-        projects.add(
-          Project(
-            id: row['id'] as String,
-            name: row['name'] as String,
-            repoPath: row['repository_path'] as String? ?? '',
-          ),
-        );
-      }
-      return projects;
-    } catch (_) {
-      return <Project>[];
-    }
+    return <Project>[];
   }
 
   Future<void> saveAll(

@@ -16,6 +16,10 @@ import '../../processing/data/video_audio_extractor.dart';
 import '../../processing/data/video_poster_extractor.dart';
 import '../../processing/domain/processor.dart';
 import '../../processing/domain/processor_registry.dart';
+import '../../../core/database/app_database.dart';
+import '../../../core/sync/turso_sync_service.dart';
+import '../../settings/data/settings_repository.dart';
+import '../../settings/domain/app_settings.dart';
 import '../../settings/domain/audio_config.dart';
 import '../../transcription/data/transcription_service.dart';
 import '../../transcription/domain/transcription_limits.dart';
@@ -370,6 +374,24 @@ class RecordingsController extends ChangeNotifier {
       return;
     }
     _logSink.log('Loaded ${_recordings.length} captures from disk.');
+
+    try {
+      final AppDatabase db = await AppDatabase.getInstance();
+      final AppSettings settings = await SettingsRepository().load() ?? AppSettings.empty;
+      if (settings.tursoDbUrl != null && settings.tursoAuthToken != null && settings.tursoSyncEnabled) {
+        final TursoSyncService syncService = TursoSyncService(db: db);
+        final bool synced = await syncService.pullFromTurso(
+          dbUrl: settings.tursoDbUrl!,
+          authToken: settings.tursoAuthToken!,
+        );
+        if (synced) {
+          _recordings = await _repository.loadAll();
+          _logSink.log('Synced ${_recordings.length} captures from Turso Cloud.');
+        }
+      }
+    } catch (e) {
+      _logSink.log('Turso startup sync skipped: $e', level: LogLevel.warn);
+    }
     unawaited(
       _gamificationController?.initialize(
         totalExistingCaptures: _recordings.length,

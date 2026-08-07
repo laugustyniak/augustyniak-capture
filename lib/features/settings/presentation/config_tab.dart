@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 
 import '../../../app/ui_kit.dart';
+import '../../../core/database/app_database.dart';
+import '../../../core/sync/turso_sync_service.dart';
 import '../../projects/domain/project.dart';
 import '../../recordings/domain/note_vault.dart';
 import '../../shortcuts/domain/shortcut_action.dart';
@@ -298,8 +300,12 @@ class ConfigTab extends StatelessWidget {
                 ),
                 InfoRow(
                   label: 'SYNC STATUS',
-                  value: 'ACTIVE · Connected (aws-us-east-1)',
-                  valueColor: Console.green,
+                  value: controller.settings.tursoDbUrl != null
+                      ? 'ACTIVE · Connected (aws-us-east-1)'
+                      : 'DISABLED',
+                  valueColor: controller.settings.tursoDbUrl != null
+                      ? Console.green
+                      : Console.mutedSoft,
                 ),
                 InfoRow(
                   label: 'API TOKEN',
@@ -316,6 +322,18 @@ class ConfigTab extends StatelessWidget {
                     height: 1.45,
                   ),
                 ),
+                const SizedBox(height: 10),
+                Align(
+                  alignment: Alignment.centerRight,
+                  child: TextButton.icon(
+                    icon: const Icon(Icons.edit, size: 14),
+                    label: const Text('EDIT TURSO CREDENTIALS'),
+                    style: TextButton.styleFrom(
+                      foregroundColor: Console.accent,
+                    ),
+                    onPressed: () => _showEditTursoDialog(context, controller),
+                  ),
+                ),
               ],
             ),
           ),
@@ -328,14 +346,18 @@ class ConfigTab extends StatelessWidget {
               children: <Widget>[
                 InfoRow(
                   label: 'BUCKET NAME',
-                  value: controller.settings.r2Bucket ?? 'augustyniak-capture-media',
+                  value: controller.settings.r2Bucket ?? 'Not configured',
                   valueColor: Console.accent,
                   monospace: true,
                 ),
                 InfoRow(
                   label: 'MEDIA SYNC',
-                  value: 'ACTIVE · 101/101 files uploaded (0 zł egress)',
-                  valueColor: Console.green,
+                  value: controller.settings.r2Bucket != null
+                      ? 'ACTIVE · 101/101 files uploaded (0 zł egress)'
+                      : 'DISABLED',
+                  valueColor: controller.settings.r2Bucket != null
+                      ? Console.green
+                      : Console.mutedSoft,
                 ),
                 InfoRow(
                   label: 'SECRET ACCESS KEY',
@@ -350,6 +372,18 @@ class ConfigTab extends StatelessWidget {
                     color: Console.mutedSoft,
                     fontSize: 11,
                     height: 1.45,
+                  ),
+                ),
+                const SizedBox(height: 10),
+                Align(
+                  alignment: Alignment.centerRight,
+                  child: TextButton.icon(
+                    icon: const Icon(Icons.edit, size: 14),
+                    label: const Text('EDIT R2 CREDENTIALS'),
+                    style: TextButton.styleFrom(
+                      foregroundColor: Console.accent,
+                    ),
+                    onPressed: () => _showEditR2Dialog(context, controller),
                   ),
                 ),
                 const SizedBox(height: 12),
@@ -493,4 +527,146 @@ class _ChoiceRow<T> extends StatelessWidget {
       ],
     );
   }
+}
+
+Future<void> _showEditTursoDialog(
+  BuildContext context,
+  SettingsController controller,
+) async {
+  final TextEditingController urlCtrl = TextEditingController(
+    text: controller.settings.tursoDbUrl ??
+        'libsql://augustyniak-capture-laugustyniak.aws-us-east-1.turso.io',
+  );
+  final TextEditingController tokenCtrl = TextEditingController(
+    text: controller.settings.tursoAuthToken ??
+        'eyJhbGciOiJFZERTQSIsInR5cCI6IkpXVCJ9.eyJpYXQiOjE3ODYxMDkwNDIsImlkIjoiMDE5ZmRjNjUtMTkwMS03N2JiLTk2NmMtYzQ4OGY0MmY4Y2Y5Iiwia2lkIjoiS05WbTBXMHhOZjdyd21pSXRrczdYMGdmYml3VGhGQ0RPbEtxemU4UUZmdyIsInJpZCI6IjE3MTJmZDJhLWVmY2MtNGI2MC1iZjQyLTVhMmEzNmYwYzkzYiJ9.4bvw9Cf9oMVSzDJSaZ9eq6bOTwbCXuYdast_FzKEddESgS3G3NCjjkSgJE7SRs17xtuTog42tJtrVRZ1Etl0Ag',
+  );
+
+  await showDialog<void>(
+    context: context,
+    builder: (BuildContext ctx) {
+      return AlertDialog(
+        backgroundColor: Console.surface,
+        title: const Text('Edit Turso Cloud Credentials'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: <Widget>[
+            TextField(
+              controller: urlCtrl,
+              decoration: const InputDecoration(labelText: 'Turso Database URL'),
+            ),
+            const SizedBox(height: 12),
+            TextField(
+              controller: tokenCtrl,
+              decoration: const InputDecoration(labelText: 'Turso Auth Token'),
+              maxLines: 3,
+            ),
+          ],
+        ),
+        actions: <Widget>[
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(),
+            child: const Text('Cancel'),
+          ),
+          ElevatedButton(
+            onPressed: () async {
+              final String url = urlCtrl.text.trim();
+              final String token = tokenCtrl.text.trim();
+
+              await controller.setTursoConfig(
+                url: url.isNotEmpty ? url : null,
+                token: token.isNotEmpty ? token : null,
+                enabled: url.isNotEmpty && token.isNotEmpty,
+              );
+
+              if (url.isNotEmpty && token.isNotEmpty) {
+                final AppDatabase db = await AppDatabase.getInstance();
+                final TursoSyncService syncService = TursoSyncService(db: db);
+                await syncService.pullFromTurso(dbUrl: url, authToken: token);
+              }
+
+              if (ctx.mounted) Navigator.of(ctx).pop();
+            },
+            child: const Text('Save & Sync'),
+          ),
+        ],
+      );
+    },
+  );
+}
+
+Future<void> _showEditR2Dialog(
+  BuildContext context,
+  SettingsController controller,
+) async {
+  final TextEditingController bucketCtrl = TextEditingController(
+    text: controller.settings.r2Bucket ?? 'augustyniak-capture-media',
+  );
+  final TextEditingController endpointCtrl = TextEditingController(
+    text: controller.settings.r2Endpoint ??
+        'https://e779027f883e48c2e7f31c5850408dba.r2.cloudflarestorage.com',
+  );
+  final TextEditingController keyIdCtrl = TextEditingController(
+    text: controller.settings.r2AccessKeyId ?? 'f7d5be45dff4ab4d90f1910219751723',
+  );
+  final TextEditingController secretCtrl = TextEditingController(
+    text: controller.settings.r2SecretAccessKey ??
+        '76e04917e25001440e2fb2ffb4143ad1b39624726eb42ac8074fb6f5e25f2a36',
+  );
+
+  await showDialog<void>(
+    context: context,
+    builder: (BuildContext ctx) {
+      return AlertDialog(
+        backgroundColor: Console.surface,
+        title: const Text('Edit Cloudflare R2 Credentials'),
+        content: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: <Widget>[
+              TextField(
+                controller: bucketCtrl,
+                decoration: const InputDecoration(labelText: 'R2 Bucket Name'),
+              ),
+              const SizedBox(height: 12),
+              TextField(
+                controller: endpointCtrl,
+                decoration: const InputDecoration(labelText: 'S3 Endpoint URL'),
+              ),
+              const SizedBox(height: 12),
+              TextField(
+                controller: keyIdCtrl,
+                decoration: const InputDecoration(labelText: 'Access Key ID'),
+              ),
+              const SizedBox(height: 12),
+              TextField(
+                controller: secretCtrl,
+                decoration: const InputDecoration(labelText: 'Secret Access Key'),
+                obscureText: true,
+              ),
+            ],
+          ),
+        ),
+        actions: <Widget>[
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(),
+            child: const Text('Cancel'),
+          ),
+          ElevatedButton(
+            onPressed: () async {
+              await controller.setR2Config(
+                bucket: bucketCtrl.text.trim().isNotEmpty ? bucketCtrl.text.trim() : null,
+                endpoint: endpointCtrl.text.trim().isNotEmpty ? endpointCtrl.text.trim() : null,
+                accessKeyId: keyIdCtrl.text.trim().isNotEmpty ? keyIdCtrl.text.trim() : null,
+                secretAccessKey: secretCtrl.text.trim().isNotEmpty ? secretCtrl.text.trim() : null,
+                enabled: bucketCtrl.text.trim().isNotEmpty && secretCtrl.text.trim().isNotEmpty,
+              );
+              if (ctx.mounted) Navigator.of(ctx).pop();
+            },
+            child: const Text('Save'),
+          ),
+        ],
+      );
+    },
+  );
 }

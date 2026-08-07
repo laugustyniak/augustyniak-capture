@@ -6,6 +6,7 @@ import 'package:path_provider/path_provider.dart';
 import 'package:sqlite3/sqlite3.dart';
 
 import '../../../core/database/app_database.dart';
+import '../domain/capture_category.dart';
 import '../domain/capture_type.dart';
 import '../domain/capture_type.dart' as policy;
 import '../domain/recording.dart';
@@ -62,6 +63,70 @@ class RecordingsRepository {
   Future<File> createAudioFile(String id) => createSourceFile(id, 'm4a');
 
   Future<List<Recording>> loadAll() async {
+    try {
+      final AppDatabase db = await AppDatabase.getInstance();
+      await db.migrateFromLegacyJsonIfNeeded();
+
+      final ResultSet results = db.rawDb.select('''
+        SELECT id, file_path, duration_ms, type, status, category, title, summary,
+               tags_json, created_at, is_processed_by_user, project_id, failure_reason, json_payload
+        FROM recordings
+        ORDER BY created_at DESC;
+      ''');
+
+      if (results.isNotEmpty) {
+        final List<Recording> recordings = <Recording>[];
+        for (final Row row in results) {
+          final String? jsonPayload = row['json_payload'] as String?;
+          if (jsonPayload != null && jsonPayload.isNotEmpty) {
+            try {
+              recordings.add(
+                Recording.fromJson(
+                  jsonDecode(jsonPayload) as Map<String, dynamic>,
+                ),
+              );
+              continue;
+            } catch (_) {}
+          }
+          final dynamic rawTags = jsonDecode(row['tags_json'] as String? ?? '[]');
+          final List<String> tags = rawTags is List<dynamic>
+              ? rawTags.map((dynamic e) => e.toString()).toList()
+              : <String>[];
+
+          final String rawStatus = (row['status'] as String? ?? 'completed');
+          RecordingStatus status = RecordingStatus.completed;
+          for (final RecordingStatus s in RecordingStatus.values) {
+            if (s.name == rawStatus) {
+              status = s;
+              break;
+            }
+          }
+
+          recordings.add(
+            Recording(
+              id: row['id'] as String,
+              filePath: row['file_path'] as String,
+              durationMs: row['duration_ms'] as int,
+              type: CaptureType.fromName(row['type'] as String?),
+              status: status,
+              category: row['category'] != null ? CaptureCategory.fromName(row['category'] as String) : null,
+              title: row['title'] as String?,
+              summary: row['summary'] as String?,
+              tags: tags,
+              createdAt: DateTime.fromMillisecondsSinceEpoch(
+                row['created_at'] as int,
+              ),
+              isProcessedByUser: (row['is_processed_by_user'] as int) == 1,
+              projectId: row['project_id'] as String?,
+              error: row['failure_reason'] as String?,
+            ),
+          );
+        }
+        _knownCount = recordings.length;
+        return recordings;
+      }
+    } catch (_) {}
+
     final File index = await _indexFile();
     if (await index.exists()) {
       final String raw;
@@ -109,34 +174,7 @@ class RecordingsRepository {
       return recordings;
     }
 
-    try {
-      final AppDatabase db = await AppDatabase.getInstance();
-      await db.migrateFromLegacyJsonIfNeeded();
-
-      final ResultSet results = db.rawDb.select('''
-        SELECT id, file_path, duration_ms, type, status, category, title, summary,
-               tags_json, created_at, is_processed_by_user, project_id, failure_reason, json_payload
-        FROM recordings
-        ORDER BY created_at DESC;
-      ''');
-
-      final List<Recording> recordings = <Recording>[];
-      for (final Row row in results) {
-        final String? jsonPayload = row['json_payload'] as String?;
-        if (jsonPayload != null && jsonPayload.isNotEmpty) {
-          try {
-            recordings.add(Recording.fromJson(jsonDecode(jsonPayload) as Map<String, dynamic>));
-            continue;
-          } catch (_) {}
-        }
-      }
-
-      _knownCount = recordings.length;
-      return recordings;
-    } catch (_) {
-      _knownCount = 0;
-      return <Recording>[];
-    }
+    return <Recording>[];
   }
 
   Future<void> saveAll(List<Recording> recordings) async {

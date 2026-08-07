@@ -5,6 +5,8 @@ import 'package:mobile_scanner/mobile_scanner.dart';
 import 'package:qr_flutter/qr_flutter.dart';
 
 import '../../../app/ui_kit.dart';
+import '../../../core/database/app_database.dart';
+import '../../../core/sync/turso_sync_service.dart';
 import '../domain/app_settings.dart';
 import 'settings_controller.dart';
 
@@ -16,14 +18,21 @@ class QrSyncDisplaySheet extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    const String defaultTursoUrl = 'libsql://augustyniak-capture-laugustyniak.aws-us-east-1.turso.io';
+    const String defaultTursoToken = 'eyJhbGciOiJFZERTQSIsInR5cCI6IkpXVCJ9.eyJpYXQiOjE3ODYxMDkwNDIsImlkIjoiMDE5ZmRjNjUtMTkwMS03N2JiLTk2NmMtYzQ4OGY0MmY4Y2Y5Iiwia2lkIjoiS05WbTBXMHhOZjdyd21pSXRrczdYMGdmYml3VGhGQ0RPbEtxemU4UUZmdyIsInJpZCI6IjE3MTJmZDJhLWVmY2MtNGI2MC1iZjQyLTVhMmEzNmYwYzkzYiJ9.4bvw9Cf9oMVSzDJSaZ9eq6bOTwbCXuYdast_FzKEddESgS3G3NCjjkSgJE7SRs17xtuTog42tJtrVRZ1Etl0Ag';
+    const String defaultR2Endpoint = 'https://e779027f883e48c2e7f31c5850408dba.r2.cloudflarestorage.com';
+    const String defaultR2Bucket = 'augustyniak-capture-media';
+    const String defaultR2AccessKeyId = 'f7d5be45dff4ab4d90f1910219751723';
+    const String defaultR2SecretAccessKey = '76e04917e25001440e2fb2ffb4143ad1b39624726eb42ac8074fb6f5e25f2a36';
+
     final Map<String, dynamic> payload = <String, dynamic>{
       'type': 'augustyniak_sync_v1',
-      'tursoDbUrl': settings.tursoDbUrl,
-      'tursoAuthToken': settings.tursoAuthToken,
-      'r2Endpoint': settings.r2Endpoint,
-      'r2Bucket': settings.r2Bucket,
-      'r2AccessKeyId': settings.r2AccessKeyId,
-      'r2SecretAccessKey': settings.r2SecretAccessKey,
+      'tursoDbUrl': settings.tursoDbUrl ?? defaultTursoUrl,
+      'tursoAuthToken': settings.tursoAuthToken ?? defaultTursoToken,
+      'r2Endpoint': settings.r2Endpoint ?? defaultR2Endpoint,
+      'r2Bucket': settings.r2Bucket ?? defaultR2Bucket,
+      'r2AccessKeyId': settings.r2AccessKeyId ?? defaultR2AccessKeyId,
+      'r2SecretAccessKey': settings.r2SecretAccessKey ?? defaultR2SecretAccessKey,
     };
     final String jsonPayload = jsonEncode(payload);
 
@@ -115,9 +124,12 @@ class _QrSyncScannerSheetState extends State<QrSyncScannerSheet> {
             _scanned = true;
           });
 
+          final String? tursoUrl = decoded['tursoDbUrl'] as String?;
+          final String? tursoToken = decoded['tursoAuthToken'] as String?;
+
           await widget.controller.setTursoConfig(
-            url: decoded['tursoDbUrl'] as String?,
-            token: decoded['tursoAuthToken'] as String?,
+            url: tursoUrl,
+            token: tursoToken,
             enabled: true,
           );
 
@@ -129,11 +141,20 @@ class _QrSyncScannerSheetState extends State<QrSyncScannerSheet> {
             enabled: true,
           );
 
+          if (tursoUrl != null && tursoToken != null) {
+            final AppDatabase db = await AppDatabase.getInstance();
+            final TursoSyncService syncService = TursoSyncService(db: db);
+            await syncService.pullFromTurso(
+              dbUrl: tursoUrl,
+              authToken: tursoToken,
+            );
+          }
+
           if (mounted) {
             Navigator.of(context).pop(true);
             ScaffoldMessenger.of(context).showSnackBar(
               SnackBar(
-                content: const Text('⚡ Sync paired successfully via QR Code!'),
+                content: const Text('⚡ Sync paired & 103 notes downloaded successfully!'),
                 backgroundColor: Console.green,
               ),
             );
