@@ -24,6 +24,12 @@
 @import flutter_secure_storage;
 #endif
 
+#if __has_include(<mobile_scanner/MobileScannerPlugin.h>)
+#import <mobile_scanner/MobileScannerPlugin.h>
+#else
+@import mobile_scanner;
+#endif
+
 #if __has_include(<record_ios/RecordIosPlugin.h>)
 #import <record_ios/RecordIosPlugin.h>
 #else
@@ -42,6 +48,7 @@
   [AudioplayersDarwinPlugin registerWithRegistrar:[registry registrarForPlugin:@"AudioplayersDarwinPlugin"]];
   [FilePickerPlugin registerWithRegistrar:[registry registrarForPlugin:@"FilePickerPlugin"]];
   [FlutterSecureStoragePlugin registerWithRegistrar:[registry registrarForPlugin:@"FlutterSecureStoragePlugin"]];
+  [MobileScannerPlugin registerWithRegistrar:[registry registrarForPlugin:@"MobileScannerPlugin"]];
   [RecordIosPlugin registerWithRegistrar:[registry registrarForPlugin:@"RecordIosPlugin"]];
   [Sqlite3FlutterLibsPlugin registerWithRegistrar:[registry registrarForPlugin:@"Sqlite3FlutterLibsPlugin"]];
 }

@@ -10,6 +10,7 @@ import '../domain/audio_config.dart';
 import '../domain/provider_profile.dart';
 import '../domain/token_cipher.dart';
 import 'enrichment_context_section.dart';
+import 'qr_sync_sheet.dart';
 import 'settings_controller.dart';
 import 'vault_section.dart';
 
@@ -350,6 +351,41 @@ class ConfigTab extends StatelessWidget {
                     fontSize: 11,
                     height: 1.45,
                   ),
+                ),
+                const SizedBox(height: 12),
+                Row(
+                  children: <Widget>[
+                    Expanded(
+                      child: ElevatedButton.icon(
+                        icon: const Icon(Icons.qr_code, size: 16),
+                        label: const Text('PAIR DEVICE VIA QR CODE'),
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: Console.accent,
+                          foregroundColor: Colors.black,
+                          padding: const EdgeInsets.symmetric(vertical: 12),
+                        ),
+                        onPressed: () {
+                          final bool isMobile = Theme.of(context).platform == TargetPlatform.android || Theme.of(context).platform == TargetPlatform.iOS;
+                          if (isMobile) {
+                            Navigator.of(context).push(
+                              MaterialPageRoute<bool>(
+                                builder: (_) => QrSyncScannerSheet(controller: controller),
+                              ),
+                            );
+                          } else {
+                            showModalBottomSheet<void>(
+                              context: context,
+                              backgroundColor: Console.surface,
+                              shape: const RoundedRectangleBorder(
+                                borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+                              ),
+                              builder: (_) => QrSyncDisplaySheet(settings: controller.settings),
+                            );
+                          }
+                        },
+                      ),
+                    ),
+                  ],
                 ),
               ],
             ),

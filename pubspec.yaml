@@ -27,6 +27,9 @@ dependencies:
   # Cross-platform SQLite engine with FTS5 support and Turso/libSQL compatibility
   sqlite3: ^2.5.0
   sqlite3_flutter_libs: ^0.5.26
+  # QR Code generation on desktop and scanning on mobile
+  qr_flutter: ^4.1.0
+  mobile_scanner: ^6.0.2
 
 dev_dependencies:
   flutter_test:

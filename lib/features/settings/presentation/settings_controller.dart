@@ -310,6 +310,24 @@ class SettingsController extends ChangeNotifier {
     );
   }
 
+  Future<void> setR2Config({
+    String? endpoint,
+    String? bucket,
+    String? accessKeyId,
+    String? secretAccessKey,
+    bool? enabled,
+  }) async {
+    await _persist(
+      _settings.copyWith(
+        r2Endpoint: endpoint,
+        r2Bucket: bucket,
+        r2AccessKeyId: accessKeyId,
+        r2SecretAccessKey: secretAccessKey,
+        r2MediaSyncEnabled: enabled,
+      ),
+    );
+  }
+
   /// Where captures are mirrored as markdown, or null when nothing is.
   String? get vaultPath => _settings.vaultPath;
   String get vaultFolder => _settings.vaultFolder;
