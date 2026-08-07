@@ -27,6 +27,7 @@ class RecordingsRepository {
   static String extensionFor(CaptureType type, {String? sourceMimeType}) =>
       policy.extensionFor(type, mimeType: sourceMimeType);
 
+  // ignore: unused_field
   int? _knownCount;
 
   void expectRowCount(int count) => _knownCount = count;
