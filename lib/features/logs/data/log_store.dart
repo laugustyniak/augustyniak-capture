@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
@@ -96,7 +97,7 @@ class LogStore extends ChangeNotifier implements LogSink {
       return;
     }
     _isFlushing = true;
-    Future<void>(() async {
+    scheduleMicrotask(() async {
       try {
         do {
           _isDirty = false;

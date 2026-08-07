@@ -6,6 +6,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:path/path.dart' as p;
 import 'package:record/record.dart';
 import 'package:augustyniak_capture/features/logs/data/log_store.dart';
+import 'package:augustyniak_capture/features/logs/domain/log_event.dart';
 import 'package:augustyniak_capture/features/recordings/data/media_picker.dart';
 import 'package:augustyniak_capture/features/recordings/data/recordings_repository.dart';
 import 'package:augustyniak_capture/features/recordings/domain/agent_handoff.dart';
@@ -142,9 +143,20 @@ SettingsController buildSettingsController({AppSettings? stored}) {
   return controller;
 }
 
+class _MemoryLogArchive implements LogArchive {
+  const _MemoryLogArchive();
+  @override
+  Future<List<LogEvent>> load() async => <LogEvent>[];
+  @override
+  Future<void> save(List<LogEvent> events) async {}
+}
+
 LogStore buildLogStore({int capacity = 500}) {
-  // No archive: memory-only, so nothing touches the filesystem.
-  final LogStore store = LogStore(capacity: capacity);
+  // Memory-only archive so nothing touches the filesystem or SQLite database in harness tests.
+  final LogStore store = LogStore(
+    archive: const _MemoryLogArchive(),
+    capacity: capacity,
+  );
   addTearDown(store.dispose);
   return store;
 }

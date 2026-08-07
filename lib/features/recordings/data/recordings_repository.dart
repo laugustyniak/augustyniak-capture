@@ -27,7 +27,6 @@ class RecordingsRepository {
   static String extensionFor(CaptureType type, {String? sourceMimeType}) =>
       policy.extensionFor(type, mimeType: sourceMimeType);
 
-  // ignore: unused_field
   int? _knownCount;
 
   void expectRowCount(int count) => _knownCount = count;
@@ -63,121 +62,135 @@ class RecordingsRepository {
   Future<File> createAudioFile(String id) => createSourceFile(id, 'm4a');
 
   Future<List<Recording>> loadAll() async {
-    final AppDatabase db = await AppDatabase.getInstance();
-    await db.migrateFromLegacyJsonIfNeeded();
-
-    final ResultSet results = db.rawDb.select('''
-      SELECT id, file_path, duration_ms, type, status, category, title, summary,
-             tags_json, created_at, is_processed_by_user, project_id, failure_reason, json_payload
-      FROM recordings
-      ORDER BY created_at DESC;
-    ''');
-
-    if (results.isEmpty) {
-      final File index = await _indexFile();
-      if (await index.exists()) {
-        try {
-          final String raw = await index.readAsString();
-          if (raw.trim().isNotEmpty) {
-            final dynamic decoded = jsonDecode(raw);
-            if (decoded is List) {
-              final List<Recording> legacyList = <Recording>[];
-              for (final item in decoded) {
-                if (item is Map<String, dynamic>) {
-                  legacyList.add(Recording.fromJson(item));
-                }
-              }
-              await saveAll(legacyList);
-              return legacyList;
-            }
-          }
-        } catch (_) {}
+    final File index = await _indexFile();
+    if (await index.exists()) {
+      final String raw;
+      final dynamic decoded;
+      try {
+        raw = await index.readAsString();
+        if (raw.trim().isEmpty) {
+          _knownCount = 0;
+          return <Recording>[];
+        }
+        decoded = jsonDecode(raw);
+      } catch (exception) {
+        throw IndexUnreadableException(
+          index.path,
+          exception,
+          backupPath: await _preserve(index, 'corrupt'),
+        );
       }
+
+      if (decoded is! List<dynamic>) {
+        throw IndexUnreadableException(
+          index.path,
+          'expected a JSON list, got ${decoded.runtimeType}',
+          backupPath: await _preserve(index, 'corrupt'),
+        );
+      }
+
+      final List<Recording> recordings = <Recording>[];
+      bool droppedARow = false;
+      for (final dynamic item in decoded) {
+        try {
+          recordings.add(Recording.fromJson(item as Map<String, dynamic>));
+        } catch (_) {
+          droppedARow = true;
+        }
+      }
+      if (droppedARow) {
+        await _preserve(index, 'partial');
+      }
+
+      recordings.sort(
+        (Recording a, Recording b) => b.createdAt.compareTo(a.createdAt),
+      );
+      _knownCount = recordings.length;
+      return recordings;
+    }
+
+    try {
+      final AppDatabase db = await AppDatabase.getInstance();
+      await db.migrateFromLegacyJsonIfNeeded();
+
+      final ResultSet results = db.rawDb.select('''
+        SELECT id, file_path, duration_ms, type, status, category, title, summary,
+               tags_json, created_at, is_processed_by_user, project_id, failure_reason, json_payload
+        FROM recordings
+        ORDER BY created_at DESC;
+      ''');
+
+      final List<Recording> recordings = <Recording>[];
+      for (final Row row in results) {
+        final String? jsonPayload = row['json_payload'] as String?;
+        if (jsonPayload != null && jsonPayload.isNotEmpty) {
+          try {
+            recordings.add(Recording.fromJson(jsonDecode(jsonPayload) as Map<String, dynamic>));
+            continue;
+          } catch (_) {}
+        }
+      }
+
+      _knownCount = recordings.length;
+      return recordings;
+    } catch (_) {
       _knownCount = 0;
       return <Recording>[];
     }
-
-    final List<Recording> recordings = <Recording>[];
-    for (final Row row in results) {
-      final String? jsonPayload = row['json_payload'] as String?;
-      if (jsonPayload != null && jsonPayload.isNotEmpty) {
-        try {
-          recordings.add(Recording.fromJson(jsonDecode(jsonPayload) as Map<String, dynamic>));
-          continue;
-        } catch (_) {}
-      }
-
-      final String typeStr = row['type'] as String? ?? 'audioRecording';
-      final CaptureType type = CaptureType.values.firstWhere(
-        (e) => e.name == typeStr,
-        orElse: () => CaptureType.audioRecording,
-      );
-      final String statusStr = row['status'] as String? ?? 'saved';
-      final RecordingStatus status = RecordingStatus.values.firstWhere(
-        (e) => e.name == statusStr,
-        orElse: () => RecordingStatus.saved,
-      );
-
-      final List<dynamic> tagsRaw =
-          jsonDecode(row['tags_json'] as String? ?? '[]') as List<dynamic>;
-      final List<String> tags = tagsRaw.map((e) => e.toString()).toList();
-
-      recordings.add(
-        Recording(
-          id: row['id'] as String,
-          filePath: row['file_path'] as String,
-          createdAt: DateTime.fromMillisecondsSinceEpoch(row['created_at'] as int),
-          durationMs: row['duration_ms'] as int? ?? 0,
-          status: status,
-          type: type,
-          title: row['title'] as String?,
-          summary: row['summary'] as String?,
-          tags: tags,
-          isProcessedByUser: (row['is_processed_by_user'] as int? ?? 0) == 1,
-          projectId: row['project_id'] as String?,
-        ),
-      );
-    }
-
-    _knownCount = recordings.length;
-    return recordings;
   }
 
   Future<void> saveAll(List<Recording> recordings) async {
-    final AppDatabase db = await AppDatabase.getInstance();
-    db.rawDb.execute('BEGIN TRANSACTION;');
     try {
-      db.rawDb.execute('DELETE FROM recordings;');
-      final PreparedStatement stmt = db.rawDb.prepare('''
-        INSERT INTO recordings
-        (id, file_path, duration_ms, type, status, category, title, summary, tags_json, created_at, is_processed_by_user, project_id, failure_reason, json_payload)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
-      ''');
+      final AppDatabase db = await AppDatabase.getInstance();
+      db.rawDb.execute('BEGIN TRANSACTION;');
+      try {
+        db.rawDb.execute('DELETE FROM recordings;');
+        final PreparedStatement stmt = db.rawDb.prepare('''
+          INSERT INTO recordings
+          (id, file_path, duration_ms, type, status, category, title, summary, tags_json, created_at, is_processed_by_user, project_id, failure_reason, json_payload)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
+        ''');
 
-      for (final Recording r in recordings) {
-        stmt.execute(<Object?>[
-          r.id,
-          r.filePath,
-          r.durationMs,
-          r.type.name,
-          r.status.name,
-          r.category?.name,
-          r.title,
-          r.summary,
-          jsonEncode(r.tags),
-          r.createdAt.millisecondsSinceEpoch,
-          r.isProcessedByUser ? 1 : 0,
-          r.projectId,
-          r.error,
-          jsonEncode(r.toJson()),
-        ]);
+        for (final Recording r in recordings) {
+          stmt.execute(<Object?>[
+            r.id,
+            r.filePath,
+            r.durationMs,
+            r.type.name,
+            r.status.name,
+            r.category?.name,
+            r.title,
+            r.summary,
+            jsonEncode(r.tags),
+            r.createdAt.millisecondsSinceEpoch,
+            r.isProcessedByUser ? 1 : 0,
+            r.projectId,
+            r.error,
+            jsonEncode(r.toJson()),
+          ]);
+        }
+        stmt.dispose();
+        db.rawDb.execute('COMMIT;');
+      } catch (e) {
+        db.rawDb.execute('ROLLBACK;');
       }
-      stmt.dispose();
-      db.rawDb.execute('COMMIT;');
-    } catch (e) {
-      db.rawDb.execute('ROLLBACK;');
-      rethrow;
+    } catch (_) {}
+
+    final File index = await _indexFile();
+    final int? previous = _knownCount;
+    if (previous != null &&
+        recordings.length < previous &&
+        await index.exists()) {
+      await _preserve(index, 'shrank');
     }
+
+    final String payload = const JsonEncoder.withIndent(
+      '  ',
+    ).convert(recordings.map((Recording item) => item.toJson()).toList());
+
+    final File temporary = File('${index.path}.tmp');
+    await temporary.writeAsString(payload, flush: true);
+    await temporary.rename(index.path);
     _knownCount = recordings.length;
   }
 
@@ -217,6 +230,23 @@ class RecordingsRepository {
       (Recording a, Recording b) => b.createdAt.compareTo(a.createdAt),
     );
     return orphans;
+  }
+
+  Future<String?> _preserve(File file, String reason) async {
+    try {
+      final String stamp = DateTime.now().toIso8601String().replaceAll(
+        RegExp(r'[:.]'),
+        '-',
+      );
+      final String destination = p.join(
+        p.dirname(file.path),
+        '${p.basenameWithoutExtension(file.path)}.$reason-$stamp.json',
+      );
+      await file.copy(destination);
+      return destination;
+    } catch (_) {
+      return null;
+    }
   }
 
   Future<File> _indexFile() async {
