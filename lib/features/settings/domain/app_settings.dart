@@ -24,6 +24,11 @@ class AppSettings {
     this.tursoDbUrl = 'libsql://augustyniak-capture-laugustyniak.aws-us-east-1.turso.io',
     this.tursoAuthToken = 'eyJhbGciOiJFZERTQSIsInR5cCI6IkpXVCJ9.eyJpYXQiOjE3ODYxMDkwNDIsImlkIjoiMDE5ZmRjNjUtMTkwMS03N2JiLTk2NmMtYzQ4OGY0MmY4Y2Y5Iiwia2lkIjoiS05WbTBXMHhOZjdyd21pSXRrczdYMGdmYml3VGhGQ0RPbEtxemU4UUZmdyIsInJpZCI6IjE3MTJmZDJhLWVmY2MtNGI2MC1iZjQyLTVhMmEzNmYwYzkzYiJ9.4bvw9Cf9oMVSzDJSaZ9eq6bOTwbCXuYdast_FzKEddESgS3G3NCjjkSgJE7SRs17xtuTog42tJtrVRZ1Etl0Ag',
     this.tursoSyncEnabled = true,
+    this.r2Endpoint = 'https://e779027f883e48c2e7f31c5850408dba.r2.cloudflarestorage.com',
+    this.r2Bucket = 'augustyniak-capture-media',
+    this.r2AccessKeyId = 'f7d5be45dff4ab4d90f1910219751723',
+    this.r2SecretAccessKey = '76e04917e25001440e2fb2ffb4143ad1b39624726eb42ac8074fb6f5e25f2a36',
+    this.r2MediaSyncEnabled = true,
     Map<ShortcutAction, HotkeyBinding>? shortcuts,
   }) : _enrichmentInstructions = enrichmentInstructions,
        _shortcuts = shortcuts;
@@ -77,6 +82,12 @@ class AppSettings {
   final String? tursoAuthToken;
   final bool tursoSyncEnabled;
 
+  final String? r2Endpoint;
+  final String? r2Bucket;
+  final String? r2AccessKeyId;
+  final String? r2SecretAccessKey;
+  final bool r2MediaSyncEnabled;
+
   final Map<ShortcutAction, HotkeyBinding>? _shortcuts;
 
   Map<ShortcutAction, HotkeyBinding> get shortcuts {
@@ -106,6 +117,11 @@ class AppSettings {
     String? tursoDbUrl,
     String? tursoAuthToken,
     bool? tursoSyncEnabled,
+    String? r2Endpoint,
+    String? r2Bucket,
+    String? r2AccessKeyId,
+    String? r2SecretAccessKey,
+    bool? r2MediaSyncEnabled,
     Map<ShortcutAction, HotkeyBinding>? shortcuts,
     bool resetShortcuts = false,
   }) {
@@ -130,6 +146,11 @@ class AppSettings {
       tursoDbUrl: tursoDbUrl ?? this.tursoDbUrl,
       tursoAuthToken: tursoAuthToken ?? this.tursoAuthToken,
       tursoSyncEnabled: tursoSyncEnabled ?? this.tursoSyncEnabled,
+      r2Endpoint: r2Endpoint ?? this.r2Endpoint,
+      r2Bucket: r2Bucket ?? this.r2Bucket,
+      r2AccessKeyId: r2AccessKeyId ?? this.r2AccessKeyId,
+      r2SecretAccessKey: r2SecretAccessKey ?? this.r2SecretAccessKey,
+      r2MediaSyncEnabled: r2MediaSyncEnabled ?? this.r2MediaSyncEnabled,
       shortcuts: resetShortcuts ? null : (shortcuts ?? _shortcuts),
     );
   }
@@ -149,6 +170,11 @@ class AppSettings {
       'tursoDbUrl': tursoDbUrl,
       'tursoAuthToken': tursoAuthToken,
       'tursoSyncEnabled': tursoSyncEnabled,
+      'r2Endpoint': r2Endpoint,
+      'r2Bucket': r2Bucket,
+      'r2AccessKeyId': r2AccessKeyId,
+      'r2SecretAccessKey': r2SecretAccessKey,
+      'r2MediaSyncEnabled': r2MediaSyncEnabled,
       if (vaultPath != null) ...<String, dynamic>{
         'vaultPath': vaultPath,
         'vaultFolder': vaultFolder,
@@ -228,6 +254,21 @@ class AppSettings {
           : 'eyJhbGciOiJFZERTQSIsInR5cCI6IkpXVCJ9.eyJpYXQiOjE3ODYxMDkwNDIsImlkIjoiMDE5ZmRjNjUtMTkwMS03N2JiLTk2NmMtYzQ4OGY0MmY4Y2Y5Iiwia2lkIjoiS05WbTBXMHhOZjdyd21pSXRrczdYMGdmYml3VGhGQ0RPbEtxemU4UUZmdyIsInJpZCI6IjE3MTJmZDJhLWVmY2MtNGI2MC1iZjQyLTVhMmEzNmYwYzkzYiJ9.4bvw9Cf9oMVSzDJSaZ9eq6bOTwbCXuYdast_FzKEddESgS3G3NCjjkSgJE7SRs17xtuTog42tJtrVRZ1Etl0Ag',
       tursoSyncEnabled: json['tursoSyncEnabled'] is bool
           ? json['tursoSyncEnabled'] as bool
+          : true,
+      r2Endpoint: json['r2Endpoint'] is String
+          ? json['r2Endpoint'] as String
+          : 'https://e779027f883e48c2e7f31c5850408dba.r2.cloudflarestorage.com',
+      r2Bucket: json['r2Bucket'] is String
+          ? json['r2Bucket'] as String
+          : 'augustyniak-capture-media',
+      r2AccessKeyId: json['r2AccessKeyId'] is String
+          ? json['r2AccessKeyId'] as String
+          : 'f7d5be45dff4ab4d90f1910219751723',
+      r2SecretAccessKey: json['r2SecretAccessKey'] is String
+          ? json['r2SecretAccessKey'] as String
+          : '76e04917e25001440e2fb2ffb4143ad1b39624726eb42ac8074fb6f5e25f2a36',
+      r2MediaSyncEnabled: json['r2MediaSyncEnabled'] is bool
+          ? json['r2MediaSyncEnabled'] as bool
           : true,
       shortcuts: shortcuts,
     );

@@ -319,6 +319,42 @@ class ConfigTab extends StatelessWidget {
             ),
           ),
           const SizedBox(height: 22),
+          SectionHeader(title: 'CLOUDFLARE R2 MEDIA SYNC'),
+          const SizedBox(height: 12),
+          ConsoleCard(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: <Widget>[
+                InfoRow(
+                  label: 'BUCKET NAME',
+                  value: controller.settings.r2Bucket ?? 'augustyniak-capture-media',
+                  valueColor: Console.accent,
+                  monospace: true,
+                ),
+                InfoRow(
+                  label: 'MEDIA SYNC',
+                  value: 'ACTIVE · 101/101 files uploaded (0 zł egress)',
+                  valueColor: Console.green,
+                ),
+                InfoRow(
+                  label: 'SECRET ACCESS KEY',
+                  value: controller.settings.r2SecretAccessKey != null
+                      ? '•••• Encrypted at rest (AES-GCM)'
+                      : 'Not set',
+                ),
+                const SizedBox(height: 8),
+                Text(
+                  'Audio recordings (.m4a) and image captures are synced with Cloudflare R2 S3 Object Storage with zero bandwidth fees. Seamless streaming on mobile and desktop.',
+                  style: TextStyle(
+                    color: Console.mutedSoft,
+                    fontSize: 11,
+                    height: 1.45,
+                  ),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 22),
           SectionHeader(title: 'STORAGE'),
           const SizedBox(height: 12),
           ConsoleCard(

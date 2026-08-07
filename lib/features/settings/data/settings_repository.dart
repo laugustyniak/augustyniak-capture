@@ -150,8 +150,21 @@ class SettingsRepository {
       }
     }
 
+    String? r2Secret = settings.r2SecretAccessKey;
+    if (r2Secret != null && r2Secret.isNotEmpty) {
+      final String value = await transform(r2Secret);
+      if (value != r2Secret) {
+        changed = true;
+        r2Secret = value;
+      }
+    }
+
     return changed
-        ? settings.copyWith(profiles: profiles, tursoAuthToken: tursoToken)
+        ? settings.copyWith(
+            profiles: profiles,
+            tursoAuthToken: tursoToken,
+            r2SecretAccessKey: r2Secret,
+          )
         : settings;
   }
 
@@ -159,6 +172,11 @@ class SettingsRepository {
     if (settings.tursoAuthToken != null &&
         settings.tursoAuthToken!.isNotEmpty &&
         !TokenCipher.isSealed(settings.tursoAuthToken!)) {
+      return true;
+    }
+    if (settings.r2SecretAccessKey != null &&
+        settings.r2SecretAccessKey!.isNotEmpty &&
+        !TokenCipher.isSealed(settings.r2SecretAccessKey!)) {
       return true;
     }
     return settings.profiles.any((ProviderProfile profile) =>
