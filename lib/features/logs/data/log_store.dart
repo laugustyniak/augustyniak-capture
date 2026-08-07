@@ -52,6 +52,14 @@ class LogStore extends ChangeNotifier implements LogSink {
     notifyListeners();
   }
 
+  bool _disposed = false;
+
+  @override
+  void dispose() {
+    _disposed = true;
+    super.dispose();
+  }
+
   @override
   void log(
     String message, {
@@ -71,13 +79,17 @@ class LogStore extends ChangeNotifier implements LogSink {
 
   void add(LogEvent event) {
     _events = _capped(<LogEvent>[event, ..._events]);
-    notifyListeners();
+    if (!_disposed) {
+      notifyListeners();
+    }
     _scheduleFlush();
   }
 
   Future<void> clear() async {
     _events = <LogEvent>[];
-    notifyListeners();
+    if (!_disposed) {
+      notifyListeners();
+    }
     // Route through the coalescing flush so this write can't race an in-flight
     // one over the shared `.tmp` file (double rename → ENOENT).
     _scheduleFlush();
