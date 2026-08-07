@@ -5,6 +5,7 @@ import 'package:flutter/services.dart';
 
 import '../../../app/ui_kit.dart';
 import '../../gamification/presentation/done_burst_animation.dart';
+import '../domain/agent_artifact.dart';
 import '../domain/capture_type.dart';
 import '../domain/recording.dart';
 import 'card_parts.dart';
@@ -36,6 +37,7 @@ class RecordingCard extends StatelessWidget {
     this.canRoute = false,
     required this.onHandoff,
     this.canHandoff = false,
+    this.onSelectArtifact,
     this.focused = false,
   });
 
@@ -116,6 +118,7 @@ class RecordingCard extends StatelessWidget {
   /// the same reason as [canRoute] — an install with no repository configured
   /// would otherwise carry a dead button on every row.
   final bool canHandoff;
+  final void Function(AgentArtifact artifact)? onSelectArtifact;
 
   /// This row is the one the keyboard is on.
   ///
@@ -358,6 +361,60 @@ class RecordingCard extends StatelessWidget {
                     style: ConsoleText.micro.copyWith(color: Console.green),
                   ),
                 ),
+              ],
+            ),
+          ],
+          if (recording.artifacts.isNotEmpty) ...<Widget>[
+            const SizedBox(height: 9),
+            Wrap(
+              spacing: 6,
+              runSpacing: 6,
+              crossAxisAlignment: WrapCrossAlignment.center,
+              children: <Widget>[
+                for (final AgentArtifact artifact in recording.artifacts)
+                  InkWell(
+                    onTap: () => onSelectArtifact?.call(artifact),
+                    borderRadius: BorderRadius.circular(6),
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 8,
+                        vertical: 4,
+                      ),
+                      decoration: BoxDecoration(
+                        color: Console.accent.withValues(alpha: .12),
+                        borderRadius: BorderRadius.circular(6),
+                        border: Border.all(
+                          color: Console.accent.withValues(alpha: .3),
+                        ),
+                      ),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: <Widget>[
+                          Icon(
+                            artifact.kind == AgentArtifactKind.resultNote
+                                ? Icons.auto_awesome
+                                : Icons.description_outlined,
+                            size: 13,
+                            color: Console.accent,
+                          ),
+                          const SizedBox(width: 5),
+                          ConstrainedBox(
+                            constraints: const BoxConstraints(maxWidth: 180),
+                            child: Text(
+                              artifact.title,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: TextStyle(
+                                color: Console.accent,
+                                fontSize: 11,
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
               ],
             ),
           ],

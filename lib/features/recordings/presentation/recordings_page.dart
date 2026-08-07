@@ -5,6 +5,7 @@ import 'dart:io';
 // material re-exports from it.
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:path/path.dart' as p;
 
 import '../../../app/ui_kit.dart';
 import '../../clipboard/domain/clipboard_watcher_service.dart';
@@ -166,6 +167,11 @@ class _RecordingsPageState extends State<RecordingsPage> {
     controller = RecordingsController(
       repository: repository,
       gamificationController: gamification,
+      projectById: _projectById,
+      vaultDirectory: () => settings.vaultPath == null ||
+              settings.vaultPath!.trim().isEmpty
+          ? null
+          : Directory(p.join(settings.vaultPath!, settings.vaultFolder)),
       // Records what the enrichment model and hand edits overwrite. Left null
       // in tests, like the clipboard and media-opener seams, so the pure-Dart
       // suites never reach a platform channel.
