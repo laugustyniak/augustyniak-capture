@@ -162,7 +162,12 @@ aktywny filtr arkusza.
 
 ## Testy
 
-### `test/clipboard_test.dart` — czysty Dart, `LocalJsonClipboardRepository`
+Wszystkie testy trafiają do `test/clipboard_history_test.dart`. Mimo nazwy
+`test/clipboard_test.dart` **nie dotyczy historii schowka** — testuje
+`ClipboardSink` w potoku nagrań (czy ukończona transkrypcja trafia do schowka
+systemowego) i nie ma z tą zmianą nic wspólnego.
+
+### Grupa `ClipboardRepository` — czysty Dart, `LocalJsonClipboardRepository`
 
 - edycja tekstu przelicza `preview` oraz zachowuje pozycję wpisu na liście i
   jego kolekcje
@@ -172,7 +177,12 @@ aktywny filtr arkusza.
 - zmiana przeżywa ponowne wczytanie repozytorium z dysku
 - `updateItem` z nieznanym `id` nie rzuca i nie zmienia listy
 
-### `test/clipboard_history_test.dart` — widget
+Fake `_MemoryClipboardRepository` w tym samym pliku (`clipboard_history_test.dart:337`)
+implementuje `ClipboardRepository`, więc rozszerzenie interfejsu zepsuje jego
+kompilację, dopóki nie dostanie własnego `updateItem`. Jest to pożądane —
+kompilator nie pozwoli przeoczyć żadnej implementacji.
+
+### Grupa widgetowa
 
 - ołówek jest obecny na wierszu tekstowym i nieobecny na obrazkowym
 - edycja treści i `ZAPISZ` zmienia wpis widoczny w arkuszu
