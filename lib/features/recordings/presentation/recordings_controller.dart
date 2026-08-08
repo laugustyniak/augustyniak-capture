@@ -17,6 +17,7 @@ import '../../processing/data/video_poster_extractor.dart';
 import '../../processing/domain/processor.dart';
 import '../../processing/domain/processor_registry.dart';
 import '../../../core/database/app_database.dart';
+import '../../../core/sync/sync_defaults.dart';
 import '../../../core/sync/turso_sync_service.dart';
 import '../../settings/data/settings_repository.dart';
 import '../../settings/domain/app_settings.dart';
@@ -459,15 +460,25 @@ class RecordingsController extends ChangeNotifier {
       final AppDatabase db = await AppDatabase.getInstance();
       final AppSettings settings = await SettingsRepository().load() ?? AppSettings.empty;
 
-      const String defaultUrl = 'libsql://augustyniak-capture-laugustyniak.aws-us-east-1.turso.io';
-      const String defaultToken = 'eyJhbGciOiJFZERTQSIsInR5cCI6IkpXVCJ9.eyJpYXQiOjE3ODYxMDkwNDIsImlkIjoiMDE5ZmRjNjUtMTkwMS03N2JiLTk2NmMtYzQ4OGY0MmY4Y2Y5Iiwia2lkIjoiS05WbTBXMHhOZjdyd21pSXRrczdYMGdmYml3VGhGQ0RPbEtxemU4UUZmdyIsInJpZCI6IjE3MTJmZDJhLWVmY2MtNGI2MC1iZjQyLTVhMmEzNmYwYzkzYiJ9.4bvw9Cf9oMVSzDJSaZ9eq6bOTwbCXuYdast_FzKEddESgS3G3NCjjkSgJE7SRs17xtuTog42tJtrVRZ1Etl0Ag';
-
       final String url = (settings.tursoDbUrl ?? '').trim().isNotEmpty
           ? settings.tursoDbUrl!
-          : defaultUrl;
-      final String token = (settings.tursoAuthToken != null && !TokenCipher.isSealed(settings.tursoAuthToken!))
+          : (SyncDefaults.tursoDbUrl ?? '');
+      // A sealed token is one the key store could not open, not a missing one.
+      // Falling through to the build-time value would paper over exactly the
+      // failure the Config tab is trying to report, so it stays empty and the
+      // sync declines below with its own message.
+      final String token = (settings.tursoAuthToken != null &&
+              !TokenCipher.isSealed(settings.tursoAuthToken!))
           ? settings.tursoAuthToken!
-          : defaultToken;
+          : (SyncDefaults.tursoAuthToken ?? '');
+
+      if (url.isEmpty || token.isEmpty) {
+        _logSink.log(
+          'Turso sync skipped: no credentials available.',
+          level: LogLevel.warn,
+        );
+        return false;
+      }
 
       final TursoSyncService syncService = TursoSyncService(db: db);
       final bool synced = await syncService.syncTwoWay(
