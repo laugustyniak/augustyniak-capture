@@ -1,3 +1,6 @@
+import 'dart:convert';
+
+import 'package:augustyniak_capture/features/momentum/data/file_closure_log.dart';
 import 'package:augustyniak_capture/features/momentum/domain/closure_event.dart';
 import 'package:augustyniak_capture/features/recordings/domain/capture_type.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -86,6 +89,52 @@ void main() {
         }),
         isNull,
       );
+    });
+  });
+
+  group('FileClosureLog.parse', () {
+    String row(String id, String kind) => jsonEncode(<String, dynamic>{
+      'recordingId': id,
+      'at': DateTime(2026, 8, 9).toIso8601String(),
+      'kind': kind,
+      'type': 'text',
+    });
+
+    test('reads one event per line', () {
+      final String raw = <String>[row('a', 'review'), row('b', 'route')].join(
+        '\n',
+      );
+
+      expect(FileClosureLog.parse(raw).length, 2);
+    });
+
+    test('a torn final line costs one event, never the file', () {
+      // The failure a kill mid-append actually produces. Losing the whole
+      // history to one half-written row is the shape this store exists to
+      // avoid.
+      final String raw = '${row('a', 'review')}\n{"recordingId":"b","at":';
+
+      final List<ClosureEvent> events = FileClosureLog.parse(raw);
+
+      expect(events.length, 1);
+      expect(events.single.recordingId, 'a');
+    });
+
+    test('a row from a newer build is skipped, and the rest survive', () {
+      final String raw = <String>[
+        row('a', 'review'),
+        row('b', 'teleported'),
+        row('c', 'handoff'),
+      ].join('\n');
+
+      final List<ClosureEvent> events = FileClosureLog.parse(raw);
+
+      expect(events.map((ClosureEvent e) => e.recordingId), <String>['a', 'c']);
+    });
+
+    test('blank lines are skipped', () {
+      expect(FileClosureLog.parse('\n\n  \n'), isEmpty);
+      expect(FileClosureLog.parse(''), isEmpty);
     });
   });
 
