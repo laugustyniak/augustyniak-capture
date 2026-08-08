@@ -1,5 +1,11 @@
-import 'package:flutter/material.dart';
-
+/// A threshold the user has just crossed.
+///
+/// This type carries the *fact* — which threshold, of which kind, and the
+/// stable id that records it as unlocked. It deliberately carries no wording,
+/// icon or colour: those are one widget's concern, they would drag
+/// `package:flutter/material.dart` into `domain/`, and they are what a future
+/// translation pass would have to reach into the domain to change. See
+/// `presentation/milestone_copy.dart`.
 enum MilestoneType {
   captureCreated,
   captureDone,
@@ -10,19 +16,11 @@ class Milestone {
     required this.id,
     required this.type,
     required this.count,
-    required this.title,
-    required this.description,
-    required this.icon,
-    required this.color,
   });
 
   final String id;
   final MilestoneType type;
   final int count;
-  final String title;
-  final String description;
-  final IconData icon;
-  final Color color;
 
   static bool isMilestoneCount(int count) {
     if (count <= 0) return false;
@@ -58,117 +56,6 @@ class Milestone {
     required int count,
     required String id,
   }) {
-    final bool isDone = type == MilestoneType.captureDone;
-
-    if (count == 1) {
-      return Milestone(
-        id: id,
-        type: type,
-        count: count,
-        title: isDone ? 'PIERWSZE UKOŃCZONE!' : 'PIERWSZE PRZECHWYCENIE!',
-        description: isDone
-            ? 'Zaznaczono pierwszą notatkę jako wykonaną. Świetny start!'
-            : 'Zapisano pierwsze przechwycenie w aplikacji. Tak trzymaj!',
-        icon: isDone ? Icons.check_circle_outline_rounded : Icons.bolt_rounded,
-        color: isDone ? const Color(0xFF10B981) : const Color(0xFF6366F1),
-      );
-    }
-
-    if (count == 10) {
-      return Milestone(
-        id: id,
-        type: type,
-        count: count,
-        title: isDone ? '10 ZROBIONYCH!' : '10 PRZECHWYCEŃ!',
-        description: isDone
-            ? '10 zadań odhaczonych! Zbierasz tempo.'
-            : '10 przechwyconych myśli i nagrań. Dobry nawyk!',
-        icon: isDone ? Icons.stars_rounded : Icons.auto_awesome_rounded,
-        color: isDone ? const Color(0xFF059669) : const Color(0xFF8B5CF6),
-      );
-    }
-
-    if (count == 20) {
-      return Milestone(
-        id: id,
-        type: type,
-        count: count,
-        title: isDone ? '20 ZROBIONYCH!' : '20 PRZECHWYCEŃ!',
-        description: isDone
-            ? '20 ukończonych elementów! Twoja skrzynka czyszczeje.'
-            : '20 utworzonych wpisów. Masz w głowie mnóstwo pomysłów!',
-        icon: isDone ? Icons.emoji_events_rounded : Icons.local_fire_department_rounded,
-        color: isDone ? const Color(0xFF10B981) : const Color(0xFFEC4899),
-      );
-    }
-
-    if (count == 50) {
-      return Milestone(
-        id: id,
-        type: type,
-        count: count,
-        title: isDone ? '50 ZROBIONYCH!' : '50 PRZECHWYCEŃ!',
-        description: isDone
-            ? 'Pół setki domkniętych spraw! Niesamowita produktywność.'
-            : '50 zarchiwizowanych myśli. System działa znakomicie!',
-        icon: isDone ? Icons.workspace_premium_rounded : Icons.rocket_launch_rounded,
-        color: isDone ? const Color(0xFFF59E0B) : const Color(0xFF3B82F6),
-      );
-    }
-
-    if (count == 100) {
-      return Milestone(
-        id: id,
-        type: type,
-        count: count,
-        title: isDone ? 'SETKA ZROBIONA (100)!' : '100 PRZECHWYCEŃ!',
-        description: isDone
-            ? 'Sto zrealizowanych zadań! Jesteś mistrzem domykania.'
-            : '100 wpisów w bazie! Twój osobisty mózg rośnie w siłę.',
-        icon: isDone ? Icons.military_tech_rounded : Icons.diamond_rounded,
-        color: const Color(0xFFEAB308),
-      );
-    }
-
-    if (count == 200) {
-      return Milestone(
-        id: id,
-        type: type,
-        count: count,
-        title: isDone ? '200 ZROBIONYCH!' : '200 PRZECHWYCEŃ!',
-        description: isDone
-            ? '200 zamkniętych tematów. Prawdziwa maszyna do pracy!'
-            : '200 nagrań i notatek w systemie. Niezwykłe osiągnięcie!',
-        icon: Icons.shield_rounded,
-        color: const Color(0xFFA855F7),
-      );
-    }
-
-    if (count == 300) {
-      return Milestone(
-        id: id,
-        type: type,
-        count: count,
-        title: isDone ? '300 ZROBIONYCH!' : '300 PRZECHWYCEŃ!',
-        description: isDone
-            ? '300 ukończonych spraw! Absolutny poziom ekspercki.'
-            : '300 przechwyceń! Pełny przepływ informacji.',
-        icon: Icons.verified_rounded,
-        color: const Color(0xFF06B6D4),
-      );
-    }
-
-    // Every 100 further (400, 500, 600...)
-    return Milestone(
-      id: id,
-      type: type,
-      count: count,
-      title: isDone ? '$count ZROBIONYCH!' : '$count PRZECHWYCEŃ!',
-      description: isDone
-          ? '$count ukończonych zadań. Imponująca konsekwencja!'
-          : '$count zapisanych notatek i nagrań!',
-      icon: Icons.celebration_rounded,
-      color: const Color(0xFFF43F5E),
-    );
+    return Milestone(id: id, type: type, count: count);
   }
 }

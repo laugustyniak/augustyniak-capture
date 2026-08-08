@@ -5,6 +5,7 @@ import '../../../app/ui_kit.dart';
 import '../domain/milestone.dart';
 import 'confetti_particle.dart';
 import 'gamification_controller.dart';
+import 'milestone_copy.dart';
 
 class CelebrationOverlay extends StatefulWidget {
   const CelebrationOverlay({
@@ -98,6 +99,8 @@ class _CelebrationOverlayState extends State<CelebrationOverlay>
                   curve: Curves.elasticOut,
                 ).value.clamp(0.0, 1.2);
 
+                final copy = milestoneCopyFor(_currentMilestone!);
+
                 return Opacity(
                   opacity: opacity.clamp(0.0, 1.0),
                   child: GestureDetector(
@@ -118,12 +121,12 @@ class _CelebrationOverlayState extends State<CelebrationOverlay>
                               color: Console.surface,
                               borderRadius: BorderRadius.circular(18),
                               border: Border.all(
-                                color: _currentMilestone!.color.withValues(alpha: 0.6),
+                                color: copy.color.withValues(alpha: 0.6),
                                 width: 2,
                               ),
                               boxShadow: <BoxShadow>[
                                 BoxShadow(
-                                  color: _currentMilestone!.color.withValues(alpha: 0.35),
+                                  color: copy.color.withValues(alpha: 0.35),
                                   blurRadius: 24,
                                   spreadRadius: 2,
                                 ),
@@ -137,21 +140,21 @@ class _CelebrationOverlayState extends State<CelebrationOverlay>
                                   height: 72,
                                   decoration: BoxDecoration(
                                     shape: BoxShape.circle,
-                                    color: _currentMilestone!.color.withValues(alpha: 0.15),
+                                    color: copy.color.withValues(alpha: 0.15),
                                     border: Border.all(
-                                      color: _currentMilestone!.color,
+                                      color: copy.color,
                                       width: 2,
                                     ),
                                   ),
                                   child: Icon(
-                                    _currentMilestone!.icon,
+                                    copy.icon,
                                     size: 38,
-                                    color: _currentMilestone!.color,
+                                    color: copy.color,
                                   ),
                                 ),
                                 const SizedBox(height: 16),
                                 Text(
-                                  _currentMilestone!.title,
+                                  copy.title,
                                   textAlign: TextAlign.center,
                                   style: ConsoleText.cardTitle.copyWith(
                                     fontSize: 18,
@@ -162,7 +165,7 @@ class _CelebrationOverlayState extends State<CelebrationOverlay>
                                 ),
                                 const SizedBox(height: 8),
                                 Text(
-                                  _currentMilestone!.description,
+                                  copy.description,
                                   textAlign: TextAlign.center,
                                   style: ConsoleText.body.copyWith(
                                     color: Console.muted,
@@ -174,7 +177,7 @@ class _CelebrationOverlayState extends State<CelebrationOverlay>
                                   child: ElevatedButton(
                                     onPressed: _dismiss,
                                     style: ElevatedButton.styleFrom(
-                                      backgroundColor: _currentMilestone!.color,
+                                      backgroundColor: copy.color,
                                       foregroundColor: Colors.white,
                                       padding: const EdgeInsets.symmetric(vertical: 12),
                                       shape: RoundedRectangleBorder(
@@ -182,7 +185,7 @@ class _CelebrationOverlayState extends State<CelebrationOverlay>
                                       ),
                                     ),
                                     child: Text(
-                                      'WSPANIALE!',
+                                      'AWESOME!',
                                       style: ConsoleText.chip.copyWith(
                                         fontWeight: FontWeight.bold,
                                         color: Colors.white,
