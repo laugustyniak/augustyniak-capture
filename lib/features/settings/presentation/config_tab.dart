@@ -365,7 +365,7 @@ class ConfigTab extends StatelessWidget {
                 InfoRow(
                   label: 'MEDIA SYNC',
                   value: controller.settings.r2Bucket != null
-                      ? 'ACTIVE · 101/101 files uploaded (0 zł egress)'
+                      ? 'ACTIVE · 101/101 files uploaded (\$0 egress)'
                       : 'DISABLED',
                   valueColor: controller.settings.r2Bucket != null
                       ? Console.green
