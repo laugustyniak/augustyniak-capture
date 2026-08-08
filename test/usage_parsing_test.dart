@@ -61,5 +61,14 @@ void main() {
       expect(usage.inputTokens, isNull);
       expect(usage.outputTokens, 7);
     });
+
+    test('numeric-looking strings are not parsed as numbers', () {
+      final MeasuredUsage usage = parseUsage(_decode('''
+        {"usage": {"prompt_tokens": "7", "completion_tokens": 7}}
+      '''));
+
+      expect(usage.inputTokens, isNull);
+      expect(usage.outputTokens, 7);
+    });
   });
 }
