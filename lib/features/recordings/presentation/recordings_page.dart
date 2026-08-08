@@ -22,6 +22,7 @@ import '../../projects/data/projects_repository.dart';
 import '../../projects/domain/agent_session_launcher.dart';
 import '../../projects/domain/project.dart';
 import '../../settings/data/aes_gcm_token_cipher.dart';
+import '../../settings/data/file_master_key_store.dart';
 import '../../settings/data/secure_storage_master_key_store.dart';
 import '../../settings/data/settings_repository.dart';
 import '../../settings/domain/app_theme_mode.dart';
@@ -145,11 +146,16 @@ class _RecordingsPageState extends State<RecordingsPage> {
     super.initState();
     settings = SettingsController(
       repository: SettingsRepository(
-        // Real keyring-backed cipher on every platform; ensureReady degrades
-        // to the plaintext behaviour when no keyring answers (headless Linux,
-        // locked Secret Service, test bindings).
+        // The master key lives in an owner-only file beside the database, and
+        // is adopted from the keyring on first run so tokens sealed under the
+        // old arrangement still open. The keyring cannot be the primary store
+        // here: it keys access to the code signature, and an ad-hoc build has
+        // a new one every time, which silently turned every stored token into
+        // an unusable blob after a rebuild. See FileMasterKeyStore.
         cipher: AesGcmTokenCipher(
-          keyStore: const SecureStorageMasterKeyStore(),
+          keyStore: FileMasterKeyStore(
+            migrateFrom: const SecureStorageMasterKeyStore(),
+          ),
         ),
       ),
     );

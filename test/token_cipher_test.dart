@@ -1,8 +1,10 @@
 import 'dart:convert';
+import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:augustyniak_capture/features/settings/domain/token_cipher.dart';
 import 'package:augustyniak_capture/features/settings/data/aes_gcm_token_cipher.dart';
+import 'package:augustyniak_capture/features/settings/data/file_master_key_store.dart';
 import 'package:augustyniak_capture/features/settings/data/secure_storage_master_key_store.dart';
 
 /// In-memory keyring stand-in, same hand-written-fake convention as
@@ -215,6 +217,120 @@ void main() {
         expect(await cipher.seal('sk-secret'), 'sk-secret');
       },
     );
+  });
+
+  group('FileMasterKeyStore', () {
+    late Directory dir;
+
+    setUp(() {
+      dir = Directory.systemTemp.createTempSync('master-key-');
+    });
+
+    tearDown(() {
+      if (dir.existsSync()) dir.deleteSync(recursive: true);
+    });
+
+    FileMasterKeyStore store({MasterKeyStore? migrateFrom}) =>
+        FileMasterKeyStore(
+          directory: () async => dir,
+          migrateFrom: migrateFrom,
+        );
+
+    test('reads nothing before anything is written', () async {
+      expect(await store().read(), isNull);
+    });
+
+    test('round-trips a written key', () async {
+      final String key = base64Encode(List<int>.filled(32, 3));
+      await store().write(key);
+
+      expect(await store().read(), key);
+    });
+
+    test('the key file is readable by its owner alone', () async {
+      // The whole security argument for moving off the keyring: the key now
+      // sits beside the database it protects, so the file mode is the only
+      // thing between it and a careless `cp -R` of the support directory.
+      await store().write(base64Encode(List<int>.filled(32, 3)));
+
+      final File file = File('${dir.path}/${FileMasterKeyStore.fileName}');
+      expect(file.statSync().modeString(), 'rw-------');
+    }, skip: Platform.isWindows);
+
+    test('adopts a key the previous store already holds', () async {
+      // The migration that makes this change non-destructive: tokens sealed
+      // under the keyring's key must still open after the switch.
+      final _MemoryKeyStore keyring = _MemoryKeyStore();
+      keyring.value = base64Encode(List<int>.filled(32, 9));
+
+      expect(await store(migrateFrom: keyring).read(), keyring.value);
+      // Adopted, not merely forwarded — the next launch needs no keyring.
+      expect(await store().read(), keyring.value);
+    });
+
+    test('the file outranks the previous store once adopted', () async {
+      final String own = base64Encode(List<int>.filled(32, 1));
+      await store().write(own);
+
+      final _MemoryKeyStore keyring = _MemoryKeyStore();
+      keyring.value = base64Encode(List<int>.filled(32, 2));
+
+      expect(await store(migrateFrom: keyring).read(), own);
+    });
+
+    test('a keyring that refuses is not an error here', () async {
+      // The exact state this store exists to survive: an ad-hoc rebuild whose
+      // signature the login keychain ACL no longer recognises.
+      expect(await store(migrateFrom: _BrokenKeyStore()).read(), isNull);
+    });
+
+    test('a blank key file reads as absent, not as a broken key', () async {
+      // A zero-length read must leave the cipher free to generate a new key.
+      // Answering '' instead would decode to a wrong-sized key and wedge
+      // encryption off permanently with no way back.
+      File(
+        '${dir.path}/${FileMasterKeyStore.fileName}',
+      ).writeAsStringSync('\n');
+
+      expect(await store().read(), isNull);
+    });
+
+    test(
+      'a cipher on the migrated key opens tokens sealed before it',
+      () async {
+        // End to end, and the regression this whole change is for: a token
+        // sealed while the keyring worked stays readable after the switch.
+        final _MemoryKeyStore keyring = _MemoryKeyStore();
+        final AesGcmTokenCipher before = AesGcmTokenCipher(keyStore: keyring);
+        await before.ensureReady();
+        final String sealed = await before.seal('sk-secret');
+
+        final AesGcmTokenCipher after = AesGcmTokenCipher(
+          keyStore: store(migrateFrom: keyring),
+        );
+        await after.ensureReady();
+
+        expect(after.encrypts, isTrue);
+        expect(await after.unseal(sealed), 'sk-secret');
+      },
+    );
+
+    test('a rebuild that loses the keyring still decrypts', () async {
+      // Same as above, one launch later: the keyring has stopped answering
+      // (new cdhash, denied prompt) and only the adopted file remains.
+      final _MemoryKeyStore keyring = _MemoryKeyStore();
+      final AesGcmTokenCipher before = AesGcmTokenCipher(keyStore: keyring);
+      await before.ensureReady();
+      final String sealed = await before.seal('sk-secret');
+      await store(migrateFrom: keyring).read();
+
+      final AesGcmTokenCipher after = AesGcmTokenCipher(
+        keyStore: store(migrateFrom: _BrokenKeyStore()),
+      );
+      await after.ensureReady();
+
+      expect(await after.unseal(sealed), 'sk-secret');
+    });
   });
 
   group('SecureStorageMasterKeyStore', () {
