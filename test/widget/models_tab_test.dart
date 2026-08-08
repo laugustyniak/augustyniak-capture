@@ -280,6 +280,23 @@ void main() {
     expect(find.textContaining('plaintext'), findsNothing);
   });
 
+  testWidgets('the storage note names neither settings.json nor the keyring', (
+    WidgetTester tester,
+  ) async {
+    // Both claims went stale under the same pair of commits: settings moved to
+    // SQLite, and the master key moved to a file beside it because the keyring
+    // keys access to a code signature an ad-hoc build changes on every build.
+    // A note about where a reader's secrets live is the one place that must not
+    // be approximately right.
+    final SettingsController controller = buildSettingsController();
+    await controller.initialize();
+    await pumpModels(tester, controller);
+
+    await scrollTo(tester, find.textContaining('plaintext'));
+    expect(find.textContaining('settings.json'), findsNothing);
+    expect(find.textContaining('keyring'), findsNothing);
+  });
+
   testWidgets('a sealed token is not advertised as set', (
     WidgetTester tester,
   ) async {

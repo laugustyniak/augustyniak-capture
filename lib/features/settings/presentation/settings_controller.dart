@@ -67,10 +67,10 @@ class SettingsController extends ChangeNotifier {
   String? get error => _error;
 
   /// Whether tokens written to disk are actually encrypted. False on the
-  /// plaintext fallback (no keyring) so the Models/Config tabs can say so.
+  /// plaintext fallback (no master key) so the Models/Config tabs can say so.
   bool get tokenEncryptionActive => _repository.encryptsTokens;
 
-  /// What the keyring said when it refused, for the Models tab. Null when
+  /// What the key store said when it refused, for the Models tab. Null when
   /// encryption is on, and null before [initialize] has made the cipher try —
   /// a reason that has not been established yet must not read as "no problem"
   /// combined with [tokenEncryptionActive], which is false at that point too.
@@ -81,7 +81,7 @@ class SettingsController extends ChangeNotifier {
   /// run the cipher over it.
   ///
   /// **This is a failure, not the plaintext fallback, and the two must not
-  /// share a message.** With no keyring an install simply never encrypts and
+  /// share a message.** With no master key an install simply never encrypts and
   /// every token keeps working; here they were encrypted, the key is out of
   /// reach, and `ProviderProfile.usableBearerToken` drops each blob rather than
   /// putting it in an `Authorization` header. The observable result is a 401

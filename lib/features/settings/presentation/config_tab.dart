@@ -457,7 +457,10 @@ class ConfigTab extends StatelessWidget {
                   value: '$recordingsCount .m4a files',
                 ),
                 InfoRow(label: 'INDEX', value: 'recordings.json'),
-                InfoRow(label: 'SETTINGS', value: 'settings.json'),
+                // Settings are read from and written to the database only; the
+                // settings.json this used to name is a legacy file, migrated
+                // once and never written again.
+                InfoRow(label: 'SETTINGS', value: 'app_database.sqlite'),
                 InfoRow(label: 'LOGS', value: 'logs.json · $logCount events'),
                 const SizedBox(height: 10),
                 Text(
@@ -486,7 +489,9 @@ String _tokenStatus(ProviderProfile? active, bool encrypted) {
   final String? token = active?.bearerToken;
   if (token == null) return 'none';
   if (TokenCipher.isSealed(token)) {
-    return '•••• unreadable — keyring unavailable';
+    // The master key moved off the keyring into a file beside the database, so
+    // naming the keyring here would send someone to fix the wrong thing.
+    return '•••• unreadable — master key unavailable';
   }
   return encrypted ? '•••• encrypted at rest' : '•••• set (plaintext on disk)';
 }

@@ -66,17 +66,25 @@ class ModelsTab extends StatelessWidget {
                   Expanded(
                     child: Text(
                       controller.tokenEncryptionActive
+                          // Neither half of this sentence may name the keyring
+                          // or settings.json any more: the key is an
+                          // owner-only file beside the database, and the
+                          // settings live in the database rather than in a
+                          // JSON file. A note about where someone's secrets
+                          // are is the one place that cannot be approximately
+                          // right.
                           ? 'Tokens are encrypted at rest (AES-256-GCM). The '
-                                'key lives in your system keyring, never in '
-                                'settings.json.'
+                                'key is an owner-only file next to the '
+                                'database, never inside it.'
                           // The reason is appended rather than replacing the
-                          // sentence: what it costs the user comes first, and the
-                          // keyring's own words are what makes the difference
-                          // between "no daemon here" and a real bug findable at
-                          // all. Null until initialize() has made the cipher try.
+                          // sentence: what it costs the user comes first, and
+                          // the key store's own words are what makes the
+                          // difference between "nothing to read here" and a
+                          // real bug findable at all. Null until initialize()
+                          // has made the cipher try.
                           : 'Tokens are stored as plaintext in the app '
-                                'documents directory (settings.json) — system '
-                                'keyring unavailable.'
+                                'database — no master key could be read or '
+                                'created.'
                                 '${controller.tokenEncryptionIssue == null ? '' : '\n${controller.tokenEncryptionIssue}'}',
                       style: TextStyle(
                         color: Console.mutedSoft,
