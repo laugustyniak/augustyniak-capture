@@ -1,61 +1,83 @@
 # Edycja wpisów w historii schowka
 
-Data: 2026-08-09
+Data: 2026-08-09 (przeprojektowane po przebudowie arkusza w `cf78b7f`)
 
 ## Problem
 
-Historia schowka (`lib/features/clipboard/`) pozwala skopiować wpis, oznaczyć go
-kolekcją, usunąć i przekazać do przetworzenia przez LLM. Nie pozwala **zmienić
-jego treści**. Rzecz skopiowana jest często prawie tym, czego użytkownik chce —
-z ogonem białych znaków, zbędną linią, literówką — a jedyną drogą do poprawki
-jest wklejenie gdzie indziej, poprawienie i skopiowanie z powrotem, co tworzy
-drugi wpis obok pierwszego.
+Historia schowka (`lib/features/clipboard/`) pozwala wkleić wpis, przekazać go
+do kolejki, oznaczyć kolekcją i usunąć. Nie pozwala **zmienić jego treści**.
+Rzecz skopiowana jest często prawie tym, czego użytkownik chce — z ogonem
+białych znaków, zbędną linią, literówką — a jedyną drogą do poprawki jest
+wklejenie gdzie indziej, poprawienie i skopiowanie z powrotem, co tworzy drugi
+wpis obok pierwszego.
 
-Skutek dotyczy przede wszystkim kolekcji. Zbiór nazwany `Prompty` albo `Kod` ma
-sens tylko wtedy, gdy to, co w nim leży, nadaje się do użycia bez poprawek.
-Bez edycji kolekcja gromadzi surowe zrzuty schowka i przestaje być czymś, z
-czego się korzysta.
+Skutek dotyczy przede wszystkim kolekcji. Zbiór nazwany `Prompts` albo `Code` ma
+sens tylko wtedy, gdy to, co w nim leży, nadaje się do użycia bez poprawek. Bez
+edycji kolekcja gromadzi surowe zrzuty schowka i przestaje być czymś, z czego
+się korzysta.
 
 ## Rozwiązanie
 
-Ołówek na wierszu tekstowym otwiera okno z pełną treścią wpisu i jego
-kolekcjami. `ZAPISZ` nadpisuje wpis w miejscu.
+Akcja `EDIT` w panelu podglądu zamienia treść wpisu na pole tekstowe **w tym
+samym miejscu**. Zmiana zapisuje się przy utracie fokusu i nadpisuje wpis.
 
-### Decyzje przyjęte w trakcie projektowania
+### Decyzje
 
 1. **Nadpisanie w miejscu**, nie zapis jako nowy wpis. Historia schowka staje
    się listą rzeczy, które użytkownik chce mieć, a nie dziennikiem tego, co
    dokładnie przeszło przez schowek. Zapisywanie kopii mnożyłoby prawie
    identyczne pozycje obok siebie — dokładnie ten problem, który dziś zmusza do
    obejścia przez wklejenie i ponowne skopiowanie.
-2. **Osobne okno dialogowe**, nie edycja w wierszu. Arkusz schowka jest
-   sterowany klawiaturą (`↑` `↓` `Enter`, pole szukania z `autofocus`); pole
-   tekstowe w wierszu przechwyciłoby te klawisze, a długi wpis rozepchnąłby
-   listę.
-3. **`ZAPISZ` nie dotyka schowka systemowego.** Jedna akcja, jeden skutek.
+
+2. **Edycja w panelu podglądu, bez okna dialogowego.** Podgląd już renderuje
+   całą treść wpisu w przewijanej ramce i już trzyma wszystkie akcje na nim;
+   edycja jest kolejną akcją na tym samym obiekcie, a nie osobnym ekranem.
+   Okno dialogowe rozważano wcześniej i odrzucono: arkusz jest sam w sobie
+   warstwą nad aplikacją, a druga warstwa nad nim to dwa `Escape` do wyjścia z
+   poprawienia literówki.
+
+3. **Tryb edycji jest jawny, przełączany akcją `EDIT`** — treść nie jest polem
+   tekstowym cały czas. Powód jest klawiaturowy: arkusz nawiguje strzałkami, a
+   `Enter` wkleja zaznaczony wpis. Skupione `EditableText` zjada jedno i drugie,
+   więc trwale edytowalna treść zabiłaby model sterowania, na którym stoi cały
+   arkusz.
+
+4. **Zapis następuje przy utracie fokusu, nie na przycisku.** Nie ma `SAVE`;
+   kliknięcie innego wiersza listy zapisuje to, co użytkownik napisał, i
+   przechodzi dalej. Alternatywą była stopka `SAVE` / `CANCEL`, ale w edycji w
+   miejscu klik w inny wiersz musiałby wtedy albo zostać zignorowany, albo
+   wyrzucić tekst — obie odpowiedzi są gorsze od zapisania.
+
+   Bezpiecznikiem jest bursztynowy znacznik **`UNSAVED`** z przyciskiem
+   cofnięcia, dokładnie jak w `RecordingEditor` w Kolejce. Bez niego „zapisane,
+   gdy odwróciłeś wzrok" i „stracone" wyglądają tak samo. `Escape` wychodzi z
+   trybu edycji, wcześniej zapisując.
+
+5. **Zapis nie dotyka schowka systemowego.** Jedna akcja, jeden skutek.
    Porządkowa poprawka wpisu sprzed godziny nie może po cichu podmienić tego, co
    użytkownik ma właśnie skopiowane. Wklejenie pozostaje tam, gdzie było —
-   kliknięcie wiersza (`_selectAndCopy`).
-4. **Ołówka nie ma na wpisach obrazkowych.** Obraz nie ma treści do podmiany, a
-   kontrolka, która nic nie robi, jest gorsza niż jej brak — ta sama zasada,
-   którą stosuje przycisk routowania w Kolejce (ukryty, nie wyszarzony).
-5. **Nowe okno jest po angielsku**, zgodnie z CLAUDE.md i z docelowym stanem
-   pliku, w którym mieszka.
+   `PASTE ⏎` i `Enter`.
 
-   Pierwotnie zdecydowano odwrotnie — cały feature `clipboard` powstał po
-   polsku (`SCHOWEK SYSTEMOWY`, `Wyczyszcz`, `NOWA KOLEKCJA`), a `EDIT ENTRY`
-   obok `Wyczyszcz` w jednym arkuszu wyglądałby na niedokończony. Przesłanka
-   przestała obowiązywać: równolegle powstał zatwierdzony plan
-   `docs/superpowers/plans/2026-08-09-english-only-strings.md`, którego Task 2
-   tłumaczy ten arkusz w całości, a Task 3 dodaje `test/language_test.dart`
-   blokujący polskie literały w `lib/`. Polski w tym arkuszu jest więc długiem
-   z terminem spłaty, a nie stanem docelowym — argument „dopasuj się do pliku"
-   wskazuje teraz na angielski.
+6. **`EDIT` nie pojawia się na wpisach obrazkowych.** Obraz nie ma treści do
+   podmiany, a kontrolka, która nic nie robi, jest gorsza niż jej brak — ta sama
+   zasada, którą stosuje przycisk routowania w Kolejce (ukryty, nie wyszarzony).
 
-   **Ta zmiana zależy od Taska 2 tamtego planu i wchodzi po nim.** Poza
-   językiem daje to jeszcze jedno: okno czyta stałą
-   `kDefaultClipboardCollections` zamiast dopisywać trzecią kopię listy
-   domyślnych kolekcji.
+7. **Wszystko po angielsku**, zgodnie z CLAUDE.md i z arkuszem, który został
+   przetłumaczony w `cf78b7f`. Wcześniejsza wersja tego specu decydowała
+   odwrotnie i uzależniała się od Taska 2 planu `2026-08-09-english-only-strings`
+   — obie te rzeczy są nieaktualne.
+
+### Co odpada wraz z oknem dialogowym
+
+Poprzednia wersja specu wkładała do okna chipy kolekcji i wymagała, żeby
+zapisywały się dopiero na `SAVE` (okno z `CANCEL`, które część zmian zapisało po
+cichu, jest pułapką). Bez okna ten wymóg nie ma przedmiotu: kolekcjami zarządza
+osobna akcja `COLLECTIONS` podglądu, która zapisuje natychmiast i nie ma czego
+anulować.
+
+Konsekwencja sięga aż do warstwy danych — repozytorium potrzebuje wyłącznie
+tekstu, więc metoda nazywa się `updateItemText(id, text)`, a nie
+`updateItem(id, {text, collections})`. Nikt nie wołałby drugiego parametru.
 
 ### Dlaczego nie ma tu ryzyka pętli sprzężenia zwrotnego
 
@@ -63,9 +85,8 @@ kolekcjami. `ZAPISZ` nadpisuje wpis w miejscu.
 każdą treść różną od `_lastText`. Gdyby zapis edycji wstawiał tekst do schowka,
 watcher zobaczyłby go jako świeżą kopię i utworzył duplikat własnej edycji —
 chyba że `_lastText` zostałoby ustawione ręcznie, tak jak robi to
-`copyToClipboard`. Decyzja 3 usuwa ten problem u źródła: skoro edycja nie dotyka
-schowka, watcher nie ma czego zobaczyć. Jest to powód, dla którego wariant
-„zapisz i skopiuj" byłby istotnie droższy niż wygląda.
+`copyToClipboard`. Decyzja 5 usuwa ten problem u źródła: skoro edycja nie dotyka
+schowka, watcher nie ma czego zobaczyć.
 
 ## Architektura
 
@@ -78,12 +99,9 @@ static String previewFor(String text);
 ```
 
 Zwraca pierwsze 120 znaków zakończone `...`, albo cały tekst gdy krótszy. Dziś
-ta reguła jest zapisana inline w `ClipboardWatcherService.checkNow`
-(`clipboard_watcher_service.dart:124`). Edycja jest drugim miejscem, które musi
-wyliczyć podgląd; dwie kopie tej samej reguły rozjeżdżają się z czasem, więc
-watcher przechodzi na wspólną funkcję zamiast liczyć po swojemu.
-
-Sama klasa nie zmienia się poza tym — jest `@immutable` i ma `copyWith`.
+ta reguła jest zapisana inline w `ClipboardWatcherService.checkNow`; edycja jest
+drugim miejscem, które musi wyliczyć podgląd, a dwie kopie tej samej reguły
+rozjeżdżają się z czasem.
 
 ### Dane — `ClipboardRepository`
 
@@ -91,119 +109,108 @@ Nowa metoda w interfejsie, zaimplementowana w obu klasach
 (`LocalJsonClipboardRepository` i `SqliteClipboardRepository`):
 
 ```dart
-Future<void> updateItem(String id, {String? text, Set<String>? collections});
+Future<void> updateItemText(String id, String text);
 ```
 
-`null` znaczy „nie ruszaj tego pola". Reguły identyczne w obu implementacjach:
+Reguły identyczne w obu implementacjach:
 
 - **`copiedAt` nigdy się nie zmienia.** To mechanizm realizujący decyzję 1:
   SQLite czyta `ORDER BY copied_at DESC`, więc nietknięty znacznik czasu
   oznacza, że wpis zostaje na swojej pozycji. Odświeżanie go wyrzucałoby każdą
   poprawkę na górę listy.
-- **`preview` jest przeliczane** przez `ClipboardItem.previewFor` zawsze, gdy
-  podano `text`. Nigdy nie przychodzi z zewnątrz.
-- **Pusty lub złożony z samych białych znaków `text` jest ignorowany** (metoda
-  kończy się bez zapisu). Wpis bez treści nie da się skopiować ani wyszukać —
-  wyglądałby na zepsuty wiersz. Usuwanie ma własny przycisk.
-- **Wpisy typu `image` ignorują `text`**; `collections` działa dla nich
-  normalnie.
+- **`preview` jest przeliczane** przez `ClipboardItem.previewFor`. Nigdy nie
+  przychodzi z zewnątrz.
+- **Pusty lub złożony z samych białych znaków tekst jest ignorowany** (metoda
+  kończy się bez zapisu). Wpis bez treści nie da się wkleić ani wyszukać —
+  wyglądałby na zepsuty wiersz. Usuwanie ma własną akcję.
+- **Wpisy typu `image` są ignorowane** — obraz nie ma treści do podmiany.
 - Nieznane `id` to ciche no-op, tak jak w istniejącym `toggleItemCollection`.
 
-`toggleItemCollection` zostaje bez zmian — obsługuje ikonę zakładki na wierszu,
-która działa natychmiastowo i nie ma czego anulować.
-
-Implementacja SQLite wykonuje jedno `UPDATE clipboard_items SET ... WHERE id = ?`
-i kończy przez `getItems()`, tak jak pozostałe metody mutujące w tej klasie.
-Implementacja JSON podmienia element listy przez `copyWith` i wywołuje `_save()`.
+`toggleItemCollection` zostaje bez zmian.
 
 ### Serwis — `ClipboardWatcherService`
 
 ```dart
-Future<void> updateItem(String id, {String? text, Set<String>? collections}) async {
-  await _repository.updateItem(id, text: text, collections: collections);
+Future<void> updateItemText(String id, String text) async {
+  await _repository.updateItemText(id, text);
   notifyListeners();
 }
 ```
 
-Nic więcej. Nie dotyka `_lastText`, `_lastImagePath` ani schowka systemowego.
+Nie dotyka `_lastText`, `_lastImagePath` ani schowka systemowego.
 
 ### UI — `clipboard_history_sheet.dart`
 
-`_ClipboardItemTile` dostaje nullowalne `onEdit`. Ikona ołówka renderuje się
-tylko gdy `onEdit != null`; arkusz podaje callback wyłącznie dla wpisów
-`ClipboardItemType.text`. Pozycja w rzędzie akcji: przed ✨ (edycja jest tańsza
-i częstsza niż wysłanie do LLM), przed zakładką i przed usunięciem.
+**Stan edycji mieszka w `_ClipboardHistorySheetState`, nie w podglądzie.** To
+nie jest kwestia gustu: skoro klik w inny wiersz ma *zapisać* rozpoczętą
+edycję, arkusz musi umieć wymusić zapis przed zmianą zaznaczenia — a nie da się
+tego zrobić, sięgając do stanu widgetu-dziecka. Arkusz trzyma więc
+`_editingId`, `_editController` i `_syncedText`, a `_ClipboardPreview` zostaje
+bezstanowy i dostaje je z góry. Jest to zarazem ta sama zasada, którą stosuje
+`editingId` w `_QueueTabState`.
 
-Nowy prywatny widget `_ClipboardEditDialog` w tym samym pliku:
+- `_syncedText` to ostatnia wartość wzięta **z wpisu**. `dirty` jest różnicą
+  względem niej — dokładnie jak `_syncedTitle`/`_syncedText` w
+  `RecordingEditor`.
+- `_commitEdit()` zapisuje tylko gdy tekst jest brudny i nie jest pusty, po
+  czym aktualizuje `_syncedText`. Wołane z trzech miejsc: utraty fokusu pola,
+  wyjścia z trybu edycji i zmiany zaznaczenia.
+- `_revertEdit()` przywraca `_syncedText` do pola.
+- Zmiana zaznaczenia (`_ClipboardListRow.onTap`, strzałki) woła
+  `_endEdit()` **przed** ustawieniem `_selectedId`.
 
-- wielolinijkowe `TextField` z czcionką `ConsoleFont.mono` — tą samą, którą
-  podgląd używa w wierszu, żeby treść nie zmieniała kroju przy wejściu w edycję;
-  `autofocus: true`, bo cały sens funkcji to szybka poprawka
-- rząd chipów kolekcji z tą samą listą sugestii co `_manageItemCollections` —
-  stała `kDefaultClipboardCollections` unia `watcherService.allCollections` —
-  oraz chip `+` otwierający prompt o nazwę nowej kolekcji
-- `CANCEL` / `SAVE`; `SAVE` nieaktywny, gdy pole jest puste po przycięciu
-  białych znaków
-- Escape zamyka okno jak `CANCEL`
-- `SAVE` zamyka okno i wraca do arkusza schowka; arkusz pozostaje otwarty z
-  zachowanym wyszukiwaniem i wybraną kolekcją
+W `_ClipboardPreview`:
 
-**Wszystkie zmiany są odkładane i zapisują się dopiero na `ZAPISZ`** — łącznie z
-chipami kolekcji. Jest to świadome odstępstwo od reguły „chip zapisuje się na
-dotknięcie", którą stosuje `RecordingEditor` w Kolejce. Tamten edytor nie ma
-przycisku anulowania i dlatego może zapisywać na bieżąco; ten ma. Okno z
-`ANULUJ`, które część zmian już po cichu zapisało, jest pułapką: użytkownik
-klika „anuluj" i połowa zostaje. Dialog trzyma więc własną kopię tekstu i
-własny `Set<String>` kolekcji, a `ANULUJ` porzuca obie. Zapis to jedno wywołanie
-`watcherService.updateItem(id, text: ..., collections: ...)`.
-
-Chip `+` w dialogu dopisuje nazwę do odłożonego zbioru, a nie do wpisu —
-w odróżnieniu od istniejącego `_promptNewCollection`, który zmienia jedynie
-aktywny filtr arkusza.
+- piąta akcja `EDIT` w stopce, między `TO CAPTURE` a `COLLECTIONS`, renderowana
+  tylko dla wpisów tekstowych;
+- w trybie edycji ramka treści renderuje `TextField` zamiast `Text`, tą samą
+  czcionką `ConsoleFont.mono` i tym samym rozmiarem, żeby treść nie skakała przy
+  wejściu w tryb;
+- przy `dirty` w nagłówku pojawia się `UNSAVED` plus przycisk cofnięcia;
+- pozostałe akcje zostają widoczne i działają — zapis przy utracie fokusu
+  oznacza, że nie ma stanu „niezapisane, więc nie wolno".
 
 ## Czego ta zmiana nie dotyka
 
-- **`clipboard_fts`** — tabela FTS5 jest tworzona w `app_database.dart:67`, ale
-  nigdy nie zapisywana ani nie odpytywana; wyszukiwanie w arkuszu realizuje Dart
-  w `filteredItems`. Edycja nie ma czego w niej odświeżać.
-- **Synchronizacja Turso** — `turso_sync_service.dart:138` wysyła
+- **`clipboard_fts`** — tabela FTS5 jest tworzona w `app_database.dart`, ale
+  nigdy nie zapisywana ani nie odpytywana; wyszukiwanie realizuje Dart w
+  `_visibleItems`. Edycja nie ma czego w niej odświeżać.
+- **Synchronizacja Turso** — `turso_sync_service.dart` wysyła
   `INSERT OR REPLACE` po `id`, więc zmieniona treść dojedzie na inne urządzenie
-  przy następnym sync bez dodatkowej flagi ani znacznika.
-- **Schowek systemowy** — patrz decyzja 3.
+  przy następnym sync bez dodatkowej flagi.
+- **Schowek systemowy** — patrz decyzja 5.
+- **Kolekcje** — patrz „Co odpada wraz z oknem dialogowym".
 
 ## Testy
 
-Wszystkie testy trafiają do `test/clipboard_history_test.dart`. Mimo nazwy
+Wszystkie trafiają do `test/clipboard_history_test.dart`. Mimo nazwy
 `test/clipboard_test.dart` **nie dotyczy historii schowka** — testuje
-`ClipboardSink` w potoku nagrań (czy ukończona transkrypcja trafia do schowka
-systemowego) i nie ma z tą zmianą nic wspólnego.
+`ClipboardSink` w potoku nagrań. CLAUDE.md odnotowuje tę pułapkę wprost.
 
 ### Grupa `ClipboardRepository` — czysty Dart, `LocalJsonClipboardRepository`
 
-- edycja tekstu przelicza `preview` oraz zachowuje pozycję wpisu na liście i
-  jego kolekcje
+- edycja tekstu przelicza `preview` oraz zachowuje pozycję wpisu i jego kolekcje
 - pusty tekst (oraz złożony z samych spacji) nie zmienia wpisu
-- `text` przekazany dla wpisu typu `image` jest ignorowany, a `collections`
-  w tym samym wywołaniu zostaje zapisane
+- wpis typu `image` jest nietknięty
 - zmiana przeżywa ponowne wczytanie repozytorium z dysku
-- `updateItem` z nieznanym `id` nie rzuca i nie zmienia listy
+- nieznane `id` nie rzuca i nie zmienia listy
 
-Fake `_MemoryClipboardRepository` w tym samym pliku (`clipboard_history_test.dart:337`)
-implementuje `ClipboardRepository`, więc rozszerzenie interfejsu zepsuje jego
-kompilację, dopóki nie dostanie własnego `updateItem`. Jest to pożądane —
-kompilator nie pozwoli przeoczyć żadnej implementacji.
+Fake `_MemoryClipboardRepository` w tym samym pliku implementuje
+`ClipboardRepository`, więc rozszerzenie interfejsu zepsuje jego kompilację,
+dopóki nie dostanie własnego `updateItemText`. Jest to pożądane — kompilator nie
+pozwoli przeoczyć żadnej implementacji.
 
 ### Grupa widgetowa
 
-- ołówek jest obecny na wierszu tekstowym i nieobecny na obrazkowym
-- edycja treści i `ZAPISZ` zmienia wpis widoczny w arkuszu
-- `ANULUJ` nie zmienia ani tekstu, ani kolekcji — test pilnujący decyzji o
-  odkładaniu zmian
+- `EDIT` jest w podglądzie wpisu tekstowego i nie ma go dla obrazkowego
+- `EDIT` zamienia treść na pole; wpisanie tekstu i utrata fokusu zapisuje
+- **wybranie innego wiersza w trakcie edycji zapisuje, a nie porzuca** — to test
+  pilnujący decyzji 4 i jedyny, który odróżnia ją od stopki `SAVE`/`CANCEL`
+- brudne pole pokazuje `UNSAVED`, a cofnięcie przywraca pierwotny tekst
+- pusta treść nie nadpisuje wpisu
 
-**Pułapka do przestrzegania:** dialog ma `autofocus`, a migający kursor to
-animacja bez końca, więc `pumpAndSettle` zawiesi się do timeoutu. Nowe testy
-używają `pump()` z jawnym czasem. CLAUDE.md wymienia tę zasadę w sekcji Testing;
-ten dialog dokłada się do listy widgetów, których nie wolno „ustabilizować".
+**Pułapka:** pole edycji jest skupiane po wejściu w tryb, a migający kursor to
+animacja bez końca — `pumpAndSettle` zawiesi się do timeoutu. Nowe testy używają
+`pump()` z jawnym czasem. CLAUDE.md wymienia tę zasadę w sekcji Testing.
 
-Każdy nowy test należy zobaczyć na czerwono przed wprowadzeniem poprawki, a nie
-tylko na zielono po niej.
+Każdy nowy test należy zobaczyć na czerwono przed wprowadzeniem poprawki.
