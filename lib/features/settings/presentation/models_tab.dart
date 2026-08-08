@@ -35,43 +35,59 @@ class ModelsTab extends StatelessWidget {
           const SizedBox(height: 22),
           ..._section(context, ProfileKind.enrichment),
           const SizedBox(height: 14),
-          ConsoleCard(
-            child: Row(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: <Widget>[
-                Icon(
-                  Icons.lock_outline,
-                  size: 16,
-                  color: controller.tokenEncryptionActive
-                      ? Console.accent
-                      : Console.amber,
-                ),
-                const SizedBox(width: 10),
-                Expanded(
-                  child: Text(
-                    controller.tokenEncryptionActive
-                        ? 'Tokens are encrypted at rest (AES-256-GCM). The '
-                              'key lives in your system keyring, never in '
-                              'settings.json.'
-                        // The reason is appended rather than replacing the
-                        // sentence: what it costs the user comes first, and the
-                        // keyring's own words are what makes the difference
-                        // between "no daemon here" and a real bug findable at
-                        // all. Null until initialize() has made the cipher try.
-                        : 'Tokens are stored as plaintext in the app '
-                              'documents directory (settings.json) — system '
-                              'keyring unavailable.'
-                              '${controller.tokenEncryptionIssue == null ? '' : '\n${controller.tokenEncryptionIssue}'}',
-                    style: TextStyle(
-                      color: Console.mutedSoft,
-                      fontSize: 11,
-                      height: 1.45,
+          // Three states, not two. "Encrypted, key unreachable" is a failure
+          // and shares nothing with the plaintext fallback below it: there the
+          // tokens work and are merely unprotected, here they are protected and
+          // do not work. Reporting the second as the first is what left a
+          // string of 401s on screen with an amber line claiming the tokens
+          // were sitting on disk in the clear — the opposite of the truth.
+          if (controller.sealedTokensUnreadable)
+            ErrorBanner(
+              message:
+                  'Stored tokens are encrypted and cannot be decrypted — the '
+                  'master key was unreachable this launch, so requests go out '
+                  'with no key and providers answer 401. Nothing is lost: they '
+                  'open again once the key can be read.'
+                  '${controller.tokenEncryptionIssue == null ? '' : '\n${controller.tokenEncryptionIssue}'}',
+            )
+          else
+            ConsoleCard(
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: <Widget>[
+                  Icon(
+                    Icons.lock_outline,
+                    size: 16,
+                    color: controller.tokenEncryptionActive
+                        ? Console.accent
+                        : Console.amber,
+                  ),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: Text(
+                      controller.tokenEncryptionActive
+                          ? 'Tokens are encrypted at rest (AES-256-GCM). The '
+                                'key lives in your system keyring, never in '
+                                'settings.json.'
+                          // The reason is appended rather than replacing the
+                          // sentence: what it costs the user comes first, and the
+                          // keyring's own words are what makes the difference
+                          // between "no daemon here" and a real bug findable at
+                          // all. Null until initialize() has made the cipher try.
+                          : 'Tokens are stored as plaintext in the app '
+                                'documents directory (settings.json) — system '
+                                'keyring unavailable.'
+                                '${controller.tokenEncryptionIssue == null ? '' : '\n${controller.tokenEncryptionIssue}'}',
+                      style: TextStyle(
+                        color: Console.mutedSoft,
+                        fontSize: 11,
+                        height: 1.45,
+                      ),
                     ),
                   ),
-                ),
-              ],
+                ],
+              ),
             ),
-          ),
         ],
       ),
     );
@@ -281,8 +297,14 @@ class _ActiveProfileCard extends StatelessWidget {
                   label: 'LANG ${item!.language!.toUpperCase()}',
                   color: Console.green,
                 ),
-              if (item != null && item.bearerToken != null)
-                StatusPill(label: 'TOKEN SET', color: Console.green),
+              // `usableBearerToken`, not `bearerToken`: a still-sealed blob is
+              // not null but is dropped before the Authorization header, so a
+              // green TOKEN SET would promise exactly the thing that is
+              // failing — and sit next to the banner saying so.
+              if (item?.usableBearerToken != null)
+                StatusPill(label: 'TOKEN SET', color: Console.green)
+              else if (item?.bearerToken != null)
+                StatusPill(label: 'TOKEN LOCKED', color: Console.red),
             ],
           ),
         ],

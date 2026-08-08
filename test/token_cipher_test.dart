@@ -40,6 +40,24 @@ class _AmnesiacKeyStore implements MasterKeyStore {
   Future<void> write(String next) async {}
 }
 
+/// A store whose key is still there but cannot be read this launch: a key file
+/// with the wrong mode, a keychain that answers "not found" to a rebuilt
+/// binary. The distinction that matters is that a write here is destructive —
+/// it lands on top of the only copy of the key.
+class _UnreadableKeyStore implements MasterKeyStore {
+  _UnreadableKeyStore(this.hidden);
+
+  String hidden;
+
+  @override
+  Future<String?> read() async => null;
+
+  @override
+  Future<void> write(String next) async {
+    hidden = next;
+  }
+}
+
 void main() {
   group('TokenCipher.isSealed', () {
     test('detects the enc:v1: prefix', () {
@@ -217,6 +235,114 @@ void main() {
         expect(await cipher.seal('sk-secret'), 'sk-secret');
       },
     );
+  });
+
+  group('AesGcmTokenCipher.expectExistingKey', () {
+    test('a store answering nothing does not get a replacement key', () async {
+      // The mine this guard exists for. `read()` returning null is ambiguous:
+      // it is a first run *or* a key that is present and unreachable. Treating
+      // the second as the first generates a fresh key, writes it over the only
+      // copy of the real one, and makes every already-sealed token unopenable
+      // for good — the one loss this whole layer is built to prevent.
+      final _UnreadableKeyStore store = _UnreadableKeyStore('the-real-key');
+      final AesGcmTokenCipher cipher = AesGcmTokenCipher(keyStore: store);
+
+      cipher.expectExistingKey();
+      await cipher.ensureReady();
+
+      expect(store.hidden, 'the-real-key');
+      expect(cipher.encrypts, isFalse);
+    });
+
+    test(
+      'the refusal says the key was expected, not that none exists',
+      () async {
+        // "no keyring here" and "your key is missing but your data needs it" are
+        // opposite situations; the second must never be reported as the first.
+        final AesGcmTokenCipher cipher = AesGcmTokenCipher(
+          keyStore: _UnreadableKeyStore('the-real-key'),
+        );
+
+        cipher.expectExistingKey();
+        await cipher.ensureReady();
+
+        expect(cipher.unavailableReason, contains('already encrypted'));
+      },
+    );
+
+    test('sealed values are preserved rather than re-encrypted', () async {
+      final AesGcmTokenCipher cipher = AesGcmTokenCipher(
+        keyStore: _UnreadableKeyStore('the-real-key'),
+      );
+      cipher.expectExistingKey();
+      await cipher.ensureReady();
+
+      expect(await cipher.unseal('enc:v1:blob'), 'enc:v1:blob');
+      expect(await cipher.seal('enc:v1:blob'), 'enc:v1:blob');
+    });
+
+    test('the guard is irrelevant when the key store answers', () async {
+      final _MemoryKeyStore store = _MemoryKeyStore();
+      final AesGcmTokenCipher writer = AesGcmTokenCipher(keyStore: store);
+      await writer.ensureReady();
+      final String sealed = await writer.seal('sk-secret');
+
+      final AesGcmTokenCipher reader = AesGcmTokenCipher(keyStore: store);
+      reader.expectExistingKey();
+      await reader.ensureReady();
+
+      expect(reader.encrypts, isTrue);
+      expect(await reader.unseal(sealed), 'sk-secret');
+    });
+
+    test('an unguarded first run still generates a key', () async {
+      // The guard must stay opt-in: a genuine fresh install has no sealed data
+      // to protect and has to be able to start encrypting.
+      final _MemoryKeyStore store = _MemoryKeyStore();
+      final AesGcmTokenCipher cipher = AesGcmTokenCipher(keyStore: store);
+
+      await cipher.ensureReady();
+
+      expect(cipher.encrypts, isTrue);
+      expect(store.value, isNotNull);
+    });
+
+    test(
+      'a key kept safe by the guard opens the tokens when it returns',
+      () async {
+        // End to end, and the whole point: one launch without a readable key
+        // must cost nothing permanent.
+        final _MemoryKeyStore keyring = _MemoryKeyStore();
+        final AesGcmTokenCipher before = AesGcmTokenCipher(keyStore: keyring);
+        await before.ensureReady();
+        final String sealed = await before.seal('sk-secret');
+
+        final _UnreadableKeyStore blind = _UnreadableKeyStore(keyring.value!);
+        final AesGcmTokenCipher during = AesGcmTokenCipher(keyStore: blind);
+        during.expectExistingKey();
+        await during.ensureReady();
+        expect(await during.unseal(sealed), sealed);
+
+        final AesGcmTokenCipher after = AesGcmTokenCipher(
+          keyStore: _MemoryKeyStore()..value = blind.hidden,
+        );
+        await after.ensureReady();
+
+        expect(await after.unseal(sealed), 'sk-secret');
+      },
+    );
+
+    test('PlaintextTokenCipher accepts the call and ignores it', () async {
+      // The repository announces this against the interface, so the default
+      // implementation has to be a no-op rather than a missing method.
+      const PlaintextTokenCipher cipher = PlaintextTokenCipher();
+
+      cipher.expectExistingKey();
+      await cipher.ensureReady();
+
+      expect(cipher.encrypts, isFalse);
+      expect(await cipher.unseal('enc:v1:blob'), 'enc:v1:blob');
+    });
   });
 
   group('FileMasterKeyStore', () {

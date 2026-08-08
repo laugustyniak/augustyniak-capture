@@ -32,13 +32,31 @@ class SettingsRepository {
     return AppDatabase.getInstance(overrideDb: _dbOverride);
   }
 
-  Future<AppSettings?> load() async {
+  /// Bring the cipher up, having first told it whether [raw] already contains
+  /// sealed values.
+  ///
+  /// The order is the whole point and it is why `ensureReady` no longer runs at
+  /// the top of [load]: the announcement has to land before the cipher decides
+  /// whether a key store that answered "nothing here" is a first run or a
+  /// failure. `ensureReady` memoises, so the later calls are free.
+  ///
+  /// The test is against the raw payload rather than the parsed fields on
+  /// purpose — a secret added to [AppSettings] later is covered the day it is
+  /// persisted, instead of the day someone remembers to extend a list here.
+  Future<void> _prepareCipher(String raw) async {
+    if (raw.contains(TokenCipher.sealedPrefix)) _cipher.expectExistingKey();
     await _cipher.ensureReady();
+  }
 
+  Future<AppSettings?> load() async {
     final File? customFile = await settingsFile();
     if (customFile != null) {
-      if (!await customFile.exists()) return null;
+      if (!await customFile.exists()) {
+        await _cipher.ensureReady();
+        return null;
+      }
       final String raw = await customFile.readAsString();
+      await _prepareCipher(raw);
       if (raw.trim().isEmpty) return null;
       final dynamic decoded = jsonDecode(raw);
       if (decoded is! Map<String, dynamic>) return null;
@@ -69,6 +87,7 @@ class SettingsRepository {
         if (await legacyFile.exists()) {
           final String raw = await legacyFile.readAsString();
           if (raw.trim().isNotEmpty) {
+            await _prepareCipher(raw);
             final dynamic decoded = jsonDecode(raw);
             if (decoded is Map<String, dynamic>) {
               settings = await unsealTokens(AppSettings.fromJson(decoded));
@@ -85,6 +104,7 @@ class SettingsRepository {
     }
 
     final String raw = results.single['value_json'] as String;
+    await _prepareCipher(raw);
     if (raw.trim().isEmpty) return null;
 
     final dynamic decoded = jsonDecode(raw);

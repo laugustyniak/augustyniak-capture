@@ -13,6 +13,7 @@ import '../domain/app_settings.dart';
 import '../domain/app_theme_mode.dart';
 import '../domain/audio_config.dart';
 import '../domain/provider_profile.dart';
+import '../domain/token_cipher.dart';
 
 /// Owns runtime settings: transcription provider profiles and capture
 /// parameters. Every mutation persists the whole `settings.json`, mirroring how
@@ -74,6 +75,28 @@ class SettingsController extends ChangeNotifier {
   /// a reason that has not been established yet must not read as "no problem"
   /// combined with [tokenEncryptionActive], which is false at that point too.
   String? get tokenEncryptionIssue => _repository.tokenEncryptionIssue;
+
+  /// True when secrets on disk are encrypted and this launch cannot open them:
+  /// a stored value still carries the `enc:v1:` marker after [initialize] has
+  /// run the cipher over it.
+  ///
+  /// **This is a failure, not the plaintext fallback, and the two must not
+  /// share a message.** With no keyring an install simply never encrypts and
+  /// every token keeps working; here they were encrypted, the key is out of
+  /// reach, and `ProviderProfile.usableBearerToken` drops each blob rather than
+  /// putting it in an `Authorization` header. The observable result is a 401
+  /// reading "you didn't provide an API key" on every capture, with the amber
+  /// "stored as plaintext" note — which is the opposite of what happened —
+  /// as the only thing on screen.
+  bool get sealedTokensUnreadable {
+    if (tokenEncryptionActive) return false;
+    bool sealed(String? value) => value != null && TokenCipher.isSealed(value);
+    return _settings.profiles.any(
+          (ProviderProfile profile) => sealed(profile.bearerToken),
+        ) ||
+        sealed(_settings.tursoAuthToken) ||
+        sealed(_settings.r2SecretAccessKey);
+  }
 
   /// The service the recordings controller should use right now. No active
   /// profile means transcription reports "not configured" — same as a fresh

@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:augustyniak_capture/app/ui_kit.dart';
+import 'package:augustyniak_capture/features/settings/domain/app_settings.dart';
 import 'package:augustyniak_capture/features/settings/domain/provider_profile.dart';
 import 'package:augustyniak_capture/features/settings/presentation/models_tab.dart';
 import 'package:augustyniak_capture/features/settings/presentation/settings_controller.dart';
@@ -250,5 +251,109 @@ void main() {
     // so its presence is what proves the round-trip rather than a lucky string.
     expect(find.widgetWithText(ActionChip, 'gemini-3.1-pro'), findsOneWidget);
     expect(find.text('Google AI Studio API key (AIza…)'), findsOneWidget);
+  });
+
+  testWidgets('an unopenable token is reported as a failure, not as plaintext', (
+    WidgetTester tester,
+  ) async {
+    // The screen that was on display while every capture came back 401: the
+    // tokens were encrypted and unreadable, and the only note about them said
+    // they were sitting on disk in the clear. Opposite claim, same amber line.
+    final SettingsController controller = buildSettingsController(
+      stored: const AppSettings(
+        profiles: <ProviderProfile>[
+          ProviderProfile(
+            id: 'p1',
+            name: 'OpenAI',
+            endpoint: 'https://api.openai.com/v1/audio/transcriptions',
+            bearerToken: 'enc:v1:unreadable-blob',
+          ),
+        ],
+        activeProfileId: 'p1',
+      ),
+    );
+    await controller.initialize();
+    await pumpModels(tester, controller);
+
+    await scrollTo(tester, find.textContaining('cannot be decrypted'));
+    expect(find.textContaining('cannot be decrypted'), findsOneWidget);
+    expect(find.textContaining('plaintext'), findsNothing);
+  });
+
+  testWidgets('a sealed token is not advertised as set', (
+    WidgetTester tester,
+  ) async {
+    // Found by looking at the built app rather than by a failing assertion: the
+    // profile card kept a green TOKEN SET beside the red banner, because the
+    // pill tested `bearerToken != null` and a blob is not null. The two claims
+    // on one screen contradict each other, and the green one is the lie —
+    // `usableBearerToken` is what a request actually gets, and it is null here.
+    final SettingsController controller = buildSettingsController(
+      stored: const AppSettings(
+        profiles: <ProviderProfile>[
+          ProviderProfile(
+            id: 'p1',
+            name: 'OpenAI',
+            endpoint: 'https://api.openai.com/v1/audio/transcriptions',
+            bearerToken: 'enc:v1:unreadable-blob',
+          ),
+        ],
+        activeProfileId: 'p1',
+      ),
+    );
+    await controller.initialize();
+    await pumpModels(tester, controller);
+
+    expect(find.text('TOKEN SET'), findsNothing);
+    expect(find.text('TOKEN LOCKED'), findsOneWidget);
+  });
+
+  testWidgets('a usable token still says TOKEN SET', (
+    WidgetTester tester,
+  ) async {
+    final SettingsController controller = buildSettingsController(
+      stored: const AppSettings(
+        profiles: <ProviderProfile>[
+          ProviderProfile(
+            id: 'p1',
+            name: 'OpenAI',
+            endpoint: 'https://api.openai.com/v1/audio/transcriptions',
+            bearerToken: 'sk-secret',
+          ),
+        ],
+        activeProfileId: 'p1',
+      ),
+    );
+    await controller.initialize();
+    await pumpModels(tester, controller);
+
+    expect(find.text('TOKEN SET'), findsOneWidget);
+    expect(find.text('TOKEN LOCKED'), findsNothing);
+  });
+
+  testWidgets('a plaintext install still gets the plaintext note', (
+    WidgetTester tester,
+  ) async {
+    // The guard on the test above: it must fail because the *state* is
+    // different, not because the copy moved.
+    final SettingsController controller = buildSettingsController(
+      stored: const AppSettings(
+        profiles: <ProviderProfile>[
+          ProviderProfile(
+            id: 'p1',
+            name: 'OpenAI',
+            endpoint: 'https://api.openai.com/v1/audio/transcriptions',
+            bearerToken: 'sk-secret',
+          ),
+        ],
+        activeProfileId: 'p1',
+      ),
+    );
+    await controller.initialize();
+    await pumpModels(tester, controller);
+
+    await scrollTo(tester, find.textContaining('plaintext'));
+    expect(find.textContaining('plaintext'), findsOneWidget);
+    expect(find.textContaining('cannot be decrypted'), findsNothing);
   });
 }
