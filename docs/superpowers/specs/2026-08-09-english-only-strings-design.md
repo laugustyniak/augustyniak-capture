@@ -11,14 +11,26 @@ English (they were Polish until the design pass — do not reintroduce Polish)" 
 but nothing enforces it, so the drift was invisible until someone read the
 screens.
 
-The Polish is not scattered. It sits in exactly two files:
+The Polish is not scattered. It sits in two features, across four files:
 
 | File | Polish strings | Layer |
 | --- | --- | --- |
-| `lib/features/gamification/domain/milestone.dart` | ~20 | `domain/` |
-| `lib/features/clipboard/presentation/clipboard_history_sheet.dart` | 11 | `presentation/` |
+| `gamification/domain/milestone.dart` | 20 | `domain/` |
+| `gamification/presentation/celebration_overlay.dart` | 1 (`'WSPANIALE!'`) | `presentation/` |
+| `clipboard/domain/clipboard_watcher_service.dart` | 1 (`'[Obrazek]'`) | `domain/` |
+| `clipboard/presentation/clipboard_history_sheet.dart` | 22 | `presentation/` |
 
-The second file is a plain translation. The first is not: those sentences are
+**This inventory was corrected upward during planning, and how it was missed is
+the point.** The first pass grepped for `[ąćęłńóśźż]` and reported 31 strings in
+two files. It missed `'WSPANIALE!'`, `'Anuluj'`, `'Dodaj'`, `'Wszystkie'`,
+`'Nowa'`, `'Wyczyszcz'`, `'[Obrazek]'`, `'min temu'` and `'Schowek jest pusty'` —
+nine strings, one of them in a file the report claimed was clean — because none
+of them contains a diacritic. A second pass with a Polish-wordlist grep found
+them and confirmed nothing leaked outside these four files. This is the same
+failure the guard in section 3 is explicitly documented as *not* preventing.
+
+The clipboard sheet is a plain translation. `milestone.dart` is not: those
+sentences are
 built inside `domain/`, which is why that file imports
 `package:flutter/material.dart` (for `IconData` and `Color`). That import is the
 actual defect — it is the same layering mistake `ClipboardSink` and `AlarmPlayer`
@@ -78,22 +90,41 @@ record.
 class:** there is one call site and no state. A class would add a name to learn
 for no reduction in anything.
 
-### 2. `clipboard_history_sheet.dart` — translation, with one exception
+### 2. The clipboard feature — translation, plus two things that are not
 
-Eleven UI strings become English, 1:1.
+Twenty-two UI strings in `clipboard_history_sheet.dart` become English, 1:1,
+including the relative-time strings at lines 62–64 (`'Przed chwilą'`,
+`'min temu'`, `'h temu'`).
 
-**Collection names are the exception.** `'Ulubione'`, `'Kod'`, `'Prompty'` and
-`'Ważne'` are default *suggestions* for naming a clipboard collection; a chosen
-suggestion becomes data written to disk. `CLAUDE.md` already rules on this:
-"Strings already stored on disk (a provider profile the user named) keep whatever
-they were saved as; only code literals were translated."
+**Two findings are not translations and need a decision each.**
 
-So: the suggestion list in the source is translated, and **no migration touches
-existing collections**. A collection already named `Ważne` stays `Ważne`. The
-consequence is a mixed list for the current user — the four English suggestions
-alongside their existing Polish collections — and that is the correct outcome
-rather than a defect. Renaming a user's data to match a code change is the class
-of action this repo refuses everywhere else.
+**a. `'[Obrazek]'` is persisted, not displayed.**
+`clipboard_watcher_service.dart:104` writes it into `ClipboardItem.preview`, which
+goes to the repository and onto disk. `CLAUDE.md` rules on this class: "Strings
+already stored on disk keep whatever they were saved as; only code literals were
+translated." So the literal becomes `'[Image]'` and **nothing migrates existing
+rows** — clipboard entries captured before this change keep `[Obrazek]` in their
+preview. Same reasoning applies to collection names below.
+
+**b. The default collection list is duplicated, and the two copies already
+disagree.** Lines 246–249 offer `Ulubione / Kod / Prompty / Ważne` as suggestions
+in the "add to collection" dialog; lines 318–321 seed the filter chips with
+`Ulubione / Kod / Prompty` — `Ważne` is missing. Two definitions of one
+vocabulary, already drifted.
+
+Unifying them into a single `const List<String> _defaultCollections` is **in
+scope**, because the alternative is translating both copies and leaving two
+English lists that still disagree — strictly worse than what exists now. This is
+the rule `CLAUDE.md` states for `_matches()` in `queue_tab.dart`: one definition,
+used by both the filter and the counts, "so the two cannot disagree".
+
+**Consequence the user will see, stated so it is not mistaken for a bug:** the
+filter chips are seeded from the defaults *unioned with the user's existing
+collections*. After this change someone with items tagged `Ulubione` sees both a
+`Favorites` chip (the new default, empty) and an `Ulubione` chip (their data,
+populated). That is the honest rendering of "code literals translated, stored
+data untouched". Renaming a user's collections to match a code change is the
+class of action this repo refuses everywhere else.
 
 ### 3. `test/language_test.dart` — the guard
 
@@ -118,9 +149,31 @@ The allowlist is by file path with a written reason, matching how
 `rebrand_test.dart` pins values: a bare regex with no explanation is a test the
 next person deletes instead of understanding.
 
-**What the guard cannot catch, stated so nobody assumes otherwise:** Polish
-without diacritics. `'Schowek jest pusty'` would pass. The guard is a tripwire
-for the common case, not a proof of English.
+**A diacritic scan alone is demonstrably not enough**, so the guard has a second
+check. Nine of the 44 Polish strings in this codebase carry no diacritic at all —
+`'WSPANIALE!'`, `'Anuluj'`, `'Dodaj'`, `'Wszystkie'`, `'Nowa'`, `'Wyczyszcz'`,
+`'[Obrazek]'`, `'min temu'`, `'Schowek jest pusty'` — and a diacritic-only scan
+reported one of their files as clean. That is not a hypothetical; it happened
+during the planning of this very change.
+
+So the guard also matches a small list of Polish function words and UI verbs that
+effectively never appear in English UI copy, case-insensitively and on word
+boundaries:
+
+```
+nie, jest, oraz, aby, temu, przez, dla, lub, brak, wszystkie, anuluj,
+dodaj, usuń, nowa, nowy, pusty, obrazek, kolekcja, wyczyść, zapisz,
+zamknij, otwórz, szukaj, wspaniale, nazwa, schowek
+```
+
+**Stated plainly: this second check is a heuristic, not a proof.** A wordlist has
+false negatives by construction — a Polish string using none of these words
+passes. It also has a maintenance cost, and the honest expectation is that it
+catches the next accident rather than every possible one. The diacritic half is
+structural and needs no upkeep; the wordlist half is a tripwire that will
+occasionally need a word added. Neither makes the file a guarantee that the UI is
+English, and the test's own doc comment must say so, or the next reader will
+trust it further than it deserves.
 
 ### 4. One judgement call made under a stated assumption
 
@@ -142,8 +195,16 @@ placeholder rather than a deliberate localisation. Trivially reversible if wrong
   group in `test/gamification_test.dart` because `milestoneCopyFor` returns
   `IconData` and `Color`, so its test imports Flutter — and keeping the domain
   test pure Dart is the property this refactor exists to create.
-- `test/widget/celebration_overlay_test.dart`: check whether it constructs a
-  `Milestone` directly; if so it needs the shortened constructor.
+- `test/widget/celebration_overlay_test.dart`: asserts `find.text('PIERWSZE
+  UKOŃCZONE!')` (three times) and `find.text('WSPANIALE!')` (twice, one of them a
+  `tap` target). All five become the English wording. It does not construct a
+  `Milestone` directly, so the shortened constructor does not reach it.
+- `test/clipboard_history_test.dart:165`: asserts `find.text('Schowek jest
+  pusty')` — becomes the English wording.
+- `test/clipboard_history_test.dart` lines 21–79 use `'Kod'`, `'Ulubione'` and
+  `'Prompty'` as **arbitrary collection-name data** in round-trip assertions, not
+  as UI copy. They are deliberately left alone: the guard scans `lib/` only, and
+  the point of those tests is that any string round-trips.
 - `test/language_test.dart`: **prove it is not vacuous.** Re-introduce one Polish
   string, watch it fail, remove it. Per `CLAUDE.md`, a guard that has never been
   seen red is an assumption.
