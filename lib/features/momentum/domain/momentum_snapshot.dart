@@ -39,6 +39,67 @@ List<DayClosures> closuresByDay(List<ClosureEvent> events) {
   ];
 }
 
+/// What one project amounts to across the closures counted.
+class ProjectClosures {
+  const ProjectClosures({
+    required this.projectId,
+    required this.projectName,
+    required this.closures,
+  });
+
+  /// Null for captures closed with no project, kept as a real row rather than
+  /// dropped: unattributed work is a fact about the week worth seeing.
+  final String? projectId;
+
+  /// The most recent name seen for this project, so a rename shows the current
+  /// one while older rows still group under it.
+  final String projectName;
+
+  final int closures;
+}
+
+/// Closures grouped by project, busiest first.
+///
+/// **Unattributed always sorts last**, however much of it there is — it is the
+/// residual, not a competitor. Sorting it by count puts `No project` in the
+/// middle of the real ones, where it reads as a project you own and pushes work
+/// you did below work you did not file. Name breaks the remaining tie so the
+/// order cannot flicker between rebuilds. Both rules are lifted from
+/// `tallyByProject` in the timer's domain, where they were found by looking at
+/// the rendered panel rather than by any assertion about counts.
+List<ProjectClosures> closuresByProject(List<ClosureEvent> events) {
+  final Map<String?, List<ClosureEvent>> byProject =
+      <String?, List<ClosureEvent>>{};
+  for (final ClosureEvent event in events) {
+    byProject.putIfAbsent(event.projectId, () => <ClosureEvent>[]).add(event);
+  }
+
+  final List<ProjectClosures> tallies = <ProjectClosures>[
+    for (final MapEntry<String?, List<ClosureEvent>> entry
+        in byProject.entries)
+      ProjectClosures(
+        projectId: entry.key,
+        projectName: entry.key == null
+            ? 'No project'
+            // Last writer wins: the newest row carries the newest name.
+            : entry.value
+                      .map((ClosureEvent event) => event.projectName)
+                      .whereType<String>()
+                      .lastOrNull ??
+                  'Unnamed project',
+        closures: entry.value.length,
+      ),
+  ];
+  tallies.sort((ProjectClosures a, ProjectClosures b) {
+    if ((a.projectId == null) != (b.projectId == null)) {
+      return a.projectId == null ? 1 : -1;
+    }
+    final int byCount = b.closures.compareTo(a.closures);
+    return byCount != 0 ? byCount : a.projectName.compareTo(b.projectName);
+  });
+  return tallies;
+}
+
 /// Local midnight of the oldest day still inside a [days]-long window ending on
 /// the day containing [now].
 ///
