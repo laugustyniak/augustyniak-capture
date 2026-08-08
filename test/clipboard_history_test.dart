@@ -161,8 +161,8 @@ void main() {
       );
       await tester.pump(const Duration(milliseconds: 100));
 
-      expect(find.text('SCHOWEK SYSTEMOWY'), findsOneWidget);
-      expect(find.text('Schowek jest pusty'), findsOneWidget);
+      expect(find.text('SYSTEM CLIPBOARD'), findsOneWidget);
+      expect(find.text('Clipboard is empty'), findsOneWidget);
 
       service.dispose();
     });
@@ -254,9 +254,7 @@ void main() {
       );
       await tester.pump();
 
-      await tester.tap(
-        find.byTooltip('Przekaż do przetworzenia LLM (Capture ✨)'),
-      );
+      await tester.tap(find.byTooltip('Send to LLM processing (Capture ✨)'));
       await tester.pump();
       expect(convertedText, 'Convert me');
       service.dispose();

@@ -8,6 +8,25 @@ import '../../recordings/presentation/recordings_controller.dart';
 import '../domain/clipboard_item.dart';
 import '../domain/clipboard_watcher_service.dart';
 
+/// Seed vocabulary for clipboard collections, offered both as naming
+/// suggestions in the "add to collection" sheet and as filter chips.
+///
+/// One definition on purpose: these were two literal lists that had already
+/// drifted apart — the chip list was missing `Important`. Same rule as
+/// `_matches()` in `queue_tab.dart`, where one definition serves both the
+/// filter and its counts so the two cannot disagree.
+///
+/// Translating these does not rename anything already saved. A user with items
+/// tagged `Ulubione` sees both a `Favorites` chip (this default, empty) and an
+/// `Ulubione` chip (their data), because the chip list is these defaults
+/// unioned with the collections actually in use.
+const List<String> kDefaultClipboardCollections = <String>[
+  'Favorites',
+  'Code',
+  'Prompts',
+  'Important',
+];
+
 class ClipboardHistorySheet extends StatefulWidget {
   const ClipboardHistorySheet({
     super.key,
@@ -31,7 +50,7 @@ class _ClipboardHistorySheetState extends State<ClipboardHistorySheet> {
   final ScrollController _scrollController = ScrollController();
   final FocusNode _searchFocusNode = FocusNode();
   String _filter = '';
-  String? _selectedCollection; // null = Wszystkie
+  String? _selectedCollection; // null = All
   int _selectedIndex = 0;
 
   @override
@@ -59,9 +78,9 @@ class _ClipboardHistorySheetState extends State<ClipboardHistorySheet> {
   String _formatTime(DateTime dateTime) {
     final DateTime now = DateTime.now();
     final Duration diff = now.difference(dateTime);
-    if (diff.inSeconds < 60) return 'Przed chwilą';
-    if (diff.inMinutes < 60) return '${diff.inMinutes} min temu';
-    if (diff.inHours < 24) return '${diff.inHours}h temu';
+    if (diff.inSeconds < 60) return 'Just now';
+    if (diff.inMinutes < 60) return '${diff.inMinutes} min ago';
+    if (diff.inHours < 24) return '${diff.inHours}h ago';
     return '${dateTime.day}.${dateTime.month.toString().padLeft(2, '0')} ${dateTime.hour}:${dateTime.minute.toString().padLeft(2, '0')}';
   }
 
@@ -101,7 +120,7 @@ class _ClipboardHistorySheetState extends State<ClipboardHistorySheet> {
                 children: <Widget>[
                   Icon(Icons.auto_awesome, color: Console.accent, size: 20),
                   const SizedBox(width: 10),
-                  const Text('Obraz przekazano do analizy Vision LLM / OCR ✨'),
+                  const Text('Image sent for Vision LLM / OCR analysis ✨'),
                 ],
               ),
               duration: const Duration(seconds: 2),
@@ -130,7 +149,7 @@ class _ClipboardHistorySheetState extends State<ClipboardHistorySheet> {
               children: <Widget>[
                 Icon(Icons.auto_awesome, color: Console.accent, size: 20),
                 const SizedBox(width: 10),
-                const Text('Przekazano do przetworzenia LLM (Capture ✨)'),
+                const Text('Sent to LLM processing (Capture ✨)'),
               ],
             ),
             duration: const Duration(seconds: 2),
@@ -191,7 +210,7 @@ class _ClipboardHistorySheetState extends State<ClipboardHistorySheet> {
         builder: (BuildContext context) => AlertDialog(
           backgroundColor: Console.surface,
           title: Text(
-            'NOWA KOLEKCJA',
+            'NEW COLLECTION',
             style: TextStyle(
               fontFamily: ConsoleFont.display,
               fontSize: 16,
@@ -203,7 +222,7 @@ class _ClipboardHistorySheetState extends State<ClipboardHistorySheet> {
             autofocus: true,
             style: TextStyle(color: Console.text),
             decoration: InputDecoration(
-              hintText: 'Nazwa kolekcji (np. Prompty, Kod)...',
+              hintText: 'Collection name (e.g. Prompts, Code)...',
               hintStyle: TextStyle(color: Console.dimText),
               filled: true,
               fillColor: Console.surfaceRaised,
@@ -212,7 +231,7 @@ class _ClipboardHistorySheetState extends State<ClipboardHistorySheet> {
           actions: <Widget>[
             TextButton(
               onPressed: () => Navigator.of(context).pop(),
-              child: Text('Anuluj', style: TextStyle(color: Console.dimText)),
+              child: Text('Cancel', style: TextStyle(color: Console.dimText)),
             ),
             ElevatedButton(
               style: ElevatedButton.styleFrom(backgroundColor: Console.accent),
@@ -222,7 +241,7 @@ class _ClipboardHistorySheetState extends State<ClipboardHistorySheet> {
                   Navigator.of(context).pop(text);
                 }
               },
-              child: Text('Dodaj', style: TextStyle(color: Console.ink)),
+              child: Text('Add', style: TextStyle(color: Console.ink)),
             ),
           ],
         ),
@@ -242,11 +261,8 @@ class _ClipboardHistorySheetState extends State<ClipboardHistorySheet> {
   ) async {
     final Set<String> existingCollections =
         widget.watcherService.allCollections;
-    final Set<String> defaultSuggestions = {
-      'Ulubione',
-      'Kod',
-      'Prompty',
-      'Ważne',
+    final Set<String> defaultSuggestions = <String>{
+      ...kDefaultClipboardCollections,
       ...existingCollections,
     };
 
@@ -267,7 +283,7 @@ class _ClipboardHistorySheetState extends State<ClipboardHistorySheet> {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: <Widget>[
                   Text(
-                    'DODAJ DO KOLEKCJI',
+                    'ADD TO COLLECTION',
                     style: TextStyle(
                       fontFamily: ConsoleFont.display,
                       fontSize: 15,
@@ -315,10 +331,8 @@ class _ClipboardHistorySheetState extends State<ClipboardHistorySheet> {
       listenable: widget.watcherService,
       builder: (BuildContext context, Widget? child) {
         final List<ClipboardItem> allItems = widget.watcherService.items;
-        final Set<String> collections = {
-          'Ulubione',
-          'Kod',
-          'Prompty',
+        final Set<String> collections = <String>{
+          ...kDefaultClipboardCollections,
           ...widget.watcherService.allCollections,
         };
 
@@ -386,7 +400,7 @@ class _ClipboardHistorySheetState extends State<ClipboardHistorySheet> {
                         ),
                         const SizedBox(width: 10),
                         Text(
-                          'SCHOWEK SYSTEMOWY',
+                          'SYSTEM CLIPBOARD',
                           style: TextStyle(
                             fontFamily: ConsoleFont.display,
                             fontWeight: FontWeight.bold,
@@ -407,7 +421,7 @@ class _ClipboardHistorySheetState extends State<ClipboardHistorySheet> {
                               color: Console.red,
                             ),
                             label: Text(
-                              'Wyczyszcz',
+                              'Clear',
                               style: TextStyle(
                                 color: Console.red,
                                 fontSize: 13,
@@ -425,7 +439,7 @@ class _ClipboardHistorySheetState extends State<ClipboardHistorySheet> {
                       autofocus: true,
                       style: TextStyle(color: Console.text, fontSize: 14),
                       decoration: InputDecoration(
-                        hintText: 'Pisz aby szukać... (użyj ↑ ↓ oraz Enter)',
+                        hintText: 'Type to search... (use ↑ ↓ and Enter)',
                         hintStyle: TextStyle(
                           color: Console.dimText,
                           fontSize: 13,
@@ -474,7 +488,7 @@ class _ClipboardHistorySheetState extends State<ClipboardHistorySheet> {
                     child: Row(
                       children: <Widget>[
                         ChoiceChip(
-                          label: const Text('Wszystkie'),
+                          label: const Text('All'),
                           selected: _selectedCollection == null,
                           selectedColor: Console.accent.withValues(alpha: .25),
                           backgroundColor: Console.surfaceRaised,
@@ -519,7 +533,7 @@ class _ClipboardHistorySheetState extends State<ClipboardHistorySheet> {
                             size: 16,
                             color: Console.accent,
                           ),
-                          label: const Text('Nowa'),
+                          label: const Text('New'),
                           backgroundColor: Console.surfaceRaised,
                           labelStyle: TextStyle(
                             color: Console.accent,
@@ -546,8 +560,8 @@ class _ClipboardHistorySheetState extends State<ClipboardHistorySheet> {
                                 const SizedBox(height: 12),
                                 Text(
                                   _filter.isEmpty && _selectedCollection == null
-                                      ? 'Schowek jest pusty'
-                                      : 'Brak wyników w tej kolekcji / wyszukiwaniu',
+                                      ? 'Clipboard is empty'
+                                      : 'No results in this collection / search',
                                   style: TextStyle(
                                     color: Console.muted,
                                     fontSize: 14,
@@ -713,8 +727,7 @@ class _ClipboardItemTile extends StatelessWidget {
                               child: Padding(
                                 padding: const EdgeInsets.all(4.0),
                                 child: Tooltip(
-                                  message:
-                                      'Przekaż do przetworzenia LLM (Capture ✨)',
+                                  message: 'Send to LLM processing (Capture ✨)',
                                   child: Icon(
                                     Icons.auto_awesome,
                                     size: 16,
@@ -776,7 +789,7 @@ class _ClipboardItemTile extends StatelessWidget {
                                   ) => Padding(
                                     padding: const EdgeInsets.all(8.0),
                                     child: Text(
-                                      '[Nie można wczytać obrazu]',
+                                      '[Could not load image]',
                                       style: TextStyle(
                                         color: Console.red,
                                         fontSize: 12,
