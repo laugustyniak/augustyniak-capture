@@ -18,7 +18,7 @@ The Polish is not scattered. It sits in two features, across four files:
 | `gamification/domain/milestone.dart` | 20 | `domain/` |
 | `gamification/presentation/celebration_overlay.dart` | 1 (`'WSPANIALE!'`) | `presentation/` |
 | `clipboard/domain/clipboard_watcher_service.dart` | 1 (`'[Obrazek]'`) | `domain/` |
-| `clipboard/presentation/clipboard_history_sheet.dart` | 22 | `presentation/` |
+| `clipboard/presentation/clipboard_history_sheet.dart` | 26 occurrences, 23 distinct | `presentation/` |
 
 **This inventory was corrected upward during planning, and how it was missed is
 the point.** The first pass grepped for `[ąćęłńóśźż]` and reported 31 strings in
@@ -92,8 +92,9 @@ for no reduction in anything.
 
 ### 2. The clipboard feature — translation, plus two things that are not
 
-Twenty-two UI strings in `clipboard_history_sheet.dart` become English, 1:1,
-including the relative-time strings at lines 62–64 (`'Przed chwilą'`,
+The UI strings in `clipboard_history_sheet.dart` become English, 1:1 — 26 literal
+occurrences, 23 distinct once the duplicated collection names in (b) are counted
+once. That includes the relative-time strings at lines 62–64 (`'Przed chwilą'`,
 `'min temu'`, `'h temu'`).
 
 **Two findings are not translations and need a decision each.**
