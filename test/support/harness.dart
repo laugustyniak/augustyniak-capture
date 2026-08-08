@@ -6,7 +6,10 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:path/path.dart' as p;
 import 'package:record/record.dart';
 import 'package:augustyniak_capture/features/logs/data/log_store.dart';
+import 'package:augustyniak_capture/features/gamification/presentation/gamification_controller.dart';
 import 'package:augustyniak_capture/features/logs/domain/log_event.dart';
+import 'package:augustyniak_capture/features/momentum/domain/closure_event.dart';
+import 'package:augustyniak_capture/features/projects/domain/project.dart';
 import 'package:augustyniak_capture/features/recordings/data/media_picker.dart';
 import 'package:augustyniak_capture/features/recordings/data/recordings_repository.dart';
 import 'package:augustyniak_capture/features/recordings/domain/agent_handoff.dart';
@@ -117,6 +120,9 @@ Future<RecordingsController> buildRecordingsController(
   CaptureRouter captureRouter = const DisabledCaptureRouter(),
   AgentHandoff agentHandoff = const DisabledAgentHandoff(),
   FakeRecordingsRepository? repository,
+  ClosureLog closureLog = const NoopClosureLog(),
+  Project? Function(String projectId)? projectById,
+  GamificationController? gamificationController,
 }) async {
   final RecordingsController controller = RecordingsController(
     repository: repository ?? FakeRecordingsRepository(appDir, seed: seed),
@@ -127,6 +133,9 @@ Future<RecordingsController> buildRecordingsController(
     agentHandoff: agentHandoff,
     recorder: FakeRecorder(),
     player: FakePlayer(),
+    closureLog: closureLog,
+    projectById: projectById,
+    gamificationController: gamificationController,
   );
   addTearDown(controller.dispose);
   await controller.initialize();
