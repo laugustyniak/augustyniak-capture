@@ -147,9 +147,19 @@ class ClipboardWatcherService extends ChangeNotifier {
     }
   }
 
+  /// Ask the platform to type ⌘V into whatever had focus before the sheet
+  /// opened. Implemented on macOS only; everywhere else the channel has no
+  /// handler and the entry is merely left on the clipboard.
+  ///
+  /// **The `await` is what makes the `catch` reachable.** Without it the call
+  /// returns a future nobody holds, so `MissingPluginException` — the ordinary
+  /// answer on Android, iOS and Linux — escaped as an unhandled async error
+  /// instead of being swallowed here as intended.
   Future<void> pasteToActiveApp() async {
     try {
-      const MethodChannel('ai.augustyniak.capture/clipboard').invokeMethod('autoPaste');
+      await const MethodChannel(
+        'ai.augustyniak.capture/clipboard',
+      ).invokeMethod<void>('autoPaste');
     } catch (_) {}
   }
 
