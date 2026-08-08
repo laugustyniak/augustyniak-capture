@@ -81,10 +81,13 @@ class _CelebrationOverlayState extends State<CelebrationOverlay>
 
   @override
   Widget build(BuildContext context) {
+    final Milestone? milestone = _currentMilestone;
+    final copy = milestone == null ? null : milestoneCopyFor(milestone);
+
     return Stack(
       children: <Widget>[
         widget.child,
-        if (_currentMilestone != null) ...<Widget>[
+        if (copy != null) ...<Widget>[
           const Positioned.fill(child: ConfettiShowerWidget()),
           Positioned.fill(
             child: AnimatedBuilder(
@@ -98,8 +101,6 @@ class _CelebrationOverlayState extends State<CelebrationOverlay>
                   parent: _animController,
                   curve: Curves.elasticOut,
                 ).value.clamp(0.0, 1.2);
-
-                final copy = milestoneCopyFor(_currentMilestone!);
 
                 return Opacity(
                   opacity: opacity.clamp(0.0, 1.0),

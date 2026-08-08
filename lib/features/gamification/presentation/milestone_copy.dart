@@ -69,7 +69,7 @@ import '../domain/milestone.dart';
       title: isDone ? 'A HUNDRED DONE (100)!' : '100 CAPTURES!',
       description: isDone
           ? 'One hundred tasks completed! You are a master of closing.'
-          : '100 entries in the base! Your second brain is growing.',
+          : '100 entries in the database! Your personal brain is growing stronger.',
       icon: isDone ? Icons.military_tech_rounded : Icons.diamond_rounded,
       color: const Color(0xFFEAB308),
     );
