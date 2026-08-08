@@ -4,16 +4,30 @@
 
 **Goal:** Ołówek na tekstowym wpisie historii schowka otwiera okno, w którym można poprawić treść i przypisać kolekcje; zapis nadpisuje wpis w miejscu.
 
-**Architecture:** Nowa metoda `updateItem` w interfejsie `ClipboardRepository` (dwie implementacje: plikowa i SQLite) przechodzi przez cienkie `ClipboardWatcherService.updateItem` do nowego dialogu `_ClipboardEditDialog`. Dialog trzyma odłożoną kopię tekstu i kolekcji i zapisuje wszystko jednym wywołaniem dopiero na `ZAPISZ`; znacznik `copiedAt` nigdy się nie zmienia, dzięki czemu wpis zostaje na swojej pozycji na liście.
+**Architecture:** Nowa metoda `updateItem` w interfejsie `ClipboardRepository` (dwie implementacje: plikowa i SQLite) przechodzi przez cienkie `ClipboardWatcherService.updateItem` do nowego dialogu `_ClipboardEditDialog`. Dialog trzyma odłożoną kopię tekstu i kolekcji i zapisuje wszystko jednym wywołaniem dopiero na `SAVE`; znacznik `copiedAt` nigdy się nie zmienia, dzięki czemu wpis zostaje na swojej pozycji na liście.
 
 **Tech Stack:** Flutter / Dart 3.10, `sqlite3`, `flutter_test`. Bez nowych zależności.
 
 **Spec:** `docs/superpowers/specs/2026-08-09-clipboard-item-editing-design.md`
 
+## ⚠ Zależność — wykonać najpierw
+
+**Task 2 z planu `docs/superpowers/plans/2026-08-09-english-only-strings.md` musi wylądować przed Taskiem 5 tego planu.** Tamten task tłumaczy arkusz schowka na angielski i zwija zduplikowaną listę domyślnych kolekcji w stałą `kDefaultClipboardCollections`. Bez niego Task 5 albo dopisze trzecią kopię tej listy, albo wprowadzi angielskie napisy do arkusza, który jest jeszcze polski.
+
+Taski 1–4 tego planu są językowo neutralne (repozytoria, serwis, `previewFor`) i mogą wejść w dowolnej kolejności względem tamtego planu.
+
+Sprawdzenie, czy zależność jest spełniona:
+
+```bash
+grep -n "kDefaultClipboardCollections" lib/features/clipboard/presentation/clipboard_history_sheet.dart
+```
+
+Brak wyniku znaczy, że Task 2 tamtego planu jeszcze nie wszedł — **zatrzymaj się i wykonaj go najpierw.**
+
 ## Global Constraints
 
-- **Teksty widoczne dla użytkownika w feature `clipboard` piszemy po polsku** — cały ten feature jest po polsku (`SCHOWEK SYSTEMOWY`, `Wyczyszcz`, `NOWA KOLEKCJA`) i mieszanie języków w jednym arkuszu wyglądałoby na niedokończone. To świadome odstępstwo od reguły CLAUDE.md o angielskich stringach, zapisane w specu jako decyzja 5.
-- **Żaden widget malujący paletę `Console` nie może mieć konstruktora `const` ani być konstruowany z `const`.** `test/theme_test.dart:302` skanuje `lib/` regexem `const _Widget(` i zgłosi każde takie miejsce jako błąd. Powód: Flutter pomija przebudowę widgetu identycznego z poprzednim, więc `const` przypina stary motyw po przełączeniu.
+- **Wszystkie napisy i komentarze w kodzie po angielsku.** CLAUDE.md: *„user-facing strings in code are English — do not reintroduce Polish"*, i to samo dotyczy identyfikatorów oraz komentarzy. Feature `clipboard` był wyjątkiem; plan English-only ten wyjątek likwiduje, a `test/language_test.dart` (jego Task 3) zacznie tego pilnować automatycznie.
+- **Żaden widget malujący paletę `Console` nie może być konstruowany z `const`.** `test/theme_test.dart:302` skanuje `lib/` regexem `const _Widget(` i zgłosi takie miejsce jako błąd. Powód: Flutter pomija przebudowę widgetu identycznego z poprzednim, więc `const` przypina stary motyw po przełączeniu. Sama deklaracja konstruktora jako `const` jest dozwolona — zakazane jest `const` w miejscu wywołania.
 - **Nigdy `tester.pumpAndSettle()` na ekranie z autofocusowanym `TextField`** — migający kursor to animacja bez końca, więc „brak zaplanowanych klatek" nigdy nie nastąpi i test wisi do timeoutu. Używamy `tester.pump(const Duration(milliseconds: N))`.
 - **Nie ma CI.** `flutter analyze && flutter test` lokalnie jest twardą bramką. Hook `pre-push` uruchamia oba, jeśli włączono `git config core.hooksPath .githooks`.
 - **`copiedAt` nie zmienia się nigdy** przy edycji — to mechanizm realizujący „nadpisz w miejscu".
@@ -43,7 +57,7 @@ Reguła skrótu podglądu żyje dziś inline w watcherze. Edycja będzie drugim 
 
 **Interfaces:**
 - Consumes: nic
-- Produces: `static String ClipboardItem.previewFor(String text)` — zwraca `text`, gdy `text.length <= 120`, w przeciwnym razie pierwsze 120 znaków sklejone z `'...'`
+- Produces: `static String ClipboardItem.previewFor(String text)` — zwraca `text`, gdy `text.length <= 120`, w przeciwnym razie pierwsze 120 znaków sklejone z `'...'`; oraz `static const int ClipboardItem.previewLength = 120`
 
 - [ ] **Step 1: Write the failing test**
 
@@ -51,7 +65,7 @@ W `test/clipboard_history_test.dart`, wewnątrz istniejącej grupy `group('Clipb
 
 ```dart
     test('previewFor shortens long text and passes short text through', () {
-      expect(ClipboardItem.previewFor('krótki tekst'), 'krótki tekst');
+      expect(ClipboardItem.previewFor('short text'), 'short text');
 
       final String exactly120 = 'x' * 120;
       expect(ClipboardItem.previewFor(exactly120), exactly120);
@@ -71,11 +85,11 @@ Expected: FAIL — błąd kompilacji `The method 'previewFor' isn't defined for 
 W `lib/features/clipboard/domain/clipboard_item.dart`, wewnątrz klasy `ClipboardItem`, tuż nad `Map<String, dynamic> toJson()`:
 
 ```dart
-  /// Skrót treści pokazywany na wierszu listy.
+  /// The shortened body rendered on a history row.
   ///
-  /// Jedyna definicja tej reguły — liczą z niej zarówno watcher zapisujący
-  /// nowy wpis, jak i edycja nadpisująca istniejący. Dwie kopie rozjechałyby
-  /// się przy pierwszej zmianie limitu.
+  /// One definition on purpose: both the watcher storing a fresh entry and the
+  /// editor overwriting an existing one compute it from here. Two copies would
+  /// drift the first time the limit changes.
   static const int previewLength = 120;
 
   static String previewFor(String text) => text.length > previewLength
@@ -113,7 +127,7 @@ Expected: PASS — wszystkie testy, łącznie z `captures new text and image onc
 git add lib/features/clipboard/domain/clipboard_item.dart \
         lib/features/clipboard/domain/clipboard_watcher_service.dart \
         test/clipboard_history_test.dart
-git commit -m "Wyciągnij regułę podglądu schowka do ClipboardItem.previewFor"
+git commit -m "Extract the clipboard preview rule into ClipboardItem.previewFor"
 ```
 
 ---
@@ -122,6 +136,7 @@ git commit -m "Wyciągnij regułę podglądu schowka do ClipboardItem.previewFor
 
 **Files:**
 - Modify: `lib/features/clipboard/data/clipboard_repository.dart` (interfejs `ClipboardRepository` + `LocalJsonClipboardRepository`)
+- Modify: `lib/features/clipboard/data/sqlite_clipboard_repository.dart` (tymczasowe rusztowanie, patrz Step 5)
 - Modify: `test/clipboard_history_test.dart` (fake `_MemoryClipboardRepository`, linia ~337)
 - Test: `test/clipboard_history_test.dart` (grupa `ClipboardRepository`)
 
@@ -139,30 +154,30 @@ W `test/clipboard_history_test.dart`, wewnątrz `group('ClipboardRepository', ..
     test('editing text rewrites preview and keeps position and collections',
         () async {
       await repository.initialize();
-      await repository.addItem(_textItem('1', 'Pierwszy'));
-      await repository.addItem(_textItem('2', 'Drugi'));
-      await repository.toggleItemCollection('2', 'Kod');
+      await repository.addItem(_textItem('1', 'First'));
+      await repository.addItem(_textItem('2', 'Second'));
+      await repository.toggleItemCollection('2', 'Code');
 
       final DateTime originalCopiedAt = repository.items
           .firstWhere((ClipboardItem item) => item.id == '2')
           .copiedAt;
 
-      await repository.updateItem('2', text: 'Drugi, poprawiony');
+      await repository.updateItem('2', text: 'Second, corrected');
 
-      // Pozycja: '2' był najnowszy, więc zostaje na indeksie 0.
+      // '2' was the newest entry, so it stays at index 0.
       expect(repository.items.map((ClipboardItem item) => item.id),
           <String>['2', '1']);
 
       final ClipboardItem edited = repository.items.first;
-      expect(edited.text, 'Drugi, poprawiony');
-      expect(edited.preview, 'Drugi, poprawiony');
-      expect(edited.collections, <String>{'Kod'});
+      expect(edited.text, 'Second, corrected');
+      expect(edited.preview, 'Second, corrected');
+      expect(edited.collections, <String>{'Code'});
       expect(edited.copiedAt, originalCopiedAt);
     });
 
     test('editing recomputes preview for long text', () async {
       await repository.initialize();
-      await repository.addItem(_textItem('1', 'krótko'));
+      await repository.addItem(_textItem('1', 'short'));
 
       final String long = 'z' * 200;
       await repository.updateItem('1', text: long);
@@ -173,13 +188,13 @@ W `test/clipboard_history_test.dart`, wewnątrz `group('ClipboardRepository', ..
 
     test('blank text leaves the item untouched', () async {
       await repository.initialize();
-      await repository.addItem(_textItem('1', 'Oryginał'));
+      await repository.addItem(_textItem('1', 'Original'));
 
       await repository.updateItem('1', text: '');
-      expect(repository.items.single.text, 'Oryginał');
+      expect(repository.items.single.text, 'Original');
 
       await repository.updateItem('1', text: '   \n  ');
-      expect(repository.items.single.text, 'Oryginał');
+      expect(repository.items.single.text, 'Original');
     });
 
     test('an image ignores text but accepts collections', () async {
@@ -188,42 +203,42 @@ W `test/clipboard_history_test.dart`, wewnątrz `group('ClipboardRepository', ..
 
       await repository.updateItem(
         'img',
-        text: 'to nie ma prawa wejść',
-        collections: <String>{'Ulubione'},
+        text: 'this must not get in',
+        collections: <String>{'Favorites'},
       );
 
       final ClipboardItem item = repository.items.single;
       expect(item.text, isNull);
-      expect(item.collections, <String>{'Ulubione'});
+      expect(item.collections, <String>{'Favorites'});
     });
 
     test('collections are replaced wholesale, not merged', () async {
       await repository.initialize();
-      await repository.addItem(_textItem('1', 'Tekst'));
-      await repository.toggleItemCollection('1', 'Kod');
+      await repository.addItem(_textItem('1', 'Text'));
+      await repository.toggleItemCollection('1', 'Code');
 
-      await repository.updateItem('1', collections: <String>{'Prompty'});
+      await repository.updateItem('1', collections: <String>{'Prompts'});
 
-      expect(repository.items.single.collections, <String>{'Prompty'});
+      expect(repository.items.single.collections, <String>{'Prompts'});
     });
 
     test('an unknown id is a silent no-op', () async {
       await repository.initialize();
-      await repository.addItem(_textItem('1', 'Tekst'));
+      await repository.addItem(_textItem('1', 'Text'));
 
-      await repository.updateItem('nie-ma-takiego', text: 'cokolwiek');
+      await repository.updateItem('no-such-id', text: 'anything');
 
       expect(repository.items, hasLength(1));
-      expect(repository.items.single.text, 'Tekst');
+      expect(repository.items.single.text, 'Text');
     });
 
     test('an edit survives reloading the repository from disk', () async {
       await repository.initialize();
-      await repository.addItem(_textItem('1', 'Przed'));
+      await repository.addItem(_textItem('1', 'Before'));
       await repository.updateItem(
         '1',
-        text: 'Po',
-        collections: <String>{'Ważne'},
+        text: 'After',
+        collections: <String>{'Important'},
       );
 
       final LocalJsonClipboardRepository restored = LocalJsonClipboardRepository(
@@ -232,8 +247,8 @@ W `test/clipboard_history_test.dart`, wewnątrz `group('ClipboardRepository', ..
       );
       await restored.initialize();
 
-      expect(restored.items.single.text, 'Po');
-      expect(restored.items.single.collections, <String>{'Ważne'});
+      expect(restored.items.single.text, 'After');
+      expect(restored.items.single.collections, <String>{'Important'});
     });
 ```
 
@@ -247,11 +262,10 @@ Expected: FAIL — błąd kompilacji `The method 'updateItem' isn't defined for 
 W `lib/features/clipboard/data/clipboard_repository.dart` dopisz do `abstract class ClipboardRepository`, między `addItem` a `toggleItemCollection`:
 
 ```dart
-  /// Nadpisuje wpis w miejscu. `null` znaczy „nie ruszaj tego pola".
+  /// Overwrites an entry in place. `null` means "leave this field alone".
   ///
-  /// `copiedAt` nigdy się nie zmienia — dzięki temu poprawka nie wyrzuca wpisu
-  /// na górę listy. Pusty `text` oraz `text` dla wpisu obrazkowego są
-  /// ignorowane.
+  /// `copiedAt` never changes, so a correction does not push the entry back to
+  /// the top of the list. Blank text, and text for an image entry, are ignored.
   Future<void> updateItem(String id, {String? text, Set<String>? collections});
 ```
 
@@ -325,7 +339,7 @@ W `lib/features/clipboard/data/sqlite_clipboard_repository.dart`, po `addItem`:
     String? text,
     Set<String>? collections,
   }) async {
-    throw UnimplementedError('Task 3 tego planu dostarcza implementację.');
+    throw UnimplementedError('Task 3 of this plan supplies the real body.');
   }
 ```
 
@@ -340,7 +354,7 @@ Expected: PASS — wszystkie, łącznie z siedmioma nowymi.
 git add lib/features/clipboard/data/clipboard_repository.dart \
         lib/features/clipboard/data/sqlite_clipboard_repository.dart \
         test/clipboard_history_test.dart
-git commit -m "Dodaj ClipboardRepository.updateItem i implementację plikową"
+git commit -m "Add ClipboardRepository.updateItem and its file-backed implementation"
 ```
 
 ---
@@ -379,8 +393,8 @@ W `lib/features/clipboard/data/sqlite_clipboard_repository.dart` zastąp ciało 
 
     if (!rewritesText && collections == null) return;
 
-    // copied_at zostaje nietknięte: getItems() czyta ORDER BY copied_at DESC,
-    // więc wpis zostaje na swojej pozycji na liście.
+    // copied_at is deliberately untouched: getItems() reads
+    // ORDER BY copied_at DESC, so the entry keeps its place in the list.
     if (rewritesText) {
       db.rawDb.execute(
         'UPDATE clipboard_items SET text = ?, preview = ? WHERE id = ?;',
@@ -414,7 +428,7 @@ Expected: PASS — żaden test nie dotyka tej klasy, więc chodzi wyłącznie o 
 
 ```bash
 git add lib/features/clipboard/data/sqlite_clipboard_repository.dart
-git commit -m "Zaimplementuj updateItem w repozytorium SQLite schowka"
+git commit -m "Implement updateItem in the SQLite clipboard repository"
 ```
 
 ---
@@ -437,7 +451,7 @@ W `test/clipboard_history_test.dart`, wewnątrz `group('ClipboardWatcherService 
     test('editing an item notifies listeners and never touches the clipboard',
         () async {
       final _MemoryClipboardRepository repository = _MemoryClipboardRepository();
-      await repository.addItem(_textItem('1', 'Przed'));
+      await repository.addItem(_textItem('1', 'Before'));
       final _FakeClipboardGateway gateway = _FakeClipboardGateway();
       final ClipboardWatcherService service = ClipboardWatcherService(
         repository: repository,
@@ -449,14 +463,14 @@ W `test/clipboard_history_test.dart`, wewnątrz `group('ClipboardWatcherService 
 
       await service.updateItem(
         '1',
-        text: 'Po',
-        collections: <String>{'Kod'},
+        text: 'After',
+        collections: <String>{'Code'},
       );
 
-      expect(repository.items.single.text, 'Po');
-      expect(repository.items.single.collections, <String>{'Kod'});
+      expect(repository.items.single.text, 'After');
+      expect(repository.items.single.collections, <String>{'Code'});
       expect(notifications, 1);
-      // Zapis edycji nie może podmienić tego, co użytkownik ma w schowku.
+      // Saving an edit must not replace what the user currently has copied.
       expect(gateway.copiedText, isNull);
       expect(gateway.copiedImagePath, isNull);
 
@@ -474,11 +488,11 @@ Expected: FAIL — `The method 'updateItem' isn't defined for the type 'Clipboar
 W `lib/features/clipboard/domain/clipboard_watcher_service.dart`, po `toggleItemCollection`:
 
 ```dart
-  /// Nadpisuje wpis w miejscu.
+  /// Overwrites an entry in place.
   ///
-  /// Świadomie nie dotyka `_lastText` ani `_lastImagePath`: edycja nie wstawia
-  /// niczego do schowka systemowego, więc watcher nie ma czego zobaczyć przy
-  /// następnym odpytaniu i nie powstaje duplikat własnej edycji.
+  /// Deliberately leaves `_lastText` and `_lastImagePath` alone: an edit never
+  /// writes to the system clipboard, so the next poll sees nothing new and no
+  /// duplicate of our own edit is captured.
   Future<void> updateItem(
     String id, {
     String? text,
@@ -499,7 +513,7 @@ Expected: PASS
 ```bash
 git add lib/features/clipboard/domain/clipboard_watcher_service.dart \
         test/clipboard_history_test.dart
-git commit -m "Dodaj ClipboardWatcherService.updateItem"
+git commit -m "Add ClipboardWatcherService.updateItem"
 ```
 
 ---
@@ -508,12 +522,14 @@ git commit -m "Dodaj ClipboardWatcherService.updateItem"
 
 Największe zadanie i jedyne z widoczną zmianą. Kończy się ręcznym uruchomieniem aplikacji — dla zmiany wizualnej zielony test opisuje tylko to, o co go zapytano, a CLAUDE.md zapisuje przypadek, w którym pełny zestaw testów przeszedł nad zepsutym wyglądem.
 
+**⚠ Wymaga Taska 2 z planu `2026-08-09-english-only-strings.md`.** Sprawdź `grep -n "kDefaultClipboardCollections" lib/features/clipboard/presentation/clipboard_history_sheet.dart` — brak wyniku znaczy „zatrzymaj się".
+
 **Files:**
 - Modify: `lib/features/clipboard/presentation/clipboard_history_sheet.dart`
 - Test: `test/clipboard_history_test.dart` (grupa `ClipboardWatcherService & Sheet Widget`)
 
 **Interfaces:**
-- Consumes: `ClipboardWatcherService.updateItem` z Task 4, `ClipboardWatcherService.allCollections` (istnieje)
+- Consumes: `ClipboardWatcherService.updateItem` z Task 4; `ClipboardWatcherService.allCollections` (istnieje); `kDefaultClipboardCollections` z planu English-only
 - Produces: prywatne dla pliku — `_ClipboardEdit`, `_ClipboardEditDialog`, `_askCollectionName`; `_ClipboardItemTile` dostaje pole `final VoidCallback? onEdit`
 
 - [ ] **Step 1: Write the failing tests**
@@ -525,8 +541,8 @@ W `test/clipboard_history_test.dart`, wewnątrz `group('ClipboardWatcherService 
       WidgetTester tester,
     ) async {
       final _MemoryClipboardRepository repository = _MemoryClipboardRepository();
-      await repository.addItem(_imageItem('img', '/tmp/nie-istnieje.png'));
-      await repository.addItem(_textItem('txt', 'Tekst do poprawki'));
+      await repository.addItem(_imageItem('img', '/tmp/does-not-exist.png'));
+      await repository.addItem(_textItem('txt', 'Text to correct'));
       final ClipboardWatcherService service = ClipboardWatcherService(
         repository: repository,
         gateway: _FakeClipboardGateway(),
@@ -539,8 +555,8 @@ W `test/clipboard_history_test.dart`, wewnątrz `group('ClipboardWatcherService 
       );
       await tester.pump(const Duration(milliseconds: 100));
 
-      // Dwa wiersze na liście, ale tylko tekstowy ma ołówek.
-      expect(find.byTooltip('Edytuj treść wpisu'), findsOneWidget);
+      // Two rows on the list, but only the text one carries a pencil.
+      expect(find.byTooltip('Edit entry text'), findsOneWidget);
 
       service.dispose();
     });
@@ -549,7 +565,7 @@ W `test/clipboard_history_test.dart`, wewnątrz `group('ClipboardWatcherService 
       WidgetTester tester,
     ) async {
       final _MemoryClipboardRepository repository = _MemoryClipboardRepository();
-      await repository.addItem(_textItem('1', 'Przed poprawką'));
+      await repository.addItem(_textItem('1', 'Before the fix'));
       final ClipboardWatcherService service = ClipboardWatcherService(
         repository: repository,
         gateway: _FakeClipboardGateway(),
@@ -562,7 +578,7 @@ W `test/clipboard_history_test.dart`, wewnątrz `group('ClipboardWatcherService 
       );
       await tester.pump(const Duration(milliseconds: 100));
 
-      await tester.tap(find.byTooltip('Edytuj treść wpisu'));
+      await tester.tap(find.byTooltip('Edit entry text'));
       await tester.pump(const Duration(milliseconds: 300));
 
       final Finder dialogField = find.descendant(
@@ -571,22 +587,22 @@ W `test/clipboard_history_test.dart`, wewnątrz `group('ClipboardWatcherService 
       );
       expect(dialogField, findsOneWidget);
 
-      await tester.enterText(dialogField, 'Po poprawce');
+      await tester.enterText(dialogField, 'After the fix');
       await tester.pump(const Duration(milliseconds: 100));
 
       await tester.tap(
         find.descendant(
           of: find.byType(AlertDialog),
-          matching: find.widgetWithText(FilterChip, 'Kod'),
+          matching: find.widgetWithText(FilterChip, 'Code'),
         ),
       );
       await tester.pump(const Duration(milliseconds: 100));
 
-      await tester.tap(find.text('ZAPISZ'));
+      await tester.tap(find.text('SAVE'));
       await tester.pump(const Duration(milliseconds: 300));
 
-      expect(repository.items.single.text, 'Po poprawce');
-      expect(repository.items.single.collections, <String>{'Kod'});
+      expect(repository.items.single.text, 'After the fix');
+      expect(repository.items.single.collections, <String>{'Code'});
       expect(find.byType(AlertDialog), findsNothing);
 
       service.dispose();
@@ -596,7 +612,7 @@ W `test/clipboard_history_test.dart`, wewnątrz `group('ClipboardWatcherService 
       WidgetTester tester,
     ) async {
       final _MemoryClipboardRepository repository = _MemoryClipboardRepository();
-      await repository.addItem(_textItem('1', 'Nietknięte'));
+      await repository.addItem(_textItem('1', 'Untouched'));
       final ClipboardWatcherService service = ClipboardWatcherService(
         repository: repository,
         gateway: _FakeClipboardGateway(),
@@ -609,7 +625,7 @@ W `test/clipboard_history_test.dart`, wewnątrz `group('ClipboardWatcherService 
       );
       await tester.pump(const Duration(milliseconds: 100));
 
-      await tester.tap(find.byTooltip('Edytuj treść wpisu'));
+      await tester.tap(find.byTooltip('Edit entry text'));
       await tester.pump(const Duration(milliseconds: 300));
 
       await tester.enterText(
@@ -617,20 +633,20 @@ W `test/clipboard_history_test.dart`, wewnątrz `group('ClipboardWatcherService 
           of: find.byType(AlertDialog),
           matching: find.byType(TextField),
         ),
-        'To ma zniknąć',
+        'This must disappear',
       );
       await tester.tap(
         find.descendant(
           of: find.byType(AlertDialog),
-          matching: find.widgetWithText(FilterChip, 'Kod'),
+          matching: find.widgetWithText(FilterChip, 'Code'),
         ),
       );
       await tester.pump(const Duration(milliseconds: 100));
 
-      await tester.tap(find.text('ANULUJ'));
+      await tester.tap(find.text('CANCEL'));
       await tester.pump(const Duration(milliseconds: 300));
 
-      expect(repository.items.single.text, 'Nietknięte');
+      expect(repository.items.single.text, 'Untouched');
       expect(repository.items.single.collections, isEmpty);
 
       service.dispose();
@@ -638,7 +654,7 @@ W `test/clipboard_history_test.dart`, wewnątrz `group('ClipboardWatcherService 
 
     testWidgets('an empty edit cannot be saved', (WidgetTester tester) async {
       final _MemoryClipboardRepository repository = _MemoryClipboardRepository();
-      await repository.addItem(_textItem('1', 'Coś'));
+      await repository.addItem(_textItem('1', 'Something'));
       final ClipboardWatcherService service = ClipboardWatcherService(
         repository: repository,
         gateway: _FakeClipboardGateway(),
@@ -651,7 +667,7 @@ W `test/clipboard_history_test.dart`, wewnątrz `group('ClipboardWatcherService 
       );
       await tester.pump(const Duration(milliseconds: 100));
 
-      await tester.tap(find.byTooltip('Edytuj treść wpisu'));
+      await tester.tap(find.byTooltip('Edit entry text'));
       await tester.pump(const Duration(milliseconds: 300));
 
       await tester.enterText(
@@ -664,7 +680,7 @@ W `test/clipboard_history_test.dart`, wewnątrz `group('ClipboardWatcherService 
       await tester.pump(const Duration(milliseconds: 100));
 
       final ElevatedButton save = tester.widget<ElevatedButton>(
-        find.widgetWithText(ElevatedButton, 'ZAPISZ'),
+        find.widgetWithText(ElevatedButton, 'SAVE'),
       );
       expect(save.onPressed, isNull);
 
@@ -682,10 +698,10 @@ Expected: FAIL — `Expected: exactly one matching candidate / Actual: _TooltipM
 W `lib/features/clipboard/presentation/clipboard_history_sheet.dart` dodaj na końcu pliku, po klasie `_ClipboardItemTile`, wspólną funkcję — będzie używana przez istniejący `_promptNewCollection` (który ustawia filtr) i przez nowy dialog (który dopisuje do odłożonego zbioru):
 
 ```dart
-/// Pyta o nazwę kolekcji i zwraca ją, albo `null` gdy użytkownik zrezygnował.
+/// Asks for a collection name and returns it, or `null` if the user backed out.
 ///
-/// Wspólna dla paska kolekcji w arkuszu i dla okna edycji — te dwa miejsca
-/// robią z odpowiedzią co innego, ale pytają dokładnie o to samo.
+/// Shared by the sheet's collection strip and by the edit dialog: the two do
+/// different things with the answer, but they ask exactly the same question.
 Future<String?> _askCollectionName(BuildContext context) {
   final TextEditingController nameController = TextEditingController();
   return showDialog<String>(
@@ -694,7 +710,7 @@ Future<String?> _askCollectionName(BuildContext context) {
       builder: (BuildContext context) => AlertDialog(
         backgroundColor: Console.surface,
         title: Text(
-          'NOWA KOLEKCJA',
+          'NEW COLLECTION',
           style: TextStyle(
             fontFamily: ConsoleFont.display,
             fontSize: 16,
@@ -706,7 +722,7 @@ Future<String?> _askCollectionName(BuildContext context) {
           autofocus: true,
           style: TextStyle(color: Console.text),
           decoration: InputDecoration(
-            hintText: 'Nazwa kolekcji (np. Prompty, Kod)...',
+            hintText: 'Collection name (e.g. Prompts, Code)...',
             hintStyle: TextStyle(color: Console.dimText),
             filled: true,
             fillColor: Console.surfaceRaised,
@@ -715,7 +731,7 @@ Future<String?> _askCollectionName(BuildContext context) {
         actions: <Widget>[
           TextButton(
             onPressed: () => Navigator.of(context).pop(),
-            child: Text('Anuluj', style: TextStyle(color: Console.dimText)),
+            child: Text('Cancel', style: TextStyle(color: Console.dimText)),
           ),
           ElevatedButton(
             style: ElevatedButton.styleFrom(backgroundColor: Console.accent),
@@ -725,7 +741,7 @@ Future<String?> _askCollectionName(BuildContext context) {
                 Navigator.of(context).pop(text);
               }
             },
-            child: Text('Dodaj', style: TextStyle(color: Console.ink)),
+            child: Text('Add', style: TextStyle(color: Console.ink)),
           ),
         ],
       ),
@@ -734,7 +750,7 @@ Future<String?> _askCollectionName(BuildContext context) {
 }
 ```
 
-Następnie zastąp całe ciało istniejącej metody `_promptNewCollection` (linie 186–237) przez:
+Następnie zastąp całe ciało istniejącej metody `_promptNewCollection` przez:
 
 ```dart
   Future<void> _promptNewCollection(BuildContext context) async {
@@ -752,7 +768,7 @@ Następnie zastąp całe ciało istniejącej metody `_promptNewCollection` (lini
 Nadal w `clipboard_history_sheet.dart`, po `_askCollectionName`:
 
 ```dart
-/// Odłożony wynik edycji — to, co dialog zwraca po `ZAPISZ`.
+/// The staged result of an edit — what the dialog returns on SAVE.
 class _ClipboardEdit {
   _ClipboardEdit({required this.text, required this.collections});
 
@@ -760,17 +776,16 @@ class _ClipboardEdit {
   final Set<String> collections;
 }
 
-/// Okno edycji pojedynczego wpisu schowka.
+/// Editor for a single clipboard entry.
 ///
-/// Wszystkie zmiany, łącznie z chipami kolekcji, są odkładane i zapisują się
-/// dopiero na `ZAPISZ`. Jest to celowe odstępstwo od reguły „chip zapisuje się
-/// na dotknięcie" z `RecordingEditor`: tamten edytor nie ma przycisku
-/// anulowania, a ten ma, więc okno, które część zmian zapisało po cichu, byłoby
-/// pułapką.
+/// Every change, collection chips included, is staged and only written on SAVE.
+/// This deliberately departs from `RecordingEditor`'s "a chip writes on the
+/// tap" rule: that editor has no cancel button and this one does, so a dialog
+/// that had already committed half of its changes would be a trap.
 ///
-/// Konstruktor nie jest `const` i nie wolno go takim uczynić — widget maluje
-/// paletę `Console`, a `const` przypiąłby stary motyw po przełączeniu
-/// (patrz `test/theme_test.dart`).
+/// The constructor is not `const` and must not become one — the widget paints
+/// the `Console` palette, and `const` would pin the old theme after a swap
+/// (see `test/theme_test.dart`).
 class _ClipboardEditDialog extends StatefulWidget {
   _ClipboardEditDialog({required this.item, required this.suggestions});
 
@@ -817,7 +832,7 @@ class _ClipboardEditDialogState extends State<_ClipboardEditDialog> {
     return AlertDialog(
       backgroundColor: Console.surface,
       title: Text(
-        'EDYTUJ WPIS',
+        'EDIT ENTRY',
         style: TextStyle(
           fontFamily: ConsoleFont.display,
           fontSize: 16,
@@ -861,7 +876,7 @@ class _ClipboardEditDialogState extends State<_ClipboardEditDialog> {
               ),
               const SizedBox(height: 14),
               Text(
-                'KOLEKCJE',
+                'COLLECTIONS',
                 style: TextStyle(
                   fontFamily: ConsoleFont.display,
                   fontSize: 12,
@@ -898,7 +913,7 @@ class _ClipboardEditDialogState extends State<_ClipboardEditDialog> {
                     ),
                   ActionChip(
                     avatar: Icon(Icons.add, size: 16, color: Console.accent),
-                    label: const Text('Nowa'),
+                    label: const Text('New'),
                     backgroundColor: Console.surfaceRaised,
                     labelStyle: TextStyle(color: Console.accent, fontSize: 12),
                     onPressed: _addCollection,
@@ -912,7 +927,7 @@ class _ClipboardEditDialogState extends State<_ClipboardEditDialog> {
       actions: <Widget>[
         TextButton(
           onPressed: () => Navigator.of(context).pop(),
-          child: Text('ANULUJ', style: TextStyle(color: Console.dimText)),
+          child: Text('CANCEL', style: TextStyle(color: Console.dimText)),
         ),
         ElevatedButton(
           style: ElevatedButton.styleFrom(backgroundColor: Console.accent),
@@ -924,7 +939,7 @@ class _ClipboardEditDialogState extends State<_ClipboardEditDialog> {
                   ),
                 )
               : null,
-          child: Text('ZAPISZ', style: TextStyle(color: Console.ink)),
+          child: Text('SAVE', style: TextStyle(color: Console.ink)),
         ),
       ],
     );
@@ -944,10 +959,7 @@ W `_ClipboardHistorySheetState`, po metodzie `_manageItemCollections`:
         builder: (BuildContext context) => _ClipboardEditDialog(
           item: item,
           suggestions: <String>{
-            'Ulubione',
-            'Kod',
-            'Prompty',
-            'Ważne',
+            ...kDefaultClipboardCollections,
             ...widget.watcherService.allCollections,
           },
         ),
@@ -962,21 +974,14 @@ W `_ClipboardHistorySheetState`, po metodzie `_manageItemCollections`:
   }
 ```
 
+Lista sugestii czytana jest ze stałej, a nie wpisana po raz trzeci — to ta sama zasada jednej definicji, dla której powstała `kDefaultClipboardCollections`.
+
 - [ ] **Step 6: Give the tile a pencil**
 
-W klasie `_ClipboardItemTile` dodaj pole i parametr konstruktora. Konstruktor:
+W klasie `_ClipboardItemTile` dodaj parametr konstruktora po `onConvertToCapture`:
 
 ```dart
-  const _ClipboardItemTile({
-    required this.item,
-    required this.timeLabel,
-    required this.isSelected,
-    required this.onTap,
-    this.onConvertToCapture,
     this.onEdit,
-    required this.onAddCollection,
-    required this.onDelete,
-  });
 ```
 
 oraz pole obok pozostałych:
@@ -995,7 +1000,7 @@ W metodzie `build`, w rzędzie akcji, **przed** blokiem `if (onConvertToCapture 
                               child: Padding(
                                 padding: const EdgeInsets.all(4.0),
                                 child: Tooltip(
-                                  message: 'Edytuj treść wpisu',
+                                  message: 'Edit entry text',
                                   child: Icon(
                                     Icons.edit_outlined,
                                     size: 16,
@@ -1016,8 +1021,7 @@ Na koniec, w `itemBuilder` arkusza, w wywołaniu `_ClipboardItemTile(...)`, dopi
                                     : null,
 ```
 
-Ołówka nie ma na wpisach obrazkowych, bo obraz nie ma treści do podmiany —
-kontrolka, która nic nie robi, jest gorsza niż jej brak.
+Ołówka nie ma na wpisach obrazkowych, bo obraz nie ma treści do podmiany — kontrolka, która nic nie robi, jest gorsza niż jej brak.
 
 - [ ] **Step 7: Run tests to verify they pass**
 
@@ -1026,19 +1030,19 @@ Expected: PASS — cztery nowe testy widgetowe plus wszystkie wcześniejsze.
 
 - [ ] **Step 8: Prove the tests are not vacuous**
 
-Skopiuj plik do scratchpada, zepsuj implementację, sprawdź czerwień, przywróć. **Nie używaj `git checkout -- <plik>`** — w brudnym drzewie cofa do `HEAD` i zabiera ze sobą wszystkie inne niezacommitowane zmiany w tym pliku.
+Skopiuj plik poza repozytorium, zepsuj implementację, sprawdź czerwień, przywróć. **Nie używaj `git checkout -- <plik>`** — w brudnym drzewie cofa do `HEAD` i zabiera ze sobą wszystkie inne niezacommitowane zmiany w tym pliku.
 
 ```bash
 cp lib/features/clipboard/presentation/clipboard_history_sheet.dart /tmp/sheet.bak
 ```
 
-Zmień w `_editItem` `if (edit == null) return;` na `return;` (czyli zapis nigdy nie następuje) i uruchom:
+Zmień w `_editItem` linię `if (edit == null) return;` na `return;` (czyli zapis nigdy nie następuje) i uruchom:
 
 ```bash
 flutter test test/clipboard_history_test.dart --plain-name "saving an edit rewrites the item"
 ```
 
-Expected: FAIL — `Expected: 'Po poprawce' / Actual: 'Przed poprawką'`. Test, który nigdy nie był czerwony, jest założeniem, a nie sprawdzeniem.
+Expected: FAIL — `Expected: 'After the fix' / Actual: 'Before the fix'`. Test, który nigdy nie był czerwony, jest założeniem, a nie sprawdzeniem.
 
 ```bash
 cp /tmp/sheet.bak lib/features/clipboard/presentation/clipboard_history_sheet.dart
@@ -1050,7 +1054,7 @@ Expected: PASS
 - [ ] **Step 9: Run the whole gate**
 
 Run: `flutter analyze && flutter test`
-Expected: `No issues found!` oraz cały zestaw na zielono. `test/theme_test.dart` musi przejść — to on pilnuje, że `_ClipboardEditDialog` nie jest konstruowany z `const`.
+Expected: `No issues found!` oraz cały zestaw na zielono. Dwa testy pilnują tu spraw, których nie widać w kodzie: `test/theme_test.dart` — że `_ClipboardEditDialog` nie jest konstruowany z `const`; `test/language_test.dart` (jeśli Task 3 planu English-only już wszedł) — że nie wprowadziliśmy polskich literałów.
 
 - [ ] **Step 10: Run the app and look at it**
 
@@ -1063,9 +1067,9 @@ flutter run -d macos
 Sprawdź na oko:
 1. otwórz arkusz schowka — ołówek jest na wierszach tekstowych, nie ma go na obrazkowych
 2. kliknij ołówek — okno otwiera się z pełną treścią, kursor jest w polu
-3. popraw treść, zaznacz kolekcję, `ZAPISZ` — wiersz pokazuje nową treść i **zostaje na swojej pozycji**, nie skacze na górę
-4. otwórz ponownie, zmień coś, `ANULUJ` — wiersz jest nietknięty, chip też
-5. wyczyść pole do zera — `ZAPISZ` jest nieaktywny
+3. popraw treść, zaznacz kolekcję, `SAVE` — wiersz pokazuje nową treść i **zostaje na swojej pozycji**, nie skacze na górę
+4. otwórz ponownie, zmień coś, `CANCEL` — wiersz jest nietknięty, chip też
+5. wyczyść pole do zera — `SAVE` jest nieaktywny
 6. przełącz motyw w Config na jasny, otwórz okno edycji ponownie — kolory są jasne, nie zostały ciemne
 
 - [ ] **Step 11: Commit**
@@ -1073,15 +1077,15 @@ Sprawdź na oko:
 ```bash
 git add lib/features/clipboard/presentation/clipboard_history_sheet.dart \
         test/clipboard_history_test.dart
-git commit -m "Dodaj okno edycji wpisu w historii schowka"
+git commit -m "Add an edit dialog for clipboard history entries"
 ```
 
 ---
 
 ## Self-review planu
 
-**Pokrycie specu.** Każda sekcja specu ma zadanie: `previewFor` → Task 1; `ClipboardRepository.updateItem` z regułami (`copiedAt`, pusty tekst, obraz, nieznane `id`) → Task 2 (plikowe, z testami) i Task 3 (SQLite); `ClipboardWatcherService.updateItem` → Task 4; ołówek ukryty na obrazach, `_ClipboardEditDialog`, odkładane chipy, zamknięcie po `ZAPISZ` → Task 5. Sekcja „Czego ta zmiana nie dotyka" nie generuje zadań z definicji.
+**Pokrycie specu.** Każda sekcja specu ma zadanie: `previewFor` → Task 1; `ClipboardRepository.updateItem` z regułami (`copiedAt`, pusty tekst, obraz, nieznane `id`) → Task 2 (plikowe, z testami) i Task 3 (SQLite); `ClipboardWatcherService.updateItem` → Task 4; ołówek ukryty na obrazach, `_ClipboardEditDialog`, odkładane chipy, zamknięcie po `SAVE` → Task 5. Decyzja 5 specu (angielski, zależność od planu English-only) jest w Global Constraints i w nagłówku Taska 5. Sekcja „Czego ta zmiana nie dotyka" nie generuje zadań z definicji.
 
 **Luka świadomie zostawiona.** `SqliteClipboardRepository.updateItem` nie ma testu automatycznego — żaden test w repozytorium nie konstruuje `AppDatabase`, a dorabianie do tego infrastruktury byłoby większą zmianą niż sama funkcja. Pokrywają go: `flutter analyze`, symetria z przetestowaną wersją plikową i ręczny przebieg z Task 5 Step 10, który idzie właśnie przez SQLite (produkcja używa tej implementacji). Zapisane tutaj, żeby nie wyglądało na przeoczenie.
 
-**Spójność nazw.** `updateItem(String id, {String? text, Set<String>? collections})` — identycznie w interfejsie, obu implementacjach, fake'u testowym i serwisie. `previewFor` i `previewLength` używane w Task 1, 2, 3. `_ClipboardEdit`, `_ClipboardEditDialog`, `_askCollectionName`, `onEdit` — wprowadzone i użyte wyłącznie w Task 5. Tooltip `'Edytuj treść wpisu'` jest tym samym łańcuchem w implementacji i w trzech testach.
+**Spójność nazw.** `updateItem(String id, {String? text, Set<String>? collections})` — identycznie w interfejsie, obu implementacjach, fake'u testowym i serwisie. `previewFor` i `previewLength` używane w Task 1, 2, 3. `_ClipboardEdit`, `_ClipboardEditDialog`, `_askCollectionName`, `onEdit` — wprowadzone i użyte wyłącznie w Task 5. Tooltip `'Edit entry text'` oraz etykiety `'SAVE'` i `'CANCEL'` to te same łańcuchy w implementacji i w czterech testach. Nazwy kolekcji w testach (`Code`, `Favorites`, `Prompts`, `Important`) zgadzają się z `kDefaultClipboardCollections` z planu English-only.

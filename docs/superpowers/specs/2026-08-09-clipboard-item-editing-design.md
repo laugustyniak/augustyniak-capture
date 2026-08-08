@@ -39,12 +39,23 @@ kolekcjami. `ZAPISZ` nadpisuje wpis w miejscu.
 4. **Ołówka nie ma na wpisach obrazkowych.** Obraz nie ma treści do podmiany, a
    kontrolka, która nic nie robi, jest gorsza niż jej brak — ta sama zasada,
    którą stosuje przycisk routowania w Kolejce (ukryty, nie wyszarzony).
-5. **Nowe okno jest po polsku**, zgodnie z plikiem, w którym mieszka. CLAUDE.md
-   wymaga angielskiego dla tekstów widocznych dla użytkownika, ale cały feature
-   `clipboard` powstał po polsku (`SCHOWEK SYSTEMOWY`, `Wyczyszcz`,
-   `NOWA KOLEKCJA`); `EDIT ENTRY` obok `Wyczyszcz` w jednym arkuszu wyglądałoby
-   na niedokończone. Przetłumaczenie całego feature'u to osobne zadanie i osobny
-   commit, poza zakresem tego specu.
+5. **Nowe okno jest po angielsku**, zgodnie z CLAUDE.md i z docelowym stanem
+   pliku, w którym mieszka.
+
+   Pierwotnie zdecydowano odwrotnie — cały feature `clipboard` powstał po
+   polsku (`SCHOWEK SYSTEMOWY`, `Wyczyszcz`, `NOWA KOLEKCJA`), a `EDIT ENTRY`
+   obok `Wyczyszcz` w jednym arkuszu wyglądałby na niedokończony. Przesłanka
+   przestała obowiązywać: równolegle powstał zatwierdzony plan
+   `docs/superpowers/plans/2026-08-09-english-only-strings.md`, którego Task 2
+   tłumaczy ten arkusz w całości, a Task 3 dodaje `test/language_test.dart`
+   blokujący polskie literały w `lib/`. Polski w tym arkuszu jest więc długiem
+   z terminem spłaty, a nie stanem docelowym — argument „dopasuj się do pliku"
+   wskazuje teraz na angielski.
+
+   **Ta zmiana zależy od Taska 2 tamtego planu i wchodzi po nim.** Poza
+   językiem daje to jeszcze jedno: okno czyta stałą
+   `kDefaultClipboardCollections` zamiast dopisywać trzecią kopię listy
+   domyślnych kolekcji.
 
 ### Dlaczego nie ma tu ryzyka pętli sprzężenia zwrotnego
 
@@ -128,13 +139,13 @@ Nowy prywatny widget `_ClipboardEditDialog` w tym samym pliku:
 - wielolinijkowe `TextField` z czcionką `ConsoleFont.mono` — tą samą, którą
   podgląd używa w wierszu, żeby treść nie zmieniała kroju przy wejściu w edycję;
   `autofocus: true`, bo cały sens funkcji to szybka poprawka
-- rząd chipów kolekcji z tą samą listą sugestii co `_manageItemCollections`
-  (`Ulubione`, `Kod`, `Prompty`, `Ważne` + `watcherService.allCollections`) oraz
-  chip `+` otwierający prompt o nazwę nowej kolekcji
-- `ANULUJ` / `ZAPISZ`; `ZAPISZ` nieaktywny, gdy pole jest puste po przycięciu
+- rząd chipów kolekcji z tą samą listą sugestii co `_manageItemCollections` —
+  stała `kDefaultClipboardCollections` unia `watcherService.allCollections` —
+  oraz chip `+` otwierający prompt o nazwę nowej kolekcji
+- `CANCEL` / `SAVE`; `SAVE` nieaktywny, gdy pole jest puste po przycięciu
   białych znaków
-- Escape zamyka okno jak `ANULUJ`
-- `ZAPISZ` zamyka okno i wraca do arkusza schowka; arkusz pozostaje otwarty z
+- Escape zamyka okno jak `CANCEL`
+- `SAVE` zamyka okno i wraca do arkusza schowka; arkusz pozostaje otwarty z
   zachowanym wyszukiwaniem i wybraną kolekcją
 
 **Wszystkie zmiany są odkładane i zapisują się dopiero na `ZAPISZ`** — łącznie z
