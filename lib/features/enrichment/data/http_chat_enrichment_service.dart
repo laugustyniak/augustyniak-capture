@@ -3,6 +3,8 @@ import 'dart:io';
 
 import 'package:http/http.dart' as http;
 
+import '../../costs/domain/usage_parsing.dart';
+import '../../costs/domain/usage_sink.dart';
 import '../../recordings/domain/capture_category.dart';
 import '../domain/enrichment_context.dart';
 import '../domain/enrichment_prompt.dart';
@@ -21,6 +23,7 @@ class HttpChatEnrichmentService implements EnrichmentService {
     this.bearerToken,
     this.model,
     http.Client? client,
+    this.usageSink = const NoopUsageSink(),
   }) : _client = client ?? http.Client();
 
   final Uri endpoint;
@@ -29,6 +32,10 @@ class HttpChatEnrichmentService implements EnrichmentService {
   /// Required by OpenAI and Groq, ignored by servers that don't read it.
   final String? model;
   final http.Client _client;
+
+  /// Receives what this call consumed. Defaults to a no-op, so nothing in the
+  /// pure-Dart suite needs a database.
+  final UsageSink usageSink;
 
   /// More than five would be noise on a card, and the prompt already asks for
   /// three to five.
@@ -76,7 +83,26 @@ class HttpChatEnrichmentService implements EnrichmentService {
       );
     }
 
-    return parseResponse(utf8.decode(response.bodyBytes));
+    final String body = utf8.decode(response.bodyBytes);
+    _recordUsage(body);
+    return parseResponse(body);
+  }
+
+  /// Accounting must never cost a capture: a malformed usage block, or a sink
+  /// that throws, is swallowed here rather than turned into a failed
+  /// enrichment. Same contract as `ClipboardSink`.
+  void _recordUsage(String body) {
+    try {
+      final dynamic envelope = jsonDecode(body);
+      if (envelope is! Map<String, dynamic>) return;
+      usageSink.record(
+        provider: endpoint.host,
+        model: model ?? '',
+        usage: parseUsage(envelope),
+      );
+    } catch (_) {
+      // Deliberately silent.
+    }
   }
 
   /// Exposed for tests, and kept separate from the transport so the parsing

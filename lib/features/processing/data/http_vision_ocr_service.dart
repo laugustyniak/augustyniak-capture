@@ -4,6 +4,8 @@ import 'dart:io';
 
 import 'package:http/http.dart' as http;
 
+import '../../costs/domain/usage_parsing.dart';
+import '../../costs/domain/usage_sink.dart';
 import 'ocr_service.dart';
 
 /// OCR through a vision-capable chat model on an OpenAI-compatible
@@ -17,12 +19,17 @@ class HttpVisionOcrService implements OcrService {
     this.bearerToken,
     this.model,
     http.Client? client,
+    this.usageSink = const NoopUsageSink(),
   }) : _client = client ?? http.Client();
 
   final Uri endpoint;
   final String? bearerToken;
   final String? model;
   final http.Client _client;
+
+  /// Receives what this call consumed. Defaults to a no-op, so nothing in the
+  /// pure-Dart suite needs a database.
+  final UsageSink usageSink;
 
   /// Providers reject payloads around this size and base64 inflates the bytes
   /// by 4/3 — a clear failure beats a silent one, and there is no image
@@ -94,7 +101,26 @@ class HttpVisionOcrService implements OcrService {
       );
     }
 
-    return parseResponse(utf8.decode(response.bodyBytes));
+    final String body = utf8.decode(response.bodyBytes);
+    _recordUsage(body);
+    return parseResponse(body);
+  }
+
+  /// Accounting must never cost a capture: a malformed usage block, or a sink
+  /// that throws, is swallowed here rather than turned into a failed OCR.
+  /// Same contract as `ClipboardSink`.
+  void _recordUsage(String body) {
+    try {
+      final dynamic envelope = jsonDecode(body);
+      if (envelope is! Map<String, dynamic>) return;
+      usageSink.record(
+        provider: endpoint.host,
+        model: model ?? '',
+        usage: parseUsage(envelope),
+      );
+    } catch (_) {
+      // Deliberately silent.
+    }
   }
 
   /// Extracts the assistant text from a chat-completions body. A body that is

@@ -3,6 +3,9 @@ import 'dart:io';
 
 import 'package:http/http.dart' as http;
 
+import '../../costs/domain/usage_parsing.dart';
+import '../../costs/domain/usage_sink.dart';
+
 abstract interface class TranscriptionService {
   Future<String> transcribe(File audioFile);
 }
@@ -23,6 +26,7 @@ class HttpWhisperTranscriptionService implements TranscriptionService {
     this.model,
     this.language,
     http.Client? client,
+    this.usageSink = const NoopUsageSink(),
   }) : _client = client ?? http.Client();
 
   final Uri endpoint;
@@ -36,6 +40,10 @@ class HttpWhisperTranscriptionService implements TranscriptionService {
   /// audio and skips language auto-detection.
   final String? language;
   final http.Client _client;
+
+  /// Receives what this call consumed. Defaults to a no-op, so nothing in the
+  /// pure-Dart suite needs a database.
+  final UsageSink usageSink;
 
   @override
   Future<String> transcribe(File audioFile) async {
@@ -64,6 +72,8 @@ class HttpWhisperTranscriptionService implements TranscriptionService {
       );
     }
 
+    _recordUsage(body);
+
     final dynamic decoded = jsonDecode(body);
     if (decoded is Map<String, dynamic>) {
       final dynamic text = decoded['text'] ?? decoded['transcript'];
@@ -75,6 +85,23 @@ class HttpWhisperTranscriptionService implements TranscriptionService {
     throw const FormatException(
       'Response does not contain text or transcript.',
     );
+  }
+
+  /// Accounting must never cost a capture: a malformed usage block, or a sink
+  /// that throws, is swallowed here rather than turned into a failed
+  /// transcription. Same contract as `ClipboardSink`.
+  void _recordUsage(String body) {
+    try {
+      final dynamic envelope = jsonDecode(body);
+      if (envelope is! Map<String, dynamic>) return;
+      usageSink.record(
+        provider: endpoint.host,
+        model: model ?? '',
+        usage: parseUsage(envelope),
+      );
+    } catch (_) {
+      // Deliberately silent.
+    }
   }
 }
 

@@ -1,3 +1,4 @@
+import '../../costs/domain/usage_sink.dart';
 import '../../enrichment/data/http_chat_enrichment_service.dart';
 import '../../enrichment/domain/enrichment_service.dart';
 import '../../processing/data/http_vision_ocr_service.dart';
@@ -110,7 +111,9 @@ class ProviderProfile {
   /// Build the service for this profile. Returns the disabled service when the
   /// endpoint is blank or unparseable, so a half-filled profile degrades to the
   /// "not configured" error instead of throwing at capture time.
-  TranscriptionService toService() {
+  TranscriptionService toService({
+    UsageSink usageSink = const NoopUsageSink(),
+  }) {
     final Uri? uri = hasEndpoint ? Uri.tryParse(endpoint.trim()) : null;
     if (uri == null || !uri.hasScheme) {
       return const DisabledTranscriptionService();
@@ -120,6 +123,7 @@ class ProviderProfile {
       bearerToken: usableBearerToken,
       model: _blankToNull(model),
       language: _blankToNull(language),
+      usageSink: usageSink,
     );
   }
 
@@ -129,7 +133,9 @@ class ProviderProfile {
   ///
   /// No `language` — the chat request asks the model to answer in the language
   /// of the input, so a per-profile hint would only fight it.
-  EnrichmentService toEnrichmentService() {
+  EnrichmentService toEnrichmentService({
+    UsageSink usageSink = const NoopUsageSink(),
+  }) {
     final Uri? uri = hasEndpoint ? Uri.tryParse(endpoint.trim()) : null;
     if (uri == null || !uri.hasScheme) {
       return const DisabledEnrichmentService();
@@ -138,6 +144,7 @@ class ProviderProfile {
       endpoint: uri,
       bearerToken: usableBearerToken,
       model: _blankToNull(model),
+      usageSink: usageSink,
     );
   }
 
@@ -146,7 +153,7 @@ class ProviderProfile {
   /// vision-capable chat endpoint is exactly what enrichment already talks to,
   /// and one profile configuring both stages beats a third Models-tab section.
   /// Same blank-or-schemeless guard as [toService].
-  OcrService toOcrService() {
+  OcrService toOcrService({UsageSink usageSink = const NoopUsageSink()}) {
     final Uri? uri = hasEndpoint ? Uri.tryParse(endpoint.trim()) : null;
     if (uri == null || !uri.hasScheme) {
       return const DisabledOcrService();
@@ -155,6 +162,7 @@ class ProviderProfile {
       endpoint: uri,
       bearerToken: usableBearerToken,
       model: _blankToNull(model),
+      usageSink: usageSink,
     );
   }
 
