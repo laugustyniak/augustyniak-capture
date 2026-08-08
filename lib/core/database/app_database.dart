@@ -7,6 +7,8 @@ import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
 import 'package:sqlite3/sqlite3.dart';
 
+import '../../features/costs/data/usage_repository.dart';
+
 class AppDatabase {
   AppDatabase._({required Database db, required String dbPath})
       : _db = db,
@@ -139,9 +141,13 @@ class AppDatabase {
     ''');
 
     _db.execute('''
-      CREATE INDEX IF NOT EXISTS idx_logs_timestamp 
+      CREATE INDEX IF NOT EXISTS idx_logs_timestamp
       ON logs(timestamp DESC);
     ''');
+
+    // Per-API-call cost history. Owned by UsageRepository so the same schema
+    // builds against an in-memory database in tests.
+    UsageRepository.createTable(_db);
   }
 
   /// Bring across whatever the pre-SQLite JSON files still hold, **without
