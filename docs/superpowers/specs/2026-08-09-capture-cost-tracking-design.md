@@ -60,6 +60,30 @@ when `costUsd` is NULL because no rate existed, adding that rate backfills the
 NULLs. There is nothing to overwrite there. Changing an *existing* rate never
 touches history.
 
+### Transcription bills by audio duration, not by tokens
+
+Confirmed against provider pricing on 2026-08-09: OpenAI charges per minute of
+audio for every transcription model (`gpt-transcribe` $0.0045/min,
+`gpt-4o-transcribe` and `whisper-1` $0.006/min, `gpt-4o-mini-transcribe`
+$0.003/min) and Groq charges per hour (`whisper-large-v3-turbo` $0.04/h,
+`whisper-large-v3` $0.111/h). None of them bills transcription by token.
+
+So the billable quantity for the transcription stage is `audioSeconds`, and
+`inputTokens`/`outputTokens` on those events are detail rather than price basis.
+The quantity is resolved in this order:
+
+1. The `usage` block, when the provider reports a duration (`usage.type ==
+   "duration"` on OpenAI). This is the provider's own count of what it billed.
+2. The capture's own `durationMs`, passed down through `beginJob`. A local
+   measurement of the same quantity, not an estimate.
+3. Unknown.
+
+**Case 3 is real and must be visible.** `MediaImporter` writes `durationMs: 0`
+for every upload (`media_importer.dart:58`), and the `gpt-*-transcribe` family
+returns token usage rather than a duration — so an uploaded audio file on one of
+those models has no duration from either source. Pricing it as zero would be the
+silent understatement this whole design exists to prevent.
+
 ### Missing rate is NULL, not zero
 
 Null and zero are different claims — the same distinction `Recording.category`
@@ -72,6 +96,14 @@ A NULL-cost event still stores its token counts, so the backfill has something
 to multiply once the rate arrives. The Config section lists every model that
 produced NULL-cost events, with a call count, so the gap is visible rather than
 inferred from a suspiciously low total.
+
+**A NULL cost has two possible causes and they must not be confused**, which is
+why the event carries `unpricedReason` (`noRate` / `noQuantity`) alongside the
+NULL. `noRate` means the price book had no entry — fixable by typing a rate, and
+backfillable afterwards. `noQuantity` means the rate exists but the billable
+amount is unknown (the audio-duration case above) — typing a rate fixes nothing,
+and listing that model under `MISSING RATES` would send the user to the wrong
+control. The Config section reports the two separately.
 
 ### Defaults live in code; settings hold only overrides
 
@@ -140,8 +172,9 @@ model        model name; '' when the profile sets none
 at           timestamp
 inputTokens  nullable — absent when the provider reports none
 outputTokens nullable
-audioSeconds nullable — whisper-1 bills by duration, not tokens
-costUsd      nullable — NULL means no rate was known
+audioSeconds nullable — the billable quantity for the transcription stage
+costUsd      nullable — NULL means the event could not be priced
+unpricedReason nullable — noRate | noQuantity; set exactly when costUsd is NULL
 ```
 
 `fromJson` follows the house rule: every field defaults when absent, unknown
@@ -180,7 +213,8 @@ CREATE TABLE IF NOT EXISTS usage_events (
   input_tokens INTEGER,
   output_tokens INTEGER,
   audio_seconds REAL,
-  cost_usd REAL
+  cost_usd REAL,
+  unpriced_reason TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_usage_capture ON usage_events(capture_id);
 CREATE INDEX IF NOT EXISTS idx_usage_at ON usage_events(at DESC);
@@ -222,8 +256,10 @@ the precedent.
   override and gets a `custom` marker with a reset. Only models present in the
   user's profiles or in the event history are listed — not forty rows for
   providers nobody uses. Footer: `defaults verified <date>`.
-- `MISSING RATES`: models that produced NULL-cost events, with call counts.
-  Adding a rate triggers the backfill.
+- `MISSING RATES`: models whose events are NULL-cost for `noRate`, with call
+  counts. Adding a rate triggers the backfill. Events NULL for `noQuantity` are
+  reported on their own line — no rate would fix them, so they must not appear
+  here.
 
 ### Queue card
 
@@ -267,9 +303,10 @@ up front. The card shows a cost only when events exist.
 
 Order, each step independently testable:
 
-1. `domain/` — `UsageEvent`, `ModelPrice`, `PriceBook` and its defaults. The
-   default rates must be read from each provider's current pricing page at this
-   step and stamped with `verifiedOn`; they are not to be written from memory.
+1. `domain/` — `UsageEvent`, `ModelPrice`, `PriceBook` and its defaults. Default
+   rates were read from each provider's pricing page on 2026-08-09 and are
+   listed in the implementation plan; they are stamped with that `verifiedOn`
+   date and were not written from memory.
 2. `data/` — the table in `AppDatabase` and `UsageRepository`.
 3. `UsageSink` and `usage` parsing in the three HTTP classes.
 4. `beginJob`/`endJob` in `_processOne`; wiring in `SettingsController`.
