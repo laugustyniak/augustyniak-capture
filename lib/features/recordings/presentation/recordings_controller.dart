@@ -383,22 +383,24 @@ class RecordingsController extends ChangeNotifier {
     }
     _logSink.log('Loaded ${_recordings.length} captures from disk.');
 
-    try {
-      final AppDatabase db = await AppDatabase.getInstance();
-      final AppSettings settings = await SettingsRepository().load() ?? AppSettings.empty;
-      if (settings.tursoDbUrl != null && settings.tursoAuthToken != null && settings.tursoSyncEnabled) {
-        final TursoSyncService syncService = TursoSyncService(db: db);
-        final bool synced = await syncService.pullFromTurso(
-          dbUrl: settings.tursoDbUrl!,
-          authToken: settings.tursoAuthToken!,
-        );
-        if (synced) {
-          _recordings = await _repository.loadAll();
-          _logSink.log('Synced ${_recordings.length} captures from Turso Cloud.');
+    if (!Platform.environment.containsKey('FLUTTER_TEST')) {
+      try {
+        final AppDatabase db = await AppDatabase.getInstance();
+        final AppSettings settings = await SettingsRepository().load() ?? AppSettings.empty;
+        if (settings.tursoDbUrl != null && settings.tursoAuthToken != null && settings.tursoSyncEnabled) {
+          final TursoSyncService syncService = TursoSyncService(db: db);
+          final bool synced = await syncService.pullFromTurso(
+            dbUrl: settings.tursoDbUrl!,
+            authToken: settings.tursoAuthToken!,
+          );
+          if (synced) {
+            _recordings = await _repository.loadAll();
+            _logSink.log('Synced ${_recordings.length} captures from Turso Cloud.');
+          }
         }
+      } catch (e) {
+        _logSink.log('Turso startup sync skipped: $e', level: LogLevel.warn);
       }
-    } catch (e) {
-      _logSink.log('Turso startup sync skipped: $e', level: LogLevel.warn);
     }
     unawaited(
       _gamificationController?.initialize(
@@ -2108,6 +2110,7 @@ class RecordingsController extends ChangeNotifier {
   }
 
   void _pushToTursoInBackground() {
+    if (Platform.environment.containsKey('FLUTTER_TEST')) return;
     unawaited(Future<void>(() async {
       try {
         final AppDatabase db = await AppDatabase.getInstance();
