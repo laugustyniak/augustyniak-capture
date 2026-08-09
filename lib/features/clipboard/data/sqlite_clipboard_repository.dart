@@ -110,7 +110,21 @@ class SqliteClipboardRepository implements ClipboardRepository {
 
   @override
   Future<void> updateItemText(String id, String text) async {
-    throw UnimplementedError('Task 3 of this plan supplies the real body.');
+    final AppDatabase db = _appDatabase ?? await AppDatabase.getInstance();
+    if (text.trim().isEmpty) return;
+
+    final int index = _items.indexWhere((ClipboardItem item) => item.id == id);
+    if (index == -1) return;
+    if (_items[index].type != ClipboardItemType.text) return;
+
+    // copied_at is deliberately untouched: getItems() reads
+    // ORDER BY copied_at DESC, so the entry keeps its place in the list.
+    db.rawDb.execute(
+      'UPDATE clipboard_items SET text = ?, preview = ? WHERE id = ?;',
+      <Object?>[text, ClipboardItem.previewFor(text), id],
+    );
+
+    await getItems();
   }
 
   @override
