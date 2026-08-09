@@ -138,6 +138,15 @@ class _ClipboardHistorySheetState extends State<ClipboardHistorySheet> {
 
   @override
   void dispose() {
+    // Clicking the modal barrier or dragging the sheet away pops the route and
+    // disposes this state with no focus change at all — `_FocusState.dispose`
+    // drops its listener before disposing the node, so `onFocusChange` never
+    // arrives, on desktop as much as anywhere. Without this the typing is lost
+    // as silently as it was when the pane swapped underneath it. Everything
+    // `_commitEdit` reads off the controller is read before its first `await`,
+    // so this is safe ahead of the disposal below, and it cannot throw into
+    // teardown because it swallows its own failure.
+    unawaited(_commitEdit());
     _searchController.removeListener(_onSearchChanged);
     _searchController.dispose();
     _scrollController.dispose();
@@ -163,7 +172,24 @@ class _ClipboardHistorySheetState extends State<ClipboardHistorySheet> {
   /// The chosen entry, or the newest one if the choice no longer resolves —
   /// which happens on every search keystroke and every eviction from the
   /// capped history.
+  ///
+  /// **An entry being edited is exempt from that fallback**, and is looked up in
+  /// the whole history rather than in the visible list. Everything else here
+  /// flushes a pending edit because it *initiates* the change (`_select`,
+  /// `_endEdit`, `dispose`); the list re-ordering underneath is the one change
+  /// nobody initiates. A new entry from the 750 ms poller, a search keystroke or
+  /// a collection chip can each make the edited entry stop being `visible.first`
+  /// — and swapping the pane unmounts the field, which `Focus.onFocusChange`
+  /// does **not** report, so the typing would be gone with no marker and no
+  /// warning. Pinning it is the same rule the Queue keeps: a row being edited
+  /// stays on screen whatever the filters do.
   ClipboardItem? _selectedIn(List<ClipboardItem> visible) {
+    final String? editing = _editingId;
+    if (editing != null) {
+      for (final ClipboardItem item in widget.watcherService.items) {
+        if (item.id == editing) return item;
+      }
+    }
     if (visible.isEmpty) return null;
     for (final ClipboardItem item in visible) {
       if (item.id == _selectedId) return item;
@@ -295,7 +321,16 @@ class _ClipboardHistorySheetState extends State<ClipboardHistorySheet> {
     final ClipboardItem? next = index >= 0 && index + 1 < visible.length
         ? visible[index + 1]
         : (index > 0 ? visible[index - 1] : null);
-    setState(() => _selectedId = next?.id);
+    setState(() {
+      _selectedId = next?.id;
+      // Deleting the entry ends any edit of it — and the mode must not outlive
+      // the editor. A stale `_editingId` stands `_handleKey` down for the rest
+      // of the session, so Enter would stop pasting and the arrows stop moving,
+      // with nothing on screen to explain it. The pending text is not written:
+      // the user has just said this entry should not exist.
+      _editingId = null;
+      _dirtyShown = false;
+    });
     await widget.watcherService.deleteItem(item.id);
   }
 
@@ -309,7 +344,14 @@ class _ClipboardHistorySheetState extends State<ClipboardHistorySheet> {
       confirmLabel: 'CLEAR',
     );
     if (!confirmed) return;
-    setState(() => _selectedId = null);
+    setState(() {
+      _selectedId = null;
+      // Same reason as `_delete`, and worse here: with every row gone there is
+      // nothing left to tap, so on the modal sheet a stale `_editingId` would
+      // leave Escape as the only key that does anything — and Escape closes it.
+      _editingId = null;
+      _dirtyShown = false;
+    });
     await widget.watcherService.clearHistory();
   }
 
@@ -428,6 +470,11 @@ class _ClipboardHistorySheetState extends State<ClipboardHistorySheet> {
   void _startEdit(ClipboardItem item) {
     setState(() {
       _editingId = item.id;
+      // Pinned as the selection too, not only as the edited id: EDIT is
+      // ordinarily pressed on the entry the pane resolved to by default, so
+      // `_selectedId` is still null at this point and every other reader here
+      // would keep answering "the newest entry".
+      _selectedId = item.id;
       _syncedText = item.text ?? '';
       _editController.text = _syncedText;
       _dirtyShown = false;
@@ -444,8 +491,21 @@ class _ClipboardHistorySheetState extends State<ClipboardHistorySheet> {
     if (id == null || !_isEditDirty) return;
     final String text = _editController.text;
     if (text.trim().isEmpty) return;
+    // Delivery first, state second — the rule `RecordingsController.route()`
+    // keeps. Advancing `_syncedText` before the write would clear the UNSAVED
+    // marker for a save that did not happen, and the two repositories disagree
+    // about whether that is even possible: the file-backed one swallows its IO
+    // errors, the SQLite one lets `rawDb.execute` throw.
+    try {
+      await widget.watcherService.updateItemText(id, text);
+    } catch (_) {
+      // Best-effort, like the app's other sinks: this runs from a focus change,
+      // a key press and `dispose`, none of which may take a throw. The marker
+      // stays up, which is the honest report — the text is still only in the
+      // field.
+      return;
+    }
     _syncedText = text;
-    await widget.watcherService.updateItemText(id, text);
     // The field is clean again, so the marker goes with it — this is the path a
     // focus loss takes, which reaches no other `setState`.
     if (mounted) setState(() => _dirtyShown = _isEditDirty);

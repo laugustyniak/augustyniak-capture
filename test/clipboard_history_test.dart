@@ -895,6 +895,159 @@ void main() {
 
       service.dispose();
     });
+
+    testWidgets('an entry arriving mid-edit does not steal the pane', (
+      WidgetTester tester,
+    ) async {
+      // The 750 ms poller inserts at the head of the list, so before the pin
+      // the pane resolved to the new entry, the field was unmounted — which
+      // `Focus.onFocusChange` never reports — and the typing was gone with no
+      // marker. Nobody initiated that change, which is why the other three
+      // flush points could not cover it.
+      final _MemoryClipboardRepository repository = _MemoryClipboardRepository();
+      await repository.addItem(_textItem('1', 'Being corrected'));
+      final _FakeClipboardGateway gateway = _FakeClipboardGateway();
+      final ClipboardWatcherService service = await pumpSheet(
+        tester,
+        repository,
+        gateway: gateway,
+      );
+
+      // EDIT is pressed on the entry the pane resolved to by default, so no
+      // selection has been made by hand at this point — the common path.
+      await tester.tap(find.text('EDIT'));
+      await tester.pump(const Duration(milliseconds: 100));
+      final Finder field = find.descendant(
+        of: find.byKey(ClipboardHistorySheet.previewKey),
+        matching: find.byType(TextField),
+      );
+      await tester.enterText(field, 'Corrected text');
+      await tester.pump(const Duration(milliseconds: 100));
+
+      gateway.text = 'Copied somewhere else';
+      await service.checkNow();
+      await tester.pump(const Duration(milliseconds: 200));
+
+      expect(
+        find.descendant(
+          of: find.byKey(ClipboardHistorySheet.listKey),
+          matching: find.text('Copied somewhere else'),
+        ),
+        findsOneWidget,
+      );
+      expect(field, findsOneWidget);
+
+      await tester.tap(find.text('DONE'));
+      await tester.pump(const Duration(milliseconds: 100));
+
+      expect(
+        repository.items.firstWhere((ClipboardItem e) => e.id == '1').text,
+        'Corrected text',
+      );
+
+      service.dispose();
+    });
+
+    testWidgets('a search that excludes the edited entry does not close it', (
+      WidgetTester tester,
+    ) async {
+      // The Queue keeps the same rule for a row being edited. Here the entry
+      // leaves the visible list entirely, so the pane has to look it up in the
+      // whole history rather than fall back to the newest match.
+      final _MemoryClipboardRepository repository = _MemoryClipboardRepository();
+      await repository.addItem(_textItem('1', 'Original'));
+      final ClipboardWatcherService service = await pumpSheet(
+        tester,
+        repository,
+      );
+
+      await tester.tap(find.text('EDIT'));
+      await tester.pump(const Duration(milliseconds: 100));
+      final Finder field = find.descendant(
+        of: find.byKey(ClipboardHistorySheet.previewKey),
+        matching: find.byType(TextField),
+      );
+      await tester.enterText(field, 'Corrected');
+      await tester.pump(const Duration(milliseconds: 100));
+
+      // Typing in the search box takes the focus, which commits, and the query
+      // then excludes the entry that was being edited.
+      await tester.enterText(find.byType(TextField).first, 'zzz');
+      await tester.pump(const Duration(milliseconds: 200));
+
+      expect(find.text('Nothing matches this collection or search.'),
+          findsOneWidget);
+      expect(field, findsOneWidget);
+      expect(repository.items.single.text, 'Corrected');
+
+      service.dispose();
+    });
+
+    testWidgets('disposing the sheet flushes the pending edit', (
+      WidgetTester tester,
+    ) async {
+      // Clicking the modal barrier or dragging the sheet away pops the route
+      // with no focus change at all — `_FocusState.dispose` drops its listener
+      // before disposing the node — so `dispose` is the last chance to write.
+      // Replacing the tree disposes the state exactly as the pop does.
+      final _MemoryClipboardRepository repository = _MemoryClipboardRepository();
+      await repository.addItem(_textItem('1', 'Before the fix'));
+      final ClipboardWatcherService service = await pumpSheet(
+        tester,
+        repository,
+      );
+
+      await tester.tap(find.text('EDIT'));
+      await tester.pump(const Duration(milliseconds: 100));
+      await tester.enterText(
+        find.descendant(
+          of: find.byKey(ClipboardHistorySheet.previewKey),
+          matching: find.byType(TextField),
+        ),
+        'Corrected on the way out',
+      );
+      await tester.pump(const Duration(milliseconds: 100));
+
+      await tester.pumpWidget(
+        MaterialApp(home: Scaffold(body: SizedBox.shrink())),
+      );
+      await tester.pump(const Duration(milliseconds: 100));
+
+      expect(repository.items.single.text, 'Corrected on the way out');
+
+      service.dispose();
+    });
+
+    testWidgets('deleting the edited entry leaves the key listener working', (
+      WidgetTester tester,
+    ) async {
+      // An `_editingId` with no editor mounted stands `_handleKey` down for the
+      // rest of the session: Enter stops pasting and the arrows stop moving,
+      // with nothing on screen to explain it.
+      final _MemoryClipboardRepository repository = _MemoryClipboardRepository();
+      await repository.addItem(_textItem('1', 'Older entry'));
+      await repository.addItem(_textItem('2', 'Newer entry'));
+      final _FakeClipboardGateway gateway = _FakeClipboardGateway();
+      final ClipboardWatcherService service = await pumpSheet(
+        tester,
+        repository,
+        gateway: gateway,
+      );
+
+      await tester.tap(find.text('EDIT'));
+      await tester.pump(const Duration(milliseconds: 100));
+      await tester.tap(find.text('DELETE'));
+      await tester.pump(const Duration(milliseconds: 200));
+
+      expect(repository.items, hasLength(1));
+
+      await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+      await tester.pump(const Duration(milliseconds: 200));
+
+      expect(gateway.copiedText, 'Older entry');
+
+      service.dispose();
+    });
   });
 }
 
