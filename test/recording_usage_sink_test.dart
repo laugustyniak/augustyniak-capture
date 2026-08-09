@@ -3,8 +3,21 @@ import 'package:augustyniak_capture/features/costs/data/usage_repository.dart';
 import 'package:augustyniak_capture/features/costs/domain/price_book.dart';
 import 'package:augustyniak_capture/features/costs/domain/usage_event.dart';
 import 'package:augustyniak_capture/features/costs/domain/usage_parsing.dart';
+import 'package:augustyniak_capture/features/logs/domain/log_event.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:sqlite3/sqlite3.dart';
+
+/// Records every call rather than persisting them, so a test can assert the
+/// sink actually told someone about a drop instead of only checking that
+/// nothing crashed.
+class _RecordingLogSink implements LogSink {
+  final List<String> messages = <String>[];
+
+  @override
+  void log(String message, {LogLevel level = LogLevel.info, String? recordingId}) {
+    messages.add(message);
+  }
+}
 
 void main() {
   late Database db;
@@ -140,6 +153,47 @@ void main() {
     );
 
     expect(repository.all(), isEmpty);
+  });
+
+  test('a record outside any job logs the drop rather than staying silent', () {
+    final _RecordingLogSink logSink = _RecordingLogSink();
+    final RecordingUsageSink logged = RecordingUsageSink(
+      repository: () => repository,
+      priceBook: () => const PriceBook(),
+      logSink: logSink,
+    );
+
+    // No `beginJob` call at all — this is what `retryEnrichment` used to do
+    // before it was made to open a job first, and the whole point of C1 was
+    // that the drop must never be invisible again.
+    logged.record(
+      provider: 'api.openai.com',
+      model: 'gpt-5.6-luna',
+      usage: const MeasuredUsage(inputTokens: 10),
+    );
+
+    expect(
+      logSink.messages,
+      contains(contains('Cost recording dropped')),
+    );
+  });
+
+  test('a repository resolver that throws never propagates out of record', () {
+    final RecordingUsageSink failing = RecordingUsageSink(
+      repository: () => throw StateError('database is not open yet'),
+      priceBook: () => const PriceBook(),
+    );
+
+    failing.beginJob('cap-9', UsageStage.enrichment);
+    expect(
+      () => failing.record(
+        provider: 'p',
+        model: 'gpt-5.6-luna',
+        usage: const MeasuredUsage(inputTokens: 1),
+      ),
+      returnsNormally,
+    );
+    failing.endJob();
   });
 
   test('a repository that throws never propagates out of record', () {

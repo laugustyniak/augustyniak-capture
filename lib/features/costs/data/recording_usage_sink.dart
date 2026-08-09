@@ -51,9 +51,10 @@ class RecordingUsageSink implements UsageSink {
   }) {
     _captureId = captureId;
     _stage = stage;
-    // Held for the *first* event of the job only. A twenty-minute capture is
-    // split into four requests; attaching the capture's full duration to each
-    // of them would bill the same audio four times.
+    // Held until the first event that needs it, then cleared by
+    // `_takeFallbackSeconds`. A twenty-minute capture is split into four
+    // requests; attaching the capture's full duration to each of them would
+    // bill the same audio four times.
     _pendingFallbackSeconds =
         (fallbackAudioSeconds ?? 0) > 0 ? fallbackAudioSeconds : null;
   }
@@ -74,16 +75,28 @@ class RecordingUsageSink implements UsageSink {
     final String? captureId = _captureId;
     final UsageStage? stage = _stage;
     // A call outside any job has no capture to bill. Dropping it is better than
-    // filing it under whichever capture ran last.
-    if (captureId == null || stage == null) return;
-
-    // The database is not open yet (early in `_bootstrap()`). Drop the event
-    // rather than throw or queue it — a cost row lost to this window is a
-    // rounding error against the alternative of failing the capture.
-    final UsageRepository? repository = _repository();
-    if (repository == null) return;
+    // filing it under whichever capture ran last — but it is also the one
+    // shape of loss this sink cannot recompute later, so it is worth a line
+    // in the log: a silent drop here is exactly what let `retryEnrichment`
+    // understate a capture's cost before it was made to open a job first.
+    if (captureId == null || stage == null) {
+      _logSink.log(
+        'Cost recording dropped — no open job.',
+        level: LogLevel.warn,
+      );
+      return;
+    }
 
     try {
+      // The database is not open yet (early in `_bootstrap()`). Drop the
+      // event rather than throw or queue it — a cost row lost to this window
+      // is a rounding error against the alternative of failing the capture.
+      // Resolved inside the `try` along with everything else below, so the
+      // class's "swallows everything" contract does not depend on every
+      // caller wrapping this call in its own handler.
+      final UsageRepository? repository = _repository();
+      if (repository == null) return;
+
       final double? seconds = usage.audioSeconds ?? _takeFallbackSeconds();
       final UsageEvent unpriced = UsageEvent(
         id: _idFactory(),
