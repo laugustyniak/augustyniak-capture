@@ -65,10 +65,28 @@ Dart UI.
 ### 2. The file set, and the one exclusion that is load-bearing
 
 Directories: `ios/`, `android/`, `macos/`, `linux/`, `windows/`.
-Extensions: `.swift .kt .java .m .h .cc .cpp .xml .plist .storyboard .xib`.
+Extensions: `.swift .kt .java .m .h .cc .cpp .xml .plist .storyboard .xib
+.strings .stringsdict .rc .xcconfig`.
 
-Build scripts (`.gradle`, `.kts`, `.cmake`, `.pbxproj`) are out of scope — they
-carry neither user-facing copy nor prose.
+`.strings`/`.stringsdict` hold no content today — none exist in this repo — but
+they are *the* iOS localisation file types, and are in scope so a future
+localisation effort cannot go unscanned by the guard that exists for exactly
+that category.
+
+**`.rc` and `.xcconfig` are in scope, correcting an earlier claim in this
+design that build scripts "carry neither user-facing copy nor prose."** That
+was wrong for these two: `windows/runner/Runner.rc` sets `CompanyName`,
+`FileDescription`, `ProductName` and `LegalCopyright`, which Explorer's
+Properties dialog and Task Manager render to the user, and
+`macos/Runner/Configs/AppInfo.xcconfig` sets `PRODUCT_COPYRIGHT`, which is
+substituted into `NSHumanReadableCopyright` and shown in the macOS About panel.
+Both are build configuration in the sense that they are consumed at build time,
+but their content ends up on screen, which is the property that puts a file in
+scope here — not its extension.
+
+`.gradle`, `.gradle.kts` and `.entitlements` remain out of scope: they
+genuinely carry neither user-facing copy nor prose, unlike `.rc`/`.xcconfig`.
+`.cmake` and `.pbxproj` are likewise excluded on the same genuine grounds.
 
 A path is skipped when any of its segments is `build`, `Pods`, `ephemeral`,
 `.gradle`, `DerivedData` or **`.symlinks`**.

@@ -20,9 +20,14 @@ import 'package:flutter_test/flutter_test.dart';
 /// files, comments included: no native file has an equivalent case, `CLAUDE.md`
 /// asks for English in comments too, and `.plist`/`.xml` carry user-facing text
 /// in nodes rather than in literals — `NSMicrophoneUsageDescription` is what
-/// the OS shows in the microphone consent dialog. A raw scan of all 52 native
-/// sources produced zero false positives, so the Dart tokenizer would buy
+/// the OS shows in the microphone consent dialog. A raw scan of every native
+/// source produced zero false positives, so the Dart tokenizer would buy
 /// nothing there and would miss the XML entirely.
+///
+/// **The native scan's boundary.** It covers `ios/`, `android/`, `macos/`,
+/// `linux/` and `windows/` and the extensions listed in the test below;
+/// anything outside that — other directories, other extensions, a platform
+/// directory a future `flutter create` adds — is not scanned.
 void main() {
   // Files allowed to hold Polish, each for a reason that is not display text.
   const Map<String, String> allowed = <String, String>{
@@ -158,6 +163,10 @@ void main() {
       '.plist',
       '.storyboard',
       '.xib',
+      '.strings',
+      '.stringsdict',
+      '.rc',
+      '.xcconfig',
     ];
     // `build`/`ephemeral` are ordinary directories; `.symlinks` is not — it
     // points into the pub cache, and `listSync` follows links by default, so
@@ -173,9 +182,15 @@ void main() {
     };
 
     final List<File> sources = <File>[];
+    final List<String> missingDirs = <String>[];
+    final Map<String, int> countByDir = <String, int>{};
     for (final String dir in platformDirs) {
       final Directory root = Directory(dir);
-      if (!root.existsSync()) continue;
+      if (!root.existsSync()) {
+        missingDirs.add(dir);
+        continue;
+      }
+      int countForDir = 0;
       for (final FileSystemEntity entity
           in root.listSync(recursive: true, followLinks: false)) {
         if (entity is! File) continue;
@@ -183,8 +198,22 @@ void main() {
         if (relative.split('/').any(skippedSegments.contains)) continue;
         if (!extensions.any(relative.endsWith)) continue;
         sources.add(entity);
+        countForDir++;
       }
+      countByDir[dir] = countForDir;
     }
+
+    // `CLAUDE.md` documents android/ and ios/ as partial directories that
+    // `flutter create --platforms=…` regenerates — so a missing one here is
+    // not "nothing to scan", it is "this checkout cannot be scanned properly"
+    // and must fail loudly rather than being skipped like an empty directory.
+    expect(
+      missingDirs,
+      isEmpty,
+      reason: 'these platform directories do not exist: '
+          '${missingDirs.join(', ')}. Regenerate them (see CLAUDE.md, '
+          '`flutter create --platforms=…`) before trusting this test.',
+    );
 
     // The most important assertion in this test. A typo in a directory name or
     // an extension, or a skip rule one segment too broad, otherwise yields a
@@ -196,6 +225,20 @@ void main() {
           'nothing. Run from the repository root, and check platformDirs, '
           'extensions and skippedSegments before trusting a green run.',
     );
+
+    // The assertion above is a union across all five directories, so one
+    // platform dropping to zero matches hides behind the other four staying
+    // healthy. Check each directory individually so a regression names itself.
+    for (final String dir in platformDirs) {
+      expect(
+        countByDir[dir],
+        greaterThan(0),
+        reason: '$dir/ exists but matched no native source files, so it has '
+            'silently dropped out of the scan while the combined count above '
+            'stays non-empty. Check extensions and skippedSegments for $dir '
+            'specifically.',
+      );
+    }
 
     final List<String> offences = <String>[];
     for (final File file in sources) {
@@ -218,9 +261,17 @@ void main() {
       isEmpty,
       reason: 'Polish found in native platform sources. Unlike the lib/ scan '
           'this one reads whole files, comments included — CLAUDE.md asks for '
-          'English there too. Translate it. If a native file ever has a '
-          'genuine reason to hold Polish, add an allowlist here rather than '
-          'narrowing the scan:\n${offences.join('\n')}',
+          'English there too. Translate it.\n'
+          'One predictable false positive: Xcode\'s "// Created by <Full '
+          'Name> on <date>" template header trips this if the signed-in '
+          'name carries a Polish diacritic (this checkout\'s `git config '
+          'user.name` is "Łukasz Augustyniak") — that is unwritten '
+          'boilerplate, not prose anyone authored, so the fix is to delete '
+          'the line, not to "translate" a name. There is no native '
+          'allowlist today (see the doc comment above `main()` for why); if '
+          'a native file ever needs a genuine exemption, that is a code '
+          'change to this test, not an entry to add to an existing '
+          'map:\n${offences.join('\n')}',
     );
   });
 }
