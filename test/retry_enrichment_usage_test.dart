@@ -491,4 +491,108 @@ void main() {
       );
     },
   );
+
+  test(
+    'three overlapping openers — two retries queued behind the drain — stay '
+    'strictly FIFO: no nesting, no end:null, and nobody starves',
+    () async {
+      final Directory dir = await _tmp();
+      addTearDown(() => dir.delete(recursive: true));
+      final _AmbientSink sink = _AmbientSink();
+      final _GatedRecordingEnrichment gated = _GatedRecordingEnrichment(
+        _verdict,
+        sink,
+      );
+      final _FakeRepo repo = _FakeRepo(dir)
+        ..saved = <Recording>[
+          _completedNote(dir, 'cap-b', 'already has text for b'),
+          _completedNote(dir, 'cap-c', 'already has text for c'),
+        ];
+      final RecordingsController c = _controller(
+        repo,
+        enrichment: gated,
+        usageSink: sink,
+        processor: _EchoProcessor(),
+      );
+      addTearDown(c.dispose);
+      await c.initialize();
+
+      // First opener: the drain, carrying a freshly captured note through to
+      // its enrichment call, which the shared gate holds open.
+      await c.addTextNote('hello from a');
+      final String aId = c.recordings
+          .firstWhere((Recording r) => r.id != 'cap-b' && r.id != 'cap-c')
+          .id;
+      await gated.started.future;
+      expect(sink.jobLog, <String>[
+        'begin:$aId:transcription',
+        'end:$aId',
+        'begin:$aId:enrichment',
+      ]);
+
+      // Second and third openers, kicked off back-to-back with **no await
+      // between them** — this is the exact window the fix depends on. Each
+      // call must publish its own place in the queue *before* it awaits the
+      // one ahead of it, so the retry for 'cap-c' has to see the retry for
+      // 'cap-b' already registered rather than both reading the drain's
+      // future as "ahead" and racing each other once it resolves.
+      final Future<void> retryB = c.retryEnrichment('cap-b');
+      final Future<void> retryC = c.retryEnrichment('cap-c');
+      await _settle();
+
+      // Neither retry may reach the model while 'a's job is still open — both
+      // must be queued behind it, never racing it.
+      expect(gated.calls, 1);
+      expect(sink.jobLog, <String>[
+        'begin:$aId:transcription',
+        'end:$aId',
+        'begin:$aId:enrichment',
+      ], reason: 'no second (or third) scope may open under the first');
+
+      // Release the drain; the two retries take their turn, strictly in the
+      // order they asked.
+      gated.release.complete();
+      await retryB;
+      await retryC;
+      await c.waitForProcessing();
+
+      expect(sink.droppedWithNoOpenJob, 0);
+      expect(gated.calls, 3);
+      expect(sink.attributedTo, <String>[aId, 'cap-b', 'cap-c']);
+      expect(sink.jobLog, <String>[
+        'begin:$aId:transcription',
+        'end:$aId',
+        'begin:$aId:enrichment',
+        'end:$aId',
+        'begin:cap-b:enrichment',
+        'end:cap-b',
+        'begin:cap-c:enrichment',
+        'end:cap-c',
+      ]);
+      expect(sink.jobLog, isNot(contains('end:null')));
+
+      // The exact sequence above already proves this, but state it as a
+      // standalone invariant too: every `begin:` is matched by its own `end:`
+      // before the next `begin:` starts — perfectly balanced, never nesting.
+      bool open = false;
+      for (final String entry in sink.jobLog) {
+        if (entry.startsWith('begin:')) {
+          expect(
+            open,
+            isFalse,
+            reason: 'a second job opened on top of one still running: $entry',
+          );
+          open = true;
+        } else {
+          expect(
+            open,
+            isTrue,
+            reason: 'a job closed with none open: $entry',
+          );
+          open = false;
+        }
+      }
+      expect(open, isFalse);
+    },
+  );
 }
