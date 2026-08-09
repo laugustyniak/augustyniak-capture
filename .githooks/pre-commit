@@ -58,6 +58,13 @@ fi
 # Every pattern is ERE, never PCRE. BSD grep has no `-P`, so a lookaround would
 # make this hook behave differently depending on whether Homebrew's grep is
 # earlier in PATH. The system grep is called explicitly for the same reason.
+#
+# The diff is taken per path, one file at a time, which defeats git's rename
+# detection: `git mv` renders as a fresh add and every line of the moved file
+# is scanned as new. Moving a file that legitimately contains a 64-hex
+# constant or a `token: '...'` fixture will therefore refuse and needs
+# `--no-verify`. Fixing that means diffing the whole index at once instead of
+# per path, which is a larger change than this hook currently makes.
 
 jwt_re='eyJ[A-Za-z0-9_-]{8,}\.eyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}'
 prov_re='(sk-ant-[A-Za-z0-9_-]{20,}|sk-[A-Za-z0-9]{20,}|gsk_[A-Za-z0-9]{20,}|AKIA[0-9A-Z]{16})'
@@ -68,13 +75,25 @@ hex_re='(^|[^0-9a-f])[0-9a-f]{64}([^0-9a-f]|$)'
 # A secret-ish name, then `:` or `=`, then a quoted value. The only rule here
 # that does not bet on a known shape.
 ctx_re='(secret|token|password|passwd|api_?key|access_?key|auth_?token|auth_?key)[A-Za-z0-9_]*[[:space:]]*[:=][[:space:]]*r?("|'"'"')[^"'"'"'[:space:]]{16,}("|'"'"')'
+# `named` false-positive exclusion: `enc:v1:` is this repository's own
+# on-disk ciphertext prefix (lib/features/settings/domain/token_cipher.dart).
+# A quoted value that starts with it is by definition not a plaintext
+# credential — it is the encrypted-token fixture this codebase's own tests
+# reuse in four files.
+enc_re='[:=][[:space:]]*r?("|'"'"')enc:v1:'
 
 GREP=/usr/bin/grep
 [ -x "$GREP" ] || GREP=grep
 
 findings=''
 
-while IFS= read -r path; do
+# `-z` NUL-separates the path list and `-c core.quotePath=false` turns off
+# the default quoting of non-ASCII/special bytes in git's own output. Without
+# both, a path like `kawiarnia-café.txt` arrives as the literal quoted string
+# `"kawiarnia-caf\303\251.txt"` — the `git diff -- "$path"` below then matches
+# nothing, `added` comes back empty, and the file is skipped with no error:
+# a silent bypass of every rule below for any non-ASCII filename.
+while IFS= read -r -d '' path; do
   [ -n "$path" ] || continue
 
   case "$path" in
@@ -82,12 +101,19 @@ while IFS= read -r path; do
     *) skip_hex='' ;;
   esac
 
-  # `-U0` means no context lines, so every `+` line is an addition. The awk
-  # tracks the new-file line number from each hunk header and prints
-  # "<line>:<content>". `+++ b/path` is a header, not an addition.
-  added=$(git diff --cached -U0 -- "$path" | awk '
-    /^\+\+\+/ { next }
-    /^@@/ { if (match($0, /\+[0-9]+/)) n = substr($0, RSTART + 1, RLENGTH - 1) + 0; next }
+  # `-U0` means no context lines, so every `+` line is an addition. `--no-color`
+  # keeps SGR escapes out of the diff — with `color.ui=always` set, `/^\+/`
+  # would never match a colorized `+` line and the content scan would go dark
+  # while the path rule above kept working, which looks alive but is not. The
+  # awk tracks the new-file line number from each hunk header and prints
+  # "<line>:<content>". `+++ b/path` is the file header, not an addition — but
+  # only *before* the first `@@`: a genuine added line whose content starts
+  # with `++` renders as `+++...` too, and treating every such line as a
+  # header would both drop it from the scan and desync every later line
+  # number in that hunk.
+  added=$(git diff --cached -U0 --no-color -- "$path" | awk '
+    /^@@/ { seen_hunk = 1; if (match($0, /\+[0-9]+/)) n = substr($0, RSTART + 1, RLENGTH - 1) + 0; next }
+    !seen_hunk && /^\+\+\+/ { next }
     /^\+/ { print n ":" substr($0, 2); n++ }
   ')
   [ -n "$added" ] || continue
@@ -101,13 +127,18 @@ while IFS= read -r path; do
       named)    re=$ctx_re; flags='-i' ;;
     esac
 
+    matched=$(printf '%s\n' "$added" | $GREP -E $flags "$re" || true)
+    if [ "$rule" = named ]; then
+      matched=$(printf '%s\n' "$matched" | $GREP -v -E -i "$enc_re" || true)
+    fi
+
     while IFS= read -r hit; do
       [ -n "$hit" ] || continue
       findings="${findings}  ${path}:${hit%%:*}  [${rule}]
 "
-    done < <(printf '%s\n' "$added" | $GREP -E $flags "$re" || true)
+    done < <(printf '%s\n' "$matched")
   done
-done < <(git diff --cached --name-only --diff-filter=ACMR)
+done < <(git -c core.quotePath=false diff --cached --name-only -z --diff-filter=ACMR)
 
 if [ -n "$findings" ]; then
   echo "pre-commit: refusing to commit what looks like a credential." >&2
