@@ -473,8 +473,11 @@ dla zmiany wizualnej zielony zestaw testów opisuje tylko to, o co go zapytano.
 W `test/clipboard_history_test.dart`, w grupie widgetowej:
 
 ```dart
-    /// Builds the sheet with one text entry selected, ready to edit.
-    Future<ClipboardWatcherService> pumpOneEntry(
+    /// Builds the sheet over an already-populated repository.
+    ///
+    /// Every entry must be added **before** this call: the in-memory fake does
+    /// not notify, so an entry added afterwards never reaches the list.
+    Future<ClipboardWatcherService> pumpSheet(
       WidgetTester tester,
       _MemoryClipboardRepository repository,
     ) async {
@@ -496,25 +499,24 @@ W `test/clipboard_history_test.dart`, w grupie widgetowej:
     ) async {
       final _MemoryClipboardRepository repository = _MemoryClipboardRepository();
       await repository.addItem(_textItem('txt', 'Text to correct'));
-      final ClipboardWatcherService service =
-          await pumpOneEntry(tester, repository);
-
-      expect(find.text('EDIT'), findsOneWidget);
-
-      // Selecting the image entry withdraws the action: an image has no body
-      // to rewrite, and a control that does nothing is worse than none.
+      // Added last, so it is the newest entry and the pane opens on it.
       await repository.addItem(_imageItem('img', '/tmp/does-not-exist.png'));
-      await service.updateItemText('txt', 'Text to correct');
-      await tester.pump(const Duration(milliseconds: 100));
+      final ClipboardWatcherService service =
+          await pumpSheet(tester, repository);
+
+      // An image has no body to rewrite, and a control that does nothing is
+      // worse than none.
+      expect(find.text('EDIT'), findsNothing);
+
       await tester.tap(
         find.descendant(
           of: find.byKey(ClipboardHistorySheet.listKey),
-          matching: find.textContaining('image'),
+          matching: find.text('Text to correct'),
         ),
       );
-      await tester.pump(const Duration(milliseconds: 100));
+      await tester.pump(const Duration(milliseconds: 200));
 
-      expect(find.text('EDIT'), findsNothing);
+      expect(find.text('EDIT'), findsOneWidget);
 
       service.dispose();
     });
