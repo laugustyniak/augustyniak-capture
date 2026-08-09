@@ -12,6 +12,13 @@
 # rewrite. Once pushed, `refs/pull/*` keeps the blob reachable even after that
 # rewrite, so the only reliable point to stop it is before the commit exists.
 #
+# It now does a second job. The path list above only ever covers the leak that
+# already happened — it could not have seen the working Turso JWT and R2 secret
+# key that sat inlined in four source files and reached this public repository.
+# So the staged *content* is scanned too, for four credential shapes. That scan
+# is a tripwire, not a proof: a credential in an unrecognised format, assigned
+# to an unrecognised name, still passes.
+#
 # Enable once per clone (same setting the pre-push hook uses):
 #   git config core.hooksPath .githooks
 # Deliberate override, if a file here ever genuinely belongs in the repo:
@@ -38,5 +45,83 @@ if [ -n "$staged" ]; then
   echo >&2
   echo "They are already in .gitignore; something staged them anyway." >&2
   echo "If one truly belongs in the repo, commit with --no-verify." >&2
+  exit 1
+fi
+
+# ---------------------------------------------------------------------------
+# Secret scan over the staged *added* lines.
+#
+# Whole staged files are deliberately not scanned: a file that already contains
+# a match would then block every future edit to it, and a hook people routinely
+# bypass is worse than no hook — it trains the bypass.
+#
+# Every pattern is ERE, never PCRE. BSD grep has no `-P`, so a lookaround would
+# make this hook behave differently depending on whether Homebrew's grep is
+# earlier in PATH. The system grep is called explicitly for the same reason.
+
+jwt_re='eyJ[A-Za-z0-9_-]{8,}\.eyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}'
+prov_re='(sk-ant-[A-Za-z0-9_-]{20,}|sk-[A-Za-z0-9]{20,}|gsk_[A-Za-z0-9]{20,}|AKIA[0-9A-Z]{16})'
+# Exactly 64 hex, not a slice of something longer. An R2 secret key is this
+# shape — and so is every sha256 in pubspec.lock, which is why generated files
+# are skipped for this rule and only this one.
+hex_re='(^|[^0-9a-f])[0-9a-f]{64}([^0-9a-f]|$)'
+# A secret-ish name, then `:` or `=`, then a quoted value. The only rule here
+# that does not bet on a known shape.
+ctx_re='(secret|token|password|passwd|api_?key|access_?key|auth_?token|auth_?key)[A-Za-z0-9_]*[[:space:]]*[:=][[:space:]]*r?("|'"'"')[^"'"'"'[:space:]]{16,}("|'"'"')'
+
+GREP=/usr/bin/grep
+[ -x "$GREP" ] || GREP=grep
+
+findings=''
+
+while IFS= read -r path; do
+  [ -n "$path" ] || continue
+
+  case "$path" in
+    *.lock|.metadata|*Package.resolved|*.pbxproj) skip_hex=1 ;;
+    *) skip_hex='' ;;
+  esac
+
+  # `-U0` means no context lines, so every `+` line is an addition. The awk
+  # tracks the new-file line number from each hunk header and prints
+  # "<line>:<content>". `+++ b/path` is a header, not an addition.
+  added=$(git diff --cached -U0 -- "$path" | awk '
+    /^\+\+\+/ { next }
+    /^@@/ { if (match($0, /\+[0-9]+/)) n = substr($0, RSTART + 1, RLENGTH - 1) + 0; next }
+    /^\+/ { print n ":" substr($0, 2); n++ }
+  ')
+  [ -n "$added" ] || continue
+
+  for rule in jwt provider hex named; do
+    flags=''
+    case "$rule" in
+      jwt)      re=$jwt_re ;;
+      provider) re=$prov_re ;;
+      hex)      [ -n "$skip_hex" ] && continue; re=$hex_re ;;
+      named)    re=$ctx_re; flags='-i' ;;
+    esac
+
+    while IFS= read -r hit; do
+      [ -n "$hit" ] || continue
+      findings="${findings}  ${path}:${hit%%:*}  [${rule}]
+"
+    done < <(printf '%s\n' "$added" | $GREP -E $flags "$re" || true)
+  done
+done < <(git diff --cached --name-only --diff-filter=ACMR)
+
+if [ -n "$findings" ]; then
+  echo "pre-commit: refusing to commit what looks like a credential." >&2
+  echo >&2
+  echo "These staged lines match a credential shape. The value is deliberately" >&2
+  echo "not printed — this repository is public, and echoing it here would put" >&2
+  echo "it in your scrollback and shell history:" >&2
+  echo >&2
+  printf '%s' "$findings" >&2
+  echo >&2
+  echo "If it is a real credential: ROTATE IT. Unstaging is not enough once a" >&2
+  echo "value has reached the working tree — it may already be in a build, a" >&2
+  echo "log, or a screen share. This repository has paid that bill once." >&2
+  echo >&2
+  echo "If it is a false positive, commit with --no-verify." >&2
   exit 1
 fi
