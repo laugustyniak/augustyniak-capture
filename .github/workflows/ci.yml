@@ -70,8 +70,14 @@ jobs:
       - name: Build macOS
         run: flutter build macos --debug
 
-      - name: Build iOS simulator
-        run: flutter build ios --simulator --debug --no-codesign
+      # Device, not simulator, and not by preference: GoogleMLKit — pulled in by
+      # mobile_scanner for QR pairing — ships no arm64 slice for the simulator.
+      # macos-latest is Apple Silicon with an iOS 26+ simulator, where arm64 is
+      # required, so the plugin is dropped from the link and the build dies on
+      # `Module 'mobile_scanner' not found`. The device slice has arm64 and
+      # builds fine. This also gates the artefact that actually ships.
+      - name: Build iOS (device)
+        run: flutter build ios --debug --no-codesign
 
   # Windows-specific native gate for global hotkeys, OCR and media plugins.
   # Analyze alone would never catch a broken native registration.

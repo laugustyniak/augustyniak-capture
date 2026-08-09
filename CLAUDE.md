@@ -127,6 +127,8 @@ six minutes and a Dart test can make in one second belong in the Dart test:
 `ios_deployment_target_test.dart` and `macos_signing_test.dart` both exist for
 that reason.
 
+**The iOS job builds for a device, never the simulator, and that is a dependency limitation rather than a preference.** `mobile_scanner` (QR pairing) pulls in GoogleMLKit, which ships **no arm64 slice for the simulator**. `macos-latest` is Apple Silicon with an iOS 26+ simulator, where arm64 is required, so the plugin is dropped from the link and the build dies on `Module 'mobile_scanner' not found` — a message that says nothing about architectures. Locally the same state is only a warning and `flutter build ios --simulator` succeeds, which is why this looked like a runner quirk for a day. The device slice has arm64 and builds cleanly. Dropping the simulator costs nothing a CI gate wants: the device artefact is the one that ships.
+
 The `pre-push` hook still runs `flutter analyze` + `flutter test` locally, and
 is worth keeping — it is what stops a branch that does not compile from
 reaching review at all. Enable it once per clone:
