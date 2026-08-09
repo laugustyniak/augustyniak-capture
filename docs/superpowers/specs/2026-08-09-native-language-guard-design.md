@@ -100,11 +100,15 @@ repository does not control. The implementation therefore does **both**: passes
 `followLinks: false` *and* filters the segments. The first handles symlinks, the
 second handles `build/` and `ephemeral/`, which are ordinary directories.
 
-The exclusion list is measured rather than guessed. In a worktree where only
-`flutter pub get` has run, the unfiltered find returns 60 files; eight of them
-are under `ios/Flutter/ephemeral/` and `macos/Flutter/ephemeral/`
-(`FlutterGeneratedPluginSwiftPackage`, `FlutterFramework`). Filtering leaves 52,
-matching a clean checkout exactly.
+The exclusion list is measured rather than guessed. Measured against the
+original eleven extensions, in a worktree where only `flutter pub get` has run,
+the unfiltered find returned 60 files; eight of them are under
+`ios/Flutter/ephemeral/` and `macos/Flutter/ephemeral/`
+(`FlutterGeneratedPluginSwiftPackage`, `FlutterFramework`), and filtering left
+52 — matching a clean checkout exactly. **The four extensions added above raise
+that to 62**, which is the current figure; the eight excluded `ephemeral/` files
+are unaffected by the widening. No number here is asserted by a test, on
+purpose: pinning the count would fail on every legitimately added native file.
 
 ### 3. One definition of each pattern
 
