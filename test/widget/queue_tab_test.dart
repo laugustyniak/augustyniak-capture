@@ -508,8 +508,14 @@ void main() {
     );
     await pumpQueue(tester, controller);
 
-    expect(find.text('file verified · 2.0 MB · persisted'), findsOneWidget);
-    expect(find.text('file verified · persisted'), findsOneWidget);
+    // Neither the card nor the row is wired to a usage repository — that is
+    // the editor's job (`test/widget/cost_readout_test.dart`) — so every card
+    // reads `cost —` here rather than a fabricated `$0.0000`.
+    expect(
+      find.text('file verified · 2.0 MB · cost — · persisted'),
+      findsOneWidget,
+    );
+    expect(find.text('file verified · cost — · persisted'), findsOneWidget);
   });
 
   testWidgets('text and image items get neither play nor open', (

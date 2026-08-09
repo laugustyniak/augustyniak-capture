@@ -107,13 +107,26 @@ class RecordingLeadingTile extends StatelessWidget {
   }
 }
 
-/// `✓ file verified · 6.8 MB · persisted` — the durability guarantee, stated on
-/// every row in every mode. The size segment disappears on legacy rows, which
-/// never recorded one, rather than printing a made-up `0 B`.
+/// `✓ file verified · 6.8 MB · $0.0021 · persisted` — the durability guarantee,
+/// stated on every row in every mode, with what the capture cost folded into
+/// the same line. The size segment disappears on legacy rows, which never
+/// recorded one, rather than printing a made-up `0 B`; the cost segment does
+/// the same for [costUsd] — null means no usage event exists yet, which reads
+/// as `cost —` rather than the false claim `$0.0000` would make. That
+/// distinction is the whole point of cost tracking, so it is never collapsed.
 class VerificationLine extends StatelessWidget {
-  const VerificationLine({super.key, required this.recording});
+  // Not `const`: this widget paints `Console.green`, and a const constructor
+  // would keep painting the previous palette after a theme swap — a stale
+  // frame no widget test can see. See the theme rule in CLAUDE.md.
+  VerificationLine({super.key, required this.recording, this.costUsd});
 
   final Recording recording;
+
+  /// Sum of this capture's usage events. Null means no event has been recorded
+  /// for it yet (no API call made, or the feature predates this capture) — a
+  /// state distinct from "it cost nothing" and rendered as `cost —` rather
+  /// than as a zero.
+  final double? costUsd;
 
   @override
   Widget build(BuildContext context) {
@@ -121,6 +134,7 @@ class VerificationLine extends StatelessWidget {
     final String text = <String>[
       'file verified',
       ?size,
+      costUsd == null ? 'cost —' : formatUsd(costUsd!),
       'persisted',
     ].join(' · ');
 

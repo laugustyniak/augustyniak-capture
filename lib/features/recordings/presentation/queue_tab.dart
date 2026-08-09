@@ -5,6 +5,9 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import '../../../app/ui_kit.dart';
+import '../../costs/data/usage_repository.dart';
+import '../../costs/domain/price_book.dart';
+import '../../costs/domain/usage_event.dart';
 import '../../projects/domain/project.dart';
 import '../../projects/presentation/projects_controller.dart';
 import '../domain/agent_artifact.dart';
@@ -55,11 +58,25 @@ class QueueTab extends StatefulWidget {
     required this.controller,
     this.projects,
     this.initialProjectId,
+    this.usageRepository,
+    this.storagePrice = StoragePrice.defaults,
   });
 
   final RecordingsController controller;
   final ProjectsController? projects;
   final String? initialProjectId;
+
+  /// Null until the shell's database open resolves (or on a build that never
+  /// opened one) — the editor's `COST` section reads through this the same way
+  /// the Config tab's PRICING section does, and renders nothing while it is
+  /// null rather than a section with no data behind it.
+  final UsageRepository? usageRepository;
+
+  /// What the capture's stored source costs to keep, per GB-month. Read off
+  /// `AppSettings.storagePrice` by the shell, which already three-state-
+  /// defaults to [StoragePrice.defaults] for an install that never overrode
+  /// a rate.
+  final StoragePrice storagePrice;
 
   @override
   State<QueueTab> createState() => _QueueTabState();
@@ -715,6 +732,14 @@ class _QueueTabState extends State<QueueTab> {
           controller.setProject(recording.id, value),
       onDelete: () => _confirmDelete(recording),
       onDone: () => setState(() => editingId = null),
+      // Resolved here rather than handed to the editor as a repository: the
+      // editor's `CostSection` stays a pure widget over a plain list, the same
+      // rule `revisions` already follows for `RevisionHistorySection`. Null
+      // repository (database not open yet) degrades to no events at all.
+      usageEvents:
+          widget.usageRepository?.forCapture(recording.id) ??
+          const <UsageEvent>[],
+      storagePrice: widget.storagePrice,
     );
   }
 

@@ -706,6 +706,12 @@ class _RecordingsPageState extends State<RecordingsPage> {
                                     controller: controller,
                                     projects: projects,
                                     initialProjectId: activeQueueProjectFilterId,
+                                    // Null until `_bootstrap()`'s database open
+                                    // resolves — same nullable resolver shape
+                                    // the PRICING section below already reads
+                                    // through.
+                                    usageRepository: _usageRepository,
+                                    storagePrice: settings.storagePrice,
                                   ),
                                   TimerTab(controller: timer, settings: settings),
                                   ProjectsTab(

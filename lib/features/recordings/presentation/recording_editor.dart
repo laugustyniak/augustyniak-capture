@@ -4,6 +4,9 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import '../../../app/ui_kit.dart';
+import '../../costs/domain/price_book.dart';
+import '../../costs/domain/usage_event.dart';
+import '../../costs/presentation/cost_section.dart';
 import '../../projects/domain/project.dart';
 import '../domain/capture_category.dart';
 import '../domain/recording.dart';
@@ -50,6 +53,8 @@ class RecordingEditor extends StatefulWidget {
     this.onDelete,
     this.projects = const <Project>[],
     this.onProjectChanged,
+    this.usageEvents = const <UsageEvent>[],
+    this.storagePrice = StoragePrice.defaults,
   });
 
   /// Public so a test asserts on the same string the widget renders.
@@ -84,6 +89,19 @@ class RecordingEditor extends StatefulWidget {
   /// defined one should not be shown a control with a single `—` in it.
   final List<Project> projects;
   final ValueChanged<String?>? onProjectChanged;
+
+  /// This capture's usage events, resolved by the caller from `UsageRepository`
+  /// — see the class doc on [CostSection] for why the widget takes a plain
+  /// list rather than the repository itself. Empty is the common case (a text
+  /// note, which makes no API call; the repository not open yet), and renders
+  /// no `COST` section at all, the same way an empty [revisions] renders no
+  /// `HISTORY` one.
+  final List<UsageEvent> usageEvents;
+
+  /// What the capture's stored source costs to keep, per GB-month. Read from
+  /// `AppSettings.storagePrice`, which already three-state-defaults to
+  /// [StoragePrice.defaults] when the user has never overridden a rate.
+  final StoragePrice storagePrice;
 
   @override
   State<RecordingEditor> createState() => _RecordingEditorState();
@@ -351,10 +369,23 @@ class _RecordingEditorState extends State<RecordingEditor> {
                 const SizedBox(height: 4),
                 RevisionHistorySection(revisions: widget.revisions),
               ],
+              if (widget.usageEvents.isNotEmpty) ...<Widget>[
+                const SizedBox(height: 4),
+                CostSection(
+                  events: widget.usageEvents,
+                  sizeBytes: recording.sizeBytes,
+                  storagePrice: widget.storagePrice,
+                ),
+              ],
               _EditorRule(),
               Row(
                 children: <Widget>[
-                  Expanded(child: VerificationLine(recording: recording)),
+                  Expanded(
+                    child: VerificationLine(
+                      recording: recording,
+                      costUsd: _totalCostUsd(widget.usageEvents),
+                    ),
+                  ),
                   const SizedBox(width: 8),
                   if (widget.onDelete != null) ...<Widget>[
                     _DeleteButton(onTap: widget.onDelete!),
@@ -589,4 +620,22 @@ class _EditorRule extends StatelessWidget {
       ),
     );
   }
+}
+
+/// The sum of a capture's usage events, or null if any single one of them was
+/// never priced.
+///
+/// A partial sum would misrepresent an unpriced component as costing nothing
+/// — exactly the fabricated-zero the `costUsd` / `cost —` distinction on
+/// [VerificationLine] exists to refuse — so one unknown collapses the whole
+/// total to unknown rather than being silently dropped from it.
+double? _totalCostUsd(List<UsageEvent> events) {
+  if (events.isEmpty) return null;
+  double total = 0;
+  for (final UsageEvent event in events) {
+    final double? cost = event.costUsd;
+    if (cost == null) return null;
+    total += cost;
+  }
+  return total;
 }
