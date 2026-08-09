@@ -168,6 +168,16 @@ class ClipboardWatcherService extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// Overwrites an entry's text in place.
+  ///
+  /// Deliberately leaves `_lastText` and `_lastImagePath` alone: an edit never
+  /// writes to the system clipboard, so the next poll sees nothing new and no
+  /// duplicate of our own edit is captured.
+  Future<void> updateItemText(String id, String text) async {
+    await _repository.updateItemText(id, text);
+    notifyListeners();
+  }
+
   Future<void> deleteItem(String id) async {
     await _repository.deleteItem(id);
     notifyListeners();

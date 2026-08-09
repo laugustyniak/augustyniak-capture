@@ -525,6 +525,30 @@ void main() {
         service.dispose();
       },
     );
+
+    test('editing an item notifies listeners and never touches the clipboard',
+        () async {
+      final _MemoryClipboardRepository repository = _MemoryClipboardRepository();
+      await repository.addItem(_textItem('1', 'Before'));
+      final _FakeClipboardGateway gateway = _FakeClipboardGateway();
+      final ClipboardWatcherService service = ClipboardWatcherService(
+        repository: repository,
+        gateway: gateway,
+      );
+
+      int notifications = 0;
+      service.addListener(() => notifications++);
+
+      await service.updateItemText('1', 'After');
+
+      expect(repository.items.single.text, 'After');
+      expect(notifications, 1);
+      // Saving an edit must not replace what the user currently has copied.
+      expect(gateway.copiedText, isNull);
+      expect(gateway.copiedImagePath, isNull);
+
+      service.dispose();
+    });
   });
 }
 
