@@ -17,6 +17,8 @@ import 'enrichment_context_section.dart';
 import 'qr_sync_sheet.dart';
 import 'settings_controller.dart';
 import 'vault_section.dart';
+import '../../momentum/domain/closure_event.dart';
+import '../../momentum/presentation/momentum_section.dart';
 
 /// Runtime settings: capture parameters plus a read-only view of where data
 /// lives and which provider is active. Provider editing lives in the Models tab.
@@ -34,6 +36,7 @@ class ConfigTab extends StatelessWidget {
     this.rejectedShortcuts = const <ShortcutAction>{},
     this.runWithHotkeysSuspended = _runDirectly,
     this.onMirrorAll,
+    this.onBackfillClosures,
   });
 
   /// Default for callers with no coordinator (mobile, tests): just run it.
@@ -65,6 +68,10 @@ class ConfigTab extends StatelessWidget {
   /// recordings controller to ask — the button then renders disabled rather
   /// than absent, so the section reads the same in every host.
   final Future<VaultMirrorSummary> Function()? onMirrorAll;
+
+  /// Reads already-closed captures back into the closure history. Null under
+  /// the same rule as [onMirrorAll] — the button renders disabled, not absent.
+  final Future<ClosureBackfill> Function()? onBackfillClosures;
 
   @override
   Widget build(BuildContext context) {
@@ -248,6 +255,8 @@ class ConfigTab extends StatelessWidget {
           EnrichmentContextSection(controller: controller, projects: projects),
           const SizedBox(height: 22),
           VaultSection(controller: controller, onMirrorAll: onMirrorAll),
+          const SizedBox(height: 22),
+          MomentumSection(onBackfill: onBackfillClosures),
           if (showShortcuts) ...<Widget>[
             const SizedBox(height: 22),
             ShortcutsSection(

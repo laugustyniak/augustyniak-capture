@@ -2099,6 +2099,106 @@ class RecordingsController extends ChangeNotifier {
     }
   }
 
+  /// Writes a closure for every capture that was already closed before the log
+  /// existed.
+  ///
+  /// **Not optional, for the reason `mirrorAll()` is not.** Recording only new
+  /// closures would leave an existing queue permanently outside the history:
+  /// an install with a hundred captures already off the desk opens the panel on
+  /// "Nothing closed yet" and a target of 1, which is a history starting at zero
+  /// for someone whose work is all behind them. There is no way in short of
+  /// re-closing everything by hand.
+  ///
+  /// **Each row is dated by its own `processedAt`, never by now.** The file's
+  /// worth is that its timeline is true; stamping the sweep with the current
+  /// time would pile a hundred closures onto one day and leave the pace
+  /// meaningless for a fortnight afterwards. A row closed before that field
+  /// existed is therefore **skipped and counted**, not invented — an
+  /// append-only file must not be given a fact that never happened.
+  ///
+  /// The kind is read from where the capture actually went, so a backfilled
+  /// history splits by destination exactly as a live one does.
+  ///
+  /// Idempotent through [_closedIds], so pressing it twice is free.
+  Future<ClosureBackfill> backfillClosures() async {
+    ClosureBackfill summary = const ClosureBackfill();
+
+    // Snapshotted and sorted oldest-first: the drain can finish an item
+    // mid-sweep, and appending in chronological order keeps the file readable
+    // by eye — the same courtesy `revisions.jsonl` gets for free by being
+    // written as changes happen.
+    final List<Recording> closed =
+        List<Recording>.of(_recordings)
+            .where((Recording item) => item.isProcessedByUser)
+            .toList()
+          ..sort((Recording a, Recording b) {
+            final DateTime? left = a.processedAt;
+            final DateTime? right = b.processedAt;
+            if (left == null || right == null) return 0;
+            return left.compareTo(right);
+          });
+
+    for (final Recording item in closed) {
+      if (_closedIds.contains(item.id)) {
+        summary = summary.plus(alreadyKnown: 1);
+        continue;
+      }
+      final DateTime? at = item.processedAt;
+      if (at == null) {
+        summary = summary.plus(undatable: 1);
+        continue;
+      }
+
+      final String? projectId = item.projectId;
+      final Project? project = projectId == null
+          ? null
+          : _projectById?.call(projectId);
+
+      try {
+        await _closureLog.append(
+          ClosureEvent(
+            recordingId: item.id,
+            at: at,
+            kind: _closureKindFor(item),
+            type: item.type,
+            projectId: projectId,
+            projectName: project?.name,
+          ),
+        );
+        _closedIds.add(item.id);
+        summary = summary.plus(recorded: 1);
+      } catch (exception) {
+        summary = summary.plus(failed: 1);
+        _logSink.log(
+          'Closure backfill failed: $exception',
+          level: LogLevel.warn,
+          recordingId: item.id,
+        );
+      }
+      if (_disposed) break;
+    }
+
+    _logSink.log(
+      'Closure backfill · ${summary.recorded} recorded, '
+      '${summary.alreadyKnown} already known, ${summary.undatable} undatable, '
+      '${summary.failed} failed',
+    );
+    return summary;
+  }
+
+  /// How a capture left the desk, read back from its delivery record.
+  ///
+  /// The last route wins: routing twice is two real deliveries, and the most
+  /// recent one is what the capture's state reflects. No routes at all means it
+  /// was ticked off by hand.
+  static ClosureKind _closureKindFor(Recording item) {
+    if (item.routes.isEmpty) return ClosureKind.review;
+    return switch (item.routes.last.kind) {
+      RouteKind.file => ClosureKind.route,
+      RouteKind.agent => ClosureKind.handoff,
+    };
+  }
+
   /// Populates [_closedIds] from the log.
   ///
   /// Called by the shell after `initialize`, never from inside it — the rule

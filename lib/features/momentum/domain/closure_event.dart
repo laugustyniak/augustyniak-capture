@@ -111,6 +111,52 @@ class ClosureEvent {
   }
 }
 
+/// What one backfill sweep did.
+///
+/// Counts rather than a list, like `VaultMirrorSummary`: the sweep runs over
+/// the whole queue and the user wants to know the shape of the result, not to
+/// read a hundred ids.
+///
+/// [undatable] is reported rather than folded into a failure because it is not
+/// one — it is the honest answer for a row closed before `processedAt` existed,
+/// and it is the only number here the user can do nothing about.
+class ClosureBackfill {
+  const ClosureBackfill({
+    this.recorded = 0,
+    this.alreadyKnown = 0,
+    this.undatable = 0,
+    this.failed = 0,
+  });
+
+  /// Captures written into the log by this sweep.
+  final int recorded;
+
+  /// Skipped because the log already knew them — the normal result of a second
+  /// press.
+  final int alreadyKnown;
+
+  /// Closed, but with no `processedAt` to date the row by.
+  final int undatable;
+
+  /// The append threw.
+  final int failed;
+
+  bool get isEmpty =>
+      recorded == 0 && alreadyKnown == 0 && undatable == 0 && failed == 0;
+
+  ClosureBackfill plus({
+    int recorded = 0,
+    int alreadyKnown = 0,
+    int undatable = 0,
+    int failed = 0,
+  }) => ClosureBackfill(
+    recorded: this.recorded + recorded,
+    alreadyKnown: this.alreadyKnown + alreadyKnown,
+    undatable: this.undatable + undatable,
+    failed: this.failed + failed,
+  );
+}
+
 /// Where closures are written down.
 ///
 /// A seam for the same reason as `FocusSessionLog`: the real implementation

@@ -18,6 +18,7 @@ import 'package:augustyniak_capture/features/recordings/domain/capture_type.dart
 import 'package:augustyniak_capture/features/recordings/domain/media_opener.dart';
 import 'package:augustyniak_capture/features/recordings/domain/capture_router.dart';
 import 'package:augustyniak_capture/features/recordings/domain/recording.dart';
+import 'package:augustyniak_capture/features/recordings/domain/route_record.dart';
 import 'package:augustyniak_capture/features/recordings/presentation/recordings_controller.dart';
 import 'package:augustyniak_capture/features/settings/data/settings_repository.dart';
 import 'package:augustyniak_capture/features/settings/domain/app_settings.dart';
@@ -208,6 +209,8 @@ Recording makeRecording({
   int durationMs = 1500,
   int sizeBytes = 0,
   bool isProcessedByUser = false,
+  DateTime? processedAt,
+  List<RouteRecord> routes = const <RouteRecord>[],
   String? filePath,
   String? thumbPath,
 }) {
@@ -215,6 +218,8 @@ Recording makeRecording({
     id: id,
     filePath: filePath ?? '/tmp/$id.m4a',
     createdAt: DateTime.utc(2026, 7, 27, 12),
+    processedAt: processedAt,
+    routes: routes,
     durationMs: durationMs,
     sizeBytes: sizeBytes,
     status: status,

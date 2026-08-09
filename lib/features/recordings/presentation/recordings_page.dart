@@ -716,6 +716,8 @@ class _RecordingsPageState extends State<RecordingsPage> {
                                     // controller's, so the sweep has to be its
                                     // call rather than the settings tab's.
                                     onMirrorAll: controller.mirrorAll,
+                                    onBackfillClosures:
+                                        controller.backfillClosures,
                                   ),
                                 ],
                               ),

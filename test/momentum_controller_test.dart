@@ -6,6 +6,7 @@ import 'package:augustyniak_capture/features/projects/domain/project.dart';
 import 'package:augustyniak_capture/features/recordings/data/project_inbox_router.dart';
 import 'package:augustyniak_capture/features/recordings/domain/capture_type.dart';
 import 'package:augustyniak_capture/features/recordings/domain/recording.dart';
+import 'package:augustyniak_capture/features/recordings/domain/route_record.dart';
 import 'package:augustyniak_capture/features/recordings/presentation/recordings_controller.dart';
 import 'package:flutter_test/flutter_test.dart';
 
@@ -255,6 +256,181 @@ void main() {
     await controller.toggleProcessed('r1'); // closed again
 
     expect(gamification.stats.totalCapturesDone, 1);
+  });
+
+  group('backfill', () {
+    // Without this, an install with a hundred closed captures opens the panel
+    // on "Nothing closed yet" and a target of 1 — a history starting at zero
+    // for someone whose work is all behind them. The same reasoning makes
+    // `mirrorAll()` non-optional for the note vault.
+
+    test('records one closure per already-closed capture', () async {
+      final _RecordingClosureLog log = _RecordingClosureLog();
+      final RecordingsController controller = await buildRecordingsController(
+        appDir,
+        seed: <Recording>[
+          makeRecording(
+            id: 'r1',
+            isProcessedByUser: true,
+            processedAt: DateTime(2026, 8, 1, 10),
+          ),
+          makeRecording(
+            id: 'r2',
+            isProcessedByUser: true,
+            processedAt: DateTime(2026, 8, 2, 10),
+          ),
+          makeRecording(id: 'r3'), // still open
+        ],
+        closureLog: log,
+      );
+
+      final ClosureBackfill summary = await controller.backfillClosures();
+
+      expect(summary.recorded, 2);
+      expect(log.appended.length, 2);
+      expect(
+        log.appended.map((ClosureEvent e) => e.recordingId),
+        <String>['r1', 'r2'],
+      );
+    });
+
+    test('dates each closure by when it was actually closed', () async {
+      // The whole point of the file is a truthful timeline; stamping the
+      // backfill with "now" would put a hundred closures on one day and make
+      // the pace meaningless for a fortnight.
+      final _RecordingClosureLog log = _RecordingClosureLog();
+      final RecordingsController controller = await buildRecordingsController(
+        appDir,
+        seed: <Recording>[
+          makeRecording(
+            id: 'r1',
+            isProcessedByUser: true,
+            processedAt: DateTime(2026, 8, 1, 10),
+          ),
+        ],
+        closureLog: log,
+      );
+
+      await controller.backfillClosures();
+
+      expect(log.appended.single.at, DateTime(2026, 8, 1, 10));
+    });
+
+    test('skips a closed capture with no processedAt, and counts it', () async {
+      // A row written before the field existed. Inventing a date would put a
+      // fact in an append-only file that never happened — worse than admitting
+      // the row cannot be placed.
+      final _RecordingClosureLog log = _RecordingClosureLog();
+      final RecordingsController controller = await buildRecordingsController(
+        appDir,
+        seed: <Recording>[makeRecording(id: 'r1', isProcessedByUser: true)],
+        closureLog: log,
+      );
+
+      final ClosureBackfill summary = await controller.backfillClosures();
+
+      expect(log.appended, isEmpty);
+      expect(summary.recorded, 0);
+      expect(summary.undatable, 1);
+    });
+
+    test('infers the kind from where the capture actually went', () async {
+      final _RecordingClosureLog log = _RecordingClosureLog();
+      final RecordingsController controller = await buildRecordingsController(
+        appDir,
+        seed: <Recording>[
+          makeRecording(
+            id: 'inbox',
+            isProcessedByUser: true,
+            processedAt: DateTime(2026, 8, 1, 10),
+            routes: <RouteRecord>[
+              RouteRecord(
+                at: DateTime(2026, 8, 1, 10),
+                kind: RouteKind.file,
+                target: 'inbox.md',
+              ),
+            ],
+          ),
+          makeRecording(
+            id: 'agent',
+            isProcessedByUser: true,
+            processedAt: DateTime(2026, 8, 1, 11),
+            routes: <RouteRecord>[
+              RouteRecord(
+                at: DateTime(2026, 8, 1, 11),
+                kind: RouteKind.agent,
+                target: 'claude',
+              ),
+            ],
+          ),
+          makeRecording(
+            id: 'ticked',
+            isProcessedByUser: true,
+            processedAt: DateTime(2026, 8, 1, 12),
+          ),
+        ],
+        closureLog: log,
+      );
+
+      await controller.backfillClosures();
+
+      expect(
+        log.appended.map((ClosureEvent e) => e.kind),
+        <ClosureKind>[
+          ClosureKind.route,
+          ClosureKind.handoff,
+          ClosureKind.review,
+        ],
+      );
+    });
+
+    test('running it twice records nothing the second time', () async {
+      // `_closedIds` already guarantees this, but the sweep is the one caller
+      // a user can press repeatedly, so it gets its own assertion.
+      final _RecordingClosureLog log = _RecordingClosureLog();
+      final RecordingsController controller = await buildRecordingsController(
+        appDir,
+        seed: <Recording>[
+          makeRecording(
+            id: 'r1',
+            isProcessedByUser: true,
+            processedAt: DateTime(2026, 8, 1, 10),
+          ),
+        ],
+        closureLog: log,
+      );
+
+      await controller.backfillClosures();
+      final ClosureBackfill second = await controller.backfillClosures();
+
+      expect(log.appended.length, 1);
+      expect(second.recorded, 0);
+      expect(second.alreadyKnown, 1);
+    });
+
+    test('a failing log costs the row, never the sweep', () async {
+      final RecordingsController controller = await buildRecordingsController(
+        appDir,
+        seed: <Recording>[
+          makeRecording(
+            id: 'r1',
+            isProcessedByUser: true,
+            processedAt: DateTime(2026, 8, 1, 10),
+          ),
+          makeRecording(
+            id: 'r2',
+            isProcessedByUser: true,
+            processedAt: DateTime(2026, 8, 2, 10),
+          ),
+        ],
+        closureLog: const _FailingClosureLog(),
+      );
+
+      final ClosureBackfill summary = await controller.backfillClosures();
+
+      expect(summary.failed, 2);
+      expect(controller.error, isNull);
+    });
   });
 
   test('re-opening a capture leaves the recorded closure alone', () async {
