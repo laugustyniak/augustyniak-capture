@@ -7,6 +7,8 @@ import 'package:path/path.dart' as p;
 import 'package:record/record.dart';
 import 'package:uuid/uuid.dart';
 
+import '../../costs/domain/usage_event.dart';
+import '../../costs/domain/usage_sink.dart';
 import '../../enrichment/domain/enrichment_context.dart';
 import '../../enrichment/domain/enrichment_result.dart';
 import '../../enrichment/domain/enrichment_service.dart';
@@ -63,6 +65,7 @@ class RecordingsController extends ChangeNotifier {
         const UnavailableVideoPosterExtractor(),
     AudioConfig audioConfig = AudioConfig.defaults,
     LogSink logSink = const NoopLogSink(),
+    UsageSink usageSink = const NoopUsageSink(),
     ClipboardSink clipboardSink = const NoopClipboardSink(),
     MediaOpener mediaOpener = const NoopMediaOpener(),
     CaptureRouter captureRouter = const DisabledCaptureRouter(),
@@ -88,6 +91,7 @@ class RecordingsController extends ChangeNotifier {
        _videoPosterExtractor = videoPosterExtractor,
        _audioConfig = audioConfig,
        _logSink = logSink,
+       _usageSink = usageSink,
        _clipboardSink = clipboardSink,
        _mediaOpener = mediaOpener,
        _captureRouter = captureRouter,
@@ -134,6 +138,10 @@ class RecordingsController extends ChangeNotifier {
       <String, List<RecordingRevision>>{};
 
   final LogSink _logSink;
+
+  /// Receives per-call usage. Ambient by design — see [UsageSink]. Defaults to
+  /// a no-op so the pure-Dart suites need no database.
+  final UsageSink _usageSink;
   final ClipboardSink _clipboardSink;
   final MediaOpener _mediaOpener;
   final CaptureRouter _captureRouter;
@@ -1614,7 +1622,22 @@ class RecordingsController extends ChangeNotifier {
       await _extractPoster(recording.id);
 
       try {
-        final String transcript = await processor.process(recording);
+        // Scope the events this job produces to this capture. The pair is
+        // safe here and only here: the drain is single-flight, so exactly one
+        // job is ever open. `durationMs` is 0 on uploads, which the sink reads
+        // as "no fallback" rather than as zero-length audio.
+        _beginUsageJob(
+          id,
+          _stageFor(recording.type),
+          audioSeconds:
+              recording.durationMs > 0 ? recording.durationMs / 1000 : null,
+        );
+        final String transcript;
+        try {
+          transcript = await processor.process(recording);
+        } finally {
+          _endUsageJob();
+        }
         await _update(
           id,
           (Recording item) => item.copyWith(
@@ -1633,7 +1656,12 @@ class RecordingsController extends ChangeNotifier {
         // Deliberately after the `completed` write as well: the item is already
         // durable, so a model outage, a malformed response or a kill in this
         // window costs a title, never a capture.
-        await _enrich(id, transcript);
+        _beginUsageJob(id, UsageStage.enrichment);
+        try {
+          await _enrich(id, transcript);
+        } finally {
+          _endUsageJob();
+        }
         // Last of all, and after enrichment rather than before it, so the note
         // reaches the vault already named and classified. Mirroring first would
         // create a file called `…-recording-1432-…` and then have to live with
@@ -1657,6 +1685,40 @@ class RecordingsController extends ChangeNotifier {
       }
     } finally {
       _processingId = null;
+    }
+  }
+
+  /// Which stage a capture's processor bills under. Derived from the item's
+  /// type rather than asked of the processor, because `Processor` has no such
+  /// question and adding one would widen a contract this design deliberately
+  /// leaves alone.
+  static UsageStage _stageFor(CaptureType type) => switch (type) {
+    CaptureType.image => UsageStage.ocr,
+    CaptureType.audioRecording ||
+    CaptureType.audioUpload ||
+    CaptureType.video ||
+    CaptureType.text => UsageStage.transcription,
+  };
+
+  /// The sink is best-effort at this boundary too: a store that throws costs a
+  /// cost row, never the capture the row was about.
+  void _beginUsageJob(String id, UsageStage stage, {double? audioSeconds}) {
+    try {
+      _usageSink.beginJob(id, stage, fallbackAudioSeconds: audioSeconds);
+    } catch (exception) {
+      _logSink.log(
+        'Cost scope failed to open: $exception',
+        level: LogLevel.warn,
+        recordingId: id,
+      );
+    }
+  }
+
+  void _endUsageJob() {
+    try {
+      _usageSink.endJob();
+    } catch (_) {
+      // Deliberately silent: the job is over either way.
     }
   }
 

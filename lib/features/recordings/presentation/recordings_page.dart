@@ -8,9 +8,13 @@ import 'package:flutter/material.dart';
 import 'package:path/path.dart' as p;
 
 import '../../../app/ui_kit.dart';
+import '../../../core/database/app_database.dart';
 import '../../clipboard/domain/clipboard_watcher_service.dart';
 import '../../clipboard/presentation/clipboard_history_sheet.dart';
 import '../../clipboard/presentation/clipboard_tab.dart';
+import '../../costs/data/recording_usage_sink.dart';
+import '../../costs/data/usage_repository.dart';
+import '../../costs/domain/price_book.dart';
 import '../../enrichment/data/composed_enrichment_context_source.dart';
 import '../../logs/data/log_store.dart';
 import '../../logs/presentation/logs_tab.dart';
@@ -113,6 +117,14 @@ class _RecordingsPageState extends State<RecordingsPage> {
   ];
 
   final RecordingsRepository repository = RecordingsRepository();
+
+  /// Null until `_bootstrap()` opens the database — the shell builds its
+  /// controllers synchronously in `initState`, so the very first captures on
+  /// a cold start can race the database open. `usageSink` reads this through
+  /// a resolver rather than capturing it, and drops an event rather than
+  /// throwing while it is still null.
+  UsageRepository? _usageRepository;
+  late final RecordingUsageSink usageSink;
   late final SettingsController settings;
   late final LogStore logs;
   late final GamificationController gamification;
@@ -144,6 +156,22 @@ class _RecordingsPageState extends State<RecordingsPage> {
   @override
   void initState() {
     super.initState();
+    logs = LogStore(archive: FileLogArchive());
+    // Built once and shared by the settings and recordings controllers: both
+    // sides of a job — the HTTP call the settings-built service makes, and
+    // the beginJob/endJob scope the recordings controller wraps it in — must
+    // land on the same sink instance. Read the repository through a resolver
+    // rather than capturing it, because it does not exist yet: the database
+    // opens asynchronously in `_bootstrap()`, well after this constructor
+    // runs.
+    usageSink = RecordingUsageSink(
+      repository: () => _usageRepository,
+      // Read per call so a rate edited in the Config tab reaches the next
+      // capture with nothing to rebuild. No overrides yet — the Config tab's
+      // PRICING section is a later addition.
+      priceBook: () => const PriceBook(),
+      logSink: logs,
+    );
     settings = SettingsController(
       repository: SettingsRepository(
         // The master key lives in an owner-only file beside the database, and
@@ -158,8 +186,8 @@ class _RecordingsPageState extends State<RecordingsPage> {
           ),
         ),
       ),
+      usageSink: usageSink,
     );
-    logs = LogStore(archive: FileLogArchive());
     gamification = GamificationController();
     // One launcher, two entry points: the project card starts a session with no
     // task in hand, the queue starts one on a capture. Sharing the instance is
@@ -226,6 +254,11 @@ class _RecordingsPageState extends State<RecordingsPage> {
       videoAudioExtractor: _buildVideoAudioExtractor(),
       videoPosterExtractor: _buildVideoPosterExtractor(),
       logSink: logs,
+      // Brackets the processor and enrichment calls that make up each job, so
+      // every event the settings-built services emit lands against the
+      // capture that caused it. Same instance the settings controller was
+      // given above — the two sides of one job must share a sink.
+      usageSink: usageSink,
       // Finished processor output lands on the system clipboard, so a clipboard
       // manager keeps it in history. Tests get the no-op default instead.
       clipboardSink: const SystemClipboardSink(),
@@ -383,6 +416,12 @@ class _RecordingsPageState extends State<RecordingsPage> {
 
   Future<void> _bootstrap() async {
     await logs.initialize();
+    // Opens (or creates) the SQLite database `usageSink` writes cost rows
+    // into. Before this resolves, `_usageRepository` is null and the sink
+    // drops whatever it is asked to record — see `RecordingUsageSink`. Ahead
+    // of `settings.initialize()` so a capture started the instant settings
+    // finish loading still has somewhere to bill.
+    _usageRepository = UsageRepository((await AppDatabase.getInstance()).rawDb);
     // Settings first so the very first recording already uses the saved
     // provider and capture parameters.
     await settings.initialize();

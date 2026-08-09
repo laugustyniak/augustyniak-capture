@@ -1,6 +1,7 @@
 import 'package:flutter/foundation.dart';
 import 'package:uuid/uuid.dart';
 
+import '../../costs/domain/usage_sink.dart';
 import '../../enrichment/domain/enrichment_service.dart';
 import '../../processing/data/ocr_service.dart';
 import '../../shortcuts/domain/hotkey_binding.dart';
@@ -18,13 +19,21 @@ import '../domain/provider_profile.dart';
 /// parameters. Every mutation persists the whole `settings.json`, mirroring how
 /// `RecordingsController` rewrites the whole recordings index.
 class SettingsController extends ChangeNotifier {
-  SettingsController({SettingsRepository? repository})
-    : _repository = repository ?? SettingsRepository();
+  SettingsController({
+    SettingsRepository? repository,
+    UsageSink usageSink = const NoopUsageSink(),
+  }) : _repository = repository ?? SettingsRepository(),
+       _usageSink = usageSink;
 
   static const String openAiEndpoint =
       'https://api.openai.com/v1/audio/transcriptions';
 
   final SettingsRepository _repository;
+
+  /// Threaded into every service this controller builds, so a transcription,
+  /// enrichment or OCR call scoped by the recordings controller's
+  /// `beginJob`/`endJob` records against the capture that caused it.
+  final UsageSink _usageSink;
   final Uuid _uuid = const Uuid();
 
   AppSettings _settings = AppSettings.empty;
@@ -94,7 +103,8 @@ class SettingsController extends ChangeNotifier {
           ].join('|');
 
     if (_service == null || _serviceSignature != signature) {
-      _service = active?.toService() ?? const DisabledTranscriptionService();
+      _service = active?.toService(usageSink: _usageSink) ??
+          const DisabledTranscriptionService();
       _serviceSignature = signature;
     }
     return _service!;
@@ -119,7 +129,8 @@ class SettingsController extends ChangeNotifier {
 
     if (_enrichment == null || _enrichmentSignature != signature) {
       _enrichment =
-          active?.toEnrichmentService() ?? const DisabledEnrichmentService();
+          active?.toEnrichmentService(usageSink: _usageSink) ??
+          const DisabledEnrichmentService();
       _enrichmentSignature = signature;
     }
     return _enrichment!;
@@ -145,7 +156,8 @@ class SettingsController extends ChangeNotifier {
           ].join('|');
 
     if (_ocr == null || _ocrSignature != signature) {
-      _ocr = active?.toOcrService() ?? const DisabledOcrService();
+      _ocr = active?.toOcrService(usageSink: _usageSink) ??
+          const DisabledOcrService();
       _ocrSignature = signature;
     }
     return _ocr!;

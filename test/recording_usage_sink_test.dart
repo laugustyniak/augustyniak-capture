@@ -18,7 +18,7 @@ void main() {
     repository = UsageRepository(db);
     counter = 0;
     sink = RecordingUsageSink(
-      repository: repository,
+      repository: () => repository,
       priceBook: () => const PriceBook(),
       idFactory: () => 'evt-${counter++}',
       clock: () => DateTime.utc(2026, 8, 9),
@@ -144,7 +144,7 @@ void main() {
 
   test('a repository that throws never propagates out of record', () {
     final RecordingUsageSink failing = RecordingUsageSink(
-      repository: _ThrowingRepository(db),
+      repository: () => _ThrowingRepository(db),
       priceBook: () => const PriceBook(),
     );
 
@@ -158,6 +158,27 @@ void main() {
       returnsNormally,
     );
     failing.endJob();
+  });
+
+  test('a null resolver drops the event instead of throwing', () {
+    final RecordingUsageSink unopened = RecordingUsageSink(
+      // The database has not been opened yet — early in `_bootstrap()`.
+      repository: () => null,
+      priceBook: () => const PriceBook(),
+    );
+
+    unopened.beginJob('cap-8', UsageStage.enrichment);
+    expect(
+      () => unopened.record(
+        provider: 'p',
+        model: 'gpt-5.6-luna',
+        usage: const MeasuredUsage(inputTokens: 1),
+      ),
+      returnsNormally,
+    );
+    unopened.endJob();
+
+    expect(repository.all(), isEmpty);
   });
 }
 

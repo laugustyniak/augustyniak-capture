@@ -14,7 +14,7 @@ import 'usage_repository.dart';
 /// here would cost the capture the feature exists to measure.
 class RecordingUsageSink implements UsageSink {
   RecordingUsageSink({
-    required UsageRepository repository,
+    required UsageRepository? Function() repository,
     required PriceBook Function() priceBook,
     String Function()? idFactory,
     DateTime Function()? clock,
@@ -25,7 +25,12 @@ class RecordingUsageSink implements UsageSink {
        _clock = clock ?? (() => DateTime.now().toUtc()),
        _logSink = logSink;
 
-  final UsageRepository _repository;
+  /// Resolved per call rather than captured, mirroring [_priceBook]: the
+  /// shell builds its controllers synchronously in `initState` while the
+  /// SQLite database opens asynchronously in `_bootstrap()`, so the database
+  /// may not exist yet on the very first captures. A null here means exactly
+  /// that — not a failure — and the event is dropped rather than queued.
+  final UsageRepository? Function() _repository;
 
   /// Read per call rather than captured: a rate edited in the Config tab must
   /// reach the very next capture without rebuilding this object.
@@ -72,6 +77,12 @@ class RecordingUsageSink implements UsageSink {
     // filing it under whichever capture ran last.
     if (captureId == null || stage == null) return;
 
+    // The database is not open yet (early in `_bootstrap()`). Drop the event
+    // rather than throw or queue it — a cost row lost to this window is a
+    // rounding error against the alternative of failing the capture.
+    final UsageRepository? repository = _repository();
+    if (repository == null) return;
+
     try {
       final double? seconds = usage.audioSeconds ?? _takeFallbackSeconds();
       final UsageEvent unpriced = UsageEvent(
@@ -87,7 +98,7 @@ class RecordingUsageSink implements UsageSink {
       );
 
       final PricedResult priced = _priceBook().price(unpriced);
-      _repository.insert(
+      repository.insert(
         UsageEvent(
           id: unpriced.id,
           captureId: unpriced.captureId,
