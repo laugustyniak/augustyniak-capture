@@ -23,6 +23,7 @@ import '../../projects/domain/agent_session_launcher.dart';
 import '../../projects/domain/project.dart';
 import '../../settings/data/aes_gcm_token_cipher.dart';
 import '../../settings/data/file_master_key_store.dart';
+import '../../settings/data/migrating_master_key_store.dart';
 import '../../settings/data/secure_storage_master_key_store.dart';
 import '../../settings/data/settings_repository.dart';
 import '../../settings/domain/app_theme_mode.dart';
@@ -151,20 +152,37 @@ class _RecordingsPageState extends State<RecordingsPage> {
     return null;
   }
 
+  /// The pre-keyring key file: read once so its key can be handed to the
+  /// keyring, then deleted. One instance, because the same object is both
+  /// the fallback that is read and the copy that is retired.
+  final FileMasterKeyStore _legacyKeyFile = FileMasterKeyStore();
+
   @override
   void initState() {
     super.initState();
     settings = SettingsController(
       repository: SettingsRepository(
-        // The master key lives in an owner-only file beside the database, and
-        // is adopted from the keyring on first run so tokens sealed under the
-        // old arrangement still open. The keyring cannot be the primary store
-        // here: it keys access to the code signature, and an ad-hoc build has
-        // a new one every time, which silently turned every stored token into
-        // an unusable blob after a rebuild. See FileMasterKeyStore.
+        // The keyring is the primary store, and the key file beside the
+        // database is the copy it takes over from and then deletes.
+        //
+        // The file existed because the keychain ACL names apps by code
+        // signature and ad-hoc rebuilds each produced a new one, so a fresh
+        // build was a stranger to the entry it wrote yesterday. That is fixed
+        // at the source now — LOCAL_SIGN_IDENTITY gives the app a designated
+        // requirement bound to a certificate rather than to a binary hash, so
+        // it survives rebuilds and is shared across worktrees. With the reason
+        // gone, keeping the key next to the ciphertext it opens buys nothing
+        // and costs the protection encryption is for.
+        //
+        // MigratingMasterKeyStore retires the file only after the keyring
+        // hands the same key back, and lets a refusing keyring throw rather
+        // than answering from the file — the failure has to be visible, not
+        // papered over by the store this is migrating away from.
         cipher: AesGcmTokenCipher(
-          keyStore: FileMasterKeyStore(
-            migrateFrom: const SecureStorageMasterKeyStore(),
+          keyStore: MigratingMasterKeyStore(
+            primary: const SecureStorageMasterKeyStore(),
+            fallback: _legacyKeyFile,
+            retireFallback: _legacyKeyFile.delete,
           ),
         ),
       ),
@@ -199,8 +217,8 @@ class _RecordingsPageState extends State<RecordingsPage> {
         (ClosureEvent event) => momentum.noteClosure(event),
       ),
       projectById: _projectById,
-      vaultDirectory: () => settings.vaultPath == null ||
-              settings.vaultPath!.trim().isEmpty
+      vaultDirectory: () =>
+          settings.vaultPath == null || settings.vaultPath!.trim().isEmpty
           ? null
           : Directory(p.join(settings.vaultPath!, settings.vaultFolder)),
       // Records what the enrichment model and hand edits overwrite. Left null
@@ -229,10 +247,7 @@ class _RecordingsPageState extends State<RecordingsPage> {
       // than offering one that can only fail.
       agentHandoff: launcher == null
           ? const DisabledAgentHandoff()
-          : ProjectAgentHandoff(
-              projectById: _projectById,
-              launcher: launcher,
-            ),
+          : ProjectAgentHandoff(projectById: _projectById, launcher: launcher),
       // The second copy of every capture, as markdown. Reads its directory
       // through callbacks for the same reason the router reads its projects
       // live: the user can point it somewhere else at any time, and the very
@@ -653,7 +668,8 @@ class _RecordingsPageState extends State<RecordingsPage> {
                                   QueueTab(
                                     controller: controller,
                                     projects: projects,
-                                    initialProjectId: activeQueueProjectFilterId,
+                                    initialProjectId:
+                                        activeQueueProjectFilterId,
                                   ),
                                   TimerTab(
                                     controller: timer,
@@ -680,7 +696,8 @@ class _RecordingsPageState extends State<RecordingsPage> {
                                     controller: settings,
                                     recordingsController: controller,
                                     storagePath: storagePath,
-                                    recordingsCount: controller.recordings.length,
+                                    recordingsCount:
+                                        controller.recordings.length,
                                     logCount: logs.events.length,
                                     onOpenModels: () => setState(
                                       () => navigationIndex = modelsIndex,
@@ -801,8 +818,8 @@ class _RecordingsPageState extends State<RecordingsPage> {
             count: index == queueIndex
                 ? total
                 : index == 3
-                    ? clipboardWatcher.items.length
-                    : null,
+                ? clipboardWatcher.items.length
+                : null,
             warn: index == modelsIndex && settings.activeProfile == null,
           ),
       ],
