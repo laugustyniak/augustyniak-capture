@@ -14,11 +14,15 @@ import 'package:flutter_test/flutter_test.dart';
 /// '[Obrazek]', 'min temu', 'Schowek jest pusty' — and reported one of their
 /// files as clean. Do not read a green run here as "the UI is English".
 ///
-/// **The scan covers `lib/` only.** Native platform code under `ios/`,
-/// `android/`, `macos/`, `linux/` and `windows/` is out of scope and is not
-/// touched by this test at all — it has its own string-literal syntax that
-/// this Dart-token regex cannot parse, and `flutter test` never compiles it
-/// in the first place. Polish there has to be found by hand.
+/// **Two scans, deliberately unequal.** The `lib/` scan reads string literals
+/// and skips comments, because `hotkey_binding.dart` legitimately lists
+/// `ą/ć/ę/ł/ń/ó/ś/ź/ż` while explaining AltGr. The native scan reads whole
+/// files, comments included: no native file has an equivalent case, `CLAUDE.md`
+/// asks for English in comments too, and `.plist`/`.xml` carry user-facing text
+/// in nodes rather than in literals — `NSMicrophoneUsageDescription` is what
+/// the OS shows in the microphone consent dialog. A raw scan of all 52 native
+/// sources produced zero false positives, so the Dart tokenizer would buy
+/// nothing there and would miss the XML entirely.
 void main() {
   // Files allowed to hold Polish, each for a reason that is not display text.
   const Map<String, String> allowed = <String, String>{
@@ -132,5 +136,91 @@ void main() {
             'be removed.',
       );
     }
+  });
+
+  test('no Polish in native platform sources', () {
+    const List<String> platformDirs = <String>[
+      'ios',
+      'android',
+      'macos',
+      'linux',
+      'windows',
+    ];
+    const List<String> extensions = <String>[
+      '.swift',
+      '.kt',
+      '.java',
+      '.m',
+      '.h',
+      '.cc',
+      '.cpp',
+      '.xml',
+      '.plist',
+      '.storyboard',
+      '.xib',
+    ];
+    // `build`/`ephemeral` are ordinary directories; `.symlinks` is not — it
+    // points into the pub cache, and `listSync` follows links by default, so
+    // the walk below also passes `followLinks: false`. Both are needed: the
+    // flag handles the symlink, the filter handles the directories.
+    const Set<String> skippedSegments = <String>{
+      'build',
+      'Pods',
+      'ephemeral',
+      '.gradle',
+      '.symlinks',
+      'DerivedData',
+    };
+
+    final List<File> sources = <File>[];
+    for (final String dir in platformDirs) {
+      final Directory root = Directory(dir);
+      if (!root.existsSync()) continue;
+      for (final FileSystemEntity entity
+          in root.listSync(recursive: true, followLinks: false)) {
+        if (entity is! File) continue;
+        final String relative = entity.path.replaceAll(r'\', '/');
+        if (relative.split('/').any(skippedSegments.contains)) continue;
+        if (!extensions.any(relative.endsWith)) continue;
+        sources.add(entity);
+      }
+    }
+
+    // The most important assertion in this test. A typo in a directory name or
+    // an extension, or a skip rule one segment too broad, otherwise yields a
+    // test that passes forever while scanning nothing.
+    expect(
+      sources,
+      isNotEmpty,
+      reason: 'the native scan matched no files at all — it is checking '
+          'nothing. Run from the repository root, and check platformDirs, '
+          'extensions and skippedSegments before trusting a green run.',
+    );
+
+    final List<String> offences = <String>[];
+    for (final File file in sources) {
+      final String relative = file.path.replaceAll(r'\', '/');
+      final List<String> lines = file.readAsStringSync().split('\n');
+      for (int i = 0; i < lines.length; i++) {
+        final String line = lines[i];
+        if (!diacritics.hasMatch(line) && !polishWords.hasMatch(line)) {
+          continue;
+        }
+        final String trimmed = line.trim();
+        final String shown =
+            trimmed.length > 120 ? '${trimmed.substring(0, 120)}…' : trimmed;
+        offences.add('$relative:${i + 1}  $shown');
+      }
+    }
+
+    expect(
+      offences,
+      isEmpty,
+      reason: 'Polish found in native platform sources. Unlike the lib/ scan '
+          'this one reads whole files, comments included — CLAUDE.md asks for '
+          'English there too. Translate it. If a native file ever has a '
+          'genuine reason to hold Polish, add an allowlist here rather than '
+          'narrowing the scan:\n${offences.join('\n')}',
+    );
   });
 }
