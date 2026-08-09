@@ -253,6 +253,16 @@ class _PricingSectionState extends State<PricingSection> {
     final double storageMonthlyUsd = widget.storageBytes / 1073741824 *
         (widget.storagePrice.r2PerGbMonth + widget.storagePrice.tursoPerGbMonth);
 
+    // The primary table is "rates in force"; MISSING RATES is "models with no
+    // rate at all". The two are not naturally disjoint — `missingRateCounts`
+    // only ever contains a model that also produced a usage event, which is
+    // exactly what puts it in `models` too — so a model with no rate is
+    // filtered out here rather than rendered twice with two copies of the
+    // same `TextEditingController`s aliased into two places in the tree.
+    final List<String> pricedModels = widget.models
+        .where((String key) => !widget.missingRateCounts.containsKey(key))
+        .toList();
+
     final List<MapEntry<String, int>> sortedMissing =
         widget.missingRateCounts.entries.toList()
           ..sort((MapEntry<String, int> a, MapEntry<String, int> b) =>
@@ -277,9 +287,9 @@ class _PricingSectionState extends State<PricingSection> {
                 value: '${formatBytes(widget.storageBytes) ?? '0 B'} ≈ '
                     '${formatUsd(storageMonthlyUsd)}/mo',
               ),
-              if (widget.models.isNotEmpty) ...<Widget>[
+              if (pricedModels.isNotEmpty) ...<Widget>[
                 Divider(color: Console.border, height: 22),
-                ...widget.models.map(_row),
+                ...pricedModels.map(_row),
               ],
               const SizedBox(height: 8),
               Text(

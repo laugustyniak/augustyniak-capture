@@ -8,6 +8,7 @@ Widget _host(Widget child) =>
     MaterialApp(home: Scaffold(body: SingleChildScrollView(child: child)));
 
 PricingSection _section({
+  List<String> models = const <String>['gpt-transcribe', 'gpt-5.6-luna'],
   Map<String, int> missingRateCounts = const <String, int>{},
   int unknownQuantityCount = 0,
   void Function(String, ModelPrice?)? onRateChanged,
@@ -17,7 +18,7 @@ PricingSection _section({
     allTimeUsd: 8.90,
     storageBytes: 2254857830,
     storagePrice: StoragePrice.defaults,
-    models: const <String>['gpt-transcribe', 'gpt-5.6-luna'],
+    models: models,
     priceBook: const PriceBook(),
     missingRateCounts: missingRateCounts,
     unknownQuantityCount: unknownQuantityCount,
@@ -83,6 +84,41 @@ void main() {
     expect(find.text('MISSING RATES'), findsNothing);
     expect(find.textContaining('unknown audio duration'), findsOneWidget);
   });
+
+  testWidgets(
+    'a model that is both in use and missing a rate renders exactly one '
+    'editable form',
+    (WidgetTester tester) async {
+      // `missingRateCounts` only ever contains a model that also produced a
+      // usage event — which is exactly what puts it in `models` too — so the
+      // two lists overlap in real usage. A model with no rate must still show
+      // up only once, not once in the primary table and again (with the same
+      // `TextEditingController`s aliased into two places) under MISSING
+      // RATES.
+      await tester.pumpWidget(
+        _host(
+          _section(
+            models: const <String>['gpt-6-nova'],
+            missingRateCounts: <String, int>{'gpt-6-nova': 3},
+          ),
+        ),
+      );
+      await tester.pump();
+
+      // The primary row's label is the bare key; the MISSING RATES row's
+      // label is `key · N call(s)`. If the model rendered twice, this would
+      // find two widgets — the primary label plus the missing-rates line.
+      expect(find.textContaining('gpt-6-nova'), findsOneWidget);
+
+      // `gpt-6-nova` has no known rate, so its one form is chat-shaped: an
+      // input and an output field — 2 `TextField`s. Rendered twice (once in
+      // the primary table, once under MISSING RATES, each pointing at the
+      // same `TextEditingController`s) this would report 4: a second,
+      // independent signal from the label count above rather than the same
+      // check twice.
+      expect(find.byType(TextField), findsNWidgets(2));
+    },
+  );
 
   testWidgets('editing a rate reports the new value', (
     WidgetTester tester,
