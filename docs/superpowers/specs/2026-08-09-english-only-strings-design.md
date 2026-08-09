@@ -20,14 +20,38 @@ The Polish is not scattered. It sits in two features, across four files:
 | `clipboard/domain/clipboard_watcher_service.dart` | 1 (`'[Obrazek]'`) | `domain/` |
 | `clipboard/presentation/clipboard_history_sheet.dart` | 26 occurrences, 23 distinct | `presentation/` |
 
-**This inventory was corrected upward during planning, and how it was missed is
-the point.** The first pass grepped for `[ąćęłńóśźż]` and reported 31 strings in
-two files. It missed `'WSPANIALE!'`, `'Anuluj'`, `'Dodaj'`, `'Wszystkie'`,
-`'Nowa'`, `'Wyczyszcz'`, `'[Obrazek]'`, `'min temu'` and `'Schowek jest pusty'` —
-nine strings, one of them in a file the report claimed was clean — because none
-of them contains a diacritic. A second pass with a Polish-wordlist grep found
-them and confirmed nothing leaked outside these four files. This is the same
-failure the guard in section 3 is explicitly documented as *not* preventing.
+Plus two more outside `lib/`, found only by the final whole-branch review:
+
+| File | Polish strings | Layer |
+| --- | --- | --- |
+| `ios/CaptureKeyboard/CaptureKeyboardViewController.swift` | 1 | native |
+| `android/app/src/main/kotlin/ai/augustyniak/capture/CaptureInputMethodService.kt` | 1 | native |
+
+**46 strings across six files. This inventory was corrected upward twice, and how
+it was missed both times is the point.**
+
+The first pass grepped for `[ąćęłńóśźż]` and reported 31 strings in two files. It
+missed `'WSPANIALE!'`, `'Anuluj'`, `'Dodaj'`, `'Wszystkie'`, `'Nowa'`,
+`'Wyczyszcz'`, `'[Obrazek]'`, `'min temu'` and `'Schowek jest pusty'` — nine
+strings, one of them in a file the report called clean — because none of them
+contains a diacritic. That is the same failure the guard in section 3 is
+explicitly documented as *not* preventing, which is why it grew a wordlist half.
+
+**An earlier revision of this document then claimed the wordlist pass "confirmed
+nothing leaked outside these four files". That claim was false and is corrected
+here rather than quietly deleted**, because a follow-on spec was written against
+it. Both passes searched `lib/` only. The two native keyboard extensions carry
+the *same* clipboard empty-state string — `"Brak skopiowanych elementów w
+schowku"` — in the very feature this change translates, so the app would have
+shipped saying `Clipboard is empty` in Dart and the Polish equivalent in the
+keyboard strip. A sweep of `ios/ android/ macos/ linux/ windows/` across
+`*.swift *.kt *.java *.cc *.h *.xml *.plist` confirms those two are the only ones.
+
+The guard cannot cover them: Swift and Kotlin have different literal syntax, so
+the Dart lexer would mis-parse them, and `flutter test` never compiles those
+files. Section 3's doc comment therefore names those directories as out of scope
+and requiring a manual check. **Extending the guard to native source is the
+obvious follow-up and is deliberately not in this change.**
 
 The clipboard sheet is a plain translation. `milestone.dart` is not: those
 sentences are

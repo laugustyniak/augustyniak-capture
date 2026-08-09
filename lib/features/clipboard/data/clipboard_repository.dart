@@ -16,6 +16,13 @@ abstract class ClipboardRepository {
   Future<void> initialize();
   Future<List<ClipboardItem>> getItems();
   Future<void> addItem(ClipboardItem item);
+
+  /// Overwrites an entry's text in place.
+  ///
+  /// `copiedAt` never changes, so a correction does not push the entry back to
+  /// the top of the list. Blank text and image entries are ignored.
+  Future<void> updateItemText(String id, String text);
+
   Future<void> toggleItemCollection(String id, String collectionName);
   Future<void> deleteItem(String id);
   Future<void> clearHistory();
@@ -147,6 +154,24 @@ class LocalJsonClipboardRepository implements ClipboardRepository {
       }
     }
 
+    await _save();
+  }
+
+  @override
+  Future<void> updateItemText(String id, String text) async {
+    if (!_initialized) await initialize();
+    if (text.trim().isEmpty) return;
+
+    final int index = _items.indexWhere((ClipboardItem item) => item.id == id);
+    if (index == -1) return;
+
+    final ClipboardItem current = _items[index];
+    if (current.type != ClipboardItemType.text) return;
+
+    _items[index] = current.copyWith(
+      text: text,
+      preview: ClipboardItem.previewFor(text),
+    );
     await _save();
   }
 

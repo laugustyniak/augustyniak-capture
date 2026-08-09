@@ -16,6 +16,28 @@ class TursoSyncService {
   final AppDatabase _db;
   final http.Client _client;
 
+  /// Encode one bound parameter for the libsql pipeline protocol.
+  ///
+  /// **A NULL column has a type of its own and must be sent as
+  /// `{'type': 'null'}`.** Sending `{'type': 'text', 'value': null}` makes the
+  /// server answer `JSON parse error: invalid type: null, expected a string`
+  /// and reject the **whole** request before executing any of it — so a single
+  /// capture with no title, category or project keeps the entire queue out of
+  /// the cloud. Every row here has at least one nullable column, which is why
+  /// the push had never once succeeded.
+  ///
+  /// It failed quietly: `pushToTurso` turns a non-200 into a bare `false`, and
+  /// `syncTwoWay` is `pulled && pushed`, so the pull half still printed its
+  /// success line while nothing was uploaded.
+  @visibleForTesting
+  static Map<String, dynamic> encodeArg(Object? value, {bool integer = false}) {
+    if (value == null) return <String, dynamic>{'type': 'null'};
+    return <String, dynamic>{
+      'type': integer ? 'integer' : 'text',
+      'value': value.toString(),
+    };
+  }
+
   String _getPipelineEndpoint(String dbUrl) {
     String endpoint = dbUrl.trim();
     if (endpoint.startsWith('libsql://')) {
@@ -220,20 +242,20 @@ class TursoSyncService {
               ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ''',
             'args': <Map<String, dynamic>>[
-              <String, dynamic>{'type': 'text', 'value': r['id']},
-              <String, dynamic>{'type': 'text', 'value': r['file_path']},
-              <String, dynamic>{'type': 'integer', 'value': r['duration_ms'].toString()},
-              <String, dynamic>{'type': 'text', 'value': r['type']},
-              <String, dynamic>{'type': 'text', 'value': r['status']},
-              <String, dynamic>{'type': 'text', 'value': r['category']},
-              <String, dynamic>{'type': 'text', 'value': r['title']},
-              <String, dynamic>{'type': 'text', 'value': r['summary']},
-              <String, dynamic>{'type': 'text', 'value': r['tags_json'] ?? '[]'},
-              <String, dynamic>{'type': 'integer', 'value': r['created_at'].toString()},
-              <String, dynamic>{'type': 'integer', 'value': (r['is_processed_by_user'] == 1 ? 1 : 0).toString()},
-              <String, dynamic>{'type': 'text', 'value': r['project_id']},
-              <String, dynamic>{'type': 'text', 'value': r['failure_reason']},
-              <String, dynamic>{'type': 'text', 'value': r['json_payload']},
+              encodeArg(r['id']),
+              encodeArg(r['file_path']),
+              encodeArg(r['duration_ms'], integer: true),
+              encodeArg(r['type']),
+              encodeArg(r['status']),
+              encodeArg(r['category']),
+              encodeArg(r['title']),
+              encodeArg(r['summary']),
+              encodeArg(r['tags_json'] ?? '[]'),
+              encodeArg(r['created_at'], integer: true),
+              encodeArg((r['is_processed_by_user'] == 1 ? 1 : 0), integer: true),
+              encodeArg(r['project_id']),
+              encodeArg(r['failure_reason']),
+              encodeArg(r['json_payload']),
             ],
           },
         });
@@ -253,13 +275,13 @@ class TursoSyncService {
               ) VALUES (?, ?, ?, ?, ?, ?, ?)
             ''',
             'args': <Map<String, dynamic>>[
-              <String, dynamic>{'type': 'text', 'value': c['id']},
-              <String, dynamic>{'type': 'text', 'value': c['type']},
-              <String, dynamic>{'type': 'text', 'value': c['text']},
-              <String, dynamic>{'type': 'text', 'value': c['image_path']},
-              <String, dynamic>{'type': 'integer', 'value': c['copied_at'].toString()},
-              <String, dynamic>{'type': 'text', 'value': c['preview']},
-              <String, dynamic>{'type': 'text', 'value': c['collections_json'] ?? '[]'},
+              encodeArg(c['id']),
+              encodeArg(c['type']),
+              encodeArg(c['text']),
+              encodeArg(c['image_path']),
+              encodeArg(c['copied_at'], integer: true),
+              encodeArg(c['preview']),
+              encodeArg(c['collections_json'] ?? '[]'),
             ],
           },
         });
@@ -279,11 +301,11 @@ class TursoSyncService {
               ) VALUES (?, ?, ?, ?, ?)
             ''',
             'args': <Map<String, dynamic>>[
-              <String, dynamic>{'type': 'text', 'value': p['id']},
-              <String, dynamic>{'type': 'text', 'value': p['name']},
-              <String, dynamic>{'type': 'text', 'value': p['color_hex']},
-              <String, dynamic>{'type': 'text', 'value': p['repository_path']},
-              <String, dynamic>{'type': 'integer', 'value': p['created_at'].toString()},
+              encodeArg(p['id']),
+              encodeArg(p['name']),
+              encodeArg(p['color_hex']),
+              encodeArg(p['repository_path']),
+              encodeArg(p['created_at'], integer: true),
             ],
           },
         });

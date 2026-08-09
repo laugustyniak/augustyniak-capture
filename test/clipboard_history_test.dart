@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 
 import 'package:augustyniak_capture/features/clipboard/data/clipboard_repository.dart';
@@ -19,7 +20,7 @@ void main() {
         copiedAt: DateTime.parse('2026-08-06T20:00:00.000Z'),
         text: 'Hello world',
         preview: 'Hello...',
-        collections: {'Kod', 'Ulubione'},
+        collections: {'Snippets', 'Favourites'},
       );
 
       final Map<String, dynamic> json = item.toJson();
@@ -28,8 +29,18 @@ void main() {
       expect(restored.id, item.id);
       expect(restored.type, item.type);
       expect(restored.text, item.text);
-      expect(restored.collections, {'Kod', 'Ulubione'});
+      expect(restored.collections, {'Snippets', 'Favourites'});
       expect(restored, item);
+    });
+
+    test('previewFor shortens long text and passes short text through', () {
+      expect(ClipboardItem.previewFor('short text'), 'short text');
+
+      final String exactly120 = 'x' * 120;
+      expect(ClipboardItem.previewFor(exactly120), exactly120);
+
+      final String tooLong = 'y' * 121;
+      expect(ClipboardItem.previewFor(tooLong), '${'y' * 120}...');
     });
   });
 
@@ -71,12 +82,12 @@ void main() {
       await repository.addItem(item1);
       await repository.addItem(item2);
 
-      await repository.toggleItemCollection('1', 'Prompty');
+      await repository.toggleItemCollection('1', 'Prompts');
       expect(repository.items.firstWhere((e) => e.id == '1').collections, {
-        'Prompty',
+        'Prompts',
       });
 
-      expect(repository.allCollections, {'Prompty'});
+      expect(repository.allCollections, {'Prompts'});
 
       await repository.clearHistory();
       expect(repository.items, isEmpty);
@@ -144,9 +155,110 @@ void main() {
         hasLength(1),
       );
     });
+
+    test('editing text rewrites preview and keeps position and collections',
+        () async {
+      await repository.initialize();
+      await repository.addItem(_textItem('1', 'First'));
+      await repository.addItem(_textItem('2', 'Second'));
+      await repository.toggleItemCollection('2', 'Code');
+
+      final DateTime originalCopiedAt = repository.items
+          .firstWhere((ClipboardItem item) => item.id == '2')
+          .copiedAt;
+
+      await repository.updateItemText('2', 'Second, corrected');
+
+      // '2' was the newest entry, so it stays at index 0.
+      expect(repository.items.map((ClipboardItem item) => item.id),
+          <String>['2', '1']);
+
+      final ClipboardItem edited = repository.items.first;
+      expect(edited.text, 'Second, corrected');
+      expect(edited.preview, 'Second, corrected');
+      expect(edited.collections, <String>{'Code'});
+      expect(edited.copiedAt, originalCopiedAt);
+    });
+
+    test('editing recomputes preview for long text', () async {
+      await repository.initialize();
+      await repository.addItem(_textItem('1', 'short'));
+
+      final String long = 'z' * 200;
+      await repository.updateItemText('1', long);
+
+      expect(repository.items.single.text, long);
+      expect(repository.items.single.preview, '${'z' * 120}...');
+    });
+
+    test('blank text leaves the item untouched', () async {
+      await repository.initialize();
+      await repository.addItem(_textItem('1', 'Original'));
+
+      await repository.updateItemText('1', '');
+      expect(repository.items.single.text, 'Original');
+
+      await repository.updateItemText('1', '   \n  ');
+      expect(repository.items.single.text, 'Original');
+    });
+
+    test('an image entry is never rewritten', () async {
+      await repository.initialize();
+      await repository.addItem(_imageItem('img', '${tempDir.path}/a.png'));
+
+      await repository.updateItemText('img', 'this must not get in');
+
+      expect(repository.items.single.text, isNull);
+    });
+
+    test('an unknown id is a silent no-op', () async {
+      await repository.initialize();
+      await repository.addItem(_textItem('1', 'Text'));
+
+      await repository.updateItemText('no-such-id', 'anything');
+
+      expect(repository.items, hasLength(1));
+      expect(repository.items.single.text, 'Text');
+    });
+
+    test('an edit survives reloading the repository from disk', () async {
+      await repository.initialize();
+      await repository.addItem(_textItem('1', 'Before'));
+      await repository.updateItemText('1', 'After');
+
+      final LocalJsonClipboardRepository restored = LocalJsonClipboardRepository(
+        maxItems: 3,
+        storageDirectoryProvider: () async => tempDir,
+      );
+      await restored.initialize();
+
+      expect(restored.items.single.text, 'After');
+    });
   });
 
   group('ClipboardWatcherService & Sheet Widget', () {
+    /// Builds the sheet over an already-populated repository.
+    ///
+    /// Every entry must be added **before** this call: the in-memory fake does
+    /// not notify, so an entry added afterwards never reaches the list.
+    Future<ClipboardWatcherService> pumpSheet(
+      WidgetTester tester,
+      _MemoryClipboardRepository repository, {
+      _FakeClipboardGateway? gateway,
+    }) async {
+      final ClipboardWatcherService service = ClipboardWatcherService(
+        repository: repository,
+        gateway: gateway ?? _FakeClipboardGateway(),
+      );
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(body: ClipboardHistorySheet(watcherService: service)),
+        ),
+      );
+      await tester.pump(const Duration(milliseconds: 100));
+      return service;
+    }
+
     testWidgets('renders empty history sheet', (WidgetTester tester) async {
       final ClipboardRepository repository = _MemoryClipboardRepository();
       await repository.initialize();
@@ -161,33 +273,23 @@ void main() {
       );
       await tester.pump(const Duration(milliseconds: 100));
 
-      expect(find.text('SCHOWEK SYSTEMOWY'), findsOneWidget);
-      expect(find.text('Schowek jest pusty'), findsOneWidget);
+      expect(find.text('CLIPBOARD'), findsOneWidget);
+      expect(find.text('The clipboard history is empty.'), findsOneWidget);
+      // The preview pane says what the sheet is for rather than sitting blank
+      // beside an empty list.
+      expect(find.text('Nothing copied yet.'), findsOneWidget);
 
       service.dispose();
     });
 
     testWidgets(
-      'renders list with items and navigates with arrow keys and enter',
+      'the preview follows the selection, and Enter pastes what it shows',
       (WidgetTester tester) async {
         final ClipboardRepository repository = _MemoryClipboardRepository();
         await repository.initialize();
-        await repository.addItem(
-          ClipboardItem(
-            id: '1',
-            type: ClipboardItemType.text,
-            copiedAt: DateTime.now(),
-            text: 'Apple Pie Recipe',
-          ),
-        );
-        await repository.addItem(
-          ClipboardItem(
-            id: '2',
-            type: ClipboardItemType.text,
-            copiedAt: DateTime.now(),
-            text: 'Banana Smoothie',
-          ),
-        );
+        // Inserted at the head, so the newest entry — Banana — is first.
+        await repository.addItem(_textItem('1', 'Apple Pie Recipe'));
+        await repository.addItem(_textItem('2', 'Banana Smoothie'));
 
         final _FakeClipboardGateway gateway = _FakeClipboardGateway();
         final ClipboardWatcherService service = ClipboardWatcherService(
@@ -204,31 +306,134 @@ void main() {
         );
         await tester.pump(const Duration(milliseconds: 100));
 
-        expect(find.text('Apple Pie Recipe'), findsOneWidget);
-        expect(find.text('Banana Smoothie'), findsOneWidget);
+        Finder inPreview(String value) => find.descendant(
+          of: find.byKey(ClipboardHistorySheet.previewKey),
+          matching: find.text(value),
+        );
+        Finder inList(String value) => find.descendant(
+          of: find.byKey(ClipboardHistorySheet.listKey),
+          matching: find.text(value),
+        );
 
-        // Press Arrow Down to navigate selection
+        // Both rows are in the list; the newest is what the pane opens on, so
+        // the sheet is never a blank half-screen.
+        expect(inList('Apple Pie Recipe'), findsOneWidget);
+        expect(inList('Banana Smoothie'), findsOneWidget);
+        expect(inPreview('Banana Smoothie'), findsWidgets);
+        expect(inPreview('Apple Pie Recipe'), findsNothing);
+
         await tester.sendKeyEvent(LogicalKeyboardKey.arrowDown);
-        await tester.pump(const Duration(milliseconds: 100));
+        await tester.pump(const Duration(milliseconds: 200));
+        expect(inPreview('Apple Pie Recipe'), findsWidgets);
+        expect(inPreview('Banana Smoothie'), findsNothing);
 
-        // Press Arrow Up to navigate back
         await tester.sendKeyEvent(LogicalKeyboardKey.arrowUp);
+        await tester.pump(const Duration(milliseconds: 200));
+        expect(inPreview('Banana Smoothie'), findsWidgets);
+
+        // The selection is an id, not an index, and this is what separates the
+        // two: a new entry lands at the head of the list, so index 0 now points
+        // at a different capture while the id still resolves to Banana.
+        await tester.sendKeyEvent(LogicalKeyboardKey.arrowDown);
+        await tester.pump(const Duration(milliseconds: 200));
+        gateway.text = 'Cherry Tart';
+        await service.checkNow();
         await tester.pump(const Duration(milliseconds: 100));
 
-        // Filter text
-        await tester.enterText(find.byType(TextField).first, 'Banana');
+        expect(inList('Cherry Tart'), findsOneWidget);
+        expect(inPreview('Apple Pie Recipe'), findsWidgets);
+        expect(inPreview('Cherry Tart'), findsNothing);
+
+        await tester.enterText(find.byType(TextField).first, 'Apple');
         await tester.pump(const Duration(milliseconds: 100));
 
-        expect(find.text('Apple Pie Recipe'), findsNothing);
-        expect(find.text('Banana Smoothie'), findsOneWidget);
+        expect(inList('Banana Smoothie'), findsNothing);
+        expect(inPreview('Apple Pie Recipe'), findsWidgets);
 
         await tester.sendKeyEvent(LogicalKeyboardKey.enter);
         await tester.pump();
-        expect(gateway.copiedText, 'Banana Smoothie');
+        expect(gateway.copiedText, 'Apple Pie Recipe');
 
         service.dispose();
       },
     );
+
+    testWidgets('the list rows carry no destructive control', (
+      WidgetTester tester,
+    ) async {
+      // The old row put convert / collect / delete about 20 px from the tap
+      // target that pastes and closes the sheet. Deleting a clipboard entry
+      // cannot be undone, so it belongs in the pane, behind a selection.
+      final ClipboardRepository repository = _MemoryClipboardRepository();
+      await repository.addItem(_textItem('1', 'Only entry'));
+      final ClipboardWatcherService service = ClipboardWatcherService(
+        repository: repository,
+        gateway: _FakeClipboardGateway(),
+      );
+
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(body: ClipboardHistorySheet(watcherService: service)),
+        ),
+      );
+      await tester.pump(const Duration(milliseconds: 100));
+
+      expect(
+        find.descendant(
+          of: find.byKey(ClipboardHistorySheet.listKey),
+          matching: find.byIcon(Icons.delete_outline_rounded),
+        ),
+        findsNothing,
+      );
+      expect(
+        find.descendant(
+          of: find.byKey(ClipboardHistorySheet.previewKey),
+          matching: find.text('DELETE'),
+        ),
+        findsOneWidget,
+      );
+
+      service.dispose();
+    });
+
+    testWidgets('the tab form does not autofocus its search box', (
+      WidgetTester tester,
+    ) async {
+      // The shell keeps all six tabs alive in an IndexedStack, so this widget
+      // is built at start-up even when the Queue is on screen. Autofocusing
+      // here took the route's focus and left every queue shortcut dead until
+      // the user clicked something.
+      final ClipboardRepository repository = _MemoryClipboardRepository();
+      await repository.addItem(_textItem('1', 'Only entry'));
+      final ClipboardWatcherService service = ClipboardWatcherService(
+        repository: repository,
+        gateway: _FakeClipboardGateway(),
+      );
+
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: ClipboardHistorySheet(
+              watcherService: service,
+              isModal: false,
+            ),
+          ),
+        ),
+      );
+      await tester.pump(const Duration(milliseconds: 100));
+
+      expect(
+        tester.widget<TextField>(find.byType(TextField).first).autofocus,
+        isFalse,
+      );
+      expect(
+        tester.widget<EditableText>(find.byType(EditableText).first).focusNode
+            .hasFocus,
+        isFalse,
+      );
+
+      service.dispose();
+    });
 
     testWidgets('converts a text clipboard item into a Capture', (
       WidgetTester tester,
@@ -254,11 +459,36 @@ void main() {
       );
       await tester.pump();
 
-      await tester.tap(
-        find.byTooltip('Przekaż do przetworzenia LLM (Capture ✨)'),
-      );
+      // The action lives in the preview pane now, not on the row: the row's
+      // only job is to be readable and selectable.
+      await tester.tap(find.text('TO CAPTURE'));
       await tester.pump();
       expect(convertedText, 'Convert me');
+      service.dispose();
+    });
+
+    test('pasting on a platform with no autoPaste handler stays quiet', () async {
+      // Android, iOS and Linux register no handler for this channel, so
+      // `invokeMethod` answers MissingPluginException. Awaiting it is what puts
+      // that error inside the method's own `try`; unawaited it escapes as an
+      // unhandled async error, which is what this zone catches.
+      //
+      // The zone is the assertion, not decoration. A plain `await
+      // pasteToActiveApp()` passes either way: an orphaned future reports
+      // itself too late for the test that created it, so the failure lands on
+      // whichever test happens to be running — or on none at all.
+      final ClipboardWatcherService service = ClipboardWatcherService(
+        repository: _MemoryClipboardRepository(),
+        gateway: _FakeClipboardGateway(),
+      );
+
+      Object? escaped;
+      await runZonedGuarded(() async {
+        await service.pasteToActiveApp();
+        await Future<void>.delayed(const Duration(milliseconds: 50));
+      }, (Object error, StackTrace stack) => escaped = error);
+
+      expect(escaped, isNull);
       service.dispose();
     });
 
@@ -317,6 +547,507 @@ void main() {
         service.dispose();
       },
     );
+
+    test('editing an item notifies listeners and never touches the clipboard',
+        () async {
+      final _MemoryClipboardRepository repository = _MemoryClipboardRepository();
+      final _FakeClipboardGateway gateway = _FakeClipboardGateway(
+        text: 'Before',
+      );
+      final ClipboardWatcherService service = ClipboardWatcherService(
+        repository: repository,
+        gateway: gateway,
+      );
+
+      // Prime the watcher's last-seen clipboard text to 'Before', the same
+      // way a real capture would have set it before the item was ever edited.
+      await service.checkNow();
+      final String id = repository.items.single.id;
+
+      int notifications = 0;
+      service.addListener(() => notifications++);
+
+      await service.updateItemText(id, 'After');
+
+      expect(repository.items.single.text, 'After');
+      expect(notifications, 1);
+      // Saving an edit must not replace what the user currently has copied.
+      expect(gateway.copiedText, isNull);
+      expect(gateway.copiedImagePath, isNull);
+
+      // The system clipboard still holds the pre-edit text. If the edit had
+      // also updated the watcher's last-seen text, this poll would see the
+      // old text as "new" and capture a spurious duplicate entry.
+      await service.checkNow();
+      expect(repository.items.length, 1);
+
+      service.dispose();
+    });
+
+    testWidgets('EDIT is offered for text and withheld for images', (
+      WidgetTester tester,
+    ) async {
+      final _MemoryClipboardRepository repository = _MemoryClipboardRepository();
+      await repository.addItem(_textItem('txt', 'Text to correct'));
+      // Added last, so it is the newest entry and the pane opens on it.
+      await repository.addItem(_imageItem('img', '/tmp/does-not-exist.png'));
+      final ClipboardWatcherService service = await pumpSheet(
+        tester,
+        repository,
+      );
+
+      // An image has no body to rewrite, and a control that does nothing is
+      // worse than none.
+      expect(find.text('EDIT'), findsNothing);
+
+      await tester.tap(
+        find.descendant(
+          of: find.byKey(ClipboardHistorySheet.listKey),
+          matching: find.text('Text to correct'),
+        ),
+      );
+      await tester.pump(const Duration(milliseconds: 200));
+
+      expect(find.text('EDIT'), findsOneWidget);
+
+      service.dispose();
+    });
+
+    // Named for what it checks: it leaves the mode through DONE. Commit on
+    // focus loss — the reason there is no SAVE button — is pinned by the two
+    // tests below it.
+    testWidgets('DONE flushes the pending edit', (WidgetTester tester) async {
+      final _MemoryClipboardRepository repository = _MemoryClipboardRepository();
+      await repository.addItem(_textItem('1', 'Before the fix'));
+      final ClipboardWatcherService service = await pumpSheet(
+        tester,
+        repository,
+      );
+
+      await tester.tap(find.text('EDIT'));
+      await tester.pump(const Duration(milliseconds: 100));
+
+      final Finder field = find.descendant(
+        of: find.byKey(ClipboardHistorySheet.previewKey),
+        matching: find.byType(TextField),
+      );
+      expect(field, findsOneWidget);
+
+      await tester.enterText(field, 'After the fix');
+      await tester.pump(const Duration(milliseconds: 100));
+
+      // Leaving the mode flushes what is pending.
+      await tester.tap(find.text('DONE'));
+      await tester.pump(const Duration(milliseconds: 100));
+
+      expect(repository.items.single.text, 'After the fix');
+
+      service.dispose();
+    });
+
+    testWidgets('selecting another entry mid-edit saves rather than discards', (
+      WidgetTester tester,
+    ) async {
+      // This is the whole point of committing on focus loss instead of on a
+      // SAVE button: the row tap must not have to be refused or to lose text.
+      final _MemoryClipboardRepository repository = _MemoryClipboardRepository();
+      await repository.addItem(_textItem('1', 'Older entry'));
+      await repository.addItem(_textItem('2', 'Newer entry'));
+      final ClipboardWatcherService service = await pumpSheet(
+        tester,
+        repository,
+      );
+
+      await tester.tap(find.text('EDIT'));
+      await tester.pump(const Duration(milliseconds: 100));
+      await tester.enterText(
+        find.descendant(
+          of: find.byKey(ClipboardHistorySheet.previewKey),
+          matching: find.byType(TextField),
+        ),
+        'Newer entry, corrected',
+      );
+      await tester.pump(const Duration(milliseconds: 100));
+
+      await tester.tap(
+        find.descendant(
+          of: find.byKey(ClipboardHistorySheet.listKey),
+          matching: find.text('Older entry'),
+        ),
+      );
+      await tester.pump(const Duration(milliseconds: 200));
+
+      expect(
+        repository.items.firstWhere((ClipboardItem e) => e.id == '2').text,
+        'Newer entry, corrected',
+      );
+
+      service.dispose();
+    });
+
+    testWidgets('a dirty field says UNSAVED and reverts on demand', (
+      WidgetTester tester,
+    ) async {
+      final _MemoryClipboardRepository repository = _MemoryClipboardRepository();
+      await repository.addItem(_textItem('1', 'Original'));
+      final ClipboardWatcherService service = await pumpSheet(
+        tester,
+        repository,
+      );
+
+      await tester.tap(find.text('EDIT'));
+      await tester.pump(const Duration(milliseconds: 100));
+      expect(find.text('UNSAVED'), findsNothing);
+
+      await tester.enterText(
+        find.descendant(
+          of: find.byKey(ClipboardHistorySheet.previewKey),
+          matching: find.byType(TextField),
+        ),
+        'Typed but not committed',
+      );
+      await tester.pump(const Duration(milliseconds: 100));
+      expect(find.text('UNSAVED'), findsOneWidget);
+
+      await tester.tap(find.bySemanticsLabel('Revert the edit'));
+      await tester.pump(const Duration(milliseconds: 100));
+
+      expect(find.text('UNSAVED'), findsNothing);
+      expect(repository.items.single.text, 'Original');
+
+      service.dispose();
+    });
+
+    testWidgets('an emptied field never overwrites the entry', (
+      WidgetTester tester,
+    ) async {
+      final _MemoryClipboardRepository repository = _MemoryClipboardRepository();
+      await repository.addItem(_textItem('1', 'Keep me'));
+      final ClipboardWatcherService service = await pumpSheet(
+        tester,
+        repository,
+      );
+
+      await tester.tap(find.text('EDIT'));
+      await tester.pump(const Duration(milliseconds: 100));
+      await tester.enterText(
+        find.descendant(
+          of: find.byKey(ClipboardHistorySheet.previewKey),
+          matching: find.byType(TextField),
+        ),
+        '   ',
+      );
+      await tester.pump(const Duration(milliseconds: 100));
+      await tester.tap(find.text('DONE'));
+      await tester.pump(const Duration(milliseconds: 100));
+
+      expect(repository.items.single.text, 'Keep me');
+
+      service.dispose();
+    });
+
+    testWidgets('losing focus commits without leaving the mode', (
+      WidgetTester tester,
+    ) async {
+      // The real focus-loss path: nothing here taps DONE or another row, so
+      // only `Focus.onFocusChange` can have written the entry.
+      final _MemoryClipboardRepository repository = _MemoryClipboardRepository();
+      await repository.addItem(_textItem('1', 'Before the fix'));
+      final ClipboardWatcherService service = await pumpSheet(
+        tester,
+        repository,
+      );
+
+      await tester.tap(find.text('EDIT'));
+      await tester.pump(const Duration(milliseconds: 100));
+      await tester.enterText(
+        find.descendant(
+          of: find.byKey(ClipboardHistorySheet.previewKey),
+          matching: find.byType(TextField),
+        ),
+        'After the fix',
+      );
+      await tester.pump(const Duration(milliseconds: 100));
+
+      // The search box is the first field on the sheet; taking the focus there
+      // is what a click anywhere outside the field does.
+      await tester.tap(find.byType(TextField).first);
+      await tester.pump(const Duration(milliseconds: 100));
+
+      expect(repository.items.single.text, 'After the fix');
+      // Still editing: a commit is not an exit.
+      expect(find.text('DONE'), findsOneWidget);
+
+      service.dispose();
+    });
+
+    testWidgets('Enter while editing types rather than pasting', (
+      WidgetTester tester,
+    ) async {
+      // `KeyboardListener` wraps the whole sheet, so without a guard Enter
+      // pasted the PRE-EDIT text, popped the route and auto-pasted it into the
+      // app underneath — with the typing never written. Adding a newline to a
+      // multi-line snippet is the ordinary gesture in this pane.
+      final _MemoryClipboardRepository repository = _MemoryClipboardRepository();
+      await repository.addItem(_textItem('1', 'Before the fix'));
+      final _FakeClipboardGateway gateway = _FakeClipboardGateway();
+      final ClipboardWatcherService service = await pumpSheet(
+        tester,
+        repository,
+        gateway: gateway,
+      );
+
+      await tester.tap(find.text('EDIT'));
+      await tester.pump(const Duration(milliseconds: 100));
+      await tester.enterText(
+        find.descendant(
+          of: find.byKey(ClipboardHistorySheet.previewKey),
+          matching: find.byType(TextField),
+        ),
+        'After the fix',
+      );
+      await tester.pump(const Duration(milliseconds: 100));
+
+      await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+      await tester.pump(const Duration(milliseconds: 200));
+
+      expect(gateway.copiedText, isNull);
+      expect(
+        find.descendant(
+          of: find.byKey(ClipboardHistorySheet.previewKey),
+          matching: find.byType(TextField),
+        ),
+        findsOneWidget,
+      );
+
+      service.dispose();
+    });
+
+    testWidgets('the arrows move the caret, not the selection, while editing', (
+      WidgetTester tester,
+    ) async {
+      final _MemoryClipboardRepository repository = _MemoryClipboardRepository();
+      await repository.addItem(_textItem('1', 'Older entry'));
+      await repository.addItem(_textItem('2', 'Newer entry'));
+      final ClipboardWatcherService service = await pumpSheet(
+        tester,
+        repository,
+      );
+
+      await tester.tap(find.text('EDIT'));
+      await tester.pump(const Duration(milliseconds: 100));
+
+      await tester.sendKeyEvent(LogicalKeyboardKey.arrowDown);
+      await tester.pump(const Duration(milliseconds: 200));
+
+      expect(
+        find.descendant(
+          of: find.byKey(ClipboardHistorySheet.previewKey),
+          matching: find.byType(TextField),
+        ),
+        findsOneWidget,
+      );
+      // The pane still heads the entry that was being edited.
+      expect(
+        find.descendant(
+          of: find.byKey(ClipboardHistorySheet.previewKey),
+          matching: find.text('Older entry'),
+        ),
+        findsNothing,
+      );
+
+      service.dispose();
+    });
+
+    testWidgets('Escape commits and leaves the mode', (
+      WidgetTester tester,
+    ) async {
+      final _MemoryClipboardRepository repository = _MemoryClipboardRepository();
+      await repository.addItem(_textItem('1', 'Before the fix'));
+      final ClipboardWatcherService service = await pumpSheet(
+        tester,
+        repository,
+      );
+
+      await tester.tap(find.text('EDIT'));
+      await tester.pump(const Duration(milliseconds: 100));
+      await tester.enterText(
+        find.descendant(
+          of: find.byKey(ClipboardHistorySheet.previewKey),
+          matching: find.byType(TextField),
+        ),
+        'After the fix',
+      );
+      await tester.pump(const Duration(milliseconds: 100));
+
+      await tester.sendKeyEvent(LogicalKeyboardKey.escape);
+      await tester.pump(const Duration(milliseconds: 200));
+
+      expect(repository.items.single.text, 'After the fix');
+      expect(find.text('EDIT'), findsOneWidget);
+      expect(
+        find.descendant(
+          of: find.byKey(ClipboardHistorySheet.previewKey),
+          matching: find.byType(TextField),
+        ),
+        findsNothing,
+      );
+
+      service.dispose();
+    });
+
+    testWidgets('an entry arriving mid-edit does not steal the pane', (
+      WidgetTester tester,
+    ) async {
+      // The 750 ms poller inserts at the head of the list, so before the pin
+      // the pane resolved to the new entry, the field was unmounted — which
+      // `Focus.onFocusChange` never reports — and the typing was gone with no
+      // marker. Nobody initiated that change, which is why the other three
+      // flush points could not cover it.
+      final _MemoryClipboardRepository repository = _MemoryClipboardRepository();
+      await repository.addItem(_textItem('1', 'Being corrected'));
+      final _FakeClipboardGateway gateway = _FakeClipboardGateway();
+      final ClipboardWatcherService service = await pumpSheet(
+        tester,
+        repository,
+        gateway: gateway,
+      );
+
+      // EDIT is pressed on the entry the pane resolved to by default, so no
+      // selection has been made by hand at this point — the common path.
+      await tester.tap(find.text('EDIT'));
+      await tester.pump(const Duration(milliseconds: 100));
+      final Finder field = find.descendant(
+        of: find.byKey(ClipboardHistorySheet.previewKey),
+        matching: find.byType(TextField),
+      );
+      await tester.enterText(field, 'Corrected text');
+      await tester.pump(const Duration(milliseconds: 100));
+
+      gateway.text = 'Copied somewhere else';
+      await service.checkNow();
+      await tester.pump(const Duration(milliseconds: 200));
+
+      expect(
+        find.descendant(
+          of: find.byKey(ClipboardHistorySheet.listKey),
+          matching: find.text('Copied somewhere else'),
+        ),
+        findsOneWidget,
+      );
+      expect(field, findsOneWidget);
+
+      await tester.tap(find.text('DONE'));
+      await tester.pump(const Duration(milliseconds: 100));
+
+      expect(
+        repository.items.firstWhere((ClipboardItem e) => e.id == '1').text,
+        'Corrected text',
+      );
+
+      service.dispose();
+    });
+
+    testWidgets('a search that excludes the edited entry does not close it', (
+      WidgetTester tester,
+    ) async {
+      // The Queue keeps the same rule for a row being edited. Here the entry
+      // leaves the visible list entirely, so the pane has to look it up in the
+      // whole history rather than fall back to the newest match.
+      final _MemoryClipboardRepository repository = _MemoryClipboardRepository();
+      await repository.addItem(_textItem('1', 'Original'));
+      final ClipboardWatcherService service = await pumpSheet(
+        tester,
+        repository,
+      );
+
+      await tester.tap(find.text('EDIT'));
+      await tester.pump(const Duration(milliseconds: 100));
+      final Finder field = find.descendant(
+        of: find.byKey(ClipboardHistorySheet.previewKey),
+        matching: find.byType(TextField),
+      );
+      await tester.enterText(field, 'Corrected');
+      await tester.pump(const Duration(milliseconds: 100));
+
+      // Typing in the search box takes the focus, which commits, and the query
+      // then excludes the entry that was being edited.
+      await tester.enterText(find.byType(TextField).first, 'zzz');
+      await tester.pump(const Duration(milliseconds: 200));
+
+      expect(find.text('Nothing matches this collection or search.'),
+          findsOneWidget);
+      expect(field, findsOneWidget);
+      expect(repository.items.single.text, 'Corrected');
+
+      service.dispose();
+    });
+
+    testWidgets('disposing the sheet flushes the pending edit', (
+      WidgetTester tester,
+    ) async {
+      // Clicking the modal barrier or dragging the sheet away pops the route
+      // with no focus change at all — `_FocusState.dispose` drops its listener
+      // before disposing the node — so `dispose` is the last chance to write.
+      // Replacing the tree disposes the state exactly as the pop does.
+      final _MemoryClipboardRepository repository = _MemoryClipboardRepository();
+      await repository.addItem(_textItem('1', 'Before the fix'));
+      final ClipboardWatcherService service = await pumpSheet(
+        tester,
+        repository,
+      );
+
+      await tester.tap(find.text('EDIT'));
+      await tester.pump(const Duration(milliseconds: 100));
+      await tester.enterText(
+        find.descendant(
+          of: find.byKey(ClipboardHistorySheet.previewKey),
+          matching: find.byType(TextField),
+        ),
+        'Corrected on the way out',
+      );
+      await tester.pump(const Duration(milliseconds: 100));
+
+      await tester.pumpWidget(
+        MaterialApp(home: Scaffold(body: SizedBox.shrink())),
+      );
+      await tester.pump(const Duration(milliseconds: 100));
+
+      expect(repository.items.single.text, 'Corrected on the way out');
+
+      service.dispose();
+    });
+
+    testWidgets('deleting the edited entry leaves the key listener working', (
+      WidgetTester tester,
+    ) async {
+      // An `_editingId` with no editor mounted stands `_handleKey` down for the
+      // rest of the session: Enter stops pasting and the arrows stop moving,
+      // with nothing on screen to explain it.
+      final _MemoryClipboardRepository repository = _MemoryClipboardRepository();
+      await repository.addItem(_textItem('1', 'Older entry'));
+      await repository.addItem(_textItem('2', 'Newer entry'));
+      final _FakeClipboardGateway gateway = _FakeClipboardGateway();
+      final ClipboardWatcherService service = await pumpSheet(
+        tester,
+        repository,
+        gateway: gateway,
+      );
+
+      await tester.tap(find.text('EDIT'));
+      await tester.pump(const Duration(milliseconds: 100));
+      await tester.tap(find.text('DELETE'));
+      await tester.pump(const Duration(milliseconds: 200));
+
+      expect(repository.items, hasLength(1));
+
+      await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+      await tester.pump(const Duration(milliseconds: 200));
+
+      expect(gateway.copiedText, 'Older entry');
+
+      service.dispose();
+    });
   });
 }
 
@@ -370,6 +1101,19 @@ class _MemoryClipboardRepository implements ClipboardRepository {
         ? collections.remove(collectionName)
         : collections.add(collectionName);
     _items[index] = item.copyWith(collections: collections);
+  }
+
+  @override
+  Future<void> updateItemText(String id, String text) async {
+    if (text.trim().isEmpty) return;
+    final int index = _items.indexWhere((ClipboardItem item) => item.id == id);
+    if (index < 0) return;
+    final ClipboardItem current = _items[index];
+    if (current.type != ClipboardItemType.text) return;
+    _items[index] = current.copyWith(
+      text: text,
+      preview: ClipboardItem.previewFor(text),
+    );
   }
 }
 

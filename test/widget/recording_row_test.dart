@@ -4,7 +4,7 @@ import 'package:augustyniak_capture/app/ui_kit.dart';
 import 'package:augustyniak_capture/features/recordings/domain/capture_category.dart';
 import 'package:augustyniak_capture/features/recordings/domain/recording.dart';
 import 'package:augustyniak_capture/features/recordings/presentation/card_parts.dart';
-import 'package:augustyniak_capture/features/recordings/presentation/queue_metrics.dart';
+import 'package:augustyniak_capture/features/recordings/presentation/queue_toolbar.dart';
 import 'package:augustyniak_capture/features/recordings/presentation/queue_tab.dart';
 import 'package:augustyniak_capture/features/recordings/presentation/recording_card.dart';
 import 'package:augustyniak_capture/features/recordings/presentation/recording_row.dart';
@@ -295,7 +295,11 @@ void main() {
       expect(find.text('DESK 1'), findsOneWidget);
       expect(find.text('OFF DESK 1'), findsOneWidget);
       expect(find.text('ANY 2'), findsOneWidget);
-      expect(find.byType(ReviewedStrip), findsNothing);
+      // The wide toolbar — and with it the `n / m` ratio and the 2 px progress
+      // line — has no place on a phone: the same numbers are already on the
+      // segments the user taps to act on them.
+      expect(find.byType(QueueToolbar), findsNothing);
+      expect(find.text('1 / 2'), findsNothing);
     });
 
     testWidgets('search and the status chips stay folded until asked', (

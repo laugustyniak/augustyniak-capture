@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../../../app/ui_kit.dart';
 import 'queue_tab.dart';
+import 'review_segments.dart';
 
 /// The Queue's header on a phone: one dense strip carrying the review axis, with
 /// search and the remaining filters folded behind their own buttons.
@@ -82,7 +83,7 @@ class CompactQueueHeader extends StatelessWidget {
               Flexible(
                 child: SingleChildScrollView(
                   scrollDirection: Axis.horizontal,
-                  child: _ReviewSegments(
+                  child: ReviewSegments(
                     total: total,
                     reviewed: reviewed,
                     filter: filter,
@@ -93,10 +94,10 @@ class CompactQueueHeader extends StatelessWidget {
               const SizedBox(width: 6),
               if (onSync != null) ...<Widget>[
                 _HeaderToggle(
-                  child: SyncSpinIcon(isSyncing: isSyncing, size: 17),
                   active: isSyncing,
                   onTap: () async => onSync!(),
                   semanticLabel: 'Sync Turso Cloud',
+                  child: SyncSpinIcon(isSyncing: isSyncing, size: 17),
                 ),
                 const SizedBox(width: 6),
               ],
@@ -123,90 +124,6 @@ class CompactQueueHeader extends StatelessWidget {
           if (filtersOpen)
             Padding(padding: const EdgeInsets.only(top: 10), child: filters),
         ],
-      ),
-    );
-  }
-}
-
-/// `DESK 4 · OFF DESK 33 · ANY 37` as one segmented control.
-///
-/// A segmented control rather than the three [ConsoleChip]s the wide form uses:
-/// these options are mutually exclusive and always exactly three, which is what
-/// a segment says and a chip does not — and the shared track is what lets them
-/// sit in a 34 px strip instead of a 44 px row of separate pills.
-class _ReviewSegments extends StatelessWidget {
-  _ReviewSegments({
-    required this.total,
-    required this.reviewed,
-    required this.filter,
-    required this.onChanged,
-  });
-
-  final int total;
-  final int reviewed;
-  final ReviewFilter filter;
-  final ValueChanged<ReviewFilter> onChanged;
-
-  /// Same words as [ReviewedStrip], which is the point: the phone and the
-  /// desktop must not name the same axis differently.
-  String _label(ReviewFilter value) => switch (value) {
-    ReviewFilter.desk => 'DESK',
-    ReviewFilter.handedOff => 'OFF DESK',
-    ReviewFilter.all => 'ANY',
-  };
-
-  int _count(ReviewFilter value) => switch (value) {
-    ReviewFilter.desk => total - reviewed,
-    ReviewFilter.handedOff => reviewed,
-    ReviewFilter.all => total,
-  };
-
-  /// The green is the same "you are finished with it" green the wide form uses
-  /// on its OFF DESK chip and on the review tick.
-  Color _color(ReviewFilter value) =>
-      value == ReviewFilter.handedOff ? Console.green : Console.accent;
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.all(3),
-      decoration: BoxDecoration(
-        color: Console.surfaceRaised,
-        borderRadius: BorderRadius.circular(10),
-        border: Border.all(color: Console.border),
-      ),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: ReviewFilter.values.map((ReviewFilter value) {
-          final bool selected = filter == value;
-          final Color color = _color(value);
-          return Semantics(
-            button: true,
-            selected: selected,
-            child: InkWell(
-              onTap: () => onChanged(value),
-              borderRadius: BorderRadius.circular(7),
-              child: AnimatedContainer(
-                duration: const Duration(milliseconds: 180),
-                constraints: const BoxConstraints(minHeight: 34),
-                alignment: Alignment.center,
-                padding: const EdgeInsets.symmetric(horizontal: 11),
-                decoration: BoxDecoration(
-                  color: selected ? color : Colors.transparent,
-                  borderRadius: BorderRadius.circular(7),
-                ),
-                child: Text(
-                  '${_label(value)} ${_count(value)}',
-                  style: ConsoleText.chip.copyWith(
-                    fontSize: 10,
-                    letterSpacing: .5,
-                    color: selected ? Console.ink : Console.muted,
-                  ),
-                ),
-              ),
-            ),
-          );
-        }).toList(),
       ),
     );
   }

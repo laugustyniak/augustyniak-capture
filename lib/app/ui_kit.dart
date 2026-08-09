@@ -48,6 +48,7 @@ class ConsolePalette {
     required this.redBorder,
     required this.track,
     required this.shadow,
+    required this.scrim,
   });
 
   final Brightness brightness;
@@ -133,6 +134,17 @@ class ConsolePalette {
   /// Drop shadow under anything that floats over the list or the page.
   final Color shadow;
 
+  /// The dimming behind a full-screen overlay.
+  ///
+  /// **Not [shadow], and the difference is not cosmetic.** A shadow sits under
+  /// one floating element and is deliberately faint — in the light palette it is
+  /// 10 % ink, which as a scrim would be invisible and would leave the overlay
+  /// looking like it had simply failed to cover anything. This has to hold its
+  /// own against a whole page of content behind it, so it is darker in both
+  /// themes and darker still in the dark one, where the page beneath is already
+  /// close to black.
+  final Color scrim;
+
   /// Background of a square icon tile (the leading badge on a card) and of an
   /// icon button while it is highlighted. Derived rather than stored: it is
   /// [accent] at the design's 12 %, and storing it separately is one more way
@@ -173,6 +185,9 @@ class ConsolePalette {
     redBorder: Color(0xFF6E2A2A),
     track: Color(0xFF3F3F46),
     shadow: Color(0x99000000),
+    // Heavier than the light theme's: the page behind is already near-black, so
+    // a 45 % scrim would barely separate the overlay from it.
+    scrim: Color(0xCC000000),
   );
 
   static const ConsolePalette light = ConsolePalette(
@@ -206,6 +221,7 @@ class ConsolePalette {
     redBorder: Color(0xFFF3C0C0),
     track: Color(0xFFE4E4E7),
     shadow: Color(0x1A17171C),
+    scrim: Color(0x8017171C),
   );
 }
 
@@ -278,6 +294,7 @@ class Console {
   static Color get redBorder => _palette.redBorder;
   static Color get track => _palette.track;
   static Color get shadow => _palette.shadow;
+  static Color get scrim => _palette.scrim;
 
   /// NavigationBar selection indicator. The design marks the active tab by
   /// colouring its icon and label, not with a pill behind them.
@@ -478,10 +495,7 @@ class ConsoleHeader extends StatelessWidget {
           crossAxisAlignment: CrossAxisAlignment.center,
           children: <Widget>[
             Expanded(child: Text(title, style: ConsoleText.pageTitle)),
-            if (action != null) ...<Widget>[
-              action!,
-              const SizedBox(width: 12),
-            ],
+            if (action != null) ...<Widget>[action!, const SizedBox(width: 12)],
             if (trailing != null)
               Padding(
                 padding: const EdgeInsets.only(bottom: 3),
@@ -555,7 +569,8 @@ class _SyncSpinIconState extends State<SyncSpinIcon>
       child: Icon(
         widget.icon,
         size: widget.size,
-        color: widget.color ?? (widget.isSyncing ? Console.accent : Console.text),
+        color:
+            widget.color ?? (widget.isSyncing ? Console.accent : Console.text),
       ),
     );
   }

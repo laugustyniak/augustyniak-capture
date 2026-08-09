@@ -98,7 +98,7 @@ class CaptureInputMethodService : InputMethodService(), ClipboardManager.OnPrima
         val items = loadHistoryClips()
         if (items.isEmpty()) {
             val emptyView = TextView(this).apply {
-                text = "Brak skopiowanych elementów w schowku"
+                text = "No copied items in the clipboard"
                 setTextColor(Color.parseColor("#71717A"))
                 setPadding(16, 12, 16, 12)
                 textSize = 12f

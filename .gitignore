@@ -60,3 +60,17 @@ gemini.md
 # thoughts — meeting notes, client work, half-formed ideas — landing in whatever
 # repo the capture was filed under. They are input to an agent, never source.
 .agent-tasks/
+
+# Local macOS code-signing identity (see LocalSigning.xcconfig.example).
+# Untracked like android/key.properties: naming a machine's own certificate,
+# and absent by default so a clone still builds ad-hoc.
+macos/Runner/Configs/LocalSigning.xcconfig
+
+# Wrangler's local state. `cache/wrangler-account.json` was tracked here and
+# held only an account id and an email — but `wrangler login` writes an
+# `oauth_token` and a `refresh_token` into this same directory, and the
+# pre-commit hook only refuses `.agent-tasks/` and `inbox.md`, so nothing
+# would have stopped the next login from being committed. Ignored as a
+# directory rather than by file, because which files Wrangler puts here is
+# its decision and not ours.
+.wrangler/

@@ -17,7 +17,7 @@ import 'agent_artifact_viewer_modal.dart';
 import 'card_parts.dart';
 import 'compact_queue_header.dart';
 import 'handoff_sheet.dart';
-import 'queue_metrics.dart';
+import 'queue_toolbar.dart';
 import 'recording_card.dart';
 import 'recording_editor.dart';
 import 'recording_row.dart';
@@ -361,7 +361,7 @@ class _QueueTabState extends State<QueueTab> {
                           setState(() => searchPanelOpen = !searchPanelOpen);
                           if (searchPanelOpen) searchFocus.requestFocus();
                         },
-                        search: _SearchField(
+                        search: QueueSearchField(
                           controller: searchController,
                           focusNode: searchFocus,
                           value: searchQuery,
@@ -377,7 +377,7 @@ class _QueueTabState extends State<QueueTab> {
                           crossAxisAlignment: CrossAxisAlignment.stretch,
                           children: <Widget>[
                             if (projects.isNotEmpty) ...<Widget>[
-                              _ProjectFilter(
+                              QueueProjectFilter(
                                 projects: projects,
                                 selectedId: effectiveProjectFilterId,
                                 onChanged: (String? value) {
@@ -386,7 +386,7 @@ class _QueueTabState extends State<QueueTab> {
                               ),
                               const SizedBox(height: 10),
                             ],
-                            _FilterRow(
+                            QueueStatusChips(
                               selected: selectedFilter,
                               counts: counts,
                               onSelected: (RecordingFilter value) {
@@ -398,42 +398,30 @@ class _QueueTabState extends State<QueueTab> {
                       )
                     else
                       Padding(
-                        padding: const EdgeInsets.fromLTRB(20, 14, 20, 0),
-                        child: Column(
-                          children: <Widget>[
-                            ReviewedStrip(
-                              total: all.length,
-                              reviewed: reviewedCount,
-                              filter: reviewFilter,
-                              onFilterChanged: (ReviewFilter value) {
-                                setState(() => reviewFilter = value);
-                              },
-                            ),
-                            const SizedBox(height: 10),
-                            Padding(
-                              padding: const EdgeInsets.symmetric(
-                                horizontal: 4,
-                              ),
-                              child: _QueueControls(
-                                searchController: searchController,
-                                searchFocusNode: searchFocus,
-                                searchQuery: searchQuery,
-                                onSearchChanged: (String value) {
-                                  setState(() => searchQuery = value);
-                                },
-                                projects: projects,
-                                selectedProjectId: effectiveProjectFilterId,
-                                onProjectChanged: (String? value) {
-                                  setState(() => projectFilterId = value);
-                                },
-                                selectedFilter: selectedFilter,
-                                counts: counts,
-                                onFilterSelected: (RecordingFilter value) {
-                                  setState(() => selectedFilter = value);
-                                },
-                              ),
-                            ),
-                          ],
+                        padding: const EdgeInsets.fromLTRB(20, 12, 20, 0),
+                        child: QueueToolbar(
+                          total: all.length,
+                          reviewed: reviewedCount,
+                          reviewFilter: reviewFilter,
+                          onReviewChanged: (ReviewFilter value) {
+                            setState(() => reviewFilter = value);
+                          },
+                          searchController: searchController,
+                          searchFocusNode: searchFocus,
+                          searchQuery: searchQuery,
+                          onSearchChanged: (String value) {
+                            setState(() => searchQuery = value);
+                          },
+                          projects: projects,
+                          selectedProjectId: effectiveProjectFilterId,
+                          onProjectChanged: (String? value) {
+                            setState(() => projectFilterId = value);
+                          },
+                          statusFilter: selectedFilter,
+                          counts: counts,
+                          onStatusChanged: (RecordingFilter value) {
+                            setState(() => selectedFilter = value);
+                          },
                         ),
                       ),
                     Expanded(
@@ -891,184 +879,6 @@ class _DoneFeedback extends StatelessWidget {
   }
 }
 
-/// Search, project and status filters — one strip, laid out by how much room
-/// the queue actually has.
-///
-/// Wide enough (a desktop window) and the three sit on a single line, which is
-/// what keeps the first card near the top of the screen instead of three rows
-/// down. Narrower and they stack the way they always did: below
-/// [_singleLineWidth] the project selector and the five chips cannot both keep
-/// a legible search box beside them, and a search field squeezed to a few
-/// characters is worse than a second row.
-class _QueueControls extends StatelessWidget {
-  const _QueueControls({
-    required this.searchController,
-    required this.searchFocusNode,
-    required this.searchQuery,
-    required this.onSearchChanged,
-    required this.projects,
-    required this.selectedProjectId,
-    required this.onProjectChanged,
-    required this.selectedFilter,
-    required this.counts,
-    required this.onFilterSelected,
-  });
-
-  /// Below this the strip stacks. Derived from what the row needs rather than
-  /// from a device class: the project selector is fixed at
-  /// [_projectFilterWidth], the chips take up to half the width, and what is
-  /// left has to stay wide enough to type a query into.
-  static const double _singleLineWidth = 860;
-  static const double _projectFilterWidth = 210;
-
-  final TextEditingController searchController;
-
-  /// Owned by the tab so `Ctrl+F` and `/` have somewhere to send focus.
-  final FocusNode searchFocusNode;
-  final String searchQuery;
-  final ValueChanged<String> onSearchChanged;
-  final List<Project> projects;
-  final String? selectedProjectId;
-  final ValueChanged<String?> onProjectChanged;
-  final RecordingFilter selectedFilter;
-  final Map<RecordingFilter, int> counts;
-  final ValueChanged<RecordingFilter> onFilterSelected;
-
-  @override
-  Widget build(BuildContext context) {
-    return LayoutBuilder(
-      builder: (BuildContext context, BoxConstraints constraints) {
-        final bool singleLine = constraints.maxWidth >= _singleLineWidth;
-        final Widget search = _SearchField(
-          controller: searchController,
-          focusNode: searchFocusNode,
-          value: searchQuery,
-          onChanged: onSearchChanged,
-        );
-        final Widget? projectFilter = projects.isEmpty
-            ? null
-            : _ProjectFilter(
-                projects: projects,
-                selectedId: selectedProjectId,
-                onChanged: onProjectChanged,
-                compact: singleLine,
-              );
-        final Widget filters = _FilterRow(
-          selected: selectedFilter,
-          counts: counts,
-          onSelected: onFilterSelected,
-        );
-
-        if (!singleLine) {
-          return Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: <Widget>[
-              search,
-              if (projectFilter != null) ...<Widget>[
-                const SizedBox(height: 12),
-                projectFilter,
-              ],
-              const SizedBox(height: 12),
-              filters,
-            ],
-          );
-        }
-
-        return Row(
-          children: <Widget>[
-            if (projectFilter != null) ...<Widget>[
-              SizedBox(width: _projectFilterWidth, child: projectFilter),
-              const SizedBox(width: 10),
-            ],
-            // The only flex child: the chips and the selector claim their
-            // natural width first, and the search box takes whatever is left.
-            Expanded(child: search),
-            const SizedBox(width: 10),
-            ConstrainedBox(
-              // A bounded box rather than a flex one, so the chips shrink to a
-              // scroller only once their labels genuinely outgrow half the
-              // strip — a longer count (`READY 1204`) must not start stealing
-              // room from the query field.
-              constraints: BoxConstraints(maxWidth: constraints.maxWidth / 2),
-              child: filters,
-            ),
-          ],
-        );
-      },
-    );
-  }
-}
-
-class _ProjectFilter extends StatelessWidget {
-  const _ProjectFilter({
-    required this.projects,
-    required this.selectedId,
-    required this.onChanged,
-    this.compact = false,
-  });
-
-  final List<Project> projects;
-  final String? selectedId;
-  final ValueChanged<String?> onChanged;
-
-  /// Drops the floating label and adopts the search box's filled outline, so
-  /// the two read as one control beside each other on the single-line strip.
-  /// The stacked layout keeps the label — there it has a row to itself and
-  /// nothing else names the field.
-  final bool compact;
-
-  @override
-  Widget build(BuildContext context) {
-    return DropdownButtonFormField<String?>(
-      // FormField owns its selected value internally. Recreate that state when
-      // the controlled selection or project vocabulary changes; otherwise a
-      // deleted project can remain as a dangling Dropdown value for one frame.
-      key: ValueKey<String>(
-        'project-filter:${selectedId ?? 'all'}:'
-        '${projects.map((Project project) => project.id).join(',')}',
-      ),
-      initialValue: selectedId,
-      dropdownColor: Console.surfaceRaised,
-      isDense: compact,
-      // A project name is free text and the selector has a fixed width on the
-      // single-line strip, so the label has to be allowed to ellipsize. Without
-      // this the dropdown's own row overflows — and it overflows while laying
-      // out the *menu* items offstage, so the visible control looks correct and
-      // only the debug stripes say otherwise.
-      isExpanded: true,
-      // Matched to the search box's 18 px prefix icon: the default 24 would
-      // make the dropdown the taller of the two and break the line.
-      iconSize: compact ? 18 : 24,
-      style: compact ? TextStyle(color: Console.text, fontSize: 13) : null,
-      decoration: compact
-          ? _fieldDecoration.copyWith(
-              hintText: 'All projects',
-              prefixIcon: Icon(
-                Icons.account_tree_outlined,
-                color: Console.dim,
-                size: 18,
-              ),
-            )
-          : const InputDecoration(
-              prefixIcon: Icon(Icons.account_tree_outlined, size: 18),
-              labelText: 'Project',
-            ),
-      items: <DropdownMenuItem<String?>>[
-        const DropdownMenuItem<String?>(
-          value: null,
-          child: Text('All projects'),
-        ),
-        for (final Project project in projects)
-          DropdownMenuItem<String?>(
-            value: project.id,
-            child: Text(project.name),
-          ),
-      ],
-      onChanged: onChanged,
-    );
-  }
-}
-
 /// Single definition of what each bucket contains — used both to filter the
 /// list and to count the chips, so the two can never disagree.
 bool _matches(RecordingFilter filter, Recording item) => switch (filter) {
@@ -1161,115 +971,6 @@ class _QueueShortcuts extends StatelessWidget {
         autofocus: true,
         skipTraversal: true,
         child: child,
-      ),
-    );
-  }
-}
-
-/// Getters, not top-level variables. A `final`-in-effect module variable is
-/// initialised lazily **once**, so the first field ever built would pin that
-/// theme's colours into every field for the rest of the process — the same
-/// staleness a `const` widget causes, one level up and with no compiler error
-/// to announce it. `test/theme_test.dart` scans for both.
-OutlineInputBorder get _fieldBorder => OutlineInputBorder(
-  borderRadius: const BorderRadius.all(Radius.circular(10)),
-  borderSide: BorderSide(color: Console.border),
-);
-
-/// The strip's shared field shape. Search and the compact project selector are
-/// different widgets on one line, so the decoration has to come from a single
-/// place — two hand-copied `OutlineInputBorder`s is exactly how the tabs drifted
-/// before `ConsoleField` existed.
-InputDecoration get _fieldDecoration => InputDecoration(
-  isDense: true,
-  contentPadding: const EdgeInsets.symmetric(vertical: 13),
-  hintStyle: TextStyle(color: Console.dimText, fontSize: 13),
-  prefixIconConstraints: const BoxConstraints(minWidth: 42),
-  filled: true,
-  // `surfaceRaised` (`--muted`), not `surface`: the field is a *well* inside a
-  // panel, and with `surface` it would be a white box on a white card in the
-  // light theme.
-  fillColor: Console.surfaceRaised,
-  border: _fieldBorder,
-  enabledBorder: _fieldBorder,
-  disabledBorder: _fieldBorder,
-  focusedBorder: OutlineInputBorder(
-    borderRadius: const BorderRadius.all(Radius.circular(10)),
-    borderSide: BorderSide(color: Console.accent),
-  ),
-);
-
-class _SearchField extends StatelessWidget {
-  const _SearchField({
-    required this.controller,
-    required this.value,
-    required this.onChanged,
-    this.focusNode,
-  });
-
-  final TextEditingController controller;
-  final String value;
-  final ValueChanged<String> onChanged;
-  final FocusNode? focusNode;
-
-  @override
-  Widget build(BuildContext context) {
-    return TextField(
-      controller: controller,
-      focusNode: focusNode,
-      onChanged: onChanged,
-      style: TextStyle(color: Console.text, fontSize: 13),
-      decoration: _fieldDecoration.copyWith(
-        hintText: 'Search captures',
-        prefixIcon: Icon(Icons.search, color: Console.dimText, size: 18),
-        suffixIcon: value.isEmpty
-            ? null
-            : IconButton(
-                tooltip: 'Clear search',
-                // Constrained so the clear button cannot make the search box
-                // taller than the controls beside it on the single-line strip:
-                // an IconButton's default 48 px minimum would do exactly that,
-                // and the row would jump the moment the user types.
-                constraints: const BoxConstraints(minWidth: 38, minHeight: 38),
-                padding: EdgeInsets.zero,
-                icon: Icon(Icons.close, color: Console.dimText, size: 18),
-                onPressed: () {
-                  controller.clear();
-                  onChanged('');
-                },
-              ),
-      ),
-    );
-  }
-}
-
-class _FilterRow extends StatelessWidget {
-  const _FilterRow({
-    required this.selected,
-    required this.counts,
-    required this.onSelected,
-  });
-
-  final RecordingFilter selected;
-  final Map<RecordingFilter, int> counts;
-  final ValueChanged<RecordingFilter> onSelected;
-
-  @override
-  Widget build(BuildContext context) {
-    return SingleChildScrollView(
-      scrollDirection: Axis.horizontal,
-      child: Row(
-        children: RecordingFilter.values.map((RecordingFilter item) {
-          return Padding(
-            padding: const EdgeInsets.only(right: 7),
-            child: ConsoleChip(
-              label: item.name.toUpperCase(),
-              count: counts[item] ?? 0,
-              selected: item == selected,
-              onSelected: () => onSelected(item),
-            ),
-          );
-        }).toList(),
       ),
     );
   }

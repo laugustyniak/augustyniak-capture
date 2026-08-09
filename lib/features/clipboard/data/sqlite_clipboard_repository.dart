@@ -98,12 +98,64 @@ class SqliteClipboardRepository implements ClipboardRepository {
       jsonEncode(item.collections.toList()),
     ]);
 
+    // Read the rows about to fall off the end *before* deleting them: an image
+    // item owns a PNG on disk, and a bare `DELETE` drops the only record of
+    // where that file is. `deleteItem` and `clearHistory` both take the file
+    // with the row, and eviction has to as well or the images directory grows
+    // for the rest of the install's life with nothing able to name the strays —
+    // there is no orphan sweep here, unlike the recordings directory.
+    final ResultSet evicted = db.rawDb.select('''
+      SELECT image_path FROM clipboard_items
+      WHERE image_path IS NOT NULL
+        AND id NOT IN (
+          SELECT id FROM clipboard_items ORDER BY copied_at DESC LIMIT ?
+        );
+    ''', <Object?>[maxItems]);
+
     db.rawDb.execute('''
       DELETE FROM clipboard_items
       WHERE id NOT IN (
         SELECT id FROM clipboard_items ORDER BY copied_at DESC LIMIT ?
       );
     ''', <Object?>[maxItems]);
+
+    // Files after the row, not before: a delete that fails leaves a file with
+    // no row — invisible but harmless — while the other order would leave a row
+    // pointing at a file that is gone, which every reader would treat as a
+    // broken entry. Same ordering rule the recordings delete follows, inverted
+    // for the same reason it is stated there.
+    for (final Row row in evicted) {
+      await _deleteImage(row['image_path'] as String?);
+    }
+
+    await getItems();
+  }
+
+  /// Best-effort: a PNG that cannot be removed costs disk space, never the
+  /// history operation that was asked for.
+  Future<void> _deleteImage(String? path) async {
+    if (path == null) return;
+    try {
+      final File file = File(path);
+      if (await file.exists()) await file.delete();
+    } catch (_) {}
+  }
+
+  @override
+  Future<void> updateItemText(String id, String text) async {
+    final AppDatabase db = _appDatabase ?? await AppDatabase.getInstance();
+    if (text.trim().isEmpty) return;
+
+    final int index = _items.indexWhere((ClipboardItem item) => item.id == id);
+    if (index == -1) return;
+    if (_items[index].type != ClipboardItemType.text) return;
+
+    // copied_at is deliberately untouched: getItems() reads
+    // ORDER BY copied_at DESC, so the entry keeps its place in the list.
+    db.rawDb.execute(
+      'UPDATE clipboard_items SET text = ?, preview = ? WHERE id = ?;',
+      <Object?>[text, ClipboardItem.previewFor(text), id],
+    );
 
     await getItems();
   }
@@ -135,37 +187,24 @@ class SqliteClipboardRepository implements ClipboardRepository {
   Future<void> deleteItem(String id) async {
     final AppDatabase db = _appDatabase ?? await AppDatabase.getInstance();
     final int index = _items.indexWhere((ClipboardItem item) => item.id == id);
-    if (index != -1) {
-      final ClipboardItem item = _items[index];
-      if (item.type == ClipboardItemType.image && item.imagePath != null) {
-        try {
-          final File imageFile = File(item.imagePath!);
-          if (await imageFile.exists()) {
-            await imageFile.delete();
-          }
-        } catch (_) {}
-      }
-    }
+    final String? imagePath = index == -1 ? null : _items[index].imagePath;
 
     db.rawDb.execute('DELETE FROM clipboard_items WHERE id = ?;', <Object?>[id]);
+    await _deleteImage(imagePath);
     await getItems();
   }
 
   @override
   Future<void> clearHistory() async {
     final AppDatabase db = _appDatabase ?? await AppDatabase.getInstance();
-    for (final ClipboardItem item in _items) {
-      if (item.type == ClipboardItemType.image && item.imagePath != null) {
-        try {
-          final File file = File(item.imagePath!);
-          if (await file.exists()) {
-            await file.delete();
-          }
-        } catch (_) {}
-      }
-    }
+    final List<String?> images = _items
+        .map((ClipboardItem item) => item.imagePath)
+        .toList();
 
     db.rawDb.execute('DELETE FROM clipboard_items;');
     _items.clear();
+    for (final String? path in images) {
+      await _deleteImage(path);
+    }
   }
 }

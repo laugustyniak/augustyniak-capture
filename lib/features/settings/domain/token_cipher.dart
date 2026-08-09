@@ -35,6 +35,20 @@ abstract class TokenCipher {
   /// Secret Service. One line of cause on screen is what separates them.
   String? get unavailableReason => null;
 
+  /// Announce, **before [ensureReady]**, that the store this cipher serves
+  /// already holds `enc:v1:` values — so a key store answering "nothing here"
+  /// is reporting a failure, not a first run.
+  ///
+  /// It is a separate call rather than a flag on [ensureReady] for the same
+  /// reason `RecordingsRepository.expectRowCount` is separate from `saveAll`:
+  /// the announcement belongs to the one caller that can make it honestly, and
+  /// changing the shared method's signature would silently reshape every
+  /// implementation and fake instead of adding one line at the single site.
+  ///
+  /// A no-op by default: only a cipher that can *generate* a key has anything
+  /// to withhold.
+  void expectExistingKey() {}
+
   /// Prepare the cipher (load or create the master key). Must never throw:
   /// a missing keyring degrades [encrypts] to false instead.
   Future<void> ensureReady();

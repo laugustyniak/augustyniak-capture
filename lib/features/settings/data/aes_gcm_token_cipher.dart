@@ -36,12 +36,16 @@ class AesGcmTokenCipher extends TokenCipher {
   bool _ready = false;
   String? _reason;
   Future<void>? _initializing;
+  bool _keyExpected = false;
 
   @override
   bool get encrypts => _ready;
 
   @override
   String? get unavailableReason => _ready ? null : _reason;
+
+  @override
+  void expectExistingKey() => _keyExpected = true;
 
   @override
   Future<void> ensureReady() => _initializing ??= _initialize();
@@ -59,6 +63,19 @@ class AesGcmTokenCipher extends TokenCipher {
         // Wrong-sized value: something else owns this entry — do not
         // overwrite it, run without encryption.
         _reason = 'the keyring entry holds a value this app did not write';
+        return;
+      }
+
+      if (_keyExpected) {
+        // The store answered "no key" for data that was sealed under one, so
+        // the key is unreachable rather than absent — and `write` here would
+        // land on top of the only copy of it, taking every sealed value with
+        // it permanently. Running without encryption costs this session's
+        // tokens; generating would cost them for good. See
+        // [TokenCipher.expectExistingKey].
+        _reason =
+            'the master key could not be read, and the stored data is '
+            'already encrypted under it — refusing to replace it';
         return;
       }
 
@@ -98,8 +115,10 @@ class AesGcmTokenCipher extends TokenCipher {
     if (!_ready || key == null || TokenCipher.isSealed(token)) {
       return token;
     }
-    final SecretBox box =
-        await _algorithm.encrypt(utf8.encode(token), secretKey: key);
+    final SecretBox box = await _algorithm.encrypt(
+      utf8.encode(token),
+      secretKey: key,
+    );
     return '${TokenCipher.sealedPrefix}${base64Encode(box.concatenation())}';
   }
 
@@ -110,8 +129,9 @@ class AesGcmTokenCipher extends TokenCipher {
       return stored;
     }
     try {
-      final Uint8List bytes =
-          base64Decode(stored.substring(TokenCipher.sealedPrefix.length));
+      final Uint8List bytes = base64Decode(
+        stored.substring(TokenCipher.sealedPrefix.length),
+      );
       final SecretBox box = SecretBox.fromConcatenation(
         bytes,
         nonceLength: AesGcm.defaultNonceLength,

@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../../../app/ui_kit.dart';
 import '../../../core/database/app_database.dart';
+import '../../../core/sync/sync_defaults.dart';
 import '../../../core/sync/turso_sync_service.dart';
 import '../../costs/domain/model_price.dart';
 import '../../costs/domain/price_book.dart';
@@ -20,6 +21,8 @@ import 'enrichment_context_section.dart';
 import 'qr_sync_sheet.dart';
 import 'settings_controller.dart';
 import 'vault_section.dart';
+import '../../momentum/domain/closure_event.dart';
+import '../../momentum/presentation/momentum_section.dart';
 
 /// Runtime settings: capture parameters plus a read-only view of where data
 /// lives and which provider is active. Provider editing lives in the Models tab.
@@ -47,6 +50,7 @@ class ConfigTab extends StatelessWidget {
     this.unknownQuantityCount = 0,
     this.verifiedOn,
     this.onRateChanged = _noRateChange,
+    this.onBackfillClosures,
   });
 
   /// Default for callers with no coordinator (mobile, tests): just run it.
@@ -106,6 +110,9 @@ class ConfigTab extends StatelessWidget {
   /// Persists an edited or reset rate, then backfills the rows it unblocks.
   /// The no-op default is what every pre-existing Config test still gets.
   final void Function(String key, ModelPrice? price) onRateChanged;
+  /// Reads already-closed captures back into the closure history. Null under
+  /// the same rule as [onMirrorAll] — the button renders disabled, not absent.
+  final Future<ClosureBackfill> Function()? onBackfillClosures;
 
   @override
   Widget build(BuildContext context) {
@@ -289,6 +296,8 @@ class ConfigTab extends StatelessWidget {
           EnrichmentContextSection(controller: controller, projects: projects),
           const SizedBox(height: 22),
           VaultSection(controller: controller, onMirrorAll: onMirrorAll),
+          const SizedBox(height: 22),
+          MomentumSection(onBackfill: onBackfillClosures),
           if (showShortcuts) ...<Widget>[
             const SizedBox(height: 22),
             ShortcutsSection(
@@ -407,7 +416,7 @@ class ConfigTab extends StatelessWidget {
                 InfoRow(
                   label: 'MEDIA SYNC',
                   value: controller.settings.r2Bucket != null
-                      ? 'ACTIVE · 101/101 files uploaded (0 zł egress)'
+                      ? 'ACTIVE · 101/101 files uploaded (\$0 egress)'
                       : 'DISABLED',
                   valueColor: controller.settings.r2Bucket != null
                       ? Console.green
@@ -511,7 +520,10 @@ class ConfigTab extends StatelessWidget {
                   value: '$recordingsCount .m4a files',
                 ),
                 InfoRow(label: 'INDEX', value: 'recordings.json'),
-                InfoRow(label: 'SETTINGS', value: 'settings.json'),
+                // Settings are read from and written to the database only; the
+                // settings.json this used to name is a legacy file, migrated
+                // once and never written again.
+                InfoRow(label: 'SETTINGS', value: 'app_database.sqlite'),
                 InfoRow(label: 'LOGS', value: 'logs.json · $logCount events'),
                 const SizedBox(height: 10),
                 Text(
@@ -540,7 +552,9 @@ String _tokenStatus(ProviderProfile? active, bool encrypted) {
   final String? token = active?.bearerToken;
   if (token == null) return 'none';
   if (TokenCipher.isSealed(token)) {
-    return '•••• unreadable — keyring unavailable';
+    // The master key moved off the keyring into a file beside the database, so
+    // naming the keyring here would send someone to fix the wrong thing.
+    return '•••• unreadable — master key unavailable';
   }
   return encrypted ? '•••• encrypted at rest' : '•••• set (plaintext on disk)';
 }
@@ -605,12 +619,11 @@ Future<void> _showEditTursoDialog(
   RecordingsController? recordingsController,
 ) async {
   final TextEditingController urlCtrl = TextEditingController(
-    text: controller.settings.tursoDbUrl ??
-        'libsql://augustyniak-capture-laugustyniak.aws-us-east-1.turso.io',
+    text: controller.settings.tursoDbUrl ?? SyncDefaults.tursoDbUrl ?? '',
   );
   final TextEditingController tokenCtrl = TextEditingController(
-    text: controller.settings.tursoAuthToken ??
-        'eyJhbGciOiJFZERTQSIsInR5cCI6IkpXVCJ9.eyJpYXQiOjE3ODYxMDkwNDIsImlkIjoiMDE5ZmRjNjUtMTkwMS03N2JiLTk2NmMtYzQ4OGY0MmY4Y2Y5Iiwia2lkIjoiS05WbTBXMHhOZjdyd21pSXRrczdYMGdmYml3VGhGQ0RPbEtxemU4UUZmdyIsInJpZCI6IjE3MTJmZDJhLWVmY2MtNGI2MC1iZjQyLTVhMmEzNmYwYzkzYiJ9.4bvw9Cf9oMVSzDJSaZ9eq6bOTwbCXuYdast_FzKEddESgS3G3NCjjkSgJE7SRs17xtuTog42tJtrVRZ1Etl0Ag',
+    text:
+        controller.settings.tursoAuthToken ?? SyncDefaults.tursoAuthToken ?? '',
   );
 
   await showDialog<void>(
@@ -672,18 +685,18 @@ Future<void> _showEditR2Dialog(
   SettingsController controller,
 ) async {
   final TextEditingController bucketCtrl = TextEditingController(
-    text: controller.settings.r2Bucket ?? 'augustyniak-capture-media',
+    text: controller.settings.r2Bucket ?? SyncDefaults.r2Bucket ?? '',
   );
   final TextEditingController endpointCtrl = TextEditingController(
-    text: controller.settings.r2Endpoint ??
-        'https://e779027f883e48c2e7f31c5850408dba.r2.cloudflarestorage.com',
+    text: controller.settings.r2Endpoint ?? SyncDefaults.r2Endpoint ?? '',
   );
   final TextEditingController keyIdCtrl = TextEditingController(
-    text: controller.settings.r2AccessKeyId ?? 'f7d5be45dff4ab4d90f1910219751723',
+    text: controller.settings.r2AccessKeyId ?? SyncDefaults.r2AccessKeyId ?? '',
   );
   final TextEditingController secretCtrl = TextEditingController(
     text: controller.settings.r2SecretAccessKey ??
-        '76e04917e25001440e2fb2ffb4143ad1b39624726eb42ac8074fb6f5e25f2a36',
+        SyncDefaults.r2SecretAccessKey ??
+        '',
   );
 
   await showDialog<void>(

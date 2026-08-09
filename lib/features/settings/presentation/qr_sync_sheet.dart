@@ -6,6 +6,7 @@ import 'package:qr_flutter/qr_flutter.dart';
 
 import '../../../app/ui_kit.dart';
 import '../../../core/database/app_database.dart';
+import '../../../core/sync/sync_defaults.dart';
 import '../../../core/sync/turso_sync_service.dart';
 import '../../recordings/presentation/recordings_controller.dart';
 import '../domain/app_settings.dart';
@@ -19,21 +20,15 @@ class QrSyncDisplaySheet extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    const String defaultTursoUrl = 'libsql://augustyniak-capture-laugustyniak.aws-us-east-1.turso.io';
-    const String defaultTursoToken = 'eyJhbGciOiJFZERTQSIsInR5cCI6IkpXVCJ9.eyJpYXQiOjE3ODYxMDkwNDIsImlkIjoiMDE5ZmRjNjUtMTkwMS03N2JiLTk2NmMtYzQ4OGY0MmY4Y2Y5Iiwia2lkIjoiS05WbTBXMHhOZjdyd21pSXRrczdYMGdmYml3VGhGQ0RPbEtxemU4UUZmdyIsInJpZCI6IjE3MTJmZDJhLWVmY2MtNGI2MC1iZjQyLTVhMmEzNmYwYzkzYiJ9.4bvw9Cf9oMVSzDJSaZ9eq6bOTwbCXuYdast_FzKEddESgS3G3NCjjkSgJE7SRs17xtuTog42tJtrVRZ1Etl0Ag';
-    const String defaultR2Endpoint = 'https://e779027f883e48c2e7f31c5850408dba.r2.cloudflarestorage.com';
-    const String defaultR2Bucket = 'augustyniak-capture-media';
-    const String defaultR2AccessKeyId = 'f7d5be45dff4ab4d90f1910219751723';
-    const String defaultR2SecretAccessKey = '76e04917e25001440e2fb2ffb4143ad1b39624726eb42ac8074fb6f5e25f2a36';
-
     final Map<String, dynamic> payload = <String, dynamic>{
       'type': 'augustyniak_sync_v1',
-      'tursoDbUrl': settings.tursoDbUrl ?? defaultTursoUrl,
-      'tursoAuthToken': settings.tursoAuthToken ?? defaultTursoToken,
-      'r2Endpoint': settings.r2Endpoint ?? defaultR2Endpoint,
-      'r2Bucket': settings.r2Bucket ?? defaultR2Bucket,
-      'r2AccessKeyId': settings.r2AccessKeyId ?? defaultR2AccessKeyId,
-      'r2SecretAccessKey': settings.r2SecretAccessKey ?? defaultR2SecretAccessKey,
+      'tursoDbUrl': settings.tursoDbUrl ?? SyncDefaults.tursoDbUrl,
+      'tursoAuthToken': settings.tursoAuthToken ?? SyncDefaults.tursoAuthToken,
+      'r2Endpoint': settings.r2Endpoint ?? SyncDefaults.r2Endpoint,
+      'r2Bucket': settings.r2Bucket ?? SyncDefaults.r2Bucket,
+      'r2AccessKeyId': settings.r2AccessKeyId ?? SyncDefaults.r2AccessKeyId,
+      'r2SecretAccessKey':
+          settings.r2SecretAccessKey ?? SyncDefaults.r2SecretAccessKey,
     };
     final String jsonPayload = jsonEncode(payload);
 
@@ -196,56 +191,75 @@ class _QrSyncScannerSheetState extends State<QrSyncScannerSheet> {
             controller: _scannerController,
             onDetect: _onDetect,
           ),
-          Positioned(
-            bottom: 30,
-            left: 20,
-            right: 20,
-            child: ElevatedButton.icon(
-              icon: const Icon(Icons.bolt, color: Colors.black),
-              label: const Text('1-CLICK CONNECT DEFAULT CLOUD'),
-              style: ElevatedButton.styleFrom(
-                backgroundColor: Console.accent,
-                foregroundColor: Colors.black,
-                padding: const EdgeInsets.symmetric(vertical: 14),
-              ),
-              onPressed: () async {
-                const String tursoUrl = 'libsql://augustyniak-capture-laugustyniak.aws-us-east-1.turso.io';
-                const String tursoToken = 'eyJhbGciOiJFZERTQSIsInR5cCI6IkpXVCJ9.eyJpYXQiOjE3ODYxMDkwNDIsImlkIjoiMDE5ZmRjNjUtMTkwMS03N2JiLTk2NmMtYzQ4OGY0MmY4Y2Y5Iiwia2lkIjoiS05WbTBXMHhOZjdyd21pSXRrczdYMGdmYml3VGhGQ0RPbEtxemU4UUZmdyIsInJpZCI6IjE3MTJmZDJhLWVmY2MtNGI2MC1iZjQyLTVhMmEzNmYwYzkzYiJ9.4bvw9Cf9oMVSzDJSaZ9eq6bOTwbCXuYdast_FzKEddESgS3G3NCjjkSgJE7SRs17xtuTog42tJtrVRZ1Etl0Ag';
-
-                await widget.controller.setTursoConfig(
-                  url: tursoUrl,
-                  token: tursoToken,
-                  enabled: true,
-                );
-
-                await widget.controller.setR2Config(
-                  endpoint: 'https://e779027f883e48c2e7f31c5850408dba.r2.cloudflarestorage.com',
-                  bucket: 'augustyniak-capture-media',
-                  accessKeyId: 'f7d5be45dff4ab4d90f1910219751723',
-                  secretAccessKey: '76e04917e25001440e2fb2ffb4143ad1b39624726eb42ac8074fb6f5e25f2a36',
-                  enabled: true,
-                );
-
-                final AppDatabase db = await AppDatabase.getInstance();
-                final TursoSyncService syncService = TursoSyncService(db: db);
-                await syncService.pullFromTurso(
-                  dbUrl: tursoUrl,
-                  authToken: tursoToken,
-                );
-                await widget.recordingsController?.reloadFromStorage();
-
-                if (mounted) {
-                  Navigator.of(context).pop(true);
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    SnackBar(
-                      content: const Text('⚡ Sync paired & 103 notes downloaded!'),
-                      backgroundColor: Console.green,
-                    ),
+          // Only a build that was given credentials at compile time can offer
+          // to pair without scanning anything. Everyone else scans the desktop
+          // QR code above, which is the path that does not need a secret in the
+          // source tree.
+          if (SyncDefaults.hasTurso)
+            Positioned(
+              bottom: 30,
+              left: 20,
+              right: 20,
+              child: ElevatedButton.icon(
+                icon: const Icon(Icons.bolt, color: Colors.black),
+                label: const Text('1-CLICK CONNECT DEFAULT CLOUD'),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: Console.accent,
+                  foregroundColor: Colors.black,
+                  padding: const EdgeInsets.symmetric(vertical: 14),
+                ),
+                onPressed: () async {
+                  // Both taken before the first await. Pairing does a network
+                  // round trip and a full storage reload, and the `context`
+                  // reachable here belongs to the builder rather than to this
+                  // State — so `mounted` says nothing about whether it is still
+                  // valid afterwards. Holding the two states instead makes the
+                  // question moot: neither is looked up across the gap.
+                  final NavigatorState navigator = Navigator.of(context);
+                  final ScaffoldMessengerState messenger = ScaffoldMessenger.of(
+                    context,
                   );
-                }
-              },
+                  final String tursoUrl = SyncDefaults.tursoDbUrl!;
+                  final String tursoToken = SyncDefaults.tursoAuthToken!;
+
+                  await widget.controller.setTursoConfig(
+                    url: tursoUrl,
+                    token: tursoToken,
+                    enabled: true,
+                  );
+
+                  if (SyncDefaults.r2Bucket != null) {
+                    await widget.controller.setR2Config(
+                      endpoint: SyncDefaults.r2Endpoint ?? '',
+                      bucket: SyncDefaults.r2Bucket!,
+                      accessKeyId: SyncDefaults.r2AccessKeyId ?? '',
+                      secretAccessKey: SyncDefaults.r2SecretAccessKey ?? '',
+                      enabled: true,
+                    );
+                  }
+
+                  final AppDatabase db = await AppDatabase.getInstance();
+                  final TursoSyncService syncService = TursoSyncService(db: db);
+                  await syncService.pullFromTurso(
+                    dbUrl: tursoUrl,
+                    authToken: tursoToken,
+                  );
+                  await widget.recordingsController?.reloadFromStorage();
+                  final int count =
+                      widget.recordingsController?.recordings.length ?? 0;
+
+                  if (mounted) {
+                    navigator.pop(true);
+                    messenger.showSnackBar(
+                      SnackBar(
+                        content: Text('⚡ Sync paired · $count notes'),
+                        backgroundColor: Console.green,
+                      ),
+                    );
+                  }
+                },
+              ),
             ),
-          ),
         ],
       ),
     );

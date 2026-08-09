@@ -7,7 +7,10 @@ import 'package:path/path.dart' as p;
 import 'package:record/record.dart';
 import 'package:augustyniak_capture/features/costs/domain/usage_sink.dart';
 import 'package:augustyniak_capture/features/logs/data/log_store.dart';
+import 'package:augustyniak_capture/features/gamification/presentation/gamification_controller.dart';
 import 'package:augustyniak_capture/features/logs/domain/log_event.dart';
+import 'package:augustyniak_capture/features/momentum/domain/closure_event.dart';
+import 'package:augustyniak_capture/features/projects/domain/project.dart';
 import 'package:augustyniak_capture/features/recordings/data/media_picker.dart';
 import 'package:augustyniak_capture/features/recordings/data/recordings_repository.dart';
 import 'package:augustyniak_capture/features/recordings/domain/agent_handoff.dart';
@@ -16,6 +19,7 @@ import 'package:augustyniak_capture/features/recordings/domain/capture_type.dart
 import 'package:augustyniak_capture/features/recordings/domain/media_opener.dart';
 import 'package:augustyniak_capture/features/recordings/domain/capture_router.dart';
 import 'package:augustyniak_capture/features/recordings/domain/recording.dart';
+import 'package:augustyniak_capture/features/recordings/domain/route_record.dart';
 import 'package:augustyniak_capture/features/recordings/presentation/recordings_controller.dart';
 import 'package:augustyniak_capture/features/settings/data/settings_repository.dart';
 import 'package:augustyniak_capture/features/settings/domain/app_settings.dart';
@@ -119,6 +123,9 @@ Future<RecordingsController> buildRecordingsController(
   AgentHandoff agentHandoff = const DisabledAgentHandoff(),
   FakeRecordingsRepository? repository,
   UsageSink usageSink = const NoopUsageSink(),
+  ClosureLog closureLog = const NoopClosureLog(),
+  Project? Function(String projectId)? projectById,
+  GamificationController? gamificationController,
 }) async {
   final RecordingsController controller = RecordingsController(
     repository: repository ?? FakeRecordingsRepository(appDir, seed: seed),
@@ -130,6 +137,9 @@ Future<RecordingsController> buildRecordingsController(
     recorder: FakeRecorder(),
     player: FakePlayer(),
     usageSink: usageSink,
+    closureLog: closureLog,
+    projectById: projectById,
+    gamificationController: gamificationController,
   );
   addTearDown(controller.dispose);
   await controller.initialize();
@@ -202,6 +212,8 @@ Recording makeRecording({
   int durationMs = 1500,
   int sizeBytes = 0,
   bool isProcessedByUser = false,
+  DateTime? processedAt,
+  List<RouteRecord> routes = const <RouteRecord>[],
   String? filePath,
   String? thumbPath,
 }) {
@@ -209,6 +221,8 @@ Recording makeRecording({
     id: id,
     filePath: filePath ?? '/tmp/$id.m4a',
     createdAt: DateTime.utc(2026, 7, 27, 12),
+    processedAt: processedAt,
+    routes: routes,
     durationMs: durationMs,
     sizeBytes: sizeBytes,
     status: status,

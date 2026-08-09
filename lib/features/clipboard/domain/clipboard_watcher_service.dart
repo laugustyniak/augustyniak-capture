@@ -101,7 +101,7 @@ class ClipboardWatcherService extends ChangeNotifier {
           type: ClipboardItemType.image,
           copiedAt: DateTime.now(),
           imagePath: imagePath,
-          preview: '[Obrazek]',
+          preview: '[Image]',
         );
         await _repository.addItem(newItem);
         notifyListeners();
@@ -121,7 +121,7 @@ class ClipboardWatcherService extends ChangeNotifier {
           type: ClipboardItemType.text,
           copiedAt: DateTime.now(),
           text: text,
-          preview: text.length > 120 ? '${text.substring(0, 120)}...' : text,
+          preview: ClipboardItem.previewFor(text),
         );
         await _repository.addItem(newItem);
         notifyListeners();
@@ -147,14 +147,34 @@ class ClipboardWatcherService extends ChangeNotifier {
     }
   }
 
+  /// Ask the platform to type ⌘V into whatever had focus before the sheet
+  /// opened. Implemented on macOS only; everywhere else the channel has no
+  /// handler and the entry is merely left on the clipboard.
+  ///
+  /// **The `await` is what makes the `catch` reachable.** Without it the call
+  /// returns a future nobody holds, so `MissingPluginException` — the ordinary
+  /// answer on Android, iOS and Linux — escaped as an unhandled async error
+  /// instead of being swallowed here as intended.
   Future<void> pasteToActiveApp() async {
     try {
-      const MethodChannel('ai.augustyniak.capture/clipboard').invokeMethod('autoPaste');
+      await const MethodChannel(
+        'ai.augustyniak.capture/clipboard',
+      ).invokeMethod<void>('autoPaste');
     } catch (_) {}
   }
 
   Future<void> toggleItemCollection(String id, String collectionName) async {
     await _repository.toggleItemCollection(id, collectionName);
+    notifyListeners();
+  }
+
+  /// Overwrites an entry's text in place.
+  ///
+  /// Deliberately leaves `_lastText` and `_lastImagePath` alone: an edit never
+  /// writes to the system clipboard, so the next poll sees nothing new and no
+  /// duplicate of our own edit is captured.
+  Future<void> updateItemText(String id, String text) async {
+    await _repository.updateItemText(id, text);
     notifyListeners();
   }
 

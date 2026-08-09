@@ -148,13 +148,14 @@ later and press retry.
 
 ---
 
-## 🖥 The six tabs
+## 🖥 The seven tabs
 
 | Tab | What it is for |
 | --- | --- |
 | **Queue** | every capture, review progress, search, filters, playback, inline editing |
-| **Timer** | a focus session — countdown dial, session goal, alarm at zero |
+| **Timer** | a focus session — countdown dial, session goal, alarm at zero — plus what got finished lately |
 | **Projects** | repository contexts, active project, per-project captures, one-click coding-agent sessions |
+| **Clipboard** | clipboard history, searchable, with a preview pane and in-place editing |
 | **Models** | provider profiles — transcription and enrichment, add / edit / activate |
 | **Logs** | live pipeline events (persist, queue, transcribe, errors) with a level filter |
 | **Config** | appearance, audio parameters, global shortcuts, enrichment profile, note vault, keyring status |
@@ -611,9 +612,47 @@ for stretching a session already under way.
 - The length and the alarm are saved in `settings.json`; the running session is
   never written to disk — there is nothing in a countdown worth resuming.
 
+### What got finished lately
+
+Above the session history sits `MOMENTUM`, which answers a different question:
+not how long you worked, but how much came *out* of it.
+
+```
+4  closed today                                          target 3 ✓
+pace 3.2/day  ↑
+
+[7 DAYS]  [30 DAYS]                                       23 in 7 days
+
+Mon  ████████████────────────────────────────────────   5
+Tue  ██████████──────────────────────────────────────   4
+Wed  ██──────────────────────────────────────────────   1
+Thu  ────────────────────────────────────────────────   –
+Fri  ████████████████████████────────────────────────   6
+```
+
+- **It counts *closing*, never capturing** — and that is the whole design. A
+  metric that rewards capture volume is satisfied by a three-second recording at
+  23:58, and the junk it produces lands in the queue you then have to drain. A
+  closure cannot be moved without first capturing something real and then
+  dealing with it, so doing the work is the cheapest way to move the number.
+- **The daily target comes from your own pace** — the median across *active*
+  days in the last fortnight, floored at 1. Active days, not calendar days: a
+  weekend must not drag it to zero, because a target of zero cannot be missed
+  and therefore says nothing. A median rather than a mean, so one exceptional
+  afternoon does not raise the bar for the two weeks after it.
+- **The floor of 1 is the feature, not a guard.** A fresh install and a return
+  after a fortnight away both meet a target of 1 — a guaranteed win on the first
+  day back, instead of the target that was current when you fell off.
+- A capture counts **once, ever**. Un-ticking a row and re-ticking it adds
+  nothing, so the tally measures work rather than clicking.
+- It lives in `closures.jsonl`, appended and never rewritten — deliberately not
+  derived from `recordings.json`, which is rewritten whole and shrinks when you
+  delete a capture. History read from there would be silently rewritten by a
+  deletion.
+
 ### What actually got done
 
-`COMPLETED SESSIONS` counts pomodoros **that reached zero**. Pausing, resetting
+`SESSIONS DONE` counts pomodoros **that reached zero**. Pausing, resetting
 or abandoning one leaves it out entirely, which is the only reason the number is
 worth looking at — a count you can inflate by starting things is not a record of
 work.
@@ -661,8 +700,16 @@ recordings/
 ├── settings.json           ← profiles, audio params, shortcuts, theme, vault, timer
 ├── projects.json           ← projects + the active one
 ├── logs.json               ← ring buffer, max 500 events
-└── revisions.jsonl         ← append-only history of overwritten values
+├── gamification.json       ← lifetime totals + unlocked milestones
+├── revisions.jsonl         ← append-only history of overwritten values
+├── focus-sessions.jsonl    ← append-only log of pomodoros that reached zero
+└── closures.jsonl          ← append-only log of captures that left the desk
 ```
+
+The three `.jsonl` files are appended one line at a time and **never rewritten**,
+unlike every `.json` above them. Each holds the only copy of something nothing
+can reconstruct — what a value used to be, that last Tuesday had four sessions,
+that you finished six things on Friday — so none of them may be written whole.
 
 Three things deliberately live **outside** that directory, because they belong to
 you rather than to the app: your project repositories (and the `inbox.md` in
@@ -997,6 +1044,7 @@ constructor injection.
 ```
 lib/
 ├── app/                    ui_kit.dart · theme · shared console widgets
+├── core/                   database — the one thing that is not feature-scoped
 └── features/
     ├── recordings/         the queue, the controller, the capture pipeline
     ├── projects/           repositories, context readers, agent launchers
@@ -1005,7 +1053,11 @@ lib/
     ├── enrichment/         the second AI stage: title, category, summary, tags
     ├── settings/           provider profiles, audio config, token encryption
     ├── logs/               ring buffer + file archive
-    └── shortcuts/          global hotkeys, window presentation
+    ├── shortcuts/          global hotkeys, window presentation
+    ├── timer/              the focus session and its completed-session log
+    ├── clipboard/          clipboard history, watcher, preview pane
+    ├── gamification/       lifetime totals, milestones, celebration overlay
+    └── momentum/           what got finished lately — closures, pace, target
 ```
 
 Every feature is `domain/` (pure Dart, no platform channels) + `data/`
