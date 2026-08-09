@@ -6,7 +6,10 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:path/path.dart' as p;
+import 'package:sqlite3/sqlite3.dart';
 import 'package:augustyniak_capture/app/ui_kit.dart';
+import 'package:augustyniak_capture/features/costs/data/usage_repository.dart';
+import 'package:augustyniak_capture/features/costs/domain/usage_event.dart';
 import 'package:augustyniak_capture/features/recordings/domain/capture_category.dart';
 import 'package:augustyniak_capture/features/recordings/domain/capture_type.dart';
 import 'package:augustyniak_capture/features/recordings/domain/recording.dart';
@@ -50,10 +53,15 @@ void main() {
     WidgetTester tester,
     RecordingsController controller, {
     ProjectsController? projects,
+    UsageRepository? usageRepository,
   }) async {
     await tester.pumpWidget(
       hostTab(
-        () => QueueTab(controller: controller, projects: projects),
+        () => QueueTab(
+          controller: controller,
+          projects: projects,
+          usageRepository: usageRepository,
+        ),
         listenable: projects == null
             ? controller
             : Listenable.merge(<Listenable>[controller, projects]),
@@ -508,15 +516,68 @@ void main() {
     );
     await pumpQueue(tester, controller);
 
-    // Neither the card nor the row is wired to a usage repository — that is
-    // the editor's job (`test/widget/cost_readout_test.dart`) — so every card
-    // reads `cost —` here rather than a fabricated `$0.0000`.
+    // No usage repository is passed here, so `_costTotals` stays empty and
+    // every card reads `cost —` rather than a fabricated `$0.0000`.
     expect(
       find.text('file verified · 2.0 MB · cost — · persisted'),
       findsOneWidget,
     );
     expect(find.text('file verified · cost — · persisted'), findsOneWidget);
   });
+
+  testWidgets(
+    'a card shows the real total for a priced capture and cost — for one '
+    'with none',
+    (WidgetTester tester) async {
+      final Database db = sqlite3.openInMemory();
+      addTearDown(db.dispose);
+      UsageRepository.createTable(db);
+      final UsageRepository usageRepository = UsageRepository(db);
+      // Two events on the same capture — a chunked transcription plus an
+      // enrichment pass — so the card has to show their *sum*, not just
+      // whichever one it saw first.
+      usageRepository.insert(
+        UsageEvent(
+          id: 'e1',
+          captureId: 'priced',
+          stage: UsageStage.transcription,
+          provider: 'api.openai.com',
+          model: 'gpt-transcribe',
+          at: DateTime.utc(2026, 8, 9),
+          audioSeconds: 90,
+          costUsd: 0.0045,
+        ),
+      );
+      usageRepository.insert(
+        UsageEvent(
+          id: 'e2',
+          captureId: 'priced',
+          stage: UsageStage.enrichment,
+          provider: 'api.openai.com',
+          model: 'gpt-5.6-luna',
+          at: DateTime.utc(2026, 8, 9),
+          inputTokens: 500,
+          outputTokens: 50,
+          costUsd: 0.00021,
+        ),
+      );
+
+      final RecordingsController controller = await buildRecordingsController(
+        appDir,
+        seed: <Recording>[
+          makeRecording(id: 'priced'),
+          // Never handed to a processor that reports usage — a text note, or
+          // simply a capture predating this feature.
+          makeRecording(id: 'unpriced'),
+        ],
+      );
+      await pumpQueue(tester, controller, usageRepository: usageRepository);
+
+      expect(find.textContaining('\$0.0047'), findsOneWidget);
+      expect(find.textContaining('cost —'), findsOneWidget);
+      expect(find.textContaining('\$0.0000'), findsNothing);
+    },
+  );
 
   testWidgets('text and image items get neither play nor open', (
     WidgetTester tester,

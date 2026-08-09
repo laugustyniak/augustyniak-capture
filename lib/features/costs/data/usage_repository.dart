@@ -87,6 +87,35 @@ class UsageRepository {
     return (rows.first['total'] as num?)?.toDouble() ?? 0;
   }
 
+  /// Every capture's summed cost, keyed by capture id — the queue card's and
+  /// compact row's source for `VerificationLine.costUsd`.
+  ///
+  /// One `GROUP BY` per queue build rather than `all()` plus a Dart-side fold:
+  /// the queue can hold thousands of rows across their whole history, and the
+  /// aggregate is the only thing a card ever needs.
+  ///
+  /// A capture is **absent** from the map, never present with `0`, when
+  /// `SUM(cost_usd)` comes back null — every one of its events was unpriced.
+  /// A `0.0` there would read as "this cost nothing", which is exactly the
+  /// fabricated-zero `VerificationLine`'s `cost —` fallback exists to refuse;
+  /// SQL's own null-propagation through `SUM` is what makes the distinction
+  /// free to keep, since a capture with at least one priced event and any
+  /// number of unpriced ones still sums to a real, if partial, number.
+  Map<String, double> totalsByCapture() {
+    final ResultSet rows = _db.select('''
+      SELECT capture_id, SUM(cost_usd) AS total
+      FROM usage_events
+      GROUP BY capture_id;
+    ''');
+    final Map<String, double> totals = <String, double>{};
+    for (final Row row in rows) {
+      final num? total = row['total'] as num?;
+      if (total == null) continue;
+      totals[row['capture_id'] as String] = total.toDouble();
+    }
+    return totals;
+  }
+
   /// Models whose events could not be priced **because no rate existed** —
   /// the only ones a rate would fix, and so the only ones the Config tab may
   /// offer a rate field for.

@@ -33,6 +33,7 @@ class RecordingRow extends StatelessWidget {
     required this.onHandoff,
     required this.onToggleProcessed,
     this.projectName,
+    this.costUsd,
   });
 
   final Recording recording;
@@ -52,6 +53,11 @@ class RecordingRow extends StatelessWidget {
   final VoidCallback onRoute;
   final VoidCallback onHandoff;
   final VoidCallback onToggleProcessed;
+
+  /// This capture's summed usage-event cost, resolved by the caller the same
+  /// way `RecordingCard.costUsd` is — see that field's doc. Null renders
+  /// `cost —`.
+  final double? costUsd;
 
   static const double _indent = 16;
 
@@ -250,7 +256,7 @@ class RecordingRow extends StatelessWidget {
                   ),
                 Padding(
                   padding: const EdgeInsets.fromLTRB(_indent, 10, 4, 0),
-                  child: VerificationLine(recording: recording),
+                  child: VerificationLine(recording: recording, costUsd: costUsd),
                 ),
                 Padding(
                   padding: const EdgeInsets.fromLTRB(_indent, 8, 4, 0),

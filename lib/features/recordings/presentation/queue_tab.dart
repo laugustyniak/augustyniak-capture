@@ -137,6 +137,13 @@ class _QueueTabState extends State<QueueTab> {
 
   bool _isSyncing = false;
 
+  /// Every visible capture's summed cost, refreshed once per [build] from
+  /// `widget.usageRepository` — a single grouped query rather than one lookup
+  /// per row. `_buildCard`/`_buildMobileRow` read it by id; a capture absent
+  /// from it (no repository yet, or every one of its events unpriced) passes
+  /// null through to `VerificationLine`, which renders `cost —`.
+  Map<String, double> _costTotals = const <String, double>{};
+
   Future<void> _handleSync(
     BuildContext context,
     RecordingsController controller,
@@ -220,6 +227,11 @@ class _QueueTabState extends State<QueueTab> {
   Widget build(BuildContext context) {
     final RecordingsController controller = widget.controller;
     final List<Recording> all = controller.recordings;
+    // Resolved once here, not once per card: `totalsByCapture()` is a single
+    // grouped query, and a thousand-row queue must not turn into a thousand
+    // repository reads on every pipeline tick.
+    _costTotals =
+        widget.usageRepository?.totalsByCapture() ?? const <String, double>{};
     final List<Project> projects =
         widget.projects?.projects ?? const <Project>[];
     final String? effectiveProjectFilterId =
@@ -596,6 +608,7 @@ class _QueueTabState extends State<QueueTab> {
       onEnrich: () => controller.retryEnrichment(recording.id),
       onEdit: () => setState(() => editingId = recording.id),
       onToggleProcessed: () => _toggleProcessed(recording),
+      costUsd: _costTotals[recording.id],
     );
   }
 
@@ -689,6 +702,7 @@ class _QueueTabState extends State<QueueTab> {
         unawaited(HapticFeedback.selectionClick());
         await controller.toggleProcessed(recording.id);
       },
+      costUsd: _costTotals[recording.id],
     );
   }
 

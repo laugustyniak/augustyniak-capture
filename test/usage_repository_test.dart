@@ -126,6 +126,28 @@ void main() {
     expect(untouched.costUsd, closeTo(0.5, 1e-9));
   });
 
+  test('totalsByCapture sums two captures independently and omits an '
+      'all-unpriced one', () {
+    repository.insert(_event(id: 'a1', captureId: 'cap-a', costUsd: 0.01));
+    repository.insert(_event(id: 'a2', captureId: 'cap-a', costUsd: 0.02));
+    repository.insert(_event(id: 'b1', captureId: 'cap-b', costUsd: 5.0));
+    // Every event on this capture is unpriced, so its SUM comes back null —
+    // it must be absent from the map, not present with 0.
+    repository.insert(_event(
+      id: 'c1',
+      captureId: 'cap-c',
+      costUsd: null,
+      unpricedReason: UnpricedReason.noRate,
+    ));
+
+    final Map<String, double> totals = repository.totalsByCapture();
+
+    expect(totals['cap-a'], closeTo(0.03, 1e-9));
+    expect(totals['cap-b'], closeTo(5.0, 1e-9));
+    expect(totals.containsKey('cap-c'), isFalse);
+    expect(totals, hasLength(2));
+  });
+
   test('backfill never rewrites a cost that is already recorded', () {
     repository.insert(_event(id: 'a', model: 'gpt-5.6-luna', costUsd: 0.5));
 

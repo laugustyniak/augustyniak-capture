@@ -39,6 +39,7 @@ class RecordingCard extends StatelessWidget {
     this.canHandoff = false,
     this.onSelectArtifact,
     this.focused = false,
+    this.costUsd,
   });
 
   /// Said in both places the action is offered — the poster and the button —
@@ -127,6 +128,13 @@ class RecordingCard extends StatelessWidget {
   /// and stay true while the user looks elsewhere, whereas this answers "where
   /// am I", and a selection the user cannot see is the same as no selection.
   final bool focused;
+
+  /// This capture's summed usage-event cost, resolved by the caller from
+  /// `UsageRepository.totalsByCapture()` — one grouped query per queue build
+  /// rather than one lookup per row. Null renders `cost —` on the durability
+  /// line, the same as a legacy capture that predates this feature; the card
+  /// never claims a cost it was not handed.
+  final double? costUsd;
 
   @override
   Widget build(BuildContext context) {
@@ -421,7 +429,9 @@ class RecordingCard extends StatelessWidget {
           const SizedBox(height: 11),
           Row(
             children: <Widget>[
-              Expanded(child: VerificationLine(recording: recording)),
+              Expanded(
+                child: VerificationLine(recording: recording, costUsd: costUsd),
+              ),
               const SizedBox(width: 8),
               if (failed) ...<Widget>[
                 _GhostButton(
