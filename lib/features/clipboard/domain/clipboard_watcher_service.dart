@@ -101,7 +101,7 @@ class ClipboardWatcherService extends ChangeNotifier {
           type: ClipboardItemType.image,
           copiedAt: DateTime.now(),
           imagePath: imagePath,
-          preview: '[Obrazek]',
+          preview: '[Image]',
         );
         await _repository.addItem(newItem);
         notifyListeners();

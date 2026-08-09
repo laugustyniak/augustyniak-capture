@@ -30,22 +30,22 @@ void main() {
     );
 
     expect(find.text('Main Content'), findsOneWidget);
-    expect(find.text('PIERWSZE UKOŃCZONE!'), findsNothing);
+    expect(find.text('FIRST ONE DONE!'), findsNothing);
 
     // Trigger first done milestone
     await controller.onCaptureDone(1);
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 300));
 
-    expect(find.text('PIERWSZE UKOŃCZONE!'), findsOneWidget);
-    expect(find.text('WSPANIALE!'), findsOneWidget);
+    expect(find.text('FIRST ONE DONE!'), findsOneWidget);
+    expect(find.text('AWESOME!'), findsOneWidget);
 
     // Dismiss by tapping button
-    await tester.tap(find.text('WSPANIALE!'));
+    await tester.tap(find.text('AWESOME!'));
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 700));
 
-    expect(find.text('PIERWSZE UKOŃCZONE!'), findsNothing);
+    expect(find.text('FIRST ONE DONE!'), findsNothing);
   });
 
   testWidgets('DoneBurstAnimation renders child widget without error', (WidgetTester tester) async {

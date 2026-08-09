@@ -4,6 +4,8 @@ import '../../../app/ui_kit.dart';
 import '../../settings/presentation/settings_controller.dart';
 import '../domain/alarm_sound.dart';
 import '../domain/focus_session.dart';
+import '../../momentum/presentation/momentum_controller.dart';
+import '../../momentum/presentation/momentum_panel.dart';
 import '../domain/timer_defaults.dart';
 import 'countdown_dial.dart';
 import 'focus_timer_controller.dart';
@@ -19,10 +21,24 @@ import 'focus_timer_controller.dart';
 /// reaches the timer through the shell. So the chips here write to settings and
 /// the change arrives back down; the tab holds no third copy of either fact.
 class TimerTab extends StatefulWidget {
-  const TimerTab({super.key, required this.controller, required this.settings});
+  const TimerTab({
+    super.key,
+    required this.controller,
+    required this.settings,
+    this.momentum,
+  });
 
   final FocusTimerController controller;
   final SettingsController settings;
+
+  /// How much has been finished lately. **Nullable, so null is the feature
+  /// switched off** — the seam shape `revisionsRepository` uses, which is what
+  /// lets every existing test mount this tab unchanged.
+  ///
+  /// It sits on this tab because this is already the "how am I doing"
+  /// destination: sessions say how long the work went on, closures say how much
+  /// came out of it.
+  final MomentumController? momentum;
 
   @override
   State<TimerTab> createState() => _TimerTabState();
@@ -104,6 +120,24 @@ class _TimerTabState extends State<TimerTab> {
           if (timer.isFinished) ...<Widget>[
             const SizedBox(height: 16),
             _FinishedPanel(controller: timer),
+          ],
+          if (widget.momentum != null) ...<Widget>[
+            const SizedBox(height: 26),
+            SectionHeader(
+              title: 'MOMENTUM',
+              trailing: widget.momentum!.hasClosures
+                  ? 'what left the desk'
+                  : null,
+            ),
+            const SizedBox(height: 12),
+            // Keyed for the reason `_FocusHistory` is: this sits below a
+            // conditional `_FinishedPanel` in a keyless `ListView`, so finishing
+            // a session inserts children above it and index-based
+            // reconciliation would discard the state holding the chosen window.
+            MomentumPanel(
+              key: const ValueKey<String>('momentum-panel'),
+              controller: widget.momentum!,
+            ),
           ],
           const SizedBox(height: 26),
           SectionHeader(

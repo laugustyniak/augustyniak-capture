@@ -23,6 +23,7 @@ import '../../projects/domain/agent_session_launcher.dart';
 import '../../projects/domain/project.dart';
 import '../../settings/data/aes_gcm_token_cipher.dart';
 import '../../settings/data/file_master_key_store.dart';
+import '../../settings/data/migrating_master_key_store.dart';
 import '../../settings/data/secure_storage_master_key_store.dart';
 import '../../settings/data/settings_repository.dart';
 import '../../settings/domain/app_theme_mode.dart';
@@ -39,6 +40,10 @@ import '../../shortcuts/domain/shortcut_action.dart';
 import '../../shortcuts/domain/window_presenter.dart';
 import '../../shortcuts/presentation/shortcuts_coordinator.dart';
 import '../../timer/data/asset_alarm_player.dart';
+import '../../momentum/data/file_closure_log.dart';
+import '../../momentum/data/notifying_closure_log.dart';
+import '../../momentum/domain/closure_event.dart';
+import '../../momentum/presentation/momentum_controller.dart';
 import '../../timer/data/file_focus_session_log.dart';
 import '../../timer/domain/focus_session.dart';
 import '../../timer/presentation/focus_timer_controller.dart';
@@ -119,6 +124,12 @@ class _RecordingsPageState extends State<RecordingsPage> {
   late final RecordingsController controller;
   late final ProjectsController projects;
   late final FocusTimerController timer;
+
+  /// How much has been finished lately. The counterpart to
+  /// [GamificationController], not a replacement: that one counts lifetime
+  /// totals and unlocks milestones, this one answers "how is it going lately",
+  /// which needs dated events a cumulative counter cannot be run backwards into.
+  late final MomentumController momentum;
   late final ShortcutsCoordinator shortcuts;
   late final ClipboardWatcherService clipboardWatcher;
   late final Listenable listenable;
@@ -141,20 +152,37 @@ class _RecordingsPageState extends State<RecordingsPage> {
     return null;
   }
 
+  /// The pre-keyring key file: read once so its key can be handed to the
+  /// keyring, then deleted. One instance, because the same object is both
+  /// the fallback that is read and the copy that is retired.
+  final FileMasterKeyStore _legacyKeyFile = FileMasterKeyStore();
+
   @override
   void initState() {
     super.initState();
     settings = SettingsController(
       repository: SettingsRepository(
-        // The master key lives in an owner-only file beside the database, and
-        // is adopted from the keyring on first run so tokens sealed under the
-        // old arrangement still open. The keyring cannot be the primary store
-        // here: it keys access to the code signature, and an ad-hoc build has
-        // a new one every time, which silently turned every stored token into
-        // an unusable blob after a rebuild. See FileMasterKeyStore.
+        // The keyring is the primary store, and the key file beside the
+        // database is the copy it takes over from and then deletes.
+        //
+        // The file existed because the keychain ACL names apps by code
+        // signature and ad-hoc rebuilds each produced a new one, so a fresh
+        // build was a stranger to the entry it wrote yesterday. That is fixed
+        // at the source now — LOCAL_SIGN_IDENTITY gives the app a designated
+        // requirement bound to a certificate rather than to a binary hash, so
+        // it survives rebuilds and is shared across worktrees. With the reason
+        // gone, keeping the key next to the ciphertext it opens buys nothing
+        // and costs the protection encryption is for.
+        //
+        // MigratingMasterKeyStore retires the file only after the keyring
+        // hands the same key back, and lets a refusing keyring throw rather
+        // than answering from the file — the failure has to be visible, not
+        // papered over by the store this is migrating away from.
         cipher: AesGcmTokenCipher(
-          keyStore: FileMasterKeyStore(
-            migrateFrom: const SecureStorageMasterKeyStore(),
+          keyStore: MigratingMasterKeyStore(
+            primary: const SecureStorageMasterKeyStore(),
+            fallback: _legacyKeyFile,
+            retireFallback: _legacyKeyFile.delete,
           ),
         ),
       ),
@@ -175,9 +203,22 @@ class _RecordingsPageState extends State<RecordingsPage> {
     controller = RecordingsController(
       repository: repository,
       gamificationController: gamification,
+      // The durable record of what was finished, one appended line per capture.
+      // Deliberately not derived from `recordings.json`: that index is
+      // rewritten wholesale and shrinks on delete, so a history read from it
+      // would be silently rewritten by a deletion.
+      //
+      // Wrapped so the panel hears about each closure as it lands. Without it
+      // the count would hold whatever was read at start-up and only catch up on
+      // the next launch — stale for the whole session, which is the least
+      // trustworthy state a counter can be in.
+      closureLog: NotifyingClosureLog(
+        const FileClosureLog(),
+        (ClosureEvent event) => momentum.noteClosure(event),
+      ),
       projectById: _projectById,
-      vaultDirectory: () => settings.vaultPath == null ||
-              settings.vaultPath!.trim().isEmpty
+      vaultDirectory: () =>
+          settings.vaultPath == null || settings.vaultPath!.trim().isEmpty
           ? null
           : Directory(p.join(settings.vaultPath!, settings.vaultFolder)),
       // Records what the enrichment model and hand edits overwrite. Left null
@@ -206,10 +247,7 @@ class _RecordingsPageState extends State<RecordingsPage> {
       // than offering one that can only fail.
       agentHandoff: launcher == null
           ? const DisabledAgentHandoff()
-          : ProjectAgentHandoff(
-              projectById: _projectById,
-              launcher: launcher,
-            ),
+          : ProjectAgentHandoff(projectById: _projectById, launcher: launcher),
       // The second copy of every capture, as markdown. Reads its directory
       // through callbacks for the same reason the router reads its projects
       // live: the user can point it somewhere else at any time, and the very
@@ -266,6 +304,15 @@ class _RecordingsPageState extends State<RecordingsPage> {
       },
       logSink: logs,
     );
+    // Reads the same log the controller appends to, plus the timer's sessions
+    // through a callback rather than a second `FocusSessionLog` — no repeated
+    // read of that file, and a session that has just finished is visible at
+    // once. It never writes there: `_record()` firing only from `_finish()` is
+    // the one reason "a pomodoro" means exactly one thing.
+    momentum = MomentumController(
+      log: const FileClosureLog(),
+      sessions: () => timer.sessions,
+    );
     clipboardWatcher = ClipboardWatcherService(
       repository: SqliteClipboardRepository(),
     );
@@ -318,6 +365,7 @@ class _RecordingsPageState extends State<RecordingsPage> {
       // `ValueNotifier`, which is what keeps a running session from rebuilding
       // all six tabs four times a second.
       timer,
+      momentum,
     ]);
     _bootstrap();
   }
@@ -398,6 +446,12 @@ class _RecordingsPageState extends State<RecordingsPage> {
     // it belongs to the shell that knows the directory is the real one. On a
     // healthy install it costs one listing and finds nothing.
     await controller.recoverOrphans();
+    // Both read real files, so they belong here for the same reason
+    // `recoverOrphans` does: an in-memory repository fake cannot stand in for
+    // them, and running either from `initialize` would send every widget test
+    // to the developer's own disk.
+    await controller.loadClosures();
+    await momentum.initialize();
     // Explicit rather than relying on the notification `initialize` emits, so
     // the hotkeys are guaranteed live once bootstrap returns.
     await _applyShortcuts();
@@ -551,6 +605,7 @@ class _RecordingsPageState extends State<RecordingsPage> {
     controller.dispose();
     projects.dispose();
     timer.dispose();
+    momentum.dispose();
     settings.dispose();
     logs.dispose();
     super.dispose();
@@ -613,9 +668,14 @@ class _RecordingsPageState extends State<RecordingsPage> {
                                   QueueTab(
                                     controller: controller,
                                     projects: projects,
-                                    initialProjectId: activeQueueProjectFilterId,
+                                    initialProjectId:
+                                        activeQueueProjectFilterId,
                                   ),
-                                  TimerTab(controller: timer, settings: settings),
+                                  TimerTab(
+                                    controller: timer,
+                                    settings: settings,
+                                    momentum: momentum,
+                                  ),
                                   ProjectsTab(
                                     controller: projects,
                                     recordingsController: controller,
@@ -636,7 +696,8 @@ class _RecordingsPageState extends State<RecordingsPage> {
                                     controller: settings,
                                     recordingsController: controller,
                                     storagePath: storagePath,
-                                    recordingsCount: controller.recordings.length,
+                                    recordingsCount:
+                                        controller.recordings.length,
                                     logCount: logs.events.length,
                                     onOpenModels: () => setState(
                                       () => navigationIndex = modelsIndex,
@@ -757,8 +818,8 @@ class _RecordingsPageState extends State<RecordingsPage> {
             count: index == queueIndex
                 ? total
                 : index == 3
-                    ? clipboardWatcher.items.length
-                    : null,
+                ? clipboardWatcher.items.length
+                : null,
             warn: index == modelsIndex && settings.activeProfile == null,
           ),
       ],

@@ -87,7 +87,7 @@ class CaptureKeyboardViewController: UIInputViewController {
 
         if clips.isEmpty {
             let emptyLabel = UILabel()
-            emptyLabel.text = "Brak skopiowanych elementów w schowku"
+            emptyLabel.text = "No copied items in the clipboard"
             emptyLabel.textColor = UIColor(red: 0.44, green: 0.44, blue: 0.48, alpha: 1.0)
             emptyLabel.font = UIFont.systemFont(ofSize: 12)
             clipsStackView.addArrangedSubview(emptyLabel)

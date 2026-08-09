@@ -7,40 +7,38 @@ import 'aes_gcm_token_cipher.dart';
 
 /// [MasterKeyStore] backed by an owner-only file beside the database.
 ///
-/// **It exists because the OS keyring identifies this app by its code
-/// signature, and this app has no stable one.** Builds are ad-hoc signed
-/// (`CODE_SIGN_IDENTITY = "-"`, see CLAUDE.md), so every rebuild produces a new
-/// `cdhash`, and macOS's classic login keychain stores an ACL naming the exact
-/// hashes it trusts. A freshly built binary is therefore a stranger to the
-/// entry it wrote yesterday: the read is refused, [AesGcmTokenCipher] swallows
-/// it as designed, `encrypts` goes false — and every already-sealed token turns
-/// into an `enc:v1:` blob that `ProviderProfile.usableBearerToken` filters out,
-/// so requests go out with no `Authorization` header and the provider answers
-/// 401. Nothing on screen connects the two. The keychain ACL on this machine
-/// had **thirteen** entries by the time it was diagnosed, one per build the
-/// user had clicked "Always Allow" for, and the fourteenth (a build from a git
-/// worktree) was what broke it.
+/// **No longer the primary store — it is the copy the keyring migrates away
+/// from,** wired as `MigratingMasterKeyStore.fallback` and deleted by
+/// [delete] once the keyring hands the same key back. Left in place because
+/// deleting the class would strand every install that still keeps its key here.
 ///
-/// A file cannot refuse the process that owns it, so this is deterministic
-/// where the keyring is not. The trade is real and deliberate: the key now sits
-/// next to the ciphertext it opens, which stops protecting against someone who
-/// can read the whole support directory. What it still protects against is what
-/// the encryption was actually for — a settings export, a synced backup, or a
-/// pasted config leaking provider keys in the clear. Restoring the stronger
-/// property needs a Developer ID signature, which lets a keychain ACL name the
-/// app by Team ID instead of by hash; revisit this then.
+/// It existed because macOS's classic login keychain stores an ACL naming the
+/// exact code signatures it trusts, and builds were ad-hoc signed — a new
+/// `cdhash` every rebuild, so a freshly built binary was a stranger to the
+/// entry it wrote yesterday. The read was refused, [AesGcmTokenCipher] swallowed
+/// it as designed, `encrypts` went false, and every already-sealed token became
+/// an `enc:v1:` blob that `ProviderProfile.usableBearerToken` filters out: the
+/// requests went out with no `Authorization` header and providers answered 401,
+/// with nothing on screen connecting the two. The ACL held **thirteen** entries
+/// by the time it was diagnosed, one per build someone had clicked "Always
+/// Allow" for, and the fourteenth — a build from a git worktree — broke it.
 ///
-/// [migrateFrom] is what makes the switch non-destructive: on first run the
-/// key is **adopted** from the previous store rather than regenerated, so
-/// tokens sealed under the keyring's key still open. A previous store that
-/// refuses is not an error here — that refusal is the very condition this
-/// class was written for.
+/// That cause is gone: `LOCAL_SIGN_IDENTITY` (see CLAUDE.md) gives the app a
+/// designated requirement bound to a certificate rather than to a binary hash,
+/// so one grant covers every future build and every worktree. With the keyring
+/// dependable again, keeping the key beside the ciphertext it opens only costs
+/// the protection encryption is for — a copied support directory yields both
+/// halves at once — so the key moved back and this file is retired on sight.
+///
+/// [migrateFrom] belongs to the older direction of travel (file adopting from
+/// keyring) and is kept for installs mid-migration; the current wiring passes
+/// nothing, because `MigratingMasterKeyStore` owns the handover now.
 class FileMasterKeyStore implements MasterKeyStore {
   FileMasterKeyStore({
     Future<Directory> Function()? directory,
     MasterKeyStore? migrateFrom,
-  })  : _directory = directory ?? getApplicationSupportDirectory,
-        _migrateFrom = migrateFrom;
+  }) : _directory = directory ?? getApplicationSupportDirectory,
+       _migrateFrom = migrateFrom;
 
   static const String fileName = 'token_master_key';
 
@@ -77,6 +75,24 @@ class FileMasterKeyStore implements MasterKeyStore {
     // world-readable at its final path.
     await _restrictToOwner(temporary.path);
     await temporary.rename(file.path);
+  }
+
+  /// Retire this copy of the key, once another store has demonstrably taken it
+  /// over — see `MigratingMasterKeyStore`, which is the only caller and which
+  /// reads the key back out of the new home before getting here.
+  ///
+  /// Deleting is the whole point of moving the key rather than copying it: a
+  /// second copy beside the database would keep the weaker of the two
+  /// protections in force. An absent file is success, not an error — the
+  /// handover is attempted on every launch and this runs again afterwards.
+  Future<void> delete() async {
+    try {
+      final File file = await _file();
+      if (await file.exists()) await file.delete();
+    } catch (_) {
+      // A key that cannot be deleted is untidy, never fatal: the live one is
+      // already in the primary store.
+    }
   }
 
   Future<File> _file() async =>

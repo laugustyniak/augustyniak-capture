@@ -37,7 +37,7 @@ void main() {
       expect(Milestone.isMilestoneCount(450), isFalse);
     });
 
-    test('creates milestone details for 1st, 10th, 100th done and captures', () {
+    test('creates milestones for 1st and 100th done', () {
       final Milestone? firstDone = Milestone.check(
         type: MilestoneType.captureDone,
         currentCount: 1,
@@ -46,7 +46,8 @@ void main() {
 
       expect(firstDone, isNotNull);
       expect(firstDone!.id, equals('done_1'));
-      expect(firstDone.title, contains('PIERWSZE UKOŃCZONE!'));
+      expect(firstDone.count, equals(1));
+      expect(firstDone.type, equals(MilestoneType.captureDone));
 
       final Milestone? hundredDone = Milestone.check(
         type: MilestoneType.captureDone,
@@ -55,7 +56,7 @@ void main() {
       );
       expect(hundredDone, isNotNull);
       expect(hundredDone!.id, equals('done_100'));
-      expect(hundredDone.title, contains('SETKA ZROBIONA (100)!'));
+      expect(hundredDone.count, equals(100));
     });
 
     test('ignores already unlocked milestones', () {
