@@ -178,6 +178,18 @@ class PriceBook {
     if (event.inputTokens == null && event.outputTokens == null) {
       return const PricedResult.unpriced(UnpricedReason.noQuantity);
     }
+    // A rate can be half-filled — the editor commits each field independently,
+    // so a model with no shipped default can pick up just one side. Pricing
+    // the other side at `?? 0` would understate the total rather than refuse
+    // it: an event that reports tokens on a side with no rate has an unknown
+    // cost for that side, not a free one. `ModelPrice`'s null-means-unbilled
+    // contract applies to the rate *and* to what an unrated side may charge.
+    if (event.inputTokens != null && input == null) {
+      return const PricedResult.unpriced(UnpricedReason.noRate);
+    }
+    if (event.outputTokens != null && output == null) {
+      return const PricedResult.unpriced(UnpricedReason.noRate);
+    }
     final double cost = (event.inputTokens ?? 0) / 1000000 * (input ?? 0) +
         (event.outputTokens ?? 0) / 1000000 * (output ?? 0);
     return PricedResult.priced(cost);

@@ -138,6 +138,61 @@ void main() {
 
       expect(priced.costUsd, closeTo(0.20, 1e-9));
     });
+
+    test(
+      'a half-filled override prices output at unknown, not zero',
+      () {
+        // Only the input side has a rate — the editor commits each field
+        // independently, so this is exactly what typing one field and
+        // clicking away produces. The event still reports real output
+        // tokens, so the true cost includes an unrated side.
+        const PriceBook book = PriceBook(
+          overrides: <String, ModelPrice>{
+            'half-rated': ModelPrice(inputPerMTok: 0.20),
+          },
+        );
+
+        final PricedResult priced = book.price(_chat(model: 'half-rated'));
+
+        expect(priced.costUsd, isNull);
+        expect(priced.reason, UnpricedReason.noRate);
+      },
+    );
+
+    test(
+      'a half-filled override on the output side leaves input unknown too',
+      () {
+        const PriceBook book = PriceBook(
+          overrides: <String, ModelPrice>{
+            'half-rated-out': ModelPrice(outputPerMTok: 1.20),
+          },
+        );
+
+        final PricedResult priced =
+            book.price(_chat(model: 'half-rated-out'));
+
+        expect(priced.costUsd, isNull);
+        expect(priced.reason, UnpricedReason.noRate);
+      },
+    );
+
+    test(
+      'a half-filled rate still prices an event that only uses that side',
+      () {
+        const PriceBook book = PriceBook(
+          overrides: <String, ModelPrice>{
+            'half-rated': ModelPrice(inputPerMTok: 0.20),
+          },
+        );
+
+        final PricedResult priced = book.price(
+          _chat(model: 'half-rated', outputTokens: null),
+        );
+
+        expect(priced.costUsd, closeTo(0.20, 1e-9));
+        expect(priced.reason, isNull);
+      },
+    );
   });
 
   group('storage prices', () {
