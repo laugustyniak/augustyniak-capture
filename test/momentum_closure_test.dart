@@ -3,7 +3,29 @@ import 'dart:convert';
 import 'package:augustyniak_capture/features/momentum/data/file_closure_log.dart';
 import 'package:augustyniak_capture/features/momentum/domain/closure_event.dart';
 import 'package:augustyniak_capture/features/recordings/domain/capture_type.dart';
+import 'package:augustyniak_capture/features/momentum/data/notifying_closure_log.dart';
 import 'package:flutter_test/flutter_test.dart';
+
+class _CollectingLog implements ClosureLog {
+  final List<ClosureEvent> appended = <ClosureEvent>[];
+
+  @override
+  Future<List<ClosureEvent>> load() async => appended;
+
+  @override
+  Future<void> append(ClosureEvent event) async => appended.add(event);
+}
+
+class _RefusingLog implements ClosureLog {
+  const _RefusingLog();
+
+  @override
+  Future<List<ClosureEvent>> load() async => const <ClosureEvent>[];
+
+  @override
+  Future<void> append(ClosureEvent event) async =>
+      throw Exception('disk full');
+}
 
 void main() {
   group('ClosureEvent', () {
@@ -135,6 +157,46 @@ void main() {
     test('blank lines are skipped', () {
       expect(FileClosureLog.parse('\n\n  \n'), isEmpty);
       expect(FileClosureLog.parse(''), isEmpty);
+    });
+  });
+
+  group('NotifyingClosureLog', () {
+    ClosureEvent event() => ClosureEvent(
+      recordingId: 'a',
+      at: DateTime(2026, 8, 9),
+      kind: ClosureKind.review,
+      type: CaptureType.text,
+    );
+
+    test('hands each appended event to the listener', () async {
+      final List<ClosureEvent> seen = <ClosureEvent>[];
+      final _CollectingLog inner = _CollectingLog();
+      final NotifyingClosureLog log = NotifyingClosureLog(inner, seen.add);
+
+      await log.append(event());
+
+      expect(inner.appended.length, 1);
+      expect(seen.single.recordingId, 'a');
+    });
+
+    test('says nothing when the inner append fails', () async {
+      // Reporting a closure the store rejected would put a number on screen
+      // that the next launch silently takes back.
+      final List<ClosureEvent> seen = <ClosureEvent>[];
+      final NotifyingClosureLog log = NotifyingClosureLog(
+        const _RefusingLog(),
+        seen.add,
+      );
+
+      await expectLater(log.append(event()), throwsA(isA<Exception>()));
+      expect(seen, isEmpty);
+    });
+
+    test('load passes straight through', () async {
+      final _CollectingLog inner = _CollectingLog()..appended.add(event());
+      final NotifyingClosureLog log = NotifyingClosureLog(inner, (_) {});
+
+      expect((await log.load()).single.recordingId, 'a');
     });
   });
 

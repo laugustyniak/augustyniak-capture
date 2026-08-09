@@ -39,6 +39,10 @@ import '../../shortcuts/domain/shortcut_action.dart';
 import '../../shortcuts/domain/window_presenter.dart';
 import '../../shortcuts/presentation/shortcuts_coordinator.dart';
 import '../../timer/data/asset_alarm_player.dart';
+import '../../momentum/data/file_closure_log.dart';
+import '../../momentum/data/notifying_closure_log.dart';
+import '../../momentum/domain/closure_event.dart';
+import '../../momentum/presentation/momentum_controller.dart';
 import '../../timer/data/file_focus_session_log.dart';
 import '../../timer/domain/focus_session.dart';
 import '../../timer/presentation/focus_timer_controller.dart';
@@ -119,6 +123,12 @@ class _RecordingsPageState extends State<RecordingsPage> {
   late final RecordingsController controller;
   late final ProjectsController projects;
   late final FocusTimerController timer;
+
+  /// How much has been finished lately. The counterpart to
+  /// [GamificationController], not a replacement: that one counts lifetime
+  /// totals and unlocks milestones, this one answers "how is it going lately",
+  /// which needs dated events a cumulative counter cannot be run backwards into.
+  late final MomentumController momentum;
   late final ShortcutsCoordinator shortcuts;
   late final ClipboardWatcherService clipboardWatcher;
   late final Listenable listenable;
@@ -175,6 +185,19 @@ class _RecordingsPageState extends State<RecordingsPage> {
     controller = RecordingsController(
       repository: repository,
       gamificationController: gamification,
+      // The durable record of what was finished, one appended line per capture.
+      // Deliberately not derived from `recordings.json`: that index is
+      // rewritten wholesale and shrinks on delete, so a history read from it
+      // would be silently rewritten by a deletion.
+      //
+      // Wrapped so the panel hears about each closure as it lands. Without it
+      // the count would hold whatever was read at start-up and only catch up on
+      // the next launch — stale for the whole session, which is the least
+      // trustworthy state a counter can be in.
+      closureLog: NotifyingClosureLog(
+        const FileClosureLog(),
+        (ClosureEvent event) => momentum.noteClosure(event),
+      ),
       projectById: _projectById,
       vaultDirectory: () => settings.vaultPath == null ||
               settings.vaultPath!.trim().isEmpty
@@ -266,6 +289,15 @@ class _RecordingsPageState extends State<RecordingsPage> {
       },
       logSink: logs,
     );
+    // Reads the same log the controller appends to, plus the timer's sessions
+    // through a callback rather than a second `FocusSessionLog` — no repeated
+    // read of that file, and a session that has just finished is visible at
+    // once. It never writes there: `_record()` firing only from `_finish()` is
+    // the one reason "a pomodoro" means exactly one thing.
+    momentum = MomentumController(
+      log: const FileClosureLog(),
+      sessions: () => timer.sessions,
+    );
     clipboardWatcher = ClipboardWatcherService(
       repository: SqliteClipboardRepository(),
     );
@@ -318,6 +350,7 @@ class _RecordingsPageState extends State<RecordingsPage> {
       // `ValueNotifier`, which is what keeps a running session from rebuilding
       // all six tabs four times a second.
       timer,
+      momentum,
     ]);
     _bootstrap();
   }
@@ -398,6 +431,12 @@ class _RecordingsPageState extends State<RecordingsPage> {
     // it belongs to the shell that knows the directory is the real one. On a
     // healthy install it costs one listing and finds nothing.
     await controller.recoverOrphans();
+    // Both read real files, so they belong here for the same reason
+    // `recoverOrphans` does: an in-memory repository fake cannot stand in for
+    // them, and running either from `initialize` would send every widget test
+    // to the developer's own disk.
+    await controller.loadClosures();
+    await momentum.initialize();
     // Explicit rather than relying on the notification `initialize` emits, so
     // the hotkeys are guaranteed live once bootstrap returns.
     await _applyShortcuts();
@@ -551,6 +590,7 @@ class _RecordingsPageState extends State<RecordingsPage> {
     controller.dispose();
     projects.dispose();
     timer.dispose();
+    momentum.dispose();
     settings.dispose();
     logs.dispose();
     super.dispose();
@@ -615,7 +655,11 @@ class _RecordingsPageState extends State<RecordingsPage> {
                                     projects: projects,
                                     initialProjectId: activeQueueProjectFilterId,
                                   ),
-                                  TimerTab(controller: timer, settings: settings),
+                                  TimerTab(
+                                    controller: timer,
+                                    settings: settings,
+                                    momentum: momentum,
+                                  ),
                                   ProjectsTab(
                                     controller: projects,
                                     recordingsController: controller,
