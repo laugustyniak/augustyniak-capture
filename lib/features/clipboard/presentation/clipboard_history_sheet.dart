@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter/material.dart';
@@ -99,14 +100,40 @@ class _ClipboardHistorySheetState extends State<ClipboardHistorySheet> {
   /// the app uses no snackbars. Cleared by the next selection change.
   String? _handoffNotice;
 
+  /// The entry being edited, or null. An **id, not the item**, for the same
+  /// reason [_selectedId] is one — and it lives here rather than in
+  /// [_ClipboardPreview] because changing the selection has to be able to flush
+  /// a pending edit, which a parent cannot do by reaching into a child's state.
+  String? _editingId;
+
+  final TextEditingController _editController = TextEditingController();
+
+  /// The last value taken **from the entry**. `dirty` is a difference from
+  /// this, exactly as `_syncedText` works in `RecordingEditor`.
+  String _syncedText = '';
+
+  bool get _isEditDirty => _editController.text != _syncedText;
+
+  /// The last dirty state the screen was built with. Typing has to reach the
+  /// `UNSAVED` marker, but only the **transition** is worth a rebuild — a
+  /// `setState` per keystroke would rebuild the list beside the field as well.
+  bool _dirtyShown = false;
+
   @override
   void initState() {
     super.initState();
     _searchController.addListener(_onSearchChanged);
+    _editController.addListener(_onEditChanged);
   }
 
   void _onSearchChanged() {
     setState(() => _filter = _searchController.text.trim().toLowerCase());
+  }
+
+  void _onEditChanged() {
+    if (_editingId == null) return;
+    if (_isEditDirty == _dirtyShown) return;
+    setState(() => _dirtyShown = _isEditDirty);
   }
 
   @override
@@ -115,6 +142,8 @@ class _ClipboardHistorySheetState extends State<ClipboardHistorySheet> {
     _searchController.dispose();
     _scrollController.dispose();
     _keyboardFocus.dispose();
+    _editController.removeListener(_onEditChanged);
+    _editController.dispose();
     super.dispose();
   }
 
@@ -149,7 +178,7 @@ class _ClipboardHistorySheetState extends State<ClipboardHistorySheet> {
         ? 0
         : visible.indexWhere((ClipboardItem item) => item.id == current.id);
     final int next = (index + delta).clamp(0, visible.length - 1);
-    setState(() => _selectedId = visible[next].id);
+    unawaited(_select(visible[next].id));
     _scrollToSelected(next);
   }
 
@@ -184,6 +213,8 @@ class _ClipboardHistorySheetState extends State<ClipboardHistorySheet> {
         event.logicalKey == LogicalKeyboardKey.numpadEnter) {
       final ClipboardItem? item = _selectedIn(visible);
       if (item != null) _paste(context, item);
+    } else if (event.logicalKey == LogicalKeyboardKey.escape) {
+      if (_editingId != null) unawaited(_endEdit());
     }
   }
 
@@ -380,6 +411,57 @@ class _ClipboardHistorySheetState extends State<ClipboardHistorySheet> {
     );
   }
 
+  // ------------------------------------------------------------------ editing
+
+  void _startEdit(ClipboardItem item) {
+    setState(() {
+      _editingId = item.id;
+      _syncedText = item.text ?? '';
+      _editController.text = _syncedText;
+      _dirtyShown = false;
+      _handoffNotice = null;
+    });
+  }
+
+  /// Writes the pending text if there is any worth writing.
+  ///
+  /// Blank is not an edit: an entry with no body cannot be pasted or searched,
+  /// and deletion has its own action.
+  Future<void> _commitEdit() async {
+    final String? id = _editingId;
+    if (id == null || !_isEditDirty) return;
+    final String text = _editController.text;
+    if (text.trim().isEmpty) return;
+    _syncedText = text;
+    await widget.watcherService.updateItemText(id, text);
+    // The field is clean again, so the marker goes with it — this is the path a
+    // focus loss takes, which reaches no other `setState`.
+    if (mounted) setState(() => _dirtyShown = _isEditDirty);
+  }
+
+  Future<void> _endEdit() async {
+    await _commitEdit();
+    if (!mounted) return;
+    setState(() => _editingId = null);
+  }
+
+  void _revertEdit() {
+    setState(() {
+      _editController.text = _syncedText;
+      _dirtyShown = false;
+    });
+  }
+
+  /// Selection changes go through here so a pending edit is never lost.
+  Future<void> _select(String id) async {
+    await _endEdit();
+    if (!mounted) return;
+    setState(() {
+      _selectedId = id;
+      _handoffNotice = null;
+    });
+  }
+
   // -------------------------------------------------------------------- build
 
   @override
@@ -523,10 +605,7 @@ class _ClipboardHistorySheetState extends State<ClipboardHistorySheet> {
           item: item,
           timeLabel: formatClipboardAge(item.copiedAt),
           selected: item.id == selected?.id,
-          onTap: () => setState(() {
-            _selectedId = item.id;
-            _handoffNotice = null;
-          }),
+          onTap: () => _select(item.id),
         );
       },
     );
@@ -565,6 +644,13 @@ class _ClipboardHistorySheetState extends State<ClipboardHistorySheet> {
           : null,
       onCollections: () => _manageCollections(context, selected),
       onDelete: () => _delete(selected, visible),
+      editing: _editingId == selected.id,
+      editController: _editController,
+      dirty: _isEditDirty,
+      onEdit: () => _startEdit(selected),
+      onEndEdit: () => unawaited(_endEdit()),
+      onRevert: _revertEdit,
+      onEditFocusLost: () => unawaited(_commitEdit()),
     );
   }
 }
@@ -839,6 +925,13 @@ class _ClipboardPreview extends StatelessWidget {
     required this.onConvert,
     required this.onCollections,
     required this.onDelete,
+    required this.editing,
+    required this.editController,
+    required this.dirty,
+    required this.onEdit,
+    required this.onEndEdit,
+    required this.onRevert,
+    required this.onEditFocusLost,
     this.notice,
   });
 
@@ -847,6 +940,17 @@ class _ClipboardPreview extends StatelessWidget {
   final VoidCallback? onConvert;
   final VoidCallback onCollections;
   final VoidCallback onDelete;
+
+  /// The edit mode is driven from [_ClipboardHistorySheetState], which is what
+  /// lets a selection change flush a pending edit before it moves on. This
+  /// widget stays stateless and only renders what it is handed.
+  final bool editing;
+  final TextEditingController editController;
+  final bool dirty;
+  final VoidCallback onEdit;
+  final VoidCallback onEndEdit;
+  final VoidCallback onRevert;
+  final VoidCallback onEditFocusLost;
 
   /// Inline confirmation shown after a hand-off, because the app uses no
   /// snackbars and the tab form has no sheet to close as its receipt.
@@ -891,6 +995,25 @@ class _ClipboardPreview extends StatelessWidget {
                 // types into whatever had focus, which is not always what is
                 // wanted.
                 CopyButton(text: text, tooltip: 'Copy without pasting'),
+              ],
+              if (editing && dirty) ...<Widget>[
+                const SizedBox(width: 10),
+                // Same marker as `RecordingEditor` in the Queue, down to the
+                // token: a plain amber micro label, not a StatusPill, because a
+                // pill would read as a state of the entry rather than a warning
+                // about the field.
+                Text(
+                  'UNSAVED',
+                  style: ConsoleText.micro.copyWith(color: Console.amber),
+                ),
+                const SizedBox(width: 4),
+                ConsoleIconButton(
+                  icon: Icons.undo_rounded,
+                  semanticLabel: 'Revert the edit',
+                  onTap: onRevert,
+                  size: 30,
+                  iconSize: 15,
+                ),
               ],
             ],
           ),
@@ -938,6 +1061,31 @@ class _ClipboardPreview extends StatelessWidget {
                             ),
                       ),
                     )
+                  : editing
+                  // Committing on focus loss is what makes a SAVE button
+                  // unnecessary: leaving the field is the gesture that writes.
+                  ? Focus(
+                      onFocusChange: (bool hasFocus) {
+                        if (!hasFocus) onEditFocusLost();
+                      },
+                      child: TextField(
+                        controller: editController,
+                        autofocus: true,
+                        maxLines: null,
+                        expands: false,
+                        style: TextStyle(
+                          fontFamily: ConsoleFont.mono,
+                          fontSize: 12.5,
+                          height: 1.6,
+                          color: Console.text,
+                        ),
+                        decoration: const InputDecoration(
+                          isDense: true,
+                          border: InputBorder.none,
+                          contentPadding: EdgeInsets.zero,
+                        ),
+                      ),
+                    )
                   : SingleChildScrollView(
                       child: Text(
                         text,
@@ -980,6 +1128,15 @@ class _ClipboardPreview extends StatelessWidget {
                   icon: Icons.auto_awesome,
                   onPressed: onConvert!,
                   color: Console.accent,
+                ),
+              // An image has no body to rewrite, and a control that does
+              // nothing is worse than none.
+              if (!isImage)
+                _PreviewAction(
+                  label: editing ? 'DONE' : 'EDIT',
+                  icon: editing ? Icons.check_rounded : Icons.edit_outlined,
+                  onPressed: editing ? onEndEdit : onEdit,
+                  color: editing ? Console.accent : null,
                 ),
               _PreviewAction(
                 label: 'COLLECTIONS',
