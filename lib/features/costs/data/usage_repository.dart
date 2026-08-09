@@ -87,29 +87,46 @@ class UsageRepository {
     return (rows.first['total'] as num?)?.toDouble() ?? 0;
   }
 
-  /// Every capture's summed cost, keyed by capture id — the queue card's and
-  /// compact row's source for `VerificationLine.costUsd`.
+  /// Every **fully priced** capture's summed cost, keyed by capture id — the
+  /// queue card's and compact row's source for `VerificationLine.costUsd`.
   ///
   /// One `GROUP BY` per queue build rather than `all()` plus a Dart-side fold:
   /// the queue can hold thousands of rows across their whole history, and the
   /// aggregate is the only thing a card ever needs.
   ///
-  /// A capture is **absent** from the map, never present with `0`, when
-  /// `SUM(cost_usd)` comes back null — every one of its events was unpriced.
-  /// A `0.0` there would read as "this cost nothing", which is exactly the
-  /// fabricated-zero `VerificationLine`'s `cost —` fallback exists to refuse;
-  /// SQL's own null-propagation through `SUM` is what makes the distinction
-  /// free to keep, since a capture with at least one priced event and any
-  /// number of unpriced ones still sums to a real, if partial, number.
+  /// A capture is **absent** from the map — never present with `0`, and never
+  /// present with a partial sum — unless **every** one of its events priced.
+  /// Plain `SUM(cost_usd)` was tried first and is wrong: SQLite's `SUM`
+  /// ignores individual `NULL`s, so three priced chunks plus one `noRate`
+  /// chunk would still sum to a real number and render as, say, `$0.0047` —
+  /// which states a total cost that is not the total cost. The capture cost
+  /// *more* than that; the fourth chunk's price is simply unknown, and a
+  /// number on screen does not say so. That silent understatement is exactly
+  /// the failure this whole feature exists to prevent, and it is worse here
+  /// than anywhere else: the card has no per-event breakdown to qualify it
+  /// with (unlike the editor's `CostSection`, which prints each event's stage
+  /// and can say `no rate` right next to the number, so `cost —` there is
+  /// explained on the same screen). `HAVING COUNT(*) = COUNT(cost_usd)` is
+  /// what enforces "every row priced": `COUNT(*)` counts every row in the
+  /// group, `COUNT(cost_usd)` — unlike `SUM` — counts only the non-null ones,
+  /// and the two are equal exactly when no row in the group is null. This is
+  /// the same rule `RecordingEditor`'s `_totalCostUsd()` applies in Dart for
+  /// the same capture's own `VerificationLine`; the two must agree, and this
+  /// query is now this repository's half of that agreement.
   Map<String, double> totalsByCapture() {
     final ResultSet rows = _db.select('''
       SELECT capture_id, SUM(cost_usd) AS total
       FROM usage_events
-      GROUP BY capture_id;
+      GROUP BY capture_id
+      HAVING COUNT(*) = COUNT(cost_usd);
     ''');
     final Map<String, double> totals = <String, double>{};
     for (final Row row in rows) {
       final num? total = row['total'] as num?;
+      // Not reachable given the HAVING clause above (a group that passes it
+      // has no null cost_usd, so SUM cannot be null either) — kept as a
+      // guard rather than a `!`, so a future change to the query degrades by
+      // omission instead of by crash.
       if (total == null) continue;
       totals[row['capture_id'] as String] = total.toDouble();
     }

@@ -126,8 +126,8 @@ void main() {
     expect(untouched.costUsd, closeTo(0.5, 1e-9));
   });
 
-  test('totalsByCapture sums two captures independently and omits an '
-      'all-unpriced one', () {
+  test('totalsByCapture sums two fully priced captures independently and '
+      'omits an all-unpriced one', () {
     repository.insert(_event(id: 'a1', captureId: 'cap-a', costUsd: 0.01));
     repository.insert(_event(id: 'a2', captureId: 'cap-a', costUsd: 0.02));
     repository.insert(_event(id: 'b1', captureId: 'cap-b', costUsd: 5.0));
@@ -146,6 +146,32 @@ void main() {
     expect(totals['cap-b'], closeTo(5.0, 1e-9));
     expect(totals.containsKey('cap-c'), isFalse);
     expect(totals, hasLength(2));
+  });
+
+  test('a capture with a mix of priced and unpriced events is absent, not '
+      'present with a partial sum', () {
+    // Three chunks priced, a fourth not — plain SUM(cost_usd) would still
+    // answer 0.03 here, understating what the capture actually cost. The
+    // total is unknown, not $0.03, so the capture must not appear at all.
+    repository.insert(_event(id: 'm1', captureId: 'cap-mixed', costUsd: 0.01));
+    repository.insert(_event(id: 'm2', captureId: 'cap-mixed', costUsd: 0.01));
+    repository.insert(_event(id: 'm3', captureId: 'cap-mixed', costUsd: 0.01));
+    repository.insert(_event(
+      id: 'm4',
+      captureId: 'cap-mixed',
+      costUsd: null,
+      unpricedReason: UnpricedReason.noRate,
+    ));
+    // A control capture, fully priced, so the test can tell "the query
+    // dropped everything" apart from "the query correctly dropped the mixed
+    // one".
+    repository.insert(_event(id: 'p1', captureId: 'cap-priced', costUsd: 0.5));
+
+    final Map<String, double> totals = repository.totalsByCapture();
+
+    expect(totals, isNot(contains('cap-mixed')));
+    expect(totals['cap-mixed'], isNull);
+    expect(totals['cap-priced'], closeTo(0.5, 1e-9));
   });
 
   test('backfill never rewrites a cost that is already recorded', () {
