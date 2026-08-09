@@ -209,6 +209,16 @@ class _QrSyncScannerSheetState extends State<QrSyncScannerSheet> {
                   padding: const EdgeInsets.symmetric(vertical: 14),
                 ),
                 onPressed: () async {
+                  // Both taken before the first await. Pairing does a network
+                  // round trip and a full storage reload, and the `context`
+                  // reachable here belongs to the builder rather than to this
+                  // State — so `mounted` says nothing about whether it is still
+                  // valid afterwards. Holding the two states instead makes the
+                  // question moot: neither is looked up across the gap.
+                  final NavigatorState navigator = Navigator.of(context);
+                  final ScaffoldMessengerState messenger = ScaffoldMessenger.of(
+                    context,
+                  );
                   final String tursoUrl = SyncDefaults.tursoDbUrl!;
                   final String tursoToken = SyncDefaults.tursoAuthToken!;
 
@@ -239,8 +249,8 @@ class _QrSyncScannerSheetState extends State<QrSyncScannerSheet> {
                       widget.recordingsController?.recordings.length ?? 0;
 
                   if (mounted) {
-                    Navigator.of(context).pop(true);
-                    ScaffoldMessenger.of(context).showSnackBar(
+                    navigator.pop(true);
+                    messenger.showSnackBar(
                       SnackBar(
                         content: Text('⚡ Sync paired · $count notes'),
                         backgroundColor: Console.green,
