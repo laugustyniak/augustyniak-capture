@@ -1,5 +1,6 @@
 import 'package:augustyniak_capture/features/costs/domain/model_price.dart';
 import 'package:augustyniak_capture/features/costs/domain/price_book.dart';
+import 'package:augustyniak_capture/features/costs/domain/usage_event.dart';
 import 'package:augustyniak_capture/features/costs/presentation/pricing_section.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -9,13 +10,15 @@ Widget _host(Widget child) =>
 
 PricingSection _section({
   List<String> models = const <String>['gpt-transcribe', 'gpt-5.6-luna'],
-  Map<String, int> missingRateCounts = const <String, int>{},
+  Map<String, MissingRateInfo> missingRateCounts = const <String, MissingRateInfo>{},
   int unknownQuantityCount = 0,
+  UsageTotal thisMonth = const UsageTotal(amountUsd: 1.24, unpricedCount: 0),
+  UsageTotal allTime = const UsageTotal(amountUsd: 8.90, unpricedCount: 0),
   void Function(String, ModelPrice?)? onRateChanged,
 }) {
   return PricingSection(
-    thisMonthUsd: 1.24,
-    allTimeUsd: 8.90,
+    thisMonth: thisMonth,
+    allTime: allTime,
     storageBytes: 2254857830,
     storagePrice: StoragePrice.defaults,
     models: models,
@@ -64,7 +67,9 @@ void main() {
     expect(find.text('MISSING RATES'), findsNothing);
 
     await tester.pumpWidget(
-      _host(_section(missingRateCounts: <String, int>{'gpt-6-nova': 3})),
+      _host(_section(missingRateCounts: <String, MissingRateInfo>{
+        'gpt-6-nova': const MissingRateInfo(count: 3, isTranscription: false),
+      })),
     );
     await tester.pump();
 
@@ -99,7 +104,10 @@ void main() {
         _host(
           _section(
             models: const <String>['gpt-6-nova'],
-            missingRateCounts: <String, int>{'gpt-6-nova': 3},
+            missingRateCounts: <String, MissingRateInfo>{
+              'gpt-6-nova':
+                  const MissingRateInfo(count: 3, isTranscription: false),
+            },
           ),
         ),
       );
@@ -140,4 +148,101 @@ void main() {
 
     expect(edits.single, startsWith('gpt-transcribe:'));
   });
+
+  testWidgets(
+    'a value typed and then blurred, without submitting, is still committed',
+    (WidgetTester tester) async {
+      final List<String> edits = <String>[];
+      await tester.pumpWidget(
+        _host(
+          _section(
+            onRateChanged: (String key, ModelPrice? price) => edits.add(
+              '$key:${price?.perAudioMinute ?? price?.inputPerMTok}',
+            ),
+          ),
+        ),
+      );
+      await tester.pump();
+
+      // Field 0 is gpt-transcribe's single audio-minute field; field 1 is
+      // gpt-5.6-luna's input field. Moving focus there with a tap — never
+      // submitting field 0 — is what a mouse user actually does when leaving
+      // a field, and is exactly what `onSubmitted` alone cannot see.
+      await tester.enterText(find.byType(TextField).at(0), '0.05');
+      await tester.pump();
+      await tester.tap(find.byType(TextField).at(1));
+      await tester.pump();
+
+      expect(edits, contains('gpt-transcribe:0.05'));
+    },
+  );
+
+  testWidgets(
+    'a missing-rate key used for transcription renders the audio-minute '
+    'field, not the chat pair, and a rate typed there prices it',
+    (WidgetTester tester) async {
+      final List<ModelPrice?> committed = <ModelPrice?>[];
+      await tester.pumpWidget(
+        _host(
+          _section(
+            models: const <String>[],
+            missingRateCounts: <String, MissingRateInfo>{
+              'custom-whisper':
+                  const MissingRateInfo(count: 2, isTranscription: true),
+            },
+            onRateChanged: (String key, ModelPrice? price) =>
+                committed.add(price),
+          ),
+        ),
+      );
+      await tester.pump();
+
+      // Before I3, a missing-rate key always rendered the chat pair (2
+      // fields) because the shape was read off `existing`, which is null for
+      // exactly the keys under MISSING RATES.
+      expect(find.byType(TextField), findsNWidgets(1));
+
+      await tester.enterText(find.byType(TextField).first, '0.02');
+      await tester.testTextInput.receiveAction(TextInputAction.done);
+      await tester.pump();
+
+      expect(committed.single?.perAudioMinute, closeTo(0.02, 1e-9));
+      expect(committed.single?.inputPerMTok, isNull);
+    },
+  );
+
+  testWidgets(
+    'THIS MONTH reports a mixed total with the unpriced calls it excludes',
+    (WidgetTester tester) async {
+      await tester.pumpWidget(
+        _host(
+          _section(
+            thisMonth:
+                const UsageTotal(amountUsd: 1.24, unpricedCount: 3),
+          ),
+        ),
+      );
+      await tester.pump();
+
+      expect(find.textContaining('\$1.24'), findsOneWidget);
+      expect(find.textContaining('3 unpriced'), findsOneWidget);
+    },
+  );
+
+  testWidgets(
+    'an all-unpriced ALL TIME total never renders a bare \$0.0000',
+    (WidgetTester tester) async {
+      await tester.pumpWidget(
+        _host(
+          _section(
+            allTime: const UsageTotal(amountUsd: null, unpricedCount: 5),
+          ),
+        ),
+      );
+      await tester.pump();
+
+      expect(find.textContaining('\$0.0000'), findsNothing);
+      expect(find.textContaining('5 unpriced'), findsOneWidget);
+    },
+  );
 }

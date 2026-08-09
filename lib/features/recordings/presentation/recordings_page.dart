@@ -16,6 +16,7 @@ import '../../costs/data/recording_usage_sink.dart';
 import '../../costs/data/usage_repository.dart';
 import '../../costs/domain/model_price.dart';
 import '../../costs/domain/price_book.dart';
+import '../../costs/domain/usage_event.dart';
 import '../../enrichment/data/composed_enrichment_context_source.dart';
 import '../../logs/data/log_store.dart';
 import '../../logs/domain/log_event.dart';
@@ -764,9 +765,9 @@ class _RecordingsPageState extends State<RecordingsPage> {
                                             DateTime.now().month,
                                           ),
                                         ) ??
-                                        0,
-                                    allTimeUsd:
-                                        _usageRepository?.totalAll() ?? 0,
+                                        UsageTotal.zero,
+                                    allTimeUsd: _usageRepository?.totalAll() ??
+                                        UsageTotal.zero,
                                     // Both R2 (source files) and Turso (the
                                     // index) scale with the same total, so one
                                     // measured sum feeds both halves of the
@@ -784,7 +785,7 @@ class _RecordingsPageState extends State<RecordingsPage> {
                                     models: _usageModels(),
                                     missingRateCounts:
                                         _usageRepository?.missingRateCounts() ??
-                                            const <String, int>{},
+                                            const <String, MissingRateInfo>{},
                                     unknownQuantityCount: _usageRepository
                                             ?.unknownQuantityCount() ??
                                         0,

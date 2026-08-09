@@ -73,19 +73,36 @@ class UsageRepository {
   List<UsageEvent> all() =>
       _select('SELECT * FROM usage_events ORDER BY at DESC;', <Object?>[]);
 
-  double totalSince(DateTime from) {
+  /// The Config tab's `THIS MONTH` figure — a floor, not a total, whenever the
+  /// range holds an unpriced call. Plain `SUM(cost_usd)` was tried first, the
+  /// same mistake `totalsByCapture`'s doc explains: SQLite's `SUM` skips
+  /// `NULL`s rather than poisoning the result, so a mix of priced and
+  /// `noRate` rows would still sum to a real number and print as a total that
+  /// understates what was actually spent. `COUNT(*) - COUNT(cost_usd)` is the
+  /// same non-null-counting trick as `totalsByCapture`'s `HAVING` clause,
+  /// applied here to produce the qualifier instead of to hide the row.
+  UsageTotal totalSince(DateTime from) {
     final ResultSet rows = _db.select(
-      'SELECT SUM(cost_usd) AS total FROM usage_events WHERE at >= ?;',
+      'SELECT SUM(cost_usd) AS total, COUNT(*) - COUNT(cost_usd) AS unpriced '
+      'FROM usage_events WHERE at >= ?;',
       <Object?>[from.millisecondsSinceEpoch],
     );
-    return (rows.first['total'] as num?)?.toDouble() ?? 0;
+    return _totalFromRow(rows.first);
   }
 
-  double totalAll() {
-    final ResultSet rows =
-        _db.select('SELECT SUM(cost_usd) AS total FROM usage_events;');
-    return (rows.first['total'] as num?)?.toDouble() ?? 0;
+  /// The Config tab's `ALL TIME` figure. See [totalSince].
+  UsageTotal totalAll() {
+    final ResultSet rows = _db.select(
+      'SELECT SUM(cost_usd) AS total, COUNT(*) - COUNT(cost_usd) AS unpriced '
+      'FROM usage_events;',
+    );
+    return _totalFromRow(rows.first);
   }
+
+  static UsageTotal _totalFromRow(Row row) => UsageTotal(
+    amountUsd: (row['total'] as num?)?.toDouble(),
+    unpricedCount: (row['unpriced'] as num).toInt(),
+  );
 
   /// Every **fully priced** capture's summed cost, keyed by capture id — the
   /// queue card's and compact row's source for `VerificationLine.costUsd`.
@@ -135,18 +152,32 @@ class UsageRepository {
 
   /// Models whose events could not be priced **because no rate existed** —
   /// the only ones a rate would fix, and so the only ones the Config tab may
-  /// offer a rate field for.
-  Map<String, int> missingRateCounts() {
+  /// offer a rate field for. Each entry also carries which billing shape its
+  /// calls need (see [MissingRateInfo]), because the field the Config tab
+  /// renders has to match: offering the token-pair field to a key whose
+  /// unpriced calls are transcription-stage produces a row that can never
+  /// actually be priced from the typed rate.
+  Map<String, MissingRateInfo> missingRateCounts() {
     final ResultSet rows = _db.select('''
-      SELECT model, provider, COUNT(*) AS calls
+      SELECT model, provider,
+        COUNT(*) AS calls,
+        SUM(CASE WHEN stage = 'transcription' THEN 1 ELSE 0 END)
+          AS transcription_calls
       FROM usage_events
       WHERE unpriced_reason = 'noRate'
       GROUP BY model, provider;
     ''');
-    return <String, int>{
+    return <String, MissingRateInfo>{
       for (final Row row in rows)
         PriceBook.keyFor(row['model'] as String, row['provider'] as String):
-            (row['calls'] as num).toInt(),
+            MissingRateInfo(
+          count: (row['calls'] as num).toInt(),
+          // A key whose calls mix both shapes is not something one field can
+          // fix either way; leaning toward "transcription" at least prices
+          // the model's actual shape in the overwhelmingly common case where
+          // a key belongs to exactly one stage.
+          isTranscription: (row['transcription_calls'] as num).toInt() > 0,
+        ),
     };
   }
 

@@ -69,9 +69,80 @@ void main() {
     repository.insert(_event(id: 'old', at: DateTime.utc(2026, 7, 31), costUsd: 5));
     repository.insert(_event(id: 'new', at: DateTime.utc(2026, 8, 1), costUsd: 2));
 
-    expect(repository.totalSince(DateTime.utc(2026, 8, 1)), closeTo(2, 1e-9));
-    expect(repository.totalAll(), closeTo(7, 1e-9));
+    final UsageTotal since = repository.totalSince(DateTime.utc(2026, 8, 1));
+    expect(since.amountUsd, closeTo(2, 1e-9));
+    expect(since.unpricedCount, 0);
+
+    final UsageTotal all = repository.totalAll();
+    expect(all.amountUsd, closeTo(7, 1e-9));
+    expect(all.unpricedCount, 0);
   });
+
+  test(
+    'a total is a floor, with the unpriced calls it excludes reported '
+    'alongside it rather than silently dropped from the sum',
+    () {
+      repository.insert(_event(id: 'priced', costUsd: 2));
+      repository.insert(_event(
+        id: 'unpriced-1',
+        costUsd: null,
+        unpricedReason: UnpricedReason.noRate,
+      ));
+      repository.insert(_event(
+        id: 'unpriced-2',
+        costUsd: null,
+        unpricedReason: UnpricedReason.noQuantity,
+      ));
+
+      final UsageTotal total = repository.totalAll();
+
+      // The old `SUM(cost_usd)` behaviour silently skipped the two null rows
+      // and reported exactly `2` here too — this assertion alone cannot tell
+      // the two implementations apart, which is why `unpricedCount` is
+      // checked as well.
+      expect(total.amountUsd, closeTo(2, 1e-9));
+      expect(total.unpricedCount, 2);
+    },
+  );
+
+  test(
+    'an all-unpriced history has no floor to show, and must not read as '
+    'zero spent',
+    () {
+      repository.insert(_event(
+        id: 'unpriced-1',
+        costUsd: null,
+        unpricedReason: UnpricedReason.noRate,
+      ));
+      repository.insert(_event(
+        id: 'unpriced-2',
+        costUsd: null,
+        unpricedReason: UnpricedReason.noRate,
+      ));
+
+      final UsageTotal total = repository.totalAll();
+
+      // `SUM` over an all-NULL group is NULL, not zero — a caller that
+      // defaults it with `?? 0` produces exactly the fabricated `$0.0000`
+      // this feature exists to refuse.
+      expect(total.amountUsd, isNull);
+      expect(total.unpricedCount, 2);
+    },
+  );
+
+  test(
+    'a fresh install with no events reports no floor but no unpriced calls '
+    'either — the UI, not the repository, is what renders that as zero',
+    () {
+      final UsageTotal total = repository.totalAll();
+
+      // `SUM` over zero rows is NULL regardless of why there are zero rows;
+      // it is `unpricedCount == 0` that tells a caller this null is safe to
+      // show as `$0.00` rather than as "unknown".
+      expect(total.amountUsd, isNull);
+      expect(total.unpricedCount, 0);
+    },
+  );
 
   test('missing-rate counts group by model and exclude other reasons', () {
     repository.insert(_event(
@@ -93,9 +164,37 @@ void main() {
       unpricedReason: UnpricedReason.noQuantity,
     ));
 
-    expect(repository.missingRateCounts(), <String, int>{'gpt-6-nova': 2});
+    final Map<String, MissingRateInfo> missing = repository.missingRateCounts();
+    expect(missing.keys, <String>['gpt-6-nova']);
+    expect(missing['gpt-6-nova']!.count, 2);
     expect(repository.unknownQuantityCount(), 1);
   });
+
+  test(
+    'a missing-rate key carries whether its calls are transcription-stage, '
+    'so the Config tab can offer the field that actually prices them',
+    () {
+      repository.insert(_event(
+        id: 'chat',
+        model: 'gpt-6-nova',
+        stage: UsageStage.enrichment,
+        costUsd: null,
+        unpricedReason: UnpricedReason.noRate,
+      ));
+      repository.insert(_event(
+        id: 'audio',
+        model: 'custom-whisper',
+        stage: UsageStage.transcription,
+        costUsd: null,
+        unpricedReason: UnpricedReason.noRate,
+      ));
+
+      final Map<String, MissingRateInfo> missing = repository.missingRateCounts();
+
+      expect(missing['gpt-6-nova']!.isTranscription, isFalse);
+      expect(missing['custom-whisper']!.isTranscription, isTrue);
+    },
+  );
 
   test('backfill prices only the null rows of that model', () {
     repository.insert(_event(

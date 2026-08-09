@@ -38,6 +38,47 @@ enum UnpricedReason {
       name == null ? null : UnpricedReason.values.asNameMap()[name];
 }
 
+/// One missing-rate key's call count and the billing shape its calls need —
+/// enough for the Config tab to know which rate field to offer.
+class MissingRateInfo {
+  const MissingRateInfo({required this.count, required this.isTranscription});
+
+  final int count;
+
+  /// True when the key's unpriced calls are transcription-stage, which prices
+  /// by audio minute rather than by token. Offering the token-pair field for
+  /// a key like this would leave it permanently unpriceable: `price()` never
+  /// reads `inputPerMTok`/`outputPerMTok` for a transcription event, so a
+  /// rate typed there backfills nothing.
+  final bool isTranscription;
+}
+
+/// A monetary total plus the count of calls it could not include.
+///
+/// [amountUsd] is a floor, never a total, whenever [unpricedCount] is
+/// nonzero — an unpriced call has an *unknown* cost, not a zero one, so it
+/// must never be folded silently into a sum that reads as complete. It is
+/// null whenever nothing in range has a price yet — which `SUM` cannot tell
+/// apart from "nothing is in range at all". [unpricedCount] is what breaks
+/// the tie for a renderer: zero unpriced calls means the null carries no
+/// missing money and is safe to show as `$0.00`; a nonzero count means the
+/// null is standing in for an unknown amount and must not be papered over
+/// with `?? 0`, or "no priced calls yet" and "genuinely nothing spent" become
+/// the same string on screen.
+class UsageTotal {
+  const UsageTotal({required this.amountUsd, required this.unpricedCount});
+
+  /// The Config tab's placeholder before the usage database has opened —
+  /// `unpricedCount: 0` is what makes a renderer treat the null-vs-zero
+  /// ambiguity as safe here, the same way it does for a genuinely empty
+  /// range: nothing is known to be missing, so nothing is understated by
+  /// showing `$0.00`.
+  static const UsageTotal zero = UsageTotal(amountUsd: 0, unpricedCount: 0);
+
+  final double? amountUsd;
+  final int unpricedCount;
+}
+
 /// One API call, what it consumed, and what it cost.
 ///
 /// One capture produces several of these: a long recording is split into N

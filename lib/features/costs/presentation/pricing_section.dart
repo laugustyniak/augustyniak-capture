@@ -3,13 +3,17 @@ import 'package:flutter/material.dart';
 import '../../../app/ui_kit.dart';
 import '../domain/model_price.dart';
 import '../domain/price_book.dart';
+import '../domain/usage_event.dart';
 
 /// One editable row's controllers, keyed by rate key in [_PricingSectionState].
 ///
 /// All three are always allocated — a row is either a chat shape (input +
 /// output) or a transcription shape (audio-minute), never both, but keeping
 /// one class rather than two subtypes means the row widget can stay a single
-/// method with a branch instead of two near-duplicate ones.
+/// method with a branch instead of two near-duplicate ones. The focus nodes
+/// exist for the same reason `RecordingEditor`'s do: a rate must commit on
+/// blur as well as on Enter, or clicking to the next field silently discards
+/// whatever was just typed.
 class _RateRowControllers {
   _RateRowControllers({required this.isTranscription});
 
@@ -17,11 +21,27 @@ class _RateRowControllers {
   final TextEditingController input = TextEditingController();
   final TextEditingController output = TextEditingController();
   final TextEditingController audio = TextEditingController();
+  final FocusNode inputFocus = FocusNode();
+  final FocusNode outputFocus = FocusNode();
+  final FocusNode audioFocus = FocusNode();
+
+  /// The text last handed to `onRateChanged`, mirroring `RecordingEditor`'s
+  /// `_syncedTitle`/`_syncedText`. Enter and blur can both fire for the same
+  /// keystroke — a `TextInputAction.done` triggers `onSubmitted` and then
+  /// unfocuses the field, which fires the blur listener right behind it —
+  /// so a commit is skipped once the field already matches what was last
+  /// sent, the same guard `_commitTitle`'s `!_titleDirty` return applies.
+  String? lastCommittedInput;
+  String? lastCommittedOutput;
+  String? lastCommittedAudio;
 
   void dispose() {
     input.dispose();
     output.dispose();
     audio.dispose();
+    inputFocus.dispose();
+    outputFocus.dispose();
+    audioFocus.dispose();
   }
 }
 
@@ -39,8 +59,8 @@ class _RateRowControllers {
 class PricingSection extends StatefulWidget {
   PricingSection({
     super.key,
-    required this.thisMonthUsd,
-    required this.allTimeUsd,
+    required this.thisMonth,
+    required this.allTime,
     required this.storageBytes,
     required this.storagePrice,
     required this.models,
@@ -51,8 +71,11 @@ class PricingSection extends StatefulWidget {
     required this.onRateChanged,
   });
 
-  final double thisMonthUsd;
-  final double allTimeUsd;
+  /// See [UsageTotal]: a floor rather than a total whenever it carries any
+  /// unpriced calls, and never rendered as a bare `$0.0000` when nothing in
+  /// range has priced yet.
+  final UsageTotal thisMonth;
+  final UsageTotal allTime;
   final int storageBytes;
   final StoragePrice storagePrice;
 
@@ -65,8 +88,10 @@ class PricingSection extends StatefulWidget {
   /// Models whose events are unpriced for `UnpricedReason.noRate` — the only
   /// ones a typed rate can fix. Deliberately kept apart from
   /// [unknownQuantityCount]: no rate the user types would price those, so
-  /// they must never be offered this control.
-  final Map<String, int> missingRateCounts;
+  /// they must never be offered this control. Each entry also says whether
+  /// its calls are transcription-stage, so the row renders the field that can
+  /// actually price them — see [MissingRateInfo].
+  final Map<String, MissingRateInfo> missingRateCounts;
   final int unknownQuantityCount;
   final DateTime verifiedOn;
 
@@ -111,16 +136,39 @@ class _PricingSectionState extends State<PricingSection> {
   _RateRowControllers _controllersFor(String key) {
     return _controllers.putIfAbsent(key, () {
       final ModelPrice? existing = widget.priceBook.lookup(key, key);
-      final bool isTranscription = existing?.perAudioMinute != null;
+      // A key that already has a rate takes its shape from that rate. A key
+      // with none — everything under MISSING RATES — has no rate to read the
+      // shape off, so it falls back to what its own unpriced calls actually
+      // are; without this a transcription-stage key always rendered the chat
+      // pair (`existing` is null, so `existing?.perAudioMinute != null` is
+      // always false) and a rate typed there could never price it.
+      final bool isTranscription = existing != null
+          ? existing.perAudioMinute != null
+          : (widget.missingRateCounts[key]?.isTranscription ?? false);
       final _RateRowControllers ctrls = _RateRowControllers(
         isTranscription: isTranscription,
       );
       if (isTranscription) {
         ctrls.audio.text = existing?.perAudioMinute?.toString() ?? '';
+        ctrls.lastCommittedAudio = ctrls.audio.text;
       } else {
         ctrls.input.text = existing?.inputPerMTok?.toString() ?? '';
         ctrls.output.text = existing?.outputPerMTok?.toString() ?? '';
+        ctrls.lastCommittedInput = ctrls.input.text;
+        ctrls.lastCommittedOutput = ctrls.output.text;
       }
+      // Commit on blur as well as on Enter — `RecordingEditor`'s rule for
+      // every text field in this app. `onSubmitted` alone means a rate typed
+      // and then dismissed by clicking elsewhere is silently discarded.
+      ctrls.inputFocus.addListener(() {
+        if (!ctrls.inputFocus.hasFocus) _commit(key, ctrls);
+      });
+      ctrls.outputFocus.addListener(() {
+        if (!ctrls.outputFocus.hasFocus) _commit(key, ctrls);
+      });
+      ctrls.audioFocus.addListener(() {
+        if (!ctrls.audioFocus.hasFocus) _commit(key, ctrls);
+      });
       return ctrls;
     });
   }
@@ -128,6 +176,17 @@ class _PricingSectionState extends State<PricingSection> {
   double? _parse(String text) => double.tryParse(text.trim());
 
   void _commit(String key, _RateRowControllers ctrls) {
+    if (ctrls.isTranscription) {
+      if (ctrls.audio.text == ctrls.lastCommittedAudio) return;
+      ctrls.lastCommittedAudio = ctrls.audio.text;
+    } else {
+      if (ctrls.input.text == ctrls.lastCommittedInput &&
+          ctrls.output.text == ctrls.lastCommittedOutput) {
+        return;
+      }
+      ctrls.lastCommittedInput = ctrls.input.text;
+      ctrls.lastCommittedOutput = ctrls.output.text;
+    }
     final ModelPrice price = ctrls.isTranscription
         ? ModelPrice(perAudioMinute: _parse(ctrls.audio.text))
         : ModelPrice(
@@ -143,9 +202,12 @@ class _PricingSectionState extends State<PricingSection> {
     setState(() {
       if (ctrls.isTranscription) {
         ctrls.audio.text = fallback?.perAudioMinute?.toString() ?? '';
+        ctrls.lastCommittedAudio = ctrls.audio.text;
       } else {
         ctrls.input.text = fallback?.inputPerMTok?.toString() ?? '';
         ctrls.output.text = fallback?.outputPerMTok?.toString() ?? '';
+        ctrls.lastCommittedInput = ctrls.input.text;
+        ctrls.lastCommittedOutput = ctrls.output.text;
       }
     });
   }
@@ -159,6 +221,7 @@ class _PricingSectionState extends State<PricingSection> {
         width: 180,
         child: ConsoleField(
           controller: ctrls.audio,
+          focusNode: ctrls.audioFocus,
           hintText: 'USD / audio min',
           fontSize: 11,
           monospace: true,
@@ -171,6 +234,7 @@ class _PricingSectionState extends State<PricingSection> {
         Expanded(
           child: ConsoleField(
             controller: ctrls.input,
+            focusNode: ctrls.inputFocus,
             hintText: 'input USD / MTok',
             fontSize: 11,
             monospace: true,
@@ -181,6 +245,7 @@ class _PricingSectionState extends State<PricingSection> {
         Expanded(
           child: ConsoleField(
             controller: ctrls.output,
+            focusNode: ctrls.outputFocus,
             hintText: 'output USD / MTok',
             fontSize: 11,
             monospace: true,
@@ -231,14 +296,14 @@ class _PricingSectionState extends State<PricingSection> {
   /// One `MISSING RATES` row: the key and its call count on one line — the
   /// only place that text renders, so it does not also duplicate the label
   /// `_row` prints for the primary list — then the same rate field(s).
-  Widget _missingRow(String key, int count) {
+  Widget _missingRow(String key, MissingRateInfo info) {
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 6),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: <Widget>[
           Text(
-            '$key  ·  $count call(s)',
+            '$key  ·  ${info.count} call(s)',
             style: ConsoleText.micro.copyWith(color: Console.textSoft),
           ),
           const SizedBox(height: 6),
@@ -246,6 +311,25 @@ class _PricingSectionState extends State<PricingSection> {
         ],
       ),
     );
+  }
+
+  /// [InfoRow]'s text for a period total: the summed figure alone when every
+  /// call in range priced, and a `+N unpriced` qualifier appended otherwise —
+  /// a total is never presented as complete when it is not one. See
+  /// [UsageTotal].
+  String _totalLabel(UsageTotal total) {
+    final int unpriced = total.unpricedCount;
+    final double? amount = total.amountUsd;
+    if (amount == null) {
+      // Every call in range is unpriced (or there is no call in range at
+      // all, in which case `unpriced` is also 0) — there is no floor to
+      // show, only the qualifier when there is one, so this must never fall
+      // back to `formatUsd(0)`.
+      return unpriced == 0 ? formatUsd(0) : '—  ·  $unpriced unpriced';
+    }
+    return unpriced == 0
+        ? formatUsd(amount)
+        : '${formatUsd(amount)}  +$unpriced unpriced';
   }
 
   @override
@@ -263,9 +347,12 @@ class _PricingSectionState extends State<PricingSection> {
         .where((String key) => !widget.missingRateCounts.containsKey(key))
         .toList();
 
-    final List<MapEntry<String, int>> sortedMissing =
+    final List<MapEntry<String, MissingRateInfo>> sortedMissing =
         widget.missingRateCounts.entries.toList()
-          ..sort((MapEntry<String, int> a, MapEntry<String, int> b) =>
+          ..sort((
+            MapEntry<String, MissingRateInfo> a,
+            MapEntry<String, MissingRateInfo> b,
+          ) =>
               a.key.compareTo(b.key));
 
     return Column(
@@ -279,9 +366,9 @@ class _PricingSectionState extends State<PricingSection> {
             children: <Widget>[
               InfoRow(
                 label: 'THIS MONTH',
-                value: formatUsd(widget.thisMonthUsd),
+                value: _totalLabel(widget.thisMonth),
               ),
-              InfoRow(label: 'ALL TIME', value: formatUsd(widget.allTimeUsd)),
+              InfoRow(label: 'ALL TIME', value: _totalLabel(widget.allTime)),
               InfoRow(
                 label: 'STORAGE',
                 value: '${formatBytes(widget.storageBytes) ?? '0 B'} ≈ '
@@ -315,7 +402,8 @@ class _PricingSectionState extends State<PricingSection> {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: <Widget>[
-                for (final MapEntry<String, int> entry in sortedMissing)
+                for (final MapEntry<String, MissingRateInfo> entry
+                    in sortedMissing)
                   _missingRow(entry.key, entry.value),
               ],
             ),

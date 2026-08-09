@@ -5,6 +5,7 @@ import '../../../core/database/app_database.dart';
 import '../../../core/sync/turso_sync_service.dart';
 import '../../costs/domain/model_price.dart';
 import '../../costs/domain/price_book.dart';
+import '../../costs/domain/usage_event.dart';
 import '../../costs/presentation/pricing_section.dart';
 import '../../projects/domain/project.dart';
 import '../../recordings/domain/note_vault.dart';
@@ -36,13 +37,13 @@ class ConfigTab extends StatelessWidget {
     this.rejectedShortcuts = const <ShortcutAction>{},
     this.runWithHotkeysSuspended = _runDirectly,
     this.onMirrorAll,
-    this.thisMonthUsd = 0,
-    this.allTimeUsd = 0,
+    this.thisMonthUsd = UsageTotal.zero,
+    this.allTimeUsd = UsageTotal.zero,
     this.storageBytes = 0,
     this.storagePrice = StoragePrice.defaults,
     this.priceBook = const PriceBook(),
     this.models = const <String>[],
-    this.missingRateCounts = const <String, int>{},
+    this.missingRateCounts = const <String, MissingRateInfo>{},
     this.unknownQuantityCount = 0,
     this.verifiedOn,
     this.onRateChanged = _noRateChange,
@@ -87,13 +88,13 @@ class ConfigTab extends StatelessWidget {
   // default empty for the same reason `projects` does above: with nothing
   // passed in, the section renders without ever touching the usage database,
   // which is what keeps the existing Config widget tests pure-Dart-safe.
-  final double thisMonthUsd;
-  final double allTimeUsd;
+  final UsageTotal thisMonthUsd;
+  final UsageTotal allTimeUsd;
   final int storageBytes;
   final StoragePrice storagePrice;
   final PriceBook priceBook;
   final List<String> models;
-  final Map<String, int> missingRateCounts;
+  final Map<String, MissingRateInfo> missingRateCounts;
   final int unknownQuantityCount;
 
   /// Null falls back to [PriceBookDefaults.verifiedOn] in [build] — it cannot
@@ -482,8 +483,8 @@ class ConfigTab extends StatelessWidget {
           ),
           const SizedBox(height: 22),
           PricingSection(
-            thisMonthUsd: thisMonthUsd,
-            allTimeUsd: allTimeUsd,
+            thisMonth: thisMonthUsd,
+            allTime: allTimeUsd,
             storageBytes: storageBytes,
             storagePrice: storagePrice,
             models: models,
