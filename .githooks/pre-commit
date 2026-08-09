@@ -42,7 +42,7 @@ blocked_re='^(\.agent-tasks/|inbox\.md$|android/key\.properties$)'
 # `-z` avoids the same non-ASCII quoting hazard fixed below for the content
 # scan: without it, a path git renders as `"kawiarnia-caf\303\251.md"` would
 # never match `blocked_re` against the literal bytes.
-staged=$(git -c core.quotePath=false diff --cached --name-only -z --diff-filter=ACMR | tr '\0' '\n' | grep -E "$blocked_re" || true)
+staged=$(git -c core.quotePath=false diff --cached --name-only -z --diff-filter=ACMRT | tr '\0' '\n' | grep -E "$blocked_re" || true)
 
 if [ -n "$staged" ]; then
   echo "pre-commit: refusing to commit captured content." >&2
