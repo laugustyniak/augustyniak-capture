@@ -60,3 +60,8 @@ gemini.md
 # thoughts — meeting notes, client work, half-formed ideas — landing in whatever
 # repo the capture was filed under. They are input to an agent, never source.
 .agent-tasks/
+
+# Local macOS code-signing identity (see LocalSigning.xcconfig.example).
+# Untracked like android/key.properties: naming a machine's own certificate,
+# and absent by default so a clone still builds ad-hoc.
+macos/Runner/Configs/LocalSigning.xcconfig
