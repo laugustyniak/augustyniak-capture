@@ -3,6 +3,9 @@ import 'package:flutter/material.dart';
 import '../../../app/ui_kit.dart';
 import '../../../core/database/app_database.dart';
 import '../../../core/sync/turso_sync_service.dart';
+import '../../costs/domain/model_price.dart';
+import '../../costs/domain/price_book.dart';
+import '../../costs/presentation/pricing_section.dart';
 import '../../projects/domain/project.dart';
 import '../../recordings/domain/note_vault.dart';
 import '../../recordings/presentation/recordings_controller.dart';
@@ -33,10 +36,24 @@ class ConfigTab extends StatelessWidget {
     this.rejectedShortcuts = const <ShortcutAction>{},
     this.runWithHotkeysSuspended = _runDirectly,
     this.onMirrorAll,
+    this.thisMonthUsd = 0,
+    this.allTimeUsd = 0,
+    this.storageBytes = 0,
+    this.storagePrice = StoragePrice.defaults,
+    this.priceBook = const PriceBook(),
+    this.models = const <String>[],
+    this.missingRateCounts = const <String, int>{},
+    this.unknownQuantityCount = 0,
+    this.verifiedOn,
+    this.onRateChanged = _noRateChange,
   });
 
   /// Default for callers with no coordinator (mobile, tests): just run it.
   static Future<void> _runDirectly(Future<void> Function() action) => action();
+
+  /// Default for callers with nothing wired to the usage database (every
+  /// existing Config test): render the section inertly rather than throw.
+  static void _noRateChange(String key, ModelPrice? price) {}
 
   final SettingsController controller;
   final RecordingsController? recordingsController;
@@ -64,6 +81,30 @@ class ConfigTab extends StatelessWidget {
   /// recordings controller to ask — the button then renders disabled rather
   /// than absent, so the section reads the same in every host.
   final Future<VaultMirrorSummary> Function()? onMirrorAll;
+
+  // --- PRICING section (`PricingSection`) — reported on, edited via
+  // `onRateChanged`. `models`, `missingRateCounts` and `unknownQuantityCount`
+  // default empty for the same reason `projects` does above: with nothing
+  // passed in, the section renders without ever touching the usage database,
+  // which is what keeps the existing Config widget tests pure-Dart-safe.
+  final double thisMonthUsd;
+  final double allTimeUsd;
+  final int storageBytes;
+  final StoragePrice storagePrice;
+  final PriceBook priceBook;
+  final List<String> models;
+  final Map<String, int> missingRateCounts;
+  final int unknownQuantityCount;
+
+  /// Null falls back to [PriceBookDefaults.verifiedOn] in [build] — it cannot
+  /// be the default value itself, because [PriceBookDefaults.verifiedOn] is a
+  /// `static final`, not a compile-time constant, and this constructor is
+  /// `const`.
+  final DateTime? verifiedOn;
+
+  /// Persists an edited or reset rate, then backfills the rows it unblocks.
+  /// The no-op default is what every pre-existing Config test still gets.
+  final void Function(String key, ModelPrice? price) onRateChanged;
 
   @override
   Widget build(BuildContext context) {
@@ -438,6 +479,19 @@ class ConfigTab extends StatelessWidget {
                 ),
               ],
             ),
+          ),
+          const SizedBox(height: 22),
+          PricingSection(
+            thisMonthUsd: thisMonthUsd,
+            allTimeUsd: allTimeUsd,
+            storageBytes: storageBytes,
+            storagePrice: storagePrice,
+            models: models,
+            priceBook: priceBook,
+            missingRateCounts: missingRateCounts,
+            unknownQuantityCount: unknownQuantityCount,
+            verifiedOn: verifiedOn ?? PriceBookDefaults.verifiedOn,
+            onRateChanged: onRateChanged,
           ),
           const SizedBox(height: 22),
           SectionHeader(title: 'STORAGE'),

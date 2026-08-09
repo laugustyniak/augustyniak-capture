@@ -1667,6 +1667,10 @@ String? formatBytes(int bytes) {
   return '${(bytes / (1024 * 1024)).toStringAsFixed(1)} MB';
 }
 
+/// Four decimals, because a single enrichment call routinely costs less than a
+/// tenth of a cent and rounding it to `$0.00` would make the readout useless.
+String formatUsd(double value) => '\$${value.toStringAsFixed(4)}';
+
 String formatDateTime(DateTime value) {
   final DateTime local = value.toLocal();
   return '${local.year}-${_two(local.month)}-${_two(local.day)} '

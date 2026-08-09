@@ -14,6 +14,7 @@ import '../../clipboard/presentation/clipboard_history_sheet.dart';
 import '../../clipboard/presentation/clipboard_tab.dart';
 import '../../costs/data/recording_usage_sink.dart';
 import '../../costs/data/usage_repository.dart';
+import '../../costs/domain/model_price.dart';
 import '../../costs/domain/price_book.dart';
 import '../../enrichment/data/composed_enrichment_context_source.dart';
 import '../../logs/data/log_store.dart';
@@ -460,6 +461,44 @@ class _RecordingsPageState extends State<RecordingsPage> {
     setState(() => storagePath = directory.path);
   }
 
+  /// The distinct model/provider keys with a recorded event — what the
+  /// Config tab's PRICING section offers a rate row for. Deliberately not
+  /// `PriceBookDefaults.rates.keys`: that is the whole shipped catalogue, and
+  /// an install that only ever talks to one provider does not need three
+  /// dozen rows for models it has never called.
+  List<String> _usageModels() {
+    final UsageRepository? repository = _usageRepository;
+    if (repository == null) return const <String>[];
+    final Set<String> keys = <String>{
+      for (final event in repository.all())
+        PriceBook.keyFor(event.model, event.provider),
+    };
+    return keys.toList()..sort();
+  }
+
+  /// Persists an edited or reset rate, then reprices whatever it unblocks.
+  ///
+  /// One action, not two: a rate typed for a model that already has rows
+  /// sitting unpriced for `noRate` is worthless left as a rate nobody applied
+  /// to the history that motivated typing it. `backfill` only ever touches
+  /// rows with no cost yet, so it cannot rewrite a price already charged
+  /// against an earlier rate.
+  void _onPriceRateChanged(String key, ModelPrice? price) {
+    unawaited(
+      () async {
+        await settings.setPriceOverride(key, price);
+        if (price == null) return;
+        final UsageRepository? repository = _usageRepository;
+        if (repository == null) return;
+        final int filled = repository.backfill(
+          key,
+          PriceBook(overrides: settings.settings.priceOverrides),
+        );
+        if (filled > 0 && mounted) setState(() {});
+      }(),
+    );
+  }
+
   /// Push provider + audio changes into the recordings controller. Only affects
   /// work started after the swap.
   void _applySettings() {
@@ -708,6 +747,42 @@ class _RecordingsPageState extends State<RecordingsPage> {
                                     // controller's, so the sweep has to be its
                                     // call rather than the settings tab's.
                                     onMirrorAll: controller.mirrorAll,
+                                    // PRICING section. `_usageRepository` is
+                                    // null until `_bootstrap()`'s database
+                                    // open resolves, so every read here falls
+                                    // back to the same "nothing yet" value the
+                                    // section would show on a fresh install.
+                                    thisMonthUsd: _usageRepository?.totalSince(
+                                          DateTime(
+                                            DateTime.now().year,
+                                            DateTime.now().month,
+                                          ),
+                                        ) ??
+                                        0,
+                                    allTimeUsd:
+                                        _usageRepository?.totalAll() ?? 0,
+                                    // Both R2 (source files) and Turso (the
+                                    // index) scale with the same total, so one
+                                    // measured sum feeds both halves of the
+                                    // monthly-rate formula.
+                                    storageBytes: controller.recordings.fold<
+                                        int>(
+                                      0,
+                                      (int sum, Recording r) =>
+                                          sum + r.sizeBytes,
+                                    ),
+                                    storagePrice: settings.storagePrice,
+                                    priceBook: PriceBook(
+                                      overrides: settings.settings.priceOverrides,
+                                    ),
+                                    models: _usageModels(),
+                                    missingRateCounts:
+                                        _usageRepository?.missingRateCounts() ??
+                                            const <String, int>{},
+                                    unknownQuantityCount: _usageRepository
+                                            ?.unknownQuantityCount() ??
+                                        0,
+                                    onRateChanged: _onPriceRateChanged,
                                   ),
                                 ],
                               ),
