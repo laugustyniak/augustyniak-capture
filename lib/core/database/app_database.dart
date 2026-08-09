@@ -144,11 +144,27 @@ class AppDatabase {
     ''');
   }
 
-  /// Migrates legacy JSON files into SQLite tables atomically on initial setup.
-  Future<void> migrateFromLegacyJsonIfNeeded() async {
+  /// Bring across whatever the pre-SQLite JSON files still hold, **without
+  /// ever replacing a row this database already has.**
+  ///
+  /// This runs from `SettingsRepository.load()`, so it runs on every launch —
+  /// the legacy files are never deleted, and deleting them would throw away the
+  /// only copy if the migration were ever found to be wrong. That makes "fill
+  /// in what is missing" the whole contract. It used to `INSERT OR REPLACE`,
+  /// which meant every launch silently reverted settings, projects and the
+  /// clipboard to a snapshot frozen at the moment of the SQLite move. It went
+  /// unnoticed because the settings loader immediately wrote the sync
+  /// credentials back from build-time literals, which restored the one part of
+  /// the row anybody was watching.
+  ///
+  /// [documentsDirectory] is a test seam; production reads the real app
+  /// documents directory.
+  Future<void> migrateFromLegacyJsonIfNeeded({
+    Directory? documentsDirectory,
+  }) async {
     final Directory docsDir;
     try {
-      docsDir = await getApplicationDocumentsDirectory();
+      docsDir = documentsDirectory ?? await getApplicationDocumentsDirectory();
     } catch (_) {
       return;
     }
@@ -162,7 +178,7 @@ class AppDatabase {
         if (decoded is List) {
           _db.execute('BEGIN TRANSACTION;');
           final PreparedStatement stmt = _db.prepare('''
-            INSERT OR REPLACE INTO clipboard_items 
+            INSERT OR IGNORE INTO clipboard_items 
             (id, type, text, image_path, copied_at, preview, collections_json)
             VALUES (?, ?, ?, ?, ?, ?, ?);
           ''');
@@ -194,7 +210,7 @@ class AppDatabase {
         final String raw = await settingsFile.readAsString();
         final Map<String, dynamic> decoded = jsonDecode(raw) as Map<String, dynamic>;
         _db.execute('''
-          INSERT OR REPLACE INTO settings (key, value_json) VALUES ('app_settings', ?);
+          INSERT OR IGNORE INTO settings (key, value_json) VALUES ('app_settings', ?);
         ''', <Object?>[jsonEncode(decoded)]);
       } catch (e) {
         debugPrint('Legacy settings JSON migration error: $e');
@@ -210,7 +226,7 @@ class AppDatabase {
         if (decoded is List) {
           _db.execute('BEGIN TRANSACTION;');
           final PreparedStatement stmt = _db.prepare('''
-            INSERT OR REPLACE INTO projects (id, name, color_hex, repository_path, created_at, json_payload)
+            INSERT OR IGNORE INTO projects (id, name, color_hex, repository_path, created_at, json_payload)
             VALUES (?, ?, ?, ?, ?, ?);
           ''');
           for (final item in decoded) {

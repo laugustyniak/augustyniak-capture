@@ -1,8 +1,11 @@
 import 'dart:convert';
+import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:augustyniak_capture/features/settings/domain/token_cipher.dart';
 import 'package:augustyniak_capture/features/settings/data/aes_gcm_token_cipher.dart';
+import 'package:augustyniak_capture/features/settings/data/file_master_key_store.dart';
+import 'package:augustyniak_capture/features/settings/data/migrating_master_key_store.dart';
 import 'package:augustyniak_capture/features/settings/data/secure_storage_master_key_store.dart';
 
 /// In-memory keyring stand-in, same hand-written-fake convention as
@@ -36,6 +39,34 @@ class _AmnesiacKeyStore implements MasterKeyStore {
 
   @override
   Future<void> write(String next) async {}
+}
+
+/// Accepts a read but refuses every write — a keyring present but locked for
+/// writing, or a store with nowhere to put the value.
+class _WriteOnlyFailsKeyStore implements MasterKeyStore {
+  @override
+  Future<String?> read() async => null;
+
+  @override
+  Future<void> write(String next) async => throw StateError('cannot write');
+}
+
+/// A store whose key is still there but cannot be read this launch: a key file
+/// with the wrong mode, a keychain that answers "not found" to a rebuilt
+/// binary. The distinction that matters is that a write here is destructive —
+/// it lands on top of the only copy of the key.
+class _UnreadableKeyStore implements MasterKeyStore {
+  _UnreadableKeyStore(this.hidden);
+
+  String hidden;
+
+  @override
+  Future<String?> read() async => null;
+
+  @override
+  Future<void> write(String next) async {
+    hidden = next;
+  }
 }
 
 void main() {
@@ -215,6 +246,437 @@ void main() {
         expect(await cipher.seal('sk-secret'), 'sk-secret');
       },
     );
+  });
+
+  group('AesGcmTokenCipher.expectExistingKey', () {
+    test('a store answering nothing does not get a replacement key', () async {
+      // The mine this guard exists for. `read()` returning null is ambiguous:
+      // it is a first run *or* a key that is present and unreachable. Treating
+      // the second as the first generates a fresh key, writes it over the only
+      // copy of the real one, and makes every already-sealed token unopenable
+      // for good — the one loss this whole layer is built to prevent.
+      final _UnreadableKeyStore store = _UnreadableKeyStore('the-real-key');
+      final AesGcmTokenCipher cipher = AesGcmTokenCipher(keyStore: store);
+
+      cipher.expectExistingKey();
+      await cipher.ensureReady();
+
+      expect(store.hidden, 'the-real-key');
+      expect(cipher.encrypts, isFalse);
+    });
+
+    test(
+      'the refusal says the key was expected, not that none exists',
+      () async {
+        // "no keyring here" and "your key is missing but your data needs it" are
+        // opposite situations; the second must never be reported as the first.
+        final AesGcmTokenCipher cipher = AesGcmTokenCipher(
+          keyStore: _UnreadableKeyStore('the-real-key'),
+        );
+
+        cipher.expectExistingKey();
+        await cipher.ensureReady();
+
+        expect(cipher.unavailableReason, contains('already encrypted'));
+      },
+    );
+
+    test('sealed values are preserved rather than re-encrypted', () async {
+      final AesGcmTokenCipher cipher = AesGcmTokenCipher(
+        keyStore: _UnreadableKeyStore('the-real-key'),
+      );
+      cipher.expectExistingKey();
+      await cipher.ensureReady();
+
+      expect(await cipher.unseal('enc:v1:blob'), 'enc:v1:blob');
+      expect(await cipher.seal('enc:v1:blob'), 'enc:v1:blob');
+    });
+
+    test('the guard is irrelevant when the key store answers', () async {
+      final _MemoryKeyStore store = _MemoryKeyStore();
+      final AesGcmTokenCipher writer = AesGcmTokenCipher(keyStore: store);
+      await writer.ensureReady();
+      final String sealed = await writer.seal('sk-secret');
+
+      final AesGcmTokenCipher reader = AesGcmTokenCipher(keyStore: store);
+      reader.expectExistingKey();
+      await reader.ensureReady();
+
+      expect(reader.encrypts, isTrue);
+      expect(await reader.unseal(sealed), 'sk-secret');
+    });
+
+    test('an unguarded first run still generates a key', () async {
+      // The guard must stay opt-in: a genuine fresh install has no sealed data
+      // to protect and has to be able to start encrypting.
+      final _MemoryKeyStore store = _MemoryKeyStore();
+      final AesGcmTokenCipher cipher = AesGcmTokenCipher(keyStore: store);
+
+      await cipher.ensureReady();
+
+      expect(cipher.encrypts, isTrue);
+      expect(store.value, isNotNull);
+    });
+
+    test(
+      'a key kept safe by the guard opens the tokens when it returns',
+      () async {
+        // End to end, and the whole point: one launch without a readable key
+        // must cost nothing permanent.
+        final _MemoryKeyStore keyring = _MemoryKeyStore();
+        final AesGcmTokenCipher before = AesGcmTokenCipher(keyStore: keyring);
+        await before.ensureReady();
+        final String sealed = await before.seal('sk-secret');
+
+        final _UnreadableKeyStore blind = _UnreadableKeyStore(keyring.value!);
+        final AesGcmTokenCipher during = AesGcmTokenCipher(keyStore: blind);
+        during.expectExistingKey();
+        await during.ensureReady();
+        expect(await during.unseal(sealed), sealed);
+
+        final AesGcmTokenCipher after = AesGcmTokenCipher(
+          keyStore: _MemoryKeyStore()..value = blind.hidden,
+        );
+        await after.ensureReady();
+
+        expect(await after.unseal(sealed), 'sk-secret');
+      },
+    );
+
+    test('PlaintextTokenCipher accepts the call and ignores it', () async {
+      // The repository announces this against the interface, so the default
+      // implementation has to be a no-op rather than a missing method.
+      const PlaintextTokenCipher cipher = PlaintextTokenCipher();
+
+      cipher.expectExistingKey();
+      await cipher.ensureReady();
+
+      expect(cipher.encrypts, isFalse);
+      expect(await cipher.unseal('enc:v1:blob'), 'enc:v1:blob');
+    });
+  });
+
+  group('MigratingMasterKeyStore', () {
+    // The keyring is the primary store again now that builds carry a stable
+    // signature, and the point of moving back is that the key stops sitting
+    // next to the ciphertext it opens. That only pays off if the old file is
+    // actually retired — but retiring it before the keyring has demonstrably
+    // kept the key would destroy the only copy, which is the failure this
+    // whole layer is built around.
+
+    MigratingMasterKeyStore storeOver(
+      MasterKeyStore primary,
+      MasterKeyStore fallback, {
+      void Function()? onRetire,
+    }) => MigratingMasterKeyStore(
+      primary: primary,
+      fallback: fallback,
+      retireFallback: onRetire == null ? null : () async => onRetire(),
+    );
+
+    test('a key in the primary store is used and nothing is retired', () async {
+      final _MemoryKeyStore keyring = _MemoryKeyStore()..value = 'the-key';
+      final _MemoryKeyStore file = _MemoryKeyStore()..value = 'stale';
+      bool retired = false;
+
+      final String? read = await storeOver(
+        keyring,
+        file,
+        onRetire: () => retired = true,
+      ).read();
+
+      expect(read, 'the-key');
+      expect(file.value, 'stale');
+      expect(retired, isFalse);
+    });
+
+    test('a fallback holding the same key is retired, not left behind', () async {
+      // The case this machine is actually in: both stores already hold the key,
+      // because the previous arrangement copied it rather than moving it. With
+      // retirement tied to the migration path alone, the file would survive
+      // every launch and the point of moving back — the key no longer sitting
+      // beside the ciphertext it opens — would quietly never happen.
+      final _MemoryKeyStore keyring = _MemoryKeyStore()..value = 'the-key';
+      final _MemoryKeyStore file = _MemoryKeyStore()..value = 'the-key';
+      bool retired = false;
+
+      final String? read = await storeOver(
+        keyring,
+        file,
+        onRetire: () => retired = true,
+      ).read();
+
+      expect(read, 'the-key');
+      expect(retired, isTrue);
+    });
+
+    test('a fallback holding a different key is left alone', () async {
+      // Not a redundant copy but a second key, and the tokens on disk may be
+      // sealed under it. Deleting it is the one irreversible mistake on offer.
+      final _MemoryKeyStore keyring = _MemoryKeyStore()..value = 'new-key';
+      final _MemoryKeyStore file = _MemoryKeyStore()..value = 'older-key';
+      bool retired = false;
+
+      await storeOver(keyring, file, onRetire: () => retired = true).read();
+
+      expect(retired, isFalse);
+      expect(file.value, 'older-key');
+    });
+
+    test(
+      'a key found only in the fallback is adopted and the old one retired',
+      () async {
+        final _MemoryKeyStore keyring = _MemoryKeyStore();
+        final _MemoryKeyStore file = _MemoryKeyStore()..value = 'the-key';
+        bool retired = false;
+
+        final String? read = await storeOver(
+          keyring,
+          file,
+          onRetire: () => retired = true,
+        ).read();
+
+        expect(read, 'the-key');
+        expect(keyring.value, 'the-key');
+        expect(retired, isTrue);
+      },
+    );
+
+    test('a primary that forgets the write keeps the fallback alive', () async {
+      // The read-back is what separates "the keyring took it" from "the keyring
+      // kept it". Retiring on the strength of a successful write alone is how
+      // the only copy of a key disappears.
+      final _AmnesiacKeyStore keyring = _AmnesiacKeyStore();
+      final _MemoryKeyStore file = _MemoryKeyStore()..value = 'the-key';
+      bool retired = false;
+
+      final String? read = await storeOver(
+        keyring,
+        file,
+        onRetire: () => retired = true,
+      ).read();
+
+      expect(read, 'the-key');
+      expect(retired, isFalse);
+      expect(file.value, 'the-key');
+    });
+
+    test('a primary that refuses the write keeps the fallback alive', () async {
+      final _MemoryKeyStore file = _MemoryKeyStore()..value = 'the-key';
+      bool retired = false;
+
+      final String? read = await storeOver(
+        _WriteOnlyFailsKeyStore(),
+        file,
+        onRetire: () => retired = true,
+      ).read();
+
+      expect(read, 'the-key');
+      expect(retired, isFalse);
+      expect(file.value, 'the-key');
+    });
+
+    test(
+      'a refusing primary is reported, not papered over by the fallback',
+      () async {
+        // The deliberate break from the previous arrangement. A keyring that
+        // throws is a failure the user has to see — falling through to the file
+        // would hide it and quietly undo the security this move is for. The
+        // cipher turns the throw into `unavailableReason`, and with sealed data
+        // present the guard refuses to mint a replacement key.
+        final _MemoryKeyStore file = _MemoryKeyStore()..value = 'the-key';
+
+        expect(
+          () => storeOver(_BrokenKeyStore(), file).read(),
+          throwsA(isA<StateError>()),
+        );
+        expect(file.value, 'the-key');
+      },
+    );
+
+    test('nothing anywhere reads as a first run', () async {
+      final _MemoryKeyStore keyring = _MemoryKeyStore();
+      bool retired = false;
+
+      final String? read = await storeOver(
+        keyring,
+        _MemoryKeyStore(),
+        onRetire: () => retired = true,
+      ).read();
+
+      expect(read, isNull);
+      expect(retired, isFalse);
+    });
+
+    test('an unreadable fallback is not an error', () async {
+      // A missing or unreadable key file on an install that never had one.
+      expect(
+        await storeOver(_MemoryKeyStore(), _BrokenKeyStore()).read(),
+        isNull,
+      );
+    });
+
+    test('writes go to the primary store only', () async {
+      final _MemoryKeyStore keyring = _MemoryKeyStore();
+      final _MemoryKeyStore file = _MemoryKeyStore();
+
+      await storeOver(keyring, file).write('fresh');
+
+      expect(keyring.value, 'fresh');
+      expect(file.value, isNull);
+    });
+
+    test('a token sealed before the move still opens after it', () async {
+      // End to end: the file held the key, the keyring takes it over, and the
+      // blob written under the old arrangement is still readable.
+      final _MemoryKeyStore file = _MemoryKeyStore();
+      final AesGcmTokenCipher before = AesGcmTokenCipher(keyStore: file);
+      await before.ensureReady();
+      final String sealed = await before.seal('sk-secret');
+
+      final _MemoryKeyStore keyring = _MemoryKeyStore();
+      final AesGcmTokenCipher after = AesGcmTokenCipher(
+        keyStore: storeOver(keyring, file),
+      );
+      await after.ensureReady();
+
+      expect(after.encrypts, isTrue);
+      expect(await after.unseal(sealed), 'sk-secret');
+      expect(keyring.value, isNotNull);
+    });
+  });
+
+  group('FileMasterKeyStore', () {
+    late Directory dir;
+
+    setUp(() {
+      dir = Directory.systemTemp.createTempSync('master-key-');
+    });
+
+    tearDown(() {
+      if (dir.existsSync()) dir.deleteSync(recursive: true);
+    });
+
+    FileMasterKeyStore store({MasterKeyStore? migrateFrom}) =>
+        FileMasterKeyStore(
+          directory: () async => dir,
+          migrateFrom: migrateFrom,
+        );
+
+    test('reads nothing before anything is written', () async {
+      expect(await store().read(), isNull);
+    });
+
+    test('round-trips a written key', () async {
+      final String key = base64Encode(List<int>.filled(32, 3));
+      await store().write(key);
+
+      expect(await store().read(), key);
+    });
+
+    test('the key file is readable by its owner alone', () async {
+      // The whole security argument for moving off the keyring: the key now
+      // sits beside the database it protects, so the file mode is the only
+      // thing between it and a careless `cp -R` of the support directory.
+      await store().write(base64Encode(List<int>.filled(32, 3)));
+
+      final File file = File('${dir.path}/${FileMasterKeyStore.fileName}');
+      expect(file.statSync().modeString(), 'rw-------');
+    }, skip: Platform.isWindows);
+
+    test('adopts a key the previous store already holds', () async {
+      // The migration that makes this change non-destructive: tokens sealed
+      // under the keyring's key must still open after the switch.
+      final _MemoryKeyStore keyring = _MemoryKeyStore();
+      keyring.value = base64Encode(List<int>.filled(32, 9));
+
+      expect(await store(migrateFrom: keyring).read(), keyring.value);
+      // Adopted, not merely forwarded — the next launch needs no keyring.
+      expect(await store().read(), keyring.value);
+    });
+
+    test('the file outranks the previous store once adopted', () async {
+      final String own = base64Encode(List<int>.filled(32, 1));
+      await store().write(own);
+
+      final _MemoryKeyStore keyring = _MemoryKeyStore();
+      keyring.value = base64Encode(List<int>.filled(32, 2));
+
+      expect(await store(migrateFrom: keyring).read(), own);
+    });
+
+    test('a keyring that refuses is not an error here', () async {
+      // The exact state this store exists to survive: an ad-hoc rebuild whose
+      // signature the login keychain ACL no longer recognises.
+      expect(await store(migrateFrom: _BrokenKeyStore()).read(), isNull);
+    });
+
+    test('a blank key file reads as absent, not as a broken key', () async {
+      // A zero-length read must leave the cipher free to generate a new key.
+      // Answering '' instead would decode to a wrong-sized key and wedge
+      // encryption off permanently with no way back.
+      File(
+        '${dir.path}/${FileMasterKeyStore.fileName}',
+      ).writeAsStringSync('\n');
+
+      expect(await store().read(), isNull);
+    });
+
+    test('delete removes the key file', () async {
+      // What retires the old copy once the keyring has taken the key over.
+      await store().write(base64Encode(List<int>.filled(32, 3)));
+      final File file = File('${dir.path}/${FileMasterKeyStore.fileName}');
+      expect(file.existsSync(), isTrue);
+
+      await store().delete();
+
+      expect(file.existsSync(), isFalse);
+      expect(await store().read(), isNull);
+    });
+
+    test('deleting a key file that is not there is not an error', () async {
+      // The handover is retried on every launch, so this runs again long after
+      // it has already succeeded.
+      await store().delete();
+      expect(await store().read(), isNull);
+    });
+
+    test(
+      'a cipher on the migrated key opens tokens sealed before it',
+      () async {
+        // End to end, and the regression this whole change is for: a token
+        // sealed while the keyring worked stays readable after the switch.
+        final _MemoryKeyStore keyring = _MemoryKeyStore();
+        final AesGcmTokenCipher before = AesGcmTokenCipher(keyStore: keyring);
+        await before.ensureReady();
+        final String sealed = await before.seal('sk-secret');
+
+        final AesGcmTokenCipher after = AesGcmTokenCipher(
+          keyStore: store(migrateFrom: keyring),
+        );
+        await after.ensureReady();
+
+        expect(after.encrypts, isTrue);
+        expect(await after.unseal(sealed), 'sk-secret');
+      },
+    );
+
+    test('a rebuild that loses the keyring still decrypts', () async {
+      // Same as above, one launch later: the keyring has stopped answering
+      // (new cdhash, denied prompt) and only the adopted file remains.
+      final _MemoryKeyStore keyring = _MemoryKeyStore();
+      final AesGcmTokenCipher before = AesGcmTokenCipher(keyStore: keyring);
+      await before.ensureReady();
+      final String sealed = await before.seal('sk-secret');
+      await store(migrateFrom: keyring).read();
+
+      final AesGcmTokenCipher after = AesGcmTokenCipher(
+        keyStore: store(migrateFrom: _BrokenKeyStore()),
+      );
+      await after.ensureReady();
+
+      expect(await after.unseal(sealed), 'sk-secret');
+    });
   });
 
   group('SecureStorageMasterKeyStore', () {

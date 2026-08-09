@@ -1,2 +1,8 @@
 #include "../../Flutter/Flutter-Debug.xcconfig"
 #include "Warnings.xcconfig"
+
+// Ad-hoc unless this machine supplies an identity — see
+// LocalSigning.xcconfig.example. The `?` makes the include optional, so a
+// clone without the file still builds exactly as it did before.
+LOCAL_SIGN_IDENTITY = -
+#include? "LocalSigning.xcconfig"

@@ -836,4 +836,70 @@ void main() {
       }
     });
   });
+
+  group('SettingsController.sealedTokensUnreadable', () {
+    Future<SettingsController> controllerWith(AppSettings settings) async {
+      final _FakeSettingsRepository repo = _FakeSettingsRepository()
+        ..stored = settings;
+      final SettingsController controller = SettingsController(
+        repository: repo,
+      );
+      await controller.initialize();
+      return controller;
+    }
+
+    AppSettings withProfileToken(String? token) => AppSettings(
+      profiles: <ProviderProfile>[
+        ProviderProfile(
+          id: 'p1',
+          name: 'OpenAI',
+          endpoint: 'https://api.openai.com/v1/audio/transcriptions',
+          bearerToken: token,
+        ),
+      ],
+      activeProfileId: 'p1',
+    );
+
+    test(
+      'is true when encryption is off and a stored token stayed sealed',
+      () async {
+        // The state that cost a day: requests go out with no Authorization
+        // header at all, and the provider answers 401 "you didn't provide an API
+        // key". Nothing on screen connected that to the key store.
+        final SettingsController controller = await controllerWith(
+          withProfileToken('enc:v1:unreadable-blob'),
+        );
+
+        expect(controller.sealedTokensUnreadable, isTrue);
+      },
+    );
+
+    test('is false for the ordinary plaintext fallback', () async {
+      // No keyring, but nothing was ever encrypted either — tokens work, and
+      // the existing amber "stored as plaintext" note is the right message.
+      final SettingsController controller = await controllerWith(
+        withProfileToken('sk-secret'),
+      );
+
+      expect(controller.sealedTokensUnreadable, isFalse);
+    });
+
+    test('is false when there are no tokens at all', () async {
+      final SettingsController controller = await controllerWith(
+        withProfileToken(null),
+      );
+
+      expect(controller.sealedTokensUnreadable, isFalse);
+    });
+
+    test('a sealed sync credential counts too', () async {
+      // The queue's 401 is the loud symptom, but an unopenable Turso token
+      // fails just as silently and from the same cause.
+      final SettingsController controller = await controllerWith(
+        const AppSettings(tursoAuthToken: 'enc:v1:unreadable-blob'),
+      );
+
+      expect(controller.sealedTokensUnreadable, isTrue);
+    });
+  });
 }

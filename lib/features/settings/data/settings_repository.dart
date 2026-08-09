@@ -6,6 +6,7 @@ import 'package:path_provider/path_provider.dart';
 import 'package:sqlite3/sqlite3.dart';
 
 import '../../../core/database/app_database.dart';
+import '../../../core/sync/sync_defaults.dart';
 import '../domain/app_settings.dart';
 import '../domain/provider_profile.dart';
 import '../domain/token_cipher.dart';
@@ -14,8 +15,8 @@ import '../domain/token_cipher.dart';
 /// at rest via [TokenCipher] and master key in the OS keyring.
 class SettingsRepository {
   SettingsRepository({TokenCipher? cipher, Database? db})
-      : _cipher = cipher ?? const PlaintextTokenCipher(),
-        _dbOverride = db;
+    : _cipher = cipher ?? const PlaintextTokenCipher(),
+      _dbOverride = db;
 
   final TokenCipher _cipher;
   final Database? _dbOverride;
@@ -31,13 +32,31 @@ class SettingsRepository {
     return AppDatabase.getInstance(overrideDb: _dbOverride);
   }
 
-  Future<AppSettings?> load() async {
+  /// Bring the cipher up, having first told it whether [raw] already contains
+  /// sealed values.
+  ///
+  /// The order is the whole point and it is why `ensureReady` no longer runs at
+  /// the top of [load]: the announcement has to land before the cipher decides
+  /// whether a key store that answered "nothing here" is a first run or a
+  /// failure. `ensureReady` memoises, so the later calls are free.
+  ///
+  /// The test is against the raw payload rather than the parsed fields on
+  /// purpose — a secret added to [AppSettings] later is covered the day it is
+  /// persisted, instead of the day someone remembers to extend a list here.
+  Future<void> _prepareCipher(String raw) async {
+    if (raw.contains(TokenCipher.sealedPrefix)) _cipher.expectExistingKey();
     await _cipher.ensureReady();
+  }
 
+  Future<AppSettings?> load() async {
     final File? customFile = await settingsFile();
     if (customFile != null) {
-      if (!await customFile.exists()) return null;
+      if (!await customFile.exists()) {
+        await _cipher.ensureReady();
+        return null;
+      }
       final String raw = await customFile.readAsString();
+      await _prepareCipher(raw);
       if (raw.trim().isEmpty) return null;
       final dynamic decoded = jsonDecode(raw);
       if (decoded is! Map<String, dynamic>) return null;
@@ -62,10 +81,13 @@ class SettingsRepository {
       AppSettings settings = const AppSettings();
       try {
         final Directory docsDir = await getApplicationDocumentsDirectory();
-        final File legacyFile = File(p.join(docsDir.path, 'recordings', 'settings.json'));
+        final File legacyFile = File(
+          p.join(docsDir.path, 'recordings', 'settings.json'),
+        );
         if (await legacyFile.exists()) {
           final String raw = await legacyFile.readAsString();
           if (raw.trim().isNotEmpty) {
+            await _prepareCipher(raw);
             final dynamic decoded = jsonDecode(raw);
             if (decoded is Map<String, dynamic>) {
               settings = await unsealTokens(AppSettings.fromJson(decoded));
@@ -74,23 +96,7 @@ class SettingsRepository {
         }
       } catch (_) {}
 
-      if (settings.tursoDbUrl == null || settings.r2Bucket == null) {
-        settings = settings.copyWith(
-          tursoDbUrl: settings.tursoDbUrl ??
-              'libsql://augustyniak-capture-laugustyniak.aws-us-east-1.turso.io',
-          tursoAuthToken: settings.tursoAuthToken ??
-              'eyJhbGciOiJFZERTQSIsInR5cCI6IkpXVCJ9.eyJpYXQiOjE3ODYxMDkwNDIsImlkIjoiMDE5ZmRjNjUtMTkwMS03N2JiLTk2NmMtYzQ4OGY0MmY4Y2Y5Iiwia2lkIjoiS05WbTBXMHhOZjdyd21pSXRrczdYMGdmYml3VGhGQ0RPbEtxemU4UUZmdyIsInJpZCI6IjE3MTJmZDJhLWVmY2MtNGI2MC1iZjQyLTVhMmEzNmYwYzkzYiJ9.4bvw9Cf9oMVSzDJSaZ9eq6bOTwbCXuYdast_FzKEddESgS3G3NCjjkSgJE7SRs17xtuTog42tJtrVRZ1Etl0Ag',
-          tursoSyncEnabled: true,
-          r2Endpoint: settings.r2Endpoint ??
-              'https://e779027f883e48c2e7f31c5850408dba.r2.cloudflarestorage.com',
-          r2Bucket: settings.r2Bucket ?? 'augustyniak-capture-media',
-          r2AccessKeyId:
-              settings.r2AccessKeyId ?? 'f7d5be45dff4ab4d90f1910219751723',
-          r2SecretAccessKey: settings.r2SecretAccessKey ??
-              '76e04917e25001440e2fb2ffb4143ad1b39624726eb42ac8074fb6f5e25f2a36',
-          r2MediaSyncEnabled: true,
-        );
-      }
+      settings = _withSyncDefaults(settings);
       try {
         await save(settings);
       } catch (_) {}
@@ -98,41 +104,22 @@ class SettingsRepository {
     }
 
     final String raw = results.single['value_json'] as String;
+    await _prepareCipher(raw);
     if (raw.trim().isEmpty) return null;
 
     final dynamic decoded = jsonDecode(raw);
     if (decoded is! Map<String, dynamic>) return null;
 
     final AppSettings stored = AppSettings.fromJson(decoded);
-    AppSettings settings = await unsealTokens(stored);
+    final AppSettings unsealed = await unsealTokens(stored);
+    final AppSettings settings = _withSyncDefaults(unsealed);
 
-    const String defaultToken = 'eyJhbGciOiJFZERTQSIsInR5cCI6IkpXVCJ9.eyJpYXQiOjE3ODYxMDkwNDIsImlkIjoiMDE5ZmRjNjUtMTkwMS03N2JiLTk2NmMtYzQ4OGY0MmY4Y2Y5Iiwia2lkIjoiS05WbTBXMHhOZjdyd21pSXRrczdYMGdmYml3VGhGQ0RPbEtxemU4UUZmdyIsInJpZCI6IjE3MTJmZDJhLWVmY2MtNGI2MC1iZjQyLTVhMmEzNmYwYzkzYiJ9.4bvw9Cf9oMVSzDJSaZ9eq6bOTwbCXuYdast_FzKEddESgS3G3NCjjkSgJE7SRs17xtuTog42tJtrVRZ1Etl0Ag';
-
-    if (settings.tursoDbUrl == null ||
-        settings.r2Bucket == null ||
-        settings.tursoAuthToken == null ||
-        !settings.tursoSyncEnabled ||
-        TokenCipher.isSealed(settings.tursoAuthToken!)) {
-      settings = settings.copyWith(
-        tursoDbUrl: settings.tursoDbUrl ??
-            'libsql://augustyniak-capture-laugustyniak.aws-us-east-1.turso.io',
-        tursoAuthToken: (settings.tursoAuthToken != null && !TokenCipher.isSealed(settings.tursoAuthToken!))
-            ? settings.tursoAuthToken
-            : defaultToken,
-        tursoSyncEnabled: true,
-        r2Endpoint: settings.r2Endpoint ??
-            'https://e779027f883e48c2e7f31c5850408dba.r2.cloudflarestorage.com',
-        r2Bucket: settings.r2Bucket ?? 'augustyniak-capture-media',
-        r2AccessKeyId:
-            settings.r2AccessKeyId ?? 'f7d5be45dff4ab4d90f1910219751723',
-        r2SecretAccessKey: settings.r2SecretAccessKey ??
-            '76e04917e25001440e2fb2ffb4143ad1b39624726eb42ac8074fb6f5e25f2a36',
-        r2MediaSyncEnabled: true,
-      );
-      try {
-        await save(settings);
-      } catch (_) {}
-    } else if (_cipher.encrypts && _hasPlaintextToken(stored)) {
+    // A token that will not open is left exactly as it is. An earlier build
+    // overwrote a still-sealed `tursoAuthToken` with a build-time default here,
+    // which meant one launch without a working key store silently replaced the
+    // user's own credential and wrote the replacement back in plaintext.
+    if (!identical(settings, unsealed) ||
+        (_cipher.encrypts && _hasPlaintextToken(stored))) {
       try {
         await save(settings);
       } catch (_) {}
@@ -141,14 +128,42 @@ class SettingsRepository {
     return settings;
   }
 
+  /// Fill in whatever this build was given at compile time, and nothing else.
+  ///
+  /// Returns the same instance when there is nothing to add, so the caller can
+  /// tell "seeded" from "unchanged" by identity and skip a pointless rewrite.
+  static AppSettings _withSyncDefaults(AppSettings settings) {
+    final bool seedsTurso =
+        settings.tursoDbUrl == null &&
+        settings.tursoAuthToken == null &&
+        SyncDefaults.hasTurso;
+    final bool seedsR2 =
+        settings.r2Bucket == null &&
+        SyncDefaults.r2Bucket != null &&
+        SyncDefaults.r2SecretAccessKey != null;
+    if (!seedsTurso && !seedsR2) return settings;
+
+    return settings.copyWith(
+      tursoDbUrl: seedsTurso ? SyncDefaults.tursoDbUrl : null,
+      tursoAuthToken: seedsTurso ? SyncDefaults.tursoAuthToken : null,
+      tursoSyncEnabled: seedsTurso ? true : null,
+      r2Endpoint: seedsR2 ? SyncDefaults.r2Endpoint : null,
+      r2Bucket: seedsR2 ? SyncDefaults.r2Bucket : null,
+      r2AccessKeyId: seedsR2 ? SyncDefaults.r2AccessKeyId : null,
+      r2SecretAccessKey: seedsR2 ? SyncDefaults.r2SecretAccessKey : null,
+      r2MediaSyncEnabled: seedsR2 ? true : null,
+    );
+  }
+
   Future<void> save(AppSettings settings) async {
     await _cipher.ensureReady();
     final AppSettings sealed = await sealTokens(settings);
 
     final File? customFile = await settingsFile();
     if (customFile != null) {
-      final String payload =
-          const JsonEncoder.withIndent('  ').convert(sealed.toJson());
+      final String payload = const JsonEncoder.withIndent(
+        '  ',
+      ).convert(sealed.toJson());
       final File temporary = File('${customFile.path}.tmp');
       await temporary.writeAsString(payload, flush: true);
       await temporary.rename(customFile.path);
@@ -156,9 +171,12 @@ class SettingsRepository {
     }
 
     final AppDatabase db = await _getDb();
-    db.rawDb.execute('''
+    db.rawDb.execute(
+      '''
       INSERT OR REPLACE INTO settings (key, value_json) VALUES ('app_settings', ?);
-    ''', <Object?>[jsonEncode(sealed.toJson())]);
+    ''',
+      <Object?>[jsonEncode(sealed.toJson())],
+    );
   }
 
   Future<AppSettings> sealTokens(AppSettings settings) =>
@@ -226,8 +244,10 @@ class SettingsRepository {
         !TokenCipher.isSealed(settings.r2SecretAccessKey!)) {
       return true;
     }
-    return settings.profiles.any((ProviderProfile profile) =>
-        profile.bearerToken != null &&
-        !TokenCipher.isSealed(profile.bearerToken!));
+    return settings.profiles.any(
+      (ProviderProfile profile) =>
+          profile.bearerToken != null &&
+          !TokenCipher.isSealed(profile.bearerToken!),
+    );
   }
 }

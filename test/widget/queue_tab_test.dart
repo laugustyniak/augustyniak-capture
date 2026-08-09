@@ -11,6 +11,7 @@ import 'package:augustyniak_capture/features/recordings/domain/capture_category.
 import 'package:augustyniak_capture/features/recordings/domain/capture_type.dart';
 import 'package:augustyniak_capture/features/recordings/domain/recording.dart';
 import 'package:augustyniak_capture/features/recordings/presentation/queue_tab.dart';
+import 'package:augustyniak_capture/features/recordings/presentation/queue_toolbar.dart';
 import 'package:augustyniak_capture/features/recordings/presentation/recording_card.dart';
 import 'package:augustyniak_capture/features/recordings/presentation/recording_editor.dart';
 import 'package:augustyniak_capture/features/recordings/presentation/recordings_controller.dart';
@@ -73,6 +74,20 @@ void main() {
       );
       await tester.pump();
     }
+  }
+
+  /// The five status buckets moved from a chip row onto one menu button when
+  /// the toolbar collapsed to a single line, so selecting one is now two taps.
+  /// The button always names the active bucket and its count.
+  Future<void> openStatusMenu(WidgetTester tester) async {
+    await tester.tap(find.byType(QueueStatusMenu));
+    await tester.pumpAndSettle();
+  }
+
+  Future<void> selectStatus(WidgetTester tester, String label) async {
+    await openStatusMenu(tester);
+    await tester.tap(find.text(label).last);
+    await tester.pumpAndSettle();
   }
 
   testWidgets('empty index shows the empty panel, not a list', (
@@ -204,7 +219,12 @@ void main() {
     );
     await pumpQueue(tester, controller);
 
+    // The bar names the active bucket; the other four keep their counts inside
+    // the menu, which is what the single-line toolbar traded a chip row for.
     expect(find.text('ALL 3'), findsOneWidget);
+
+    await openStatusMenu(tester);
+    expect(find.text('ALL 3'), findsNWidgets(2));
     // pendingTranscription + transcribing — one bucket, as the pipeline sees it.
     expect(find.text('QUEUE 0'), findsOneWidget);
     expect(find.text('READY 1'), findsOneWidget);
@@ -235,8 +255,7 @@ void main() {
     );
     await pumpQueue(tester, controller);
 
-    await tester.tap(find.text('READY 1'));
-    await tester.pumpAndSettle();
+    await selectStatus(tester, 'READY 1');
 
     expect(find.textContaining('done'), findsOneWidget);
     expect(find.textContaining('waiting'), findsNothing);
@@ -756,12 +775,30 @@ void main() {
     );
     await pumpQueue(tester, controller);
 
-    // The three review chips split the queue and the ratio still reads against
-    // the whole of it, not against whatever the chips currently show.
+    // The three review segments split the queue, and the hairline under the bar
+    // reads against the whole of it rather than against whatever the segments
+    // currently show. There is no `1 / 3` caption: it would be the numerator and
+    // the denominator beside it restated as a fraction.
     expect(find.text('DESK 2'), findsOneWidget);
     expect(find.text('OFF DESK 1'), findsOneWidget);
     expect(find.text('ANY 3'), findsOneWidget);
-    expect(find.text('1 / 3'), findsOneWidget);
+    expect(find.text('1 / 3'), findsNothing);
+
+    await tester.pumpAndSettle();
+    expect(
+      tester
+          .widget<LinearProgressIndicator>(
+            find.descendant(
+              of: find.byType(QueueToolbar),
+              matching: find.byType(LinearProgressIndicator),
+            ),
+          )
+          .value,
+      closeTo(1 / 3, 0.001),
+    );
+    // The sentence the caption used to print is still reachable — on the line
+    // itself, by pointer and by screen reader.
+    expect(find.byTooltip('Handed off 1 of 3'), findsOneWidget);
   });
 
   testWidgets('empty panel names combined status and review filters', (
@@ -775,8 +812,7 @@ void main() {
 
     await tester.tap(find.text('OFF DESK 0'));
     await tester.pumpAndSettle();
-    await tester.tap(find.text('FAILED 0'));
-    await tester.pumpAndSettle();
+    await selectStatus(tester, 'FAILED 0');
 
     expect(
       find.text('Nothing matches the selected status and review filters.'),
@@ -1072,8 +1108,7 @@ void main() {
     await tester.pump();
     expect(find.byType(RecordingEditor), findsOneWidget);
 
-    await tester.tap(find.text('FAILED'));
-    await tester.pump();
+    await selectStatus(tester, 'FAILED 1');
 
     expect(
       find.byType(RecordingEditor),

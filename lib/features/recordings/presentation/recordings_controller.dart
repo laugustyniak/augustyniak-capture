@@ -17,6 +17,7 @@ import '../../processing/data/video_poster_extractor.dart';
 import '../../processing/domain/processor.dart';
 import '../../processing/domain/processor_registry.dart';
 import '../../../core/database/app_database.dart';
+import '../../../core/sync/sync_defaults.dart';
 import '../../../core/sync/turso_sync_service.dart';
 import '../../settings/data/settings_repository.dart';
 import '../../settings/domain/app_settings.dart';
@@ -47,6 +48,7 @@ import '../domain/route_record.dart';
 // what an untitled capture is called, and a destination heading must not be
 // allowed to drift from what the card shows.
 import '../../gamification/presentation/gamification_controller.dart';
+import '../../momentum/domain/closure_event.dart';
 import 'card_parts.dart';
 
 class RecordingsController extends ChangeNotifier {
@@ -78,7 +80,9 @@ class RecordingsController extends ChangeNotifier {
     AudioRecorder? recorder,
     AudioPlayer? player,
     GamificationController? gamificationController,
+    ClosureLog closureLog = const NoopClosureLog(),
   }) : _repository = repository,
+       _closureLog = closureLog,
        _revisionsRepository = revisionsRepository,
        _transcriptionService = transcriptionService,
        _enrichmentService = enrichmentService,
@@ -126,6 +130,16 @@ class RecordingsController extends ChangeNotifier {
   /// and the shell is the one place that opts in.
   final RevisionsRepository? _revisionsRepository;
   final GamificationController? _gamificationController;
+
+  final ClosureLog _closureLog;
+
+  /// Ids already counted as closed, so a capture closes once and only once
+  /// however many times it is re-ticked or re-delivered.
+  ///
+  /// In memory and transient, the same class of fact as `_enrichingIds` and
+  /// `_postersInFlight`: nothing about it survives a restart, and the log on
+  /// disk is what repopulates it — see [loadClosures].
+  final Set<String> _closedIds = <String>{};
 
   /// Change history by capture id, newest first. Loaded once at [initialize]
   /// and kept in step by [_recordRevisions]; the file is append-only, so memory
@@ -459,15 +473,25 @@ class RecordingsController extends ChangeNotifier {
       final AppDatabase db = await AppDatabase.getInstance();
       final AppSettings settings = await SettingsRepository().load() ?? AppSettings.empty;
 
-      const String defaultUrl = 'libsql://augustyniak-capture-laugustyniak.aws-us-east-1.turso.io';
-      const String defaultToken = 'eyJhbGciOiJFZERTQSIsInR5cCI6IkpXVCJ9.eyJpYXQiOjE3ODYxMDkwNDIsImlkIjoiMDE5ZmRjNjUtMTkwMS03N2JiLTk2NmMtYzQ4OGY0MmY4Y2Y5Iiwia2lkIjoiS05WbTBXMHhOZjdyd21pSXRrczdYMGdmYml3VGhGQ0RPbEtxemU4UUZmdyIsInJpZCI6IjE3MTJmZDJhLWVmY2MtNGI2MC1iZjQyLTVhMmEzNmYwYzkzYiJ9.4bvw9Cf9oMVSzDJSaZ9eq6bOTwbCXuYdast_FzKEddESgS3G3NCjjkSgJE7SRs17xtuTog42tJtrVRZ1Etl0Ag';
-
       final String url = (settings.tursoDbUrl ?? '').trim().isNotEmpty
           ? settings.tursoDbUrl!
-          : defaultUrl;
-      final String token = (settings.tursoAuthToken != null && !TokenCipher.isSealed(settings.tursoAuthToken!))
+          : (SyncDefaults.tursoDbUrl ?? '');
+      // A sealed token is one the key store could not open, not a missing one.
+      // Falling through to the build-time value would paper over exactly the
+      // failure the Config tab is trying to report, so it stays empty and the
+      // sync declines below with its own message.
+      final String token = (settings.tursoAuthToken != null &&
+              !TokenCipher.isSealed(settings.tursoAuthToken!))
           ? settings.tursoAuthToken!
-          : defaultToken;
+          : (SyncDefaults.tursoAuthToken ?? '');
+
+      if (url.isEmpty || token.isEmpty) {
+        _logSink.log(
+          'Turso sync skipped: no credentials available.',
+          level: LogLevel.warn,
+        );
+        return false;
+      }
 
       final TursoSyncService syncService = TursoSyncService(db: db);
       final bool synced = await syncService.syncTwoWay(
@@ -1196,12 +1220,8 @@ class RecordingsController extends ChangeNotifier {
         clearProcessedAt: !nextValue,
       ),
     );
-    if (nextValue) {
-      final int totalDone = _recordings
-          .where((Recording item) => item.isProcessedByUser)
-          .length;
-      unawaited(_gamificationController?.onCaptureDone(totalDone));
-    }
+    // The tally is raised inside `_update`, which is the only place that can
+    // tell a first closure from a re-tick — see `_recordClosure`.
   }
 
   /// Whether [route] has anywhere to send this capture. Synchronous because the
@@ -1261,11 +1281,8 @@ class RecordingsController extends ChangeNotifier {
         isProcessedByUser: true,
         processedAt: record.at,
       ),
+      closure: ClosureKind.route,
     );
-    final int totalDone = _recordings
-        .where((Recording item) => item.isProcessedByUser)
-        .length;
-    unawaited(_gamificationController?.onCaptureDone(totalDone));
     _logSink.log('Routed to ${record.target}.', recordingId: id);
   }
 
@@ -1364,6 +1381,7 @@ class RecordingsController extends ChangeNotifier {
         isProcessedByUser: true,
         processedAt: result.record.at,
       ),
+      closure: ClosureKind.handoff,
     );
     _logSink.log(
       result.attachedToExistingSession
@@ -2021,10 +2039,93 @@ class RecordingsController extends ChangeNotifier {
       before.projectId != after.projectId ||
       !listEquals(before.tags, after.tags);
 
+  /// Appends one [ClosureEvent] the first time a capture becomes closed, and
+  /// tells the gamification counter about that same first time.
+  ///
+  /// **In `_update` rather than at the call sites, and that is the point.**
+  /// Three paths set `isProcessedByUser` — `toggleProcessed`, `route` and the
+  /// agent handoff, the latter two because closing the item is the
+  /// *consequence* of delivering it rather than a second chore. Counting at
+  /// each of them is what the previous arrangement did, and it had both
+  /// failures a scattered counter tends to have: the handoff path was simply
+  /// forgotten, so the most laborious way to finish a capture was the one that
+  /// never counted, and re-ticking one row incremented the total again because
+  /// no call site knew whether that capture had ever been closed before. A
+  /// funnel cannot be bypassed by adding a new setter, which is the same
+  /// argument that put [_recordRevisions] here.
+  ///
+  /// **A capture closes once, ever.** [_closedIds] is what makes that true, so
+  /// the tally measures work rather than clicking.
+  ///
+  /// Best-effort on the [_copyToClipboard] contract: the in-memory set is
+  /// updated first, so a failed write leaves this session's deduplication
+  /// correct and merely incomplete on disk, rather than wrong in both places.
+  Future<void> _recordClosure(
+    Recording before,
+    Recording after,
+    ClosureKind kind,
+  ) async {
+    if (before.isProcessedByUser || !after.isProcessedByUser) return;
+    if (!_closedIds.add(after.id)) return;
+
+    final String? projectId = after.projectId;
+    final Project? project = projectId == null
+        ? null
+        : _projectById?.call(projectId);
+
+    unawaited(
+      _gamificationController?.onCaptureDone(
+        _recordings.where((Recording item) => item.isProcessedByUser).length,
+      ),
+    );
+
+    try {
+      await _closureLog.append(
+        ClosureEvent(
+          recordingId: after.id,
+          at: after.processedAt ?? DateTime.now(),
+          kind: kind,
+          type: after.type,
+          projectId: projectId,
+          projectName: project?.name,
+        ),
+      );
+    } catch (exception) {
+      _logSink.log(
+        'Closure not written: $exception',
+        level: LogLevel.warn,
+        recordingId: after.id,
+      );
+    }
+  }
+
+  /// Populates [_closedIds] from the log.
+  ///
+  /// Called by the shell after `initialize`, never from inside it — the rule
+  /// `recoverOrphans` follows, and for the same reason: it is IO that an
+  /// in-memory repository fake cannot stand in for, and running it from
+  /// `initialize` would make every widget test reach the developer's real disk.
+  Future<void> loadClosures() async {
+    try {
+      for (final ClosureEvent event in await _closureLog.load()) {
+        _closedIds.add(event.recordingId);
+      }
+    } catch (exception) {
+      // Best-effort: an unreadable log costs deduplication accuracy for this
+      // session, never a close. Reporting the unreadable state to the user is
+      // `MomentumController`'s job; this side only has to keep working.
+      _logSink.log(
+        'Closure history not read: $exception',
+        level: LogLevel.warn,
+      );
+    }
+  }
+
   Future<void> _update(
     String id,
     Recording Function(Recording) transform, {
     RevisionSource source = RevisionSource.processor,
+    ClosureKind closure = ClosureKind.review,
   }) async {
     // Captured before the map so the diff below compares the same item across
     // the transform. Every mutation in this class funnels through here, which
@@ -2059,6 +2160,7 @@ class RecordingsController extends ChangeNotifier {
     // file ever held. Recording it here means the history can only ever lag the
     // index, never lead it.
     await _recordRevisions(before, _recordings[index], source);
+    await _recordClosure(before, _recordings[index], closure);
     // A hand edit is the one change that reaches the vault from here. The
     // processing and enrichment paths mirror explicitly at their own tails
     // (see `_processOne`), and doing it from this funnel as well would write
