@@ -237,8 +237,19 @@ class RecordingsController extends ChangeNotifier {
   final List<String> _processingQueue = <String>[];
   bool _isDraining = false;
   bool _disposed = false;
-  String? _processingId; // the id currently running in the drain loop, if any
+  String? _processingId; // the id the drain loop is running, if any
   Future<void>? _saveInFlight; // serializes saveAll (shared temp file)
+
+  /// Tail of the queue waiting for the ambient usage scope, or null when it is
+  /// free. See [_acquireUsageScope] — this is the whole of the mutex's state.
+  Future<void>? _usageScope;
+
+  /// Ids with an enrichment retry already claimed — queued for the scope or
+  /// running. Claimed synchronously in [retryEnrichment] before its first
+  /// await, so a second tap while the first is still waiting for the scope
+  /// cannot buy a second model call. `_enrichingIds` cannot serve here: it is
+  /// only raised once `_enrich` reaches the model, which is after the wait.
+  final Set<String> _enrichmentRetries = <String>{};
 
   /// Set only when [initialize] found an index it could not read. While true
   /// every write is refused, because `_recordings` is then empty for a reason
@@ -1524,36 +1535,45 @@ class RecordingsController extends ChangeNotifier {
       return;
     }
 
-    // The usage sink's scope is ambient (see `UsageSink`): only one job may be
-    // open at a time, or its events land against whichever capture the
-    // *other* open job named. `_processingId` already marks that a job is
-    // open for the duration of the drain loop's `_processOne`; a retry must
-    // defer to it rather than open a second scope underneath it, and setting
-    // it here in turn blocks the drain — or a second concurrent retry — from
-    // opening a job on top of this one.
-    if (_processingId != null) {
-      _logSink.log(
-        'Enrichment retry deferred — processing is already running.',
-        level: LogLevel.warn,
-        recordingId: id,
-      );
-      return;
-    }
-    _processingId = id;
+    // Claimed before the first await, like `_postersInFlight`: below this point
+    // the call can wait for the scope, and a second tap in that window would
+    // otherwise buy the same capture a second model call.
+    if (!_enrichmentRetries.add(id)) return;
 
     _logSink.log('Retrying enrichment.', level: LogLevel.warn, recordingId: id);
     try {
-      _beginUsageJob(id, UsageStage.enrichment);
+      // The usage sink's scope is ambient (see `UsageSink`): only one job may
+      // be open at a time, or its events land against whichever capture the
+      // *other* open job named. This *waits* for the drain — or an earlier
+      // retry — rather than refusing, so the button is never a no-op, and it
+      // holds the scope for its own job so the drain cannot land on top of it.
+      final void Function() releaseUsageScope = await _acquireUsageScope();
       try {
-        await _enrich(id, text);
+        // The wait can outlive the page. Nothing below is worth starting for a
+        // controller that is gone, and `_enrich` would notify a dead notifier.
+        if (_disposed) return;
+        // Re-read: the capture can be deleted, or its text edited, while this
+        // call waits its turn. Enriching the text that was on screen when the
+        // button was pressed would overwrite a newer correction's summary.
+        final int now = _recordings.indexWhere((Recording i) => i.id == id);
+        if (now < 0) return;
+        final String current = _recordings[now].transcript ?? '';
+        if (current.trim().isEmpty) return;
+
+        _beginUsageJob(id, UsageStage.enrichment);
+        try {
+          await _enrich(id, current);
+        } finally {
+          _endUsageJob();
+        }
+        // Same tail as the processing path: a better title is only half the
+        // point if the copy in the vault keeps the old one.
+        await _mirrorToVault(id);
       } finally {
-        _endUsageJob();
+        releaseUsageScope();
       }
-      // Same tail as the processing path: a better title is only half the
-      // point if the copy in the vault keeps the old one.
-      await _mirrorToVault(id);
     } finally {
-      _processingId = null;
+      _enrichmentRetries.remove(id);
     }
   }
 
@@ -1619,8 +1639,17 @@ class RecordingsController extends ChangeNotifier {
   /// the clipboard hand-off. Same state machine for every [CaptureType]; only
   /// the processor differs. Never touches the source file.
   Future<void> _processOne(String id) async {
+    // Claimed synchronously, before the await below: the id has already left
+    // `_processingQueue`, so a `retryTranscription` landing in that gap would
+    // otherwise queue it a second time and process it twice.
     _processingId = id; // marks this id in-flight so it can't be re-enqueued
+    // Waits out an enrichment retry that is already holding the ambient usage
+    // scope open. Taken here rather than around the `beginJob` pairs below so
+    // the whole job owns the scope: the ordering inside is fixed (see the
+    // comments there) and must not gain an await point in the middle of it.
+    final void Function() releaseUsageScope = await _acquireUsageScope();
     try {
+      if (_disposed) return;
       await _update(
         id,
         (Recording item) => item.copyWith(status: RecordingStatus.transcribing),
@@ -1710,6 +1739,7 @@ class RecordingsController extends ChangeNotifier {
         );
       }
     } finally {
+      releaseUsageScope();
       _processingId = null;
     }
   }
@@ -1725,6 +1755,44 @@ class RecordingsController extends ChangeNotifier {
     CaptureType.video ||
     CaptureType.text => UsageStage.transcription,
   };
+
+  /// Take the ambient usage scope, waiting for whoever holds it, and return the
+  /// release. Call it from a `finally`; calling it twice is harmless.
+  ///
+  /// `UsageSink.beginJob`/`endJob` are ambient state — one open job at a time,
+  /// or an event lands against whichever capture the *other* job named — so
+  /// every path that opens one has to be serialized against every other. There
+  /// are exactly two: [_processOne] (the drain) and [retryEnrichment] (the
+  /// ENRICH button). `_isDraining` covers only the first against itself.
+  ///
+  /// A `Completer` chain rather than a flag, because a refusal here is a silent
+  /// no-op on a control the user just pressed: whoever asks second waits and
+  /// then runs, in the order they asked.
+  ///
+  /// **It cannot deadlock**, and the argument is that nothing held inside it
+  /// ever asks for it. [_processOne] holds it across the processor, `_enrich`,
+  /// the clipboard and the vault mirror; [retryEnrichment] across `_enrich` and
+  /// the vault mirror. None of those call back into `_processOne`,
+  /// `retryEnrichment` or `_drainProcessingQueue` — `_enqueueProcessing` only
+  /// appends to a list and kicks the drain *unawaited*, so a capture taken
+  /// while a job runs never blocks on the holder. Both call sites release from
+  /// a `finally`, so a throw cannot strand the chain either; a waiter that
+  /// resumes after [dispose] checks `_disposed` and leaves.
+  Future<void Function()> _acquireUsageScope() async {
+    final Future<void>? ahead = _usageScope;
+    final Completer<void> mine = Completer<void>();
+    // Published before the await, which is what makes this a queue rather than
+    // a check: whoever asks next chains onto `mine` instead of finding it free.
+    _usageScope = mine.future;
+    if (ahead != null) await ahead;
+    return () {
+      if (mine.isCompleted) return;
+      // Only the tail clears the field. Clearing it unconditionally would hand
+      // the scope to a third caller while the second is still waiting on us.
+      if (identical(_usageScope, mine.future)) _usageScope = null;
+      mine.complete();
+    };
+  }
 
   /// The sink is best-effort at this boundary too: a store that throws costs a
   /// cost row, never the capture the row was about.

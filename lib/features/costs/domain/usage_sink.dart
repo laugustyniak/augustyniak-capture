@@ -12,15 +12,17 @@ import 'usage_parsing.dart';
 /// HTTP class.
 ///
 /// The HTTP classes do not know which capture they are working on;
-/// [beginJob]/[endJob] supply it. That is ambient state, and it is safe
-/// because exactly one job is ever open at a time: `RecordingsController`
-/// serializes every path that can call [beginJob] behind its `_processingId`
-/// guard. `_drainProcessingQueue` is single-flight and `_enrich` runs inside
-/// the same `_processOne` job, so the drain alone never overlaps itself —
-/// and `retryEnrichment` claims `_processingId` before opening its own job
-/// and defers instead of starting one while the drain (or another retry)
-/// already holds it, so a retry can neither run underneath the drain nor
-/// have the drain land on top of it.
+/// [beginJob]/[endJob] supply it. That is ambient state, and it is safe only
+/// because exactly one job is ever open at a time. Two paths in
+/// `RecordingsController` open one — `_processOne` (the drain) and
+/// `retryEnrichment` (the ENRICH button) — and both take the *same* mutex,
+/// `_acquireUsageScope`, for the whole of their job and release it from a
+/// `finally`. The exclusion is therefore symmetric: a retry cannot start
+/// underneath a running job, and a job cannot start on top of a running retry.
+/// Whoever asks second waits and then runs, so neither side is ever silently
+/// dropped. (`_isDraining` is a separate guard and covers only the drain
+/// against itself, which is not enough on its own — the retry is not in the
+/// drain.)
 ///
 /// Defaults to a no-op so the pure-Dart suites need no database, exactly as
 /// `NoopLogSink` and `NoopClipboardSink` do.

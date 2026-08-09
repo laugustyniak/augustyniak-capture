@@ -18,10 +18,12 @@ import 'package:augustyniak_capture/features/recordings/domain/recording.dart';
 import 'package:augustyniak_capture/features/recordings/presentation/recordings_controller.dart';
 import 'package:augustyniak_capture/features/transcription/data/transcription_service.dart';
 
-/// C1: `retryEnrichment` must open a usage job around its `_enrich` call —
-/// exactly as `_processOne` does — and must not be able to run while the
-/// drain (or another retry) already holds one open, since the sink's scope is
-/// ambient state shared by whichever job is open.
+/// The usage sink's scope is ambient (see `UsageSink`): whichever job is open
+/// claims every `record()` call made under it. Two paths in the controller open
+/// one — the drain's `_processOne` and `retryEnrichment` — so the exclusion
+/// between them has to hold in **both** directions, and has to be a wait rather
+/// than a refusal: the ENRICH button is ungated, so a refusal is a control that
+/// silently does nothing.
 
 /// Keeps what was written, mirroring `test/enrichment_controller_test.dart`'s
 /// fake — a fresh copy here since Dart has no cross-file private imports.
@@ -43,11 +45,14 @@ class _FakeRepo extends RecordingsRepository {
 }
 
 class _EchoProcessor implements Processor {
-  const _EchoProcessor();
+  _EchoProcessor();
+  int calls = 0;
 
   @override
-  Future<String> process(Recording item) async =>
-      File(item.filePath).readAsString();
+  Future<String> process(Recording item) async {
+    calls++;
+    return File(item.filePath).readAsString();
+  }
 }
 
 /// Attributes every `record()` call to whichever capture is currently open,
@@ -115,15 +120,17 @@ class _RecordingEnrichment implements EnrichmentService {
   }
 }
 
-/// Holds the call open until the test releases it, and reports which capture
-/// the sink had open at the moment it was called — the same shape as
-/// `test/enrichment_controller_test.dart`'s `_GatedEnrichment`, extended with
-/// a call counter and the sink hookup this file needs.
+/// Holds the *first* call open until the test releases it, and records against
+/// whichever capture the sink has open at that moment — the same shape as
+/// `test/enrichment_controller_test.dart`'s `_GatedEnrichment`, extended with a
+/// call counter and the sink hookup this file needs. Later calls pass straight
+/// through, so releasing the gate does not have to be repeated per job.
 class _GatedRecordingEnrichment implements EnrichmentService {
   _GatedRecordingEnrichment(this.result, this.sink);
   final EnrichmentResult result;
   final UsageSink sink;
   int calls = 0;
+  final List<String> textsSeen = <String>[];
   final Completer<void> started = Completer<void>();
   final Completer<void> release = Completer<void>();
 
@@ -133,6 +140,7 @@ class _GatedRecordingEnrichment implements EnrichmentService {
     EnrichmentContext context = EnrichmentContext.none,
   }) async {
     calls++;
+    textsSeen.add(text);
     if (!started.isCompleted) started.complete();
     await release.future;
     sink.record(
@@ -148,7 +156,7 @@ RecordingsController _controller(
   _FakeRepo repo, {
   required EnrichmentService enrichment,
   required UsageSink usageSink,
-  Processor processor = const _EchoProcessor(),
+  required Processor processor,
 }) => RecordingsController(
   repository: repo,
   transcriptionService: const DisabledTranscriptionService(),
@@ -159,13 +167,34 @@ RecordingsController _controller(
   }),
 );
 
-Future<Directory> _tmp() => Directory.systemTemp.createTemp('retry_enrich_usage');
+Future<Directory> _tmp() =>
+    Directory.systemTemp.createTemp('retry_enrich_usage');
+
+/// Let every microtask and zero-delay continuation the controller has queued
+/// run. Used to prove a *negative* — that a path which is supposed to be
+/// blocked has not moved — so it deliberately over-pumps rather than waiting
+/// for a signal that must never arrive.
+Future<void> _settle([int rounds = 80]) async {
+  for (int i = 0; i < rounds; i++) {
+    await Future<void>.delayed(Duration.zero);
+  }
+}
 
 const EnrichmentResult _verdict = EnrichmentResult(
   title: 'A title',
   category: CaptureCategory.note,
   summary: 'A summary.',
   tags: <String>['tag'],
+);
+
+Recording _completedNote(Directory dir, String id, String text) => Recording(
+  id: id,
+  filePath: '${dir.path}/$id.txt',
+  createdAt: DateTime.utc(2026, 8, 9),
+  durationMs: 0,
+  status: RecordingStatus.completed,
+  type: CaptureType.text,
+  transcript: text,
 );
 
 void main() {
@@ -190,22 +219,20 @@ void main() {
       final Directory dir = await _tmp();
       addTearDown(() => dir.delete(recursive: true));
       final _AmbientSink sink = _AmbientSink();
-      final _RecordingEnrichment enrichment =
-          _RecordingEnrichment(_verdict, sink);
+      final _RecordingEnrichment enrichment = _RecordingEnrichment(
+        _verdict,
+        sink,
+      );
       final _FakeRepo repo = _FakeRepo(dir)
         ..saved = <Recording>[
-          Recording(
-            id: 'cap-a',
-            filePath: '${dir.path}/cap-a.txt',
-            createdAt: DateTime.utc(2026, 8, 9),
-            durationMs: 0,
-            status: RecordingStatus.completed,
-            type: CaptureType.text,
-            transcript: 'persisted note body',
-          ),
+          _completedNote(dir, 'cap-a', 'persisted note body'),
         ];
-      final RecordingsController c =
-          _controller(repo, enrichment: enrichment, usageSink: sink);
+      final RecordingsController c = _controller(
+        repo,
+        enrichment: enrichment,
+        usageSink: sink,
+        processor: _EchoProcessor(),
+      );
       addTearDown(c.dispose);
       await c.initialize();
 
@@ -222,28 +249,26 @@ void main() {
   );
 
   test(
-    'a retry cannot open a job while the drain holds one open for a '
-    "different capture, so it can never misfile against that capture's job",
+    'a retry started while the drain holds a job waits for it, then records '
+    "its event under its own capture — the drain's is untouched",
     () async {
       final Directory dir = await _tmp();
       addTearDown(() => dir.delete(recursive: true));
       final _AmbientSink sink = _AmbientSink();
-      final _GatedRecordingEnrichment gated =
-          _GatedRecordingEnrichment(_verdict, sink);
+      final _GatedRecordingEnrichment gated = _GatedRecordingEnrichment(
+        _verdict,
+        sink,
+      );
       final _FakeRepo repo = _FakeRepo(dir)
         ..saved = <Recording>[
-          Recording(
-            id: 'cap-b',
-            filePath: '${dir.path}/cap-b.txt',
-            createdAt: DateTime.utc(2026, 8, 9),
-            durationMs: 0,
-            status: RecordingStatus.completed,
-            type: CaptureType.text,
-            transcript: 'already has text',
-          ),
+          _completedNote(dir, 'cap-b', 'already has text'),
         ];
-      final RecordingsController c =
-          _controller(repo, enrichment: gated, usageSink: sink);
+      final RecordingsController c = _controller(
+        repo,
+        enrichment: gated,
+        usageSink: sink,
+        processor: _EchoProcessor(),
+      );
       addTearDown(c.dispose);
       await c.initialize();
 
@@ -254,40 +279,216 @@ void main() {
       // `addTextNote` fills `transcript` only once processing completes, so
       // the freshly captured item is identified by not being 'cap-b' rather
       // than by its (not yet set) transcript.
-      final String aId =
-          c.recordings.firstWhere((Recording r) => r.id != 'cap-b').id;
+      final String aId = c.recordings
+          .firstWhere((Recording r) => r.id != 'cap-b')
+          .id;
 
       // Wait until the drain's enrichment call for 'a' has actually started —
       // i.e. the usage job for 'a' is open — before touching 'cap-b'.
       await gated.started.future;
       expect(sink.jobLog, contains('begin:$aId:enrichment'));
 
-      // While 'a's job is open, a retry on the *other* capture must defer
-      // rather than open a second scope underneath it — which is exactly
-      // what would misfile 'cap-b's event under 'a'.
-      await c.retryEnrichment('cap-b');
-      expect(gated.calls, 1, reason: "cap-b's retry must not have reached "
-          'the enrichment service while a is open');
-      expect(sink.attributedTo, isEmpty, reason: 'nothing has recorded yet');
+      // While 'a's job is open, a retry on the *other* capture must wait for
+      // the scope rather than open a second one underneath it — which is
+      // exactly what would misfile 'cap-b's event under 'a'.
+      final Future<void> retry = c.retryEnrichment('cap-b');
+      await _settle();
+      expect(
+        gated.calls,
+        1,
+        reason: "cap-b's retry must not reach the model while a's job is open",
+      );
+      expect(sink.jobLog, <String>[
+        'begin:$aId:transcription',
+        'end:$aId',
+        'begin:$aId:enrichment',
+      ], reason: 'no second scope may be opened under the drain\'s');
 
-      // Release 'a' and let the drain finish.
+      // Release 'a'; the retry that was waiting now takes its turn.
       gated.release.complete();
+      await retry;
       await c.waitForProcessing();
 
-      // 'a's event was attributed correctly, and 'cap-b' was never touched by
-      // it.
-      expect(sink.attributedTo, <String>[aId]);
+      expect(sink.droppedWithNoOpenJob, 0);
+      expect(sink.attributedTo, <String>[aId, 'cap-b']);
+      expect(sink.jobLog, <String>[
+        'begin:$aId:transcription',
+        'end:$aId',
+        'begin:$aId:enrichment',
+        'end:$aId',
+        'begin:cap-b:enrichment',
+        'end:cap-b',
+      ]);
+      expect(sink.jobLog, isNot(contains('end:null')));
+    },
+  );
+
+  test(
+    'the drain started while a retry holds a job does not open one on top of '
+    'it — the direction `_processingId` alone never covered',
+    () async {
+      final Directory dir = await _tmp();
+      addTearDown(() => dir.delete(recursive: true));
+      final _AmbientSink sink = _AmbientSink();
+      final _GatedRecordingEnrichment gated = _GatedRecordingEnrichment(
+        _verdict,
+        sink,
+      );
+      final _FakeRepo repo = _FakeRepo(dir)
+        ..saved = <Recording>[
+          _completedNote(dir, 'cap-b', 'already has text'),
+        ];
+      final RecordingsController c = _controller(
+        repo,
+        enrichment: gated,
+        usageSink: sink,
+        processor: _EchoProcessor(),
+      );
+      addTearDown(c.dispose);
+      await c.initialize();
+
+      // The retry goes first this time and is held open inside `_enrich`, so
+      // its usage job for 'cap-b' is the one that is live.
+      final Future<void> retry = c.retryEnrichment('cap-b');
+      await gated.started.future;
+      expect(sink.jobLog, <String>['begin:cap-b:enrichment']);
+
+      // Any capture kicks the drain. Reachability is ordinary: ENRICH is a
+      // user-tapped button over a seconds-long network call.
+      await c.addTextNote('hello from a');
+      final String aId = c.recordings
+          .firstWhere((Recording r) => r.id != 'cap-b')
+          .id;
+      await _settle();
+
+      // The drain must be parked on the scope, not running inside 'cap-b's
+      // job. Before the fix it opened `begin:$aId:transcription` right here,
+      // and 'cap-b's own event was then either dropped or misfiled under 'a'.
+      expect(sink.jobLog, <String>['begin:cap-b:enrichment']);
       expect(
-        c.recordings.firstWhere((Recording r) => r.id == 'cap-b').transcript,
-        'already has text',
+        c.recordings.firstWhere((Recording r) => r.id == aId).status,
+        RecordingStatus.pendingTranscription,
       );
 
-      // Now that the drain is idle, a retry on 'cap-b' proceeds normally and
-      // records its own event under its own id — the deferral was a wait, not
-      // a permanent lockout.
-      await c.retryEnrichment('cap-b');
+      gated.release.complete();
+      await retry;
+      await c.waitForProcessing();
+
+      expect(sink.droppedWithNoOpenJob, 0);
+      expect(sink.attributedTo, <String>['cap-b', aId]);
+      expect(sink.jobLog, <String>[
+        'begin:cap-b:enrichment',
+        'end:cap-b',
+        'begin:$aId:transcription',
+        'end:$aId',
+        'begin:$aId:enrichment',
+        'end:$aId',
+      ]);
+      // The trailing `end:null` of the old shape — a retry closing a scope
+      // that no longer existed, which with different timing closed the
+      // drain's job early and truncated its cost rows.
+      expect(sink.jobLog, isNot(contains('end:null')));
+    },
+  );
+
+  test(
+    'a retry that has to wait actually runs afterwards — it is a wait, not a '
+    'silent drop on an ungated button',
+    () async {
+      final Directory dir = await _tmp();
+      addTearDown(() => dir.delete(recursive: true));
+      final _AmbientSink sink = _AmbientSink();
+      final _GatedRecordingEnrichment gated = _GatedRecordingEnrichment(
+        _verdict,
+        sink,
+      );
+      final _FakeRepo repo = _FakeRepo(dir)
+        ..saved = <Recording>[
+          _completedNote(dir, 'cap-b', 'already has text'),
+        ];
+      final RecordingsController c = _controller(
+        repo,
+        enrichment: gated,
+        usageSink: sink,
+        processor: _EchoProcessor(),
+      );
+      addTearDown(c.dispose);
+      await c.initialize();
+
+      await c.addTextNote('hello from a');
+      await gated.started.future;
+
+      final Future<void> retry = c.retryEnrichment('cap-b');
+      // A second tap while the first is still queued must not buy a second
+      // model call for the same capture.
+      final Future<void> doubleTap = c.retryEnrichment('cap-b');
+      await _settle();
+      expect(gated.calls, 1);
+
+      gated.release.complete();
+      await retry;
+      await doubleTap;
+      await c.waitForProcessing();
+
+      // Two enrichment calls in total: the drain's for 'a', and exactly one
+      // for the retried 'cap-b' — which did run, and ran on its own text.
       expect(gated.calls, 2);
-      expect(sink.attributedTo, <String>[aId, 'cap-b']);
+      expect(gated.textsSeen.last, 'already has text');
+      final Recording b = c.recordings.firstWhere(
+        (Recording r) => r.id == 'cap-b',
+      );
+      expect(b.title, 'A title');
+      expect(b.summary, 'A summary.');
+    },
+  );
+
+  test(
+    'retryTranscription on a capture whose enrichment retry is running still '
+    'queues the job instead of silently doing nothing',
+    () async {
+      final Directory dir = await _tmp();
+      addTearDown(() => dir.delete(recursive: true));
+      File('${dir.path}/cap-b.txt').writeAsStringSync('body from disk');
+      final _AmbientSink sink = _AmbientSink();
+      final _GatedRecordingEnrichment gated = _GatedRecordingEnrichment(
+        _verdict,
+        sink,
+      );
+      final _EchoProcessor processor = _EchoProcessor();
+      final _FakeRepo repo = _FakeRepo(dir)
+        ..saved = <Recording>[
+          _completedNote(dir, 'cap-b', 'already has text'),
+        ];
+      final RecordingsController c = _controller(
+        repo,
+        enrichment: gated,
+        usageSink: sink,
+        processor: processor,
+      );
+      addTearDown(c.dispose);
+      await c.initialize();
+
+      final Future<void> retry = c.retryEnrichment('cap-b');
+      await gated.started.future;
+
+      // The enrichment retry no longer claims `_processingId`, so this is not
+      // mistaken for "that id is already running in the drain". Before the
+      // fix it logged "Retrying processing." and enqueued nothing.
+      await c.retryTranscription('cap-b');
+      expect(
+        c.recordings.firstWhere((Recording r) => r.id == 'cap-b').status,
+        RecordingStatus.pendingTranscription,
+      );
+
+      gated.release.complete();
+      await retry;
+      await c.waitForProcessing();
+
+      expect(processor.calls, 1);
+      expect(
+        c.recordings.firstWhere((Recording r) => r.id == 'cap-b').transcript,
+        'body from disk',
+      );
     },
   );
 }
