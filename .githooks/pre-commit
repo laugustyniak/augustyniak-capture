@@ -12,17 +12,37 @@
 # rewrite. Once pushed, `refs/pull/*` keeps the blob reachable even after that
 # rewrite, so the only reliable point to stop it is before the commit exists.
 #
+# It now does a second job. The path list above only ever covers the leak that
+# already happened — it could not have seen the working Turso JWT and R2 secret
+# key that sat inlined in four source files and reached this public repository.
+# So the staged *content* is scanned too, for four credential shapes. That scan
+# is a tripwire, not a proof: a credential in an unrecognised format, assigned
+# to an unrecognised name, still passes. Two narrower limits worth naming
+# plainly rather than discovering later: the `named` rule below requires a
+# *quoted* value, so an unquoted assignment (`.env` lines, `TURSO_AUTH_TOKEN=…`,
+# a bare Dart field) passes by design — widening it costs 40 false positives in
+# ordinary Dart. And the hook only runs for `git commit` proper; rebase,
+# cherry-pick and merge commits never invoke it (`git commit --amend` does).
+#
 # Enable once per clone (same setting the pre-push hook uses):
 #   git config core.hooksPath .githooks
 # Deliberate override, if a file here ever genuinely belongs in the repo:
 #   git commit --no-verify
 set -euo pipefail
 
-# Paths that hold captured content rather than source. Anchored at the repo root,
-# matched against the staged path list.
-blocked_re='^(\.agent-tasks/|inbox\.md$)'
+# Paths that hold captured content rather than source, plus the one credential
+# file that lives outside git's own tracking of secrets: `android/key.properties`
+# is gitignored, holds the passwords for the release keystore (CLAUDE.md calls
+# it the one artifact here that cannot be regenerated), and its Java-properties
+# format (`storePassword=…`) is exactly the unquoted shape the `named` rule
+# below does not catch. Anchored at the repo root, matched against the staged
+# path list.
+blocked_re='^(\.agent-tasks/|inbox\.md$|android/key\.properties$)'
 
-staged=$(git diff --cached --name-only --diff-filter=ACMR | grep -E "$blocked_re" || true)
+# `-z` avoids the same non-ASCII quoting hazard fixed below for the content
+# scan: without it, a path git renders as `"kawiarnia-caf\303\251.md"` would
+# never match `blocked_re` against the literal bytes.
+staged=$(git -c core.quotePath=false diff --cached --name-only -z --diff-filter=ACMRT | tr '\0' '\n' | grep -E "$blocked_re" || true)
 
 if [ -n "$staged" ]; then
   echo "pre-commit: refusing to commit captured content." >&2
@@ -38,5 +58,125 @@ if [ -n "$staged" ]; then
   echo >&2
   echo "They are already in .gitignore; something staged them anyway." >&2
   echo "If one truly belongs in the repo, commit with --no-verify." >&2
+  exit 1
+fi
+
+# ---------------------------------------------------------------------------
+# Secret scan over the staged *added* lines.
+#
+# Whole staged files are deliberately not scanned: a file that already contains
+# a match would then block every future edit to it, and a hook people routinely
+# bypass is worse than no hook — it trains the bypass.
+#
+# Every pattern is ERE, never PCRE. BSD grep has no `-P`, so a lookaround would
+# make this hook behave differently depending on whether Homebrew's grep is
+# earlier in PATH. The system grep is called explicitly for the same reason.
+#
+# The diff is taken per path, one file at a time, which defeats git's rename
+# detection: `git mv` renders as a fresh add and every line of the moved file
+# is scanned as new. Moving a file that legitimately contains a 64-hex
+# constant or a `token: '...'` fixture will therefore refuse and needs
+# `--no-verify`. Fixing that means diffing the whole index at once instead of
+# per path, which is a larger change than this hook currently makes.
+
+jwt_re='eyJ[A-Za-z0-9_-]{8,}\.eyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}'
+# `sk-…` widened to allow `_`/`-` so it also catches modern OpenAI keys
+# (`sk-proj-…`, `sk-svcacct-…`); `AIza…` is a Google Gemini key, the fourth
+# provider preset this repo ships (see ProviderPreset.all).
+prov_re='(sk-ant-[A-Za-z0-9_-]{20,}|sk-[A-Za-z0-9_-]{20,}|gsk_[A-Za-z0-9]{20,}|AKIA[0-9A-Z]{16}|AIza[0-9A-Za-z_-]{35})'
+# Exactly 64 hex, not a slice of something longer. An R2 secret key is this
+# shape — and so is every sha256 in pubspec.lock, which is why generated files
+# are skipped for this rule and only this one.
+hex_re='(^|[^0-9a-f])[0-9a-f]{64}([^0-9a-f]|$)'
+# A secret-ish name, then `:` or `=`, then a quoted value. The only rule here
+# that does not bet on a known shape. The optional quote right after the name
+# is what lets a JSON key match: `"apiKey": "…"` has a `"` sitting between the
+# name and the `:` that a bare name-then-colon pattern cannot see past.
+ctx_re='(secret|token|password|passwd|api_?key|access_?key|auth_?token|auth_?key)[A-Za-z0-9_]*("|'"'"')?[[:space:]]*[:=][[:space:]]*r?("|'"'"')[^"'"'"'[:space:]]{16,}("|'"'"')'
+# `named` false-positive exclusion: `enc:v1:` is this repository's own
+# on-disk ciphertext prefix (lib/features/settings/domain/token_cipher.dart).
+# A quoted value that starts with it is by definition not a plaintext
+# credential — it is the encrypted-token fixture this codebase's own tests
+# reuse in four files.
+enc_re='[:=][[:space:]]*r?("|'"'"')enc:v1:'
+
+GREP=/usr/bin/grep
+[ -x "$GREP" ] || GREP=grep
+
+findings=''
+
+# `-z` NUL-separates the path list, and that alone is what disables git's
+# quoting of non-ASCII/special bytes in its own output — without it, a path
+# like `kawiarnia-café.txt` arrives as the literal quoted string
+# `"kawiarnia-caf\303\251.txt"`, the `git diff -- "$path"` below then matches
+# nothing, `added` comes back empty, and the file is skipped with no error:
+# a silent bypass of every rule below for any non-ASCII filename.
+# `-c core.quotePath=false` is kept alongside it as belt-and-braces — verified
+# to add nothing once `-z` is set, but harmless to leave in.
+while IFS= read -r -d '' path; do
+  [ -n "$path" ] || continue
+
+  case "$path" in
+    *.lock|.metadata|*Package.resolved|*.pbxproj) skip_hex=1 ;;
+    *) skip_hex='' ;;
+  esac
+
+  # `-U0` means no context lines, so every `+` line is an addition. `--no-color`
+  # keeps SGR escapes out of the diff — with `color.ui=always` set, `/^\+/`
+  # would never match a colorized `+` line and the content scan would go dark
+  # while the path rule above kept working, which looks alive but is not.
+  # `--no-ext-diff` guards the same failure mode against a `diff.external`
+  # driver or a `.gitattributes` textconv: either could rewrite this output
+  # into something the awk below cannot parse, and the scan would go quiet
+  # the same way `color.ui=always` did. Nothing configures one here today;
+  # this is defence, not a fix for an observed bug. The awk tracks the
+  # new-file line number from each hunk header and prints "<line>:<content>".
+  # `+++ b/path` is the file header, not an addition — but only *before* the
+  # first `@@`: a genuine added line whose content starts with `++` renders
+  # as `+++...` too, and treating every such line as a header would both
+  # drop it from the scan and desync every later line number in that hunk.
+  added=$(git diff --cached -U0 --no-color --no-ext-diff -- "$path" | awk '
+    /^@@/ { seen_hunk = 1; if (match($0, /\+[0-9]+/)) n = substr($0, RSTART + 1, RLENGTH - 1) + 0; next }
+    !seen_hunk && /^\+\+\+/ { next }
+    /^\+/ { print n ":" substr($0, 2); n++ }
+  ')
+  [ -n "$added" ] || continue
+
+  for rule in jwt provider hex named; do
+    flags=''
+    case "$rule" in
+      jwt)      re=$jwt_re ;;
+      provider) re=$prov_re ;;
+      hex)      [ -n "$skip_hex" ] && continue; re=$hex_re ;;
+      named)    re=$ctx_re; flags='-i' ;;
+    esac
+
+    matched=$(printf '%s\n' "$added" | $GREP -E $flags "$re" || true)
+    if [ "$rule" = named ]; then
+      matched=$(printf '%s\n' "$matched" | $GREP -v -E -i "$enc_re" || true)
+    fi
+
+    while IFS= read -r hit; do
+      [ -n "$hit" ] || continue
+      findings="${findings}  ${path}:${hit%%:*}  [${rule}]
+"
+    done < <(printf '%s\n' "$matched")
+  done
+done < <(git -c core.quotePath=false diff --cached --name-only -z --diff-filter=ACMRT)  # T: a blob<->symlink typechange carries added lines too
+
+if [ -n "$findings" ]; then
+  echo "pre-commit: refusing to commit what looks like a credential." >&2
+  echo >&2
+  echo "These staged lines match a credential shape. The value is deliberately" >&2
+  echo "not printed — this repository is public, and echoing it here would put" >&2
+  echo "it in your scrollback and shell history:" >&2
+  echo >&2
+  printf '%s' "$findings" >&2
+  echo >&2
+  echo "If it is a real credential: ROTATE IT. Unstaging is not enough once a" >&2
+  echo "value has reached the working tree — it may already be in a build, a" >&2
+  echo "log, or a screen share. This repository has paid that bill once." >&2
+  echo >&2
+  echo "If it is a false positive, commit with --no-verify." >&2
   exit 1
 fi
