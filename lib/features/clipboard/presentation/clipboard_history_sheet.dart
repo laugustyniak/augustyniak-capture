@@ -203,7 +203,21 @@ class _ClipboardHistorySheetState extends State<ClipboardHistorySheet> {
   /// listener ever sees it — and a key hint printed on a button that cannot fire
   /// is indistinguishable from a shortcut the OS refused, which is the failure
   /// this app keeps designing against.
+  ///
+  /// **While an entry is being edited this listener stands down entirely**,
+  /// Escape excepted. `KeyboardListener` wraps the whole sheet and sees a key
+  /// before the focused field's own text handling does, so without the guard
+  /// Enter pasted the entry's *pre-edit* text, popped the route and auto-pasted
+  /// it into the app underneath — losing the typing on the way out — and the
+  /// arrows made the caret unreachable by jumping to another entry instead.
   void _handleKey(KeyEvent event, List<ClipboardItem> visible) {
+    if (_editingId != null) {
+      if (event is KeyDownEvent &&
+          event.logicalKey == LogicalKeyboardKey.escape) {
+        unawaited(_endEdit());
+      }
+      return;
+    }
     if (event is! KeyDownEvent) return;
     if (event.logicalKey == LogicalKeyboardKey.arrowDown) {
       _move(visible, 1);
@@ -213,8 +227,6 @@ class _ClipboardHistorySheetState extends State<ClipboardHistorySheet> {
         event.logicalKey == LogicalKeyboardKey.numpadEnter) {
       final ClipboardItem? item = _selectedIn(visible);
       if (item != null) _paste(context, item);
-    } else if (event.logicalKey == LogicalKeyboardKey.escape) {
-      if (_editingId != null) unawaited(_endEdit());
     }
   }
 
