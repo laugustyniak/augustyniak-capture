@@ -1524,11 +1524,37 @@ class RecordingsController extends ChangeNotifier {
       return;
     }
 
+    // The usage sink's scope is ambient (see `UsageSink`): only one job may be
+    // open at a time, or its events land against whichever capture the
+    // *other* open job named. `_processingId` already marks that a job is
+    // open for the duration of the drain loop's `_processOne`; a retry must
+    // defer to it rather than open a second scope underneath it, and setting
+    // it here in turn blocks the drain — or a second concurrent retry — from
+    // opening a job on top of this one.
+    if (_processingId != null) {
+      _logSink.log(
+        'Enrichment retry deferred — processing is already running.',
+        level: LogLevel.warn,
+        recordingId: id,
+      );
+      return;
+    }
+    _processingId = id;
+
     _logSink.log('Retrying enrichment.', level: LogLevel.warn, recordingId: id);
-    await _enrich(id, text);
-    // Same tail as the processing path: a better title is only half the point
-    // if the copy in the vault keeps the old one.
-    await _mirrorToVault(id);
+    try {
+      _beginUsageJob(id, UsageStage.enrichment);
+      try {
+        await _enrich(id, text);
+      } finally {
+        _endUsageJob();
+      }
+      // Same tail as the processing path: a better title is only half the
+      // point if the copy in the vault keeps the old one.
+      await _mirrorToVault(id);
+    } finally {
+      _processingId = null;
+    }
   }
 
   /// Mark an already-persisted item `pendingTranscription`, add it to the
