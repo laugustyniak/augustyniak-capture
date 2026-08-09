@@ -155,6 +155,85 @@ void main() {
         hasLength(1),
       );
     });
+
+    test('editing text rewrites preview and keeps position and collections',
+        () async {
+      await repository.initialize();
+      await repository.addItem(_textItem('1', 'First'));
+      await repository.addItem(_textItem('2', 'Second'));
+      await repository.toggleItemCollection('2', 'Code');
+
+      final DateTime originalCopiedAt = repository.items
+          .firstWhere((ClipboardItem item) => item.id == '2')
+          .copiedAt;
+
+      await repository.updateItemText('2', 'Second, corrected');
+
+      // '2' was the newest entry, so it stays at index 0.
+      expect(repository.items.map((ClipboardItem item) => item.id),
+          <String>['2', '1']);
+
+      final ClipboardItem edited = repository.items.first;
+      expect(edited.text, 'Second, corrected');
+      expect(edited.preview, 'Second, corrected');
+      expect(edited.collections, <String>{'Code'});
+      expect(edited.copiedAt, originalCopiedAt);
+    });
+
+    test('editing recomputes preview for long text', () async {
+      await repository.initialize();
+      await repository.addItem(_textItem('1', 'short'));
+
+      final String long = 'z' * 200;
+      await repository.updateItemText('1', long);
+
+      expect(repository.items.single.text, long);
+      expect(repository.items.single.preview, '${'z' * 120}...');
+    });
+
+    test('blank text leaves the item untouched', () async {
+      await repository.initialize();
+      await repository.addItem(_textItem('1', 'Original'));
+
+      await repository.updateItemText('1', '');
+      expect(repository.items.single.text, 'Original');
+
+      await repository.updateItemText('1', '   \n  ');
+      expect(repository.items.single.text, 'Original');
+    });
+
+    test('an image entry is never rewritten', () async {
+      await repository.initialize();
+      await repository.addItem(_imageItem('img', '${tempDir.path}/a.png'));
+
+      await repository.updateItemText('img', 'this must not get in');
+
+      expect(repository.items.single.text, isNull);
+    });
+
+    test('an unknown id is a silent no-op', () async {
+      await repository.initialize();
+      await repository.addItem(_textItem('1', 'Text'));
+
+      await repository.updateItemText('no-such-id', 'anything');
+
+      expect(repository.items, hasLength(1));
+      expect(repository.items.single.text, 'Text');
+    });
+
+    test('an edit survives reloading the repository from disk', () async {
+      await repository.initialize();
+      await repository.addItem(_textItem('1', 'Before'));
+      await repository.updateItemText('1', 'After');
+
+      final LocalJsonClipboardRepository restored = LocalJsonClipboardRepository(
+        maxItems: 3,
+        storageDirectoryProvider: () async => tempDir,
+      );
+      await restored.initialize();
+
+      expect(restored.items.single.text, 'After');
+    });
   });
 
   group('ClipboardWatcherService & Sheet Widget', () {
@@ -499,6 +578,19 @@ class _MemoryClipboardRepository implements ClipboardRepository {
         ? collections.remove(collectionName)
         : collections.add(collectionName);
     _items[index] = item.copyWith(collections: collections);
+  }
+
+  @override
+  Future<void> updateItemText(String id, String text) async {
+    if (text.trim().isEmpty) return;
+    final int index = _items.indexWhere((ClipboardItem item) => item.id == id);
+    if (index < 0) return;
+    final ClipboardItem current = _items[index];
+    if (current.type != ClipboardItemType.text) return;
+    _items[index] = current.copyWith(
+      text: text,
+      preview: ClipboardItem.previewFor(text),
+    );
   }
 }
 

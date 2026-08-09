@@ -109,6 +109,11 @@ class SqliteClipboardRepository implements ClipboardRepository {
   }
 
   @override
+  Future<void> updateItemText(String id, String text) async {
+    throw UnimplementedError('Task 3 of this plan supplies the real body.');
+  }
+
+  @override
   Future<void> toggleItemCollection(String id, String collectionName) async {
     final AppDatabase db = _appDatabase ?? await AppDatabase.getInstance();
     final int index = _items.indexWhere((ClipboardItem item) => item.id == id);
