@@ -168,9 +168,8 @@ class _RecordingsPageState extends State<RecordingsPage> {
     usageSink = RecordingUsageSink(
       repository: () => _usageRepository,
       // Read per call so a rate edited in the Config tab reaches the next
-      // capture with nothing to rebuild. No overrides yet — the Config tab's
-      // PRICING section is a later addition.
-      priceBook: () => const PriceBook(),
+      // capture with nothing to rebuild.
+      priceBook: () => PriceBook(overrides: settings.settings.priceOverrides),
       logSink: logs,
     );
     settings = SettingsController(

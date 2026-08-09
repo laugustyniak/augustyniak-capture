@@ -1,6 +1,8 @@
 import 'package:flutter/foundation.dart';
 import 'package:uuid/uuid.dart';
 
+import '../../costs/domain/model_price.dart';
+import '../../costs/domain/price_book.dart';
 import '../../costs/domain/usage_sink.dart';
 import '../../enrichment/domain/enrichment_service.dart';
 import '../../processing/data/ocr_service.dart';
@@ -404,6 +406,42 @@ class SettingsController extends ChangeNotifier {
   }
 
   Future<void> resetAudio() => updateAudio(AudioConfig.defaults);
+
+  /// What the Config tab's PRICING section reads and edits.
+  Map<String, ModelPrice> get priceOverrides => _settings.priceOverrides;
+  StoragePrice get storagePrice => _settings.storagePrice;
+  bool get hasCustomStoragePrice => _settings.hasCustomStoragePrice;
+
+  /// Set, replace or clear one model's rate override.
+  ///
+  /// `price == null`, and a [ModelPrice] whose [ModelPrice.isEmpty] is true —
+  /// what the editor produces when every field is cleared — both remove the
+  /// key rather than storing a blank entry, so the shipped table in
+  /// `PriceBookDefaults` takes back over for that model on the next capture.
+  Future<void> setPriceOverride(String key, ModelPrice? price) async {
+    final Map<String, ModelPrice> next = Map<String, ModelPrice>.from(
+      _settings.priceOverrides,
+    );
+    if (price == null || price.isEmpty) {
+      if (!next.containsKey(key)) return;
+      next.remove(key);
+    } else {
+      next[key] = price;
+    }
+    await _persist(_settings.copyWith(priceOverrides: next));
+  }
+
+  /// Set the storage rate, or clear it back to [StoragePrice.defaults] with
+  /// `null`. A non-null value is authoritative even when every field in it is
+  /// zero — see [AppSettings.hasCustomStoragePrice].
+  Future<void> setStoragePrice(StoragePrice? price) async {
+    if (price == null) {
+      if (!_settings.hasCustomStoragePrice) return;
+      await _persist(_settings.copyWith(clearStoragePrice: true));
+      return;
+    }
+    await _persist(_settings.copyWith(storagePrice: price));
+  }
 
   /// Repaint the app in [mode].
   ///

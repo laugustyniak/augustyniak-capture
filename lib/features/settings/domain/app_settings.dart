@@ -1,3 +1,5 @@
+import '../../costs/domain/model_price.dart';
+import '../../costs/domain/price_book.dart';
 import '../../enrichment/domain/enrichment_defaults.dart';
 import '../../recordings/domain/note_vault.dart';
 import '../../shortcuts/domain/hotkey_binding.dart';
@@ -29,8 +31,11 @@ class AppSettings {
     this.r2AccessKeyId,
     this.r2SecretAccessKey,
     this.r2MediaSyncEnabled = false,
+    this.priceOverrides = const <String, ModelPrice>{},
+    StoragePrice? storagePrice,
     Map<ShortcutAction, HotkeyBinding>? shortcuts,
   }) : _enrichmentInstructions = enrichmentInstructions,
+       _storagePrice = storagePrice,
        _shortcuts = shortcuts;
 
   static const AppSettings empty = AppSettings();
@@ -88,6 +93,20 @@ class AppSettings {
   final String? r2SecretAccessKey;
   final bool r2MediaSyncEnabled;
 
+  /// **Only what the user changed.** The shipped table lives in
+  /// `PriceBookDefaults`, so a later build can correct a provider's price for
+  /// everyone who never edited it. Written to disk only when non-empty.
+  final Map<String, ModelPrice> priceOverrides;
+
+  /// Private and nullable for the same reason `_shortcuts` is: absent means
+  /// "never configured, use the shipped defaults", while present is
+  /// authoritative *including a deliberate zero*.
+  final StoragePrice? _storagePrice;
+
+  StoragePrice get storagePrice => _storagePrice ?? StoragePrice.defaults;
+
+  bool get hasCustomStoragePrice => _storagePrice != null;
+
   final Map<ShortcutAction, HotkeyBinding>? _shortcuts;
 
   Map<ShortcutAction, HotkeyBinding> get shortcuts {
@@ -122,6 +141,9 @@ class AppSettings {
     String? r2AccessKeyId,
     String? r2SecretAccessKey,
     bool? r2MediaSyncEnabled,
+    Map<String, ModelPrice>? priceOverrides,
+    StoragePrice? storagePrice,
+    bool clearStoragePrice = false,
     Map<ShortcutAction, HotkeyBinding>? shortcuts,
     bool resetShortcuts = false,
   }) {
@@ -151,6 +173,10 @@ class AppSettings {
       r2AccessKeyId: r2AccessKeyId ?? this.r2AccessKeyId,
       r2SecretAccessKey: r2SecretAccessKey ?? this.r2SecretAccessKey,
       r2MediaSyncEnabled: r2MediaSyncEnabled ?? this.r2MediaSyncEnabled,
+      priceOverrides: priceOverrides ?? this.priceOverrides,
+      storagePrice: clearStoragePrice
+          ? null
+          : (storagePrice ?? _storagePrice),
       shortcuts: resetShortcuts ? null : (shortcuts ?? _shortcuts),
     );
   }
@@ -182,6 +208,13 @@ class AppSettings {
       },
       if (_enrichmentInstructions != null)
         'enrichmentInstructions': _enrichmentInstructions,
+      if (priceOverrides.isNotEmpty)
+        'priceOverrides': <String, dynamic>{
+          for (final MapEntry<String, ModelPrice> entry
+              in priceOverrides.entries)
+            entry.key: entry.value.toJson(),
+        },
+      if (_storagePrice != null) 'storagePrice': _storagePrice.toJson(),
       if (stored != null)
         'shortcuts': <String, dynamic>{
           for (final MapEntry<ShortcutAction, HotkeyBinding> entry
@@ -212,6 +245,21 @@ class AppSettings {
         if (binding != null) shortcuts[action] = binding;
       }
     }
+
+    final dynamic rawPrices = json['priceOverrides'];
+    final Map<String, ModelPrice> priceOverrides = <String, ModelPrice>{};
+    if (rawPrices is Map<String, dynamic>) {
+      for (final MapEntry<String, dynamic> entry in rawPrices.entries) {
+        final dynamic value = entry.value;
+        if (value is! Map<String, dynamic>) continue;
+        priceOverrides[entry.key] = ModelPrice.fromJson(value);
+      }
+    }
+
+    final dynamic rawStorage = json['storagePrice'];
+    final StoragePrice? storagePrice = rawStorage is Map<String, dynamic>
+        ? StoragePrice.fromJson(rawStorage)
+        : null;
 
     final dynamic rawAudio = json['audio'];
     return AppSettings(
@@ -270,6 +318,8 @@ class AppSettings {
       r2MediaSyncEnabled: json['r2MediaSyncEnabled'] is bool
           ? json['r2MediaSyncEnabled'] as bool
           : false,
+      priceOverrides: priceOverrides,
+      storagePrice: storagePrice,
       shortcuts: shortcuts,
     );
   }
