@@ -121,7 +121,7 @@ class ClipboardWatcherService extends ChangeNotifier {
           type: ClipboardItemType.text,
           copiedAt: DateTime.now(),
           text: text,
-          preview: text.length > 120 ? '${text.substring(0, 120)}...' : text,
+          preview: ClipboardItem.previewFor(text),
         );
         await _repository.addItem(newItem);
         notifyListeners();

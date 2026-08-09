@@ -32,6 +32,16 @@ void main() {
       expect(restored.collections, {'Snippets', 'Favourites'});
       expect(restored, item);
     });
+
+    test('previewFor shortens long text and passes short text through', () {
+      expect(ClipboardItem.previewFor('short text'), 'short text');
+
+      final String exactly120 = 'x' * 120;
+      expect(ClipboardItem.previewFor(exactly120), exactly120);
+
+      final String tooLong = 'y' * 121;
+      expect(ClipboardItem.previewFor(tooLong), '${'y' * 120}...');
+    });
   });
 
   group('ClipboardRepository', () {
