@@ -109,10 +109,16 @@ degrades to plaintext with a visible Config-tab warning:
 sudo apt-get install libsecret-1-dev
 ```
 
-**There is no server-side CI.** GitHub Actions is metered on this private repo,
-so the workflow is parked at `.github/workflows/ci.yml.disabled`. A branch that
-does not compile has reached review before because of this. A `pre-push` hook
-runs `flutter analyze` + `flutter test` in its place — enable it once per clone:
+**There is no server-side CI, and the reason recorded for it no longer holds.**
+The workflow is parked at `.github/workflows/ci.yml.disabled` because Actions
+minutes were metered — which is true of a private repository, and this one is
+public (`gh repo view` reports `PUBLIC`; the note about captured content leaking
+into commits, below, depends on that). Standard-runner minutes are free for
+public repositories, so **cost is no longer what stands between this project and
+a green check** — turning the workflow back on is a decision, not a purchase.
+A branch that does not compile has reached review because of its absence. Until
+then a `pre-push` hook runs `flutter analyze` + `flutter test` in its place —
+enable it once per clone:
 
 ```bash
 git config core.hooksPath .githooks
@@ -151,7 +157,7 @@ in the repo.
 - Single test by name: `flutter test --plain-name "legacy JSON defaults to not reviewed"`
 - Analyze/lint: `flutter analyze` (config in `analysis_options.yaml`: `flutter_lints` + `avoid_print`, `prefer_final_locals`)
 
-There is **no CI** — `.github/workflows/ci.yml.disabled` is a commented-out template (Actions is metered on this private repo and the budget blocked every job). `flutter analyze && flutter test` locally is therefore a hard gate, not a nicety; nothing else will catch a compile error. Re-enable by renaming the file to `ci.yml` and uncommenting.
+There is **no CI** — `.github/workflows/ci.yml.disabled` is a commented-out template, parked back when metered Actions minutes blocked every job. That reason has expired: the repository is public and standard-runner minutes are free for public repositories, so re-enabling costs nothing but the decision. Until someone makes it, `flutter analyze && flutter test` locally is a hard gate rather than a nicety; nothing else will catch a compile error. Re-enable by renaming the file to `ci.yml` and uncommenting.
 
 Global shortcuts on **Linux** additionally need `sudo apt-get install keybinder-3.0` (`hotkey_manager`'s system dependency). Without it the registrar fails at runtime and the shortcuts degrade to unavailable — everything else still works.
 
