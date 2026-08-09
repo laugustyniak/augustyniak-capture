@@ -70,12 +70,12 @@ jobs:
       - name: Build macOS
         run: flutter build macos --debug
 
-      # Device, not simulator, and not by preference: GoogleMLKit — pulled in by
-      # mobile_scanner for QR pairing — ships no arm64 slice for the simulator.
-      # macos-latest is Apple Silicon with an iOS 26+ simulator, where arm64 is
-      # required, so the plugin is dropped from the link and the build dies on
-      # `Module 'mobile_scanner' not found`. The device slice has arm64 and
-      # builds fine. This also gates the artefact that actually ships.
+      # Device rather than simulator, so the gate covers the artefact that
+      # actually ships. It was forced at first — mobile_scanner 6.x pulled in
+      # GoogleMLKit, which has no arm64 slice for the simulator, and this runner
+      # is Apple Silicon — but 7.x dropped MLKit for native APIs and the
+      # simulator builds cleanly again. Kept on device because that is the
+      # better gate, not because the simulator is broken.
       - name: Build iOS (device)
         run: flutter build ios --debug --no-codesign
 

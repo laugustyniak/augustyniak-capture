@@ -4,22 +4,22 @@ import 'package:flutter_test/flutter_test.dart';
 
 /// Pins the iOS deployment target high enough for the plugins in `pubspec.yaml`.
 ///
-/// **This is the check that CI already performs, moved to where it costs a
-/// second instead of six minutes.** `mobile_scanner` (the QR pairing scanner)
-/// declares `s.platform = :ios, '15.5.0'`; the project shipped 13.0, so
-/// `pod install` refused to resolve and the "Build iOS simulator" job failed on
-/// every push while analyze, test, Windows and macOS all stayed green. Nothing
-/// in the Dart suite could see it, and nothing locally either — `ios/` is
-/// partial in this repo, so the failure only ever appeared on a runner.
+/// **This is the check CI performs, moved to where it costs a second instead of
+/// six minutes.** `mobile_scanner` 6.x declared `s.platform = :ios, '15.5.0'`
+/// while the project shipped 13.0, so `pod install` refused to resolve and the
+/// Apple job failed on every push while analyze, test, Windows and macOS all
+/// stayed green. Nothing in the Dart suite could see it, and nothing locally
+/// either — `ios/` is partial here, so it only ever appeared on a runner.
 ///
-/// Raising the floor is a product decision, not a formality: iOS 15.5 drops
-/// everything older than the iPhone 6s. It is recorded here so the next person
-/// to lower it, or to regenerate `ios/` with `flutter create` (which resets the
-/// value to the template's), finds out before pushing.
+/// `mobile_scanner` 7.x dropped GoogleMLKit for native APIs and asks for 12.0,
+/// so the floor went back to the Flutter template's 13.0 and iPhones older than
+/// the 6s are supported again. The test stays because the failure mode has not:
+/// any plugin can raise its own floor, and `flutter create` resets these files
+/// to the template.
 void main() {
-  /// The highest `ios.deployment_target` among this project's plugins.
-  /// Bump when a dependency demands more — the CI error names the plugin.
-  const double required = 15.5;
+  /// The highest `ios.deployment_target` among this project's plugins. Raise it
+  /// when a dependency demands more; the CI error names the plugin that does.
+  const double required = 13.0;
 
   group('iOS deployment target', () {
     test('the Xcode project targets a version the plugins accept', () {
@@ -39,7 +39,7 @@ void main() {
           greaterThanOrEqualTo(required),
           reason:
               'IPHONEOS_DEPLOYMENT_TARGET is ${m.group(1)}, below the $required '
-              'that mobile_scanner requires — pod install will refuse',
+              'the plugins require — pod install will refuse',
         );
       }
     });
@@ -63,6 +63,32 @@ void main() {
       expect(
         double.parse(platform!.group(1)!),
         greaterThanOrEqualTo(required),
+      );
+    });
+
+    test('the Podfile and the Xcode project agree', () {
+      // The pair drifted apart once already, and it was invisible until a
+      // plugin raised its own floor: CocoaPods reads the Podfile, Xcode reads
+      // the project, and while nothing demanded more than either declared, two
+      // different numbers cost nothing and said nothing.
+      final String podfile = File('ios/Podfile').readAsStringSync();
+      final String project = File(
+        'ios/Runner.xcodeproj/project.pbxproj',
+      ).readAsStringSync();
+
+      final String pod = RegExp(
+        r"^platform :ios, '([0-9.]+)'",
+        multiLine: true,
+      ).firstMatch(podfile)!.group(1)!;
+
+      final Set<String> xcode = RegExp(
+        r'IPHONEOS_DEPLOYMENT_TARGET = ([0-9.]+);',
+      ).allMatches(project).map((RegExpMatch m) => m.group(1)!).toSet();
+
+      expect(
+        xcode,
+        <String>{pod},
+        reason: 'Podfile says $pod, the Xcode project says $xcode',
       );
     });
   });
