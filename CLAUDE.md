@@ -109,16 +109,27 @@ degrades to plaintext with a visible Config-tab warning:
 sudo apt-get install libsecret-1-dev
 ```
 
-**There is no server-side CI, and the reason recorded for it no longer holds.**
-The workflow is parked at `.github/workflows/ci.yml.disabled` because Actions
-minutes were metered — which is true of a private repository, and this one is
-public (`gh repo view` reports `PUBLIC`; the note about captured content leaking
-into commits, below, depends on that). Standard-runner minutes are free for
-public repositories, so **cost is no longer what stands between this project and
-a green check** — turning the workflow back on is a decision, not a purchase.
-A branch that does not compile has reached review because of its absence. Until
-then a `pre-push` hook runs `flutter analyze` + `flutter test` in its place —
-enable it once per clone:
+**CI runs on GitHub Actions** (`.github/workflows/ci.yml`), on every push to
+`main` and on every pull request. Two jobs: *Analyze + test* on Ubuntu
+(`flutter analyze`, `flutter test`, then a debug APK) and *Build macOS + iOS*
+plus a Windows build on their own runners. It was parked for a long time
+because Actions minutes were metered, which is true of a private repository —
+this one is public (`gh repo view` reports `PUBLIC`; the note about captured
+content leaking into commits, below, depends on that), and standard-runner
+minutes are free for public repositories, so cost is not a reason to turn it
+off again.
+
+**A green Actions badge is not a green build.** The Apple job spent a day
+failing on `pod install` alone — `mobile_scanner` needs iOS 15.5 and the
+project declared 13.0 — while analyze, test, Windows and macOS all passed, so
+the run summary had to be opened to see it. Checks that a runner can make in
+six minutes and a Dart test can make in one second belong in the Dart test:
+`ios_deployment_target_test.dart` and `macos_signing_test.dart` both exist for
+that reason.
+
+The `pre-push` hook still runs `flutter analyze` + `flutter test` locally, and
+is worth keeping — it is what stops a branch that does not compile from
+reaching review at all. Enable it once per clone:
 
 ```bash
 git config core.hooksPath .githooks
@@ -157,7 +168,7 @@ in the repo.
 - Single test by name: `flutter test --plain-name "legacy JSON defaults to not reviewed"`
 - Analyze/lint: `flutter analyze` (config in `analysis_options.yaml`: `flutter_lints` + `avoid_print`, `prefer_final_locals`)
 
-There is **no CI** — `.github/workflows/ci.yml.disabled` is a commented-out template, parked back when metered Actions minutes blocked every job. That reason has expired: the repository is public and standard-runner minutes are free for public repositories, so re-enabling costs nothing but the decision. Until someone makes it, `flutter analyze && flutter test` locally is a hard gate rather than a nicety; nothing else will catch a compile error. Re-enable by renaming the file to `ci.yml` and uncommenting.
+CI is **live** (`.github/workflows/ci.yml`) and runs `flutter analyze` + `flutter test` on every push to `main` and every pull request, alongside Android, Windows, macOS and iOS builds. Run it locally before pushing anyway — the same two commands are what the `pre-push` hook uses, and they answer in seconds rather than minutes.
 
 Global shortcuts on **Linux** additionally need `sudo apt-get install keybinder-3.0` (`hotkey_manager`'s system dependency). Without it the registrar fails at runtime and the shortcuts degrade to unavailable — everything else still works.
 
