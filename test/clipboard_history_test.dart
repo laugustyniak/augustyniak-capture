@@ -529,23 +529,35 @@ void main() {
     test('editing an item notifies listeners and never touches the clipboard',
         () async {
       final _MemoryClipboardRepository repository = _MemoryClipboardRepository();
-      await repository.addItem(_textItem('1', 'Before'));
-      final _FakeClipboardGateway gateway = _FakeClipboardGateway();
+      final _FakeClipboardGateway gateway = _FakeClipboardGateway(
+        text: 'Before',
+      );
       final ClipboardWatcherService service = ClipboardWatcherService(
         repository: repository,
         gateway: gateway,
       );
 
+      // Prime the watcher's last-seen clipboard text to 'Before', the same
+      // way a real capture would have set it before the item was ever edited.
+      await service.checkNow();
+      final String id = repository.items.single.id;
+
       int notifications = 0;
       service.addListener(() => notifications++);
 
-      await service.updateItemText('1', 'After');
+      await service.updateItemText(id, 'After');
 
       expect(repository.items.single.text, 'After');
       expect(notifications, 1);
       // Saving an edit must not replace what the user currently has copied.
       expect(gateway.copiedText, isNull);
       expect(gateway.copiedImagePath, isNull);
+
+      // The system clipboard still holds the pre-edit text. If the edit had
+      // also updated the watcher's last-seen text, this poll would see the
+      // old text as "new" and capture a spurious duplicate entry.
+      await service.checkNow();
+      expect(repository.items.length, 1);
 
       service.dispose();
     });
