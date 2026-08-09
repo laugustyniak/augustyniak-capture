@@ -17,6 +17,7 @@ import '../../costs/data/usage_repository.dart';
 import '../../costs/domain/price_book.dart';
 import '../../enrichment/data/composed_enrichment_context_source.dart';
 import '../../logs/data/log_store.dart';
+import '../../logs/domain/log_event.dart';
 import '../../logs/presentation/logs_tab.dart';
 import '../../processing/data/native_media_processor.dart';
 import '../../processing/data/video_audio_extractor.dart';
@@ -421,7 +422,21 @@ class _RecordingsPageState extends State<RecordingsPage> {
     // drops whatever it is asked to record — see `RecordingUsageSink`. Ahead
     // of `settings.initialize()` so a capture started the instant settings
     // finish loading still has somewhere to bill.
-    _usageRepository = UsageRepository((await AppDatabase.getInstance()).rawDb);
+    //
+    // Guarded like every other store this method opens (settings, projects,
+    // logs all catch their own failures into an error banner): cost
+    // accounting is best-effort by design, so a database that will not open
+    // — an unwritable app-support directory, a locked or corrupt file — must
+    // cost the cost history, never the rest of start-up. An unguarded throw
+    // here would abort the whole of `_bootstrap()` with no error banner at
+    // all, which is the exact failure this feature is built never to cause.
+    try {
+      _usageRepository = UsageRepository(
+        (await AppDatabase.getInstance()).rawDb,
+      );
+    } catch (exception) {
+      logs.log('Cost store unavailable: $exception', level: LogLevel.warn);
+    }
     // Settings first so the very first recording already uses the saved
     // provider and capture parameters.
     await settings.initialize();
