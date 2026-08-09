@@ -1,5 +1,18 @@
 # Pre-commit secret scan Implementation Plan
 
+> **SUPERSEDED — read `.githooks/pre-commit` itself, not the code block below.**
+> This plan's Step 2 embeds the hook body as it stood right after the first
+> implementation commit (`67abda4`). Two review passes have changed it since —
+> `4c6bead` ("Fix pre-commit secret scan review findings") added `--no-color`,
+> `-z`/`core.quotePath=false` path reading, the hunk-header awk fix for a
+> `++`-prefixed added line, and `enc_re`; the final pre-merge fix wave (see
+> `.superpowers/sdd/2026-08-09-pre-commit-secret-scan/final-review-fix-report.md`)
+> widened the `provider` rule, extended the `named` rule to JSON keys,
+> added the `android/key.properties` path rule, and more. None of that is
+> reflected in the checkboxes or the code below. Treat this file as a record of
+> intent, not as documentation of the shipped script — the git history of
+> `.githooks/pre-commit` is that record.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Make `.githooks/pre-commit` refuse a commit whose added lines contain a credential, so the repository's only gate stops matching paths alone.

@@ -31,7 +31,17 @@ against the actual leaking commit (`39a2070`). Two results changed the design.
 | Provider prefixes (`sk-`, `sk-ant-`, `gsk_`, `AKIA…`) | 0 | — | — |
 | 64-hex, generated files excluded | 0 | no | yes |
 | 64-hex, no exclusions | **102, all in `pubspec.lock`** | no | yes |
-| Contextual `name = "value"` | 0 | **no** | partly |
+| Contextual `name = "value"` | 0, with the `enc:v1:` exclusion below | **no** | partly |
+
+**Correction, made when the discrepancy surfaced in a later review:** the `0`
+above was originally measured against a draft of the contextual regex that
+opened with a `\b` word boundary before the name. That draft never shipped.
+The regex that actually shipped has no such boundary and fires on all five of
+this codebase's `enc:v1:…` ciphertext fixtures — `token: 'enc:v1:…'`-shaped
+test literals are exactly what `name = "value"` matches. The count is zero
+today only because of the `enc:v1:` exclusion in §1 below, which this
+document did not mention until this correction. Leaving the stale `0` in
+place would have been a smaller edit and a worse document.
 
 **No single rule catches both real leaks.** The contextual rule misses Turso
 because the source read `tursoAuthToken ?? 'eyJ…'` — the `??` breaks a
@@ -55,7 +65,11 @@ pattern.
   `apikey`, `access_key`, `accesskey`, `auth_token`, `authtoken`, `auth_key`,
   `authkey` (case-insensitive, with any prefix or suffix around it, so
   `r2SecretAccessKey` and `TURSO_AUTH_TOKEN` both match), then `:` or `=`, then a
-  quoted value of 16 or more non-space characters
+  quoted value of 16 or more non-space characters. A quoted value starting
+  `enc:v1:` is excluded: that is this codebase's own on-disk ciphertext prefix
+  (`lib/features/settings/domain/token_cipher.dart`), and the encrypted-token
+  fixture built from it appears, unexcluded, in five places in the tracked
+  tree — without this exclusion the rule would refuse its own test suite.
 
 The contextual rule is the only one that does not bet on a known shape: a
 20-character password assigned to `password:` matches nothing else here. It is
@@ -87,7 +101,7 @@ directly.
 
 ### 4. Path exclusions apply to the hex rule only
 
-`*.lock`, `.metadata`, `Package.resolved`, `*.pbxproj`. All are machine-generated
+`*.lock`, `.metadata`, `*Package.resolved`, `*.pbxproj`. All are machine-generated
 and full of long hex that is never a credential. The other three rules stay
 unrestricted — a JWT in a lock file would be a genuine finding.
 
