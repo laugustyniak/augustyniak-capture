@@ -38,7 +38,7 @@ void main() {
     );
   });
 
-  tearDown(() => db.dispose());
+  tearDown(() => db.close());
 
   test('an enrichment call is priced from its tokens', () {
     sink.beginJob('cap-1', UsageStage.enrichment);

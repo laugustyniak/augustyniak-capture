@@ -169,7 +169,7 @@ class ProjectsRepository {
             jsonEncode(p.toJson()),
           ]);
         }
-        stmt.dispose();
+        stmt.close();
 
         db.rawDb.execute('''
           INSERT OR REPLACE INTO settings (key, value_json) VALUES ('active_project_id', ?);

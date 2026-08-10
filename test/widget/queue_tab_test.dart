@@ -549,7 +549,7 @@ void main() {
     'with none',
     (WidgetTester tester) async {
       final Database db = sqlite3.openInMemory();
-      addTearDown(db.dispose);
+      addTearDown(db.close);
       UsageRepository.createTable(db);
       final UsageRepository usageRepository = UsageRepository(db);
       // Two events on the same capture — a chunked transcription plus an

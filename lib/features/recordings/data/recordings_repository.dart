@@ -222,7 +222,7 @@ class RecordingsRepository {
             jsonEncode(r.toJson()),
           ]);
         }
-        stmt.dispose();
+        stmt.close();
         db.rawDb.execute('COMMIT;');
       } catch (e) {
         db.rawDb.execute('ROLLBACK;');

@@ -201,7 +201,7 @@ class AppDatabase {
               ]);
             }
           }
-          stmt.dispose();
+          stmt.close();
           _db.execute('COMMIT;');
         }
       } catch (e) {
@@ -247,7 +247,7 @@ class AppDatabase {
               ]);
             }
           }
-          stmt.dispose();
+          stmt.close();
           _db.execute('COMMIT;');
         }
       } catch (e) {
@@ -257,7 +257,7 @@ class AppDatabase {
   }
 
   void close() {
-    _db.dispose();
+    _db.close();
     _instance = null;
   }
 }
