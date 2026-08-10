@@ -17,6 +17,7 @@ import '../../costs/data/usage_repository.dart';
 import '../../costs/domain/model_price.dart';
 import '../../costs/domain/price_book.dart';
 import '../../costs/domain/usage_event.dart';
+import '../../costs/domain/usage_model_keys.dart';
 import '../../enrichment/data/composed_enrichment_context_source.dart';
 import '../../logs/data/log_store.dart';
 import '../../logs/domain/log_event.dart';
@@ -516,19 +517,24 @@ class _RecordingsPageState extends State<RecordingsPage> {
     setState(() => storagePath = directory.path);
   }
 
-  /// The distinct model/provider keys with a recorded event — what the
-  /// Config tab's PRICING section offers a rate row for. Deliberately not
-  /// `PriceBookDefaults.rates.keys`: that is the whole shipped catalogue, and
-  /// an install that only ever talks to one provider does not need three
-  /// dozen rows for models it has never called.
+  /// The distinct model/provider keys the Config tab's PRICING section
+  /// offers a rate row for. Deliberately not `PriceBookDefaults.rates.keys`:
+  /// that is the whole shipped catalogue, and an install that only ever
+  /// talks to one provider does not need three dozen rows for models it has
+  /// never called.
+  ///
+  /// Union of usage history **and** the user's configured profiles — see
+  /// [usageModelKeys]. The profile half does not depend on
+  /// `_usageRepository`, which is why it is read here rather than folded
+  /// into the `repository == null` early return the way the old
+  /// history-only version was: a database that never opened must not cost
+  /// the user every rate row, only the ones history would have added.
   List<String> _usageModels() {
     final UsageRepository? repository = _usageRepository;
-    if (repository == null) return const <String>[];
-    final Set<String> keys = <String>{
-      for (final event in repository.all())
-        PriceBook.keyFor(event.model, event.provider),
-    };
-    return keys.toList()..sort();
+    return usageModelKeys(
+      events: repository?.all() ?? const <UsageEvent>[],
+      profiles: settings.settings.profiles,
+    );
   }
 
   /// Persists an edited or reset rate, then reprices whatever it unblocks.
