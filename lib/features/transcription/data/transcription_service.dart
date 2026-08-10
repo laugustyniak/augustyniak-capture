@@ -77,8 +77,20 @@ class HttpWhisperTranscriptionService implements TranscriptionService {
     final dynamic decoded = jsonDecode(body);
     if (decoded is Map<String, dynamic>) {
       final dynamic text = decoded['text'] ?? decoded['transcript'];
-      if (text is String && text.trim().isNotEmpty) {
-        return text.trim();
+      if (text is String) {
+        if (text.trim().isNotEmpty) return text.trim();
+
+        // A present-but-empty `text` is the provider answering correctly that
+        // there was nothing to transcribe — OpenAI returns
+        // `{"text":"","languages":[],"usage":{…}}` with HTTP 200 for silence.
+        // Reporting that as a malformed response sent the reader of the Logs
+        // tab to the API contract when the only thing wrong was that nobody
+        // spoke. Still a failure, because a capture with no words is not a
+        // finished transcription and should stay retryable — but one whose
+        // message names the actual cause.
+        throw const FormatException(
+          'The provider transcribed no speech in this recording.',
+        );
       }
     }
 
