@@ -39,7 +39,7 @@ void main() {
     repository = UsageRepository(db);
   });
 
-  tearDown(() => db.dispose());
+  tearDown(() => db.close());
 
   test('an inserted event reads back whole', () {
     repository.insert(_event(id: 'e1'));

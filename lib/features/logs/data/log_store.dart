@@ -172,7 +172,7 @@ class SqliteLogArchive implements LogArchive {
           e.recordingId,
         ]);
       }
-      stmt.dispose();
+      stmt.close();
       db.rawDb.execute('COMMIT;');
     } catch (_) {
       // Best-effort logging flush
