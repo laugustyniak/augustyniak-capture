@@ -321,12 +321,19 @@ class _PricingSectionState extends State<PricingSection> {
     final int unpriced = total.unpricedCount;
     final double? amount = total.amountUsd;
     if (amount == null) {
-      // Every call in range is unpriced (or there is no call in range at
-      // all, in which case `unpriced` is also 0) — there is no floor to
-      // show, only the qualifier when there is one, so this must never fall
-      // back to `formatUsd(0)`.
-      return unpriced == 0 ? formatUsd(0) : '—  ·  $unpriced unpriced';
+      // `amountUsd == null` with `unpriced == 0` means the range holds no
+      // usage event at all — an install that captured before this feature
+      // shipped, or a fresh THIS MONTH with nothing recorded yet. That is
+      // not "zero calls happened to sum to zero"; there is nothing to sum,
+      // so this renders the same bare `—` the card-level `cost —` uses
+      // rather than `formatUsd(0)`, which would assert a spend of exactly
+      // zero the app has no basis for. `unpriced > 0` is the other reason
+      // `amountUsd` is null: every call in range is still waiting on a rate.
+      return unpriced == 0 ? '—' : '—  ·  $unpriced unpriced';
     }
+    // A real number here — including a genuine 0.0, e.g. a range priced
+    // entirely by a local model with an explicit zero rate — is a fact, not
+    // a placeholder, so it always renders through `formatUsd`.
     return unpriced == 0
         ? formatUsd(amount)
         : '${formatUsd(amount)}  +$unpriced unpriced';

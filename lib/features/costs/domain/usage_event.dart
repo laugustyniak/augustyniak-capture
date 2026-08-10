@@ -68,12 +68,17 @@ class MissingRateInfo {
 class UsageTotal {
   const UsageTotal({required this.amountUsd, required this.unpricedCount});
 
-  /// The Config tab's placeholder before the usage database has opened —
-  /// `unpricedCount: 0` is what makes a renderer treat the null-vs-zero
-  /// ambiguity as safe here, the same way it does for a genuinely empty
-  /// range: nothing is known to be missing, so nothing is understated by
-  /// showing `$0.00`.
-  static const UsageTotal zero = UsageTotal(amountUsd: 0, unpricedCount: 0);
+  /// The Config tab's placeholder before the usage database has opened, and
+  /// also what a genuinely empty range (no usage events at all) collapses
+  /// to. `amountUsd: null` here means exactly what it means everywhere else
+  /// on this type: nothing is known to have been spent. Rendering that as
+  /// `$0.00` would be the fabricated zero the whole feature exists to
+  /// refuse — an install that recorded 117 captures before this feature
+  /// shipped has spent an unknown amount on AI calls, not a known zero, and
+  /// the two must not read the same on screen. `unpricedCount: 0` is still
+  /// correct: there are no calls waiting on a rate, because there are no
+  /// calls at all.
+  static const UsageTotal none = UsageTotal(amountUsd: null, unpricedCount: 0);
 
   final double? amountUsd;
   final int unpricedCount;

@@ -826,9 +826,9 @@ class _RecordingsPageState extends State<RecordingsPage> {
                                             DateTime.now().month,
                                           ),
                                         ) ??
-                                        UsageTotal.zero,
+                                        UsageTotal.none,
                                     allTimeUsd: _usageRepository?.totalAll() ??
-                                        UsageTotal.zero,
+                                        UsageTotal.none,
                                     // Both R2 (source files) and Turso (the
                                     // index) scale with the same total, so one
                                     // measured sum feeds both halves of the

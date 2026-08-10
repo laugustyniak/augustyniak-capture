@@ -245,4 +245,42 @@ void main() {
       expect(find.textContaining('5 unpriced'), findsOneWidget);
     },
   );
+
+  testWidgets(
+    'an empty history (no usage events at all) renders an em dash, never '
+    '\$0.0000',
+    (WidgetTester tester) async {
+      await tester.pumpWidget(
+        _host(
+          _section(
+            thisMonth: const UsageTotal(amountUsd: null, unpricedCount: 0),
+            allTime: const UsageTotal(amountUsd: null, unpricedCount: 0),
+          ),
+        ),
+      );
+      await tester.pump();
+
+      expect(find.textContaining('\$0.0000'), findsNothing);
+      expect(find.text('—'), findsNWidgets(2));
+    },
+  );
+
+  testWidgets(
+    'a genuinely zero-priced history (every event priced, summing to '
+    'exactly zero) still renders \$0.0000',
+    (WidgetTester tester) async {
+      await tester.pumpWidget(
+        _host(
+          _section(
+            thisMonth: const UsageTotal(amountUsd: 0.0, unpricedCount: 0),
+            allTime: const UsageTotal(amountUsd: 0.0, unpricedCount: 0),
+          ),
+        ),
+      );
+      await tester.pump();
+
+      expect(find.textContaining('\$0.0000'), findsNWidgets(2));
+      expect(find.text('—'), findsNothing);
+    },
+  );
 }
