@@ -1,20 +1,52 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:io';
+
 import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
+import 'package:path/path.dart' as p;
+import 'package:path_provider/path_provider.dart';
 import 'package:sqlite3/sqlite3.dart';
 import '../../features/settings/domain/token_cipher.dart';
 import '../database/app_database.dart';
+import 'sync_endpoint.dart';
+import 'sync_path_policy.dart';
 
 class TursoSyncService {
   TursoSyncService({
     required AppDatabase db,
     http.Client? httpClient,
+    Future<String> Function()? recordingsDirectory,
+    Duration requestTimeout = defaultRequestTimeout,
   })  : _db = db,
-        _client = httpClient ?? http.Client();
+        _client = httpClient ?? http.Client(),
+        _recordingsDirectory = recordingsDirectory ?? _defaultRecordingsDirectory,
+        _requestTimeout = requestTimeout;
+
+  /// How long a pipeline call may take before it is abandoned.
+  ///
+  /// There was no bound at all, and this is not a background nicety: the pull
+  /// is kicked from `RecordingsController.initialize()`, so a server that
+  /// accepts a connection and then says nothing left that await outstanding for
+  /// as long as the socket stayed open. Same reasoning and the same shape as
+  /// `HttpVisionOcrService.requestTimeout`; longer, because a full push can
+  /// carry the whole queue.
+  static const Duration defaultRequestTimeout = Duration(seconds: 60);
+
+  final Duration _requestTimeout;
 
   final AppDatabase _db;
   final http.Client _client;
+
+  /// Where a pulled source file would live **on this machine**. Injectable so
+  /// the pull can be tested without `path_provider`, and read through a
+  /// callback because it is only needed once a row actually arrives.
+  final Future<String> Function() _recordingsDirectory;
+
+  static Future<String> _defaultRecordingsDirectory() async {
+    final Directory documents = await getApplicationDocumentsDirectory();
+    return p.join(documents.path, 'recordings');
+  }
 
   /// Encode one bound parameter for the libsql pipeline protocol.
   ///
@@ -38,8 +70,18 @@ class TursoSyncService {
     };
   }
 
-  String _getPipelineEndpoint(String dbUrl) {
-    String endpoint = dbUrl.trim();
+  /// The pipeline URL for [dbUrl], or null when this address must not receive
+  /// a request.
+  ///
+  /// **Only `libsql://` used to be rewritten**, so an `http://` address was
+  /// carried through untouched and every call sent `Authorization: Bearer …`
+  /// plus the whole batch of captures in the clear. [SyncEndpoint] is the one
+  /// place that decision is now made, for the manual Config-tab entry and the
+  /// QR pairing alike.
+  String? _getPipelineEndpoint(String dbUrl) {
+    final String? accepted = SyncEndpoint.normalize(dbUrl);
+    if (accepted == null) return null;
+    String endpoint = accepted;
     if (endpoint.startsWith('libsql://')) {
       endpoint = endpoint.replaceFirst('libsql://', 'https://');
     }
@@ -47,6 +89,29 @@ class TursoSyncService {
       endpoint = '$endpoint/v2/pipeline';
     }
     return endpoint;
+  }
+
+  /// The row's `json_payload` with its paths re-rooted, or null to fall back on
+  /// the columns.
+  ///
+  /// Null covers "unparseable" as well as "unsafe", and both are safe answers:
+  /// `RecordingsRepository.loadAll` only prefers the payload when it is there
+  /// and parses, and rebuilds the recording from the sanitised columns
+  /// otherwise. Storing a payload this method could not vet would hand the
+  /// loader the one copy that bypasses every check above it.
+  static String? _sanitizedPayload(Object? raw, String recordingsDirectory) {
+    if (raw is! String || raw.isEmpty) return null;
+    try {
+      final dynamic decoded = jsonDecode(raw);
+      if (decoded is! Map<String, dynamic>) return null;
+      final Map<String, dynamic>? clean = SyncPathPolicy.sanitizePayload(
+        decoded,
+        recordingsDirectory: recordingsDirectory,
+      );
+      return clean == null ? null : jsonEncode(clean);
+    } catch (_) {
+      return null;
+    }
   }
 
   static int _parseInteger(dynamic raw, int fallback) {
@@ -62,7 +127,14 @@ class TursoSyncService {
   }) async {
     if (dbUrl.isEmpty || authToken.isEmpty || TokenCipher.isSealed(authToken)) return false;
 
-    final String endpoint = _getPipelineEndpoint(dbUrl);
+    final String? endpoint = _getPipelineEndpoint(dbUrl);
+    if (endpoint == null) {
+      debugPrint('Turso pull refused: not an https/libsql address.');
+      return false;
+    }
+    // Resolved before the request, so a row can be re-rooted the moment it
+    // arrives rather than trusted for the length of a directory lookup.
+    final String localRecordings = await _recordingsDirectory();
 
     try {
       final Map<String, dynamic> body = <String, dynamic>{
@@ -98,10 +170,14 @@ class TursoSyncService {
           'Content-Type': 'application/json',
         },
         body: jsonEncode(body),
-      );
+      ).timeout(_requestTimeout);
 
       if (response.statusCode != 200) {
-        debugPrint('Turso Sync HTTP Error: ${response.statusCode} - ${response.body}');
+        // The status code, never the body. A pipeline response *is* the
+        // user's rows — titles, transcripts, clipboard text — and `debugPrint`
+        // survives in release builds, so printing it copies the notes into the
+        // system log where nothing this app owns can ever remove them.
+        _logFailure('pull', response.statusCode);
         return false;
       }
 
@@ -125,9 +201,21 @@ class TursoSyncService {
             ''');
             for (final dynamic row in rows) {
               if (row is List<dynamic> && row.length >= 14) {
+                // A remote row may name a file, never a place — see
+                // [SyncPathPolicy]. A row with no usable name is dropped
+                // rather than stored pointing at somebody else's disk.
+                final String? name = SyncPathPolicy.localFileName(
+                  row[1]?['value'],
+                );
+                if (name == null) continue;
+                final String? payload = _sanitizedPayload(
+                  row[13]?['value'],
+                  localRecordings,
+                );
+
                 stmt.execute(<Object?>[
                   row[0]?['value'],
-                  row[1]?['value'],
+                  p.join(localRecordings, name),
                   _parseInteger(row[2]?['value'], 0),
                   row[3]?['value'],
                   row[4]?['value'],
@@ -139,7 +227,7 @@ class TursoSyncService {
                   _parseInteger(row[10]?['value'], 0),
                   row[11]?['value'],
                   row[12]?['value'],
-                  row[13]?['value'],
+                  payload,
                 ]);
               }
             }
@@ -167,7 +255,11 @@ class TursoSyncService {
                   row[0]?['value'],
                   row[1]?['value'],
                   row[2]?['value'],
-                  row[3]?['value'],
+                  // The PNG itself is not synced, so a remote `image_path`
+                  // can only ever name a *local* file — and all three ways a
+                  // clipboard row leaves (delete, clear, eviction) delete
+                  // whatever it names. The text and preview still travel.
+                  null,
                   _parseInteger(row[4]?['value'], DateTime.now().millisecondsSinceEpoch),
                   row[5]?['value'],
                   row[6]?['value'] ?? '[]',
@@ -187,10 +279,24 @@ class TursoSyncService {
           final dynamic resultObj = responseObj['result'];
           final dynamic rows = resultObj['rows'];
           if (rows is List<dynamic>) {
+            // `repository_path` is deliberately absent from both halves.
+            //
+            // It is a fact about *this* machine, and it is the most powerful
+            // field in the pull: `ProjectContextReader` reads a file from that
+            // directory into an LLM prompt, `ProjectInboxRouter` appends to
+            // `inbox.md` inside it, and the agent handoff writes there and
+            // starts a CLI with it as the working directory. A path from
+            // another machine cannot be meaningful here and must not be
+            // actionable, so a synced project keeps the local path it already
+            // had, and a new one arrives with none until the user picks one.
             final dynamic stmt = _db.rawDb.prepare('''
-              INSERT OR REPLACE INTO projects (
+              INSERT INTO projects (
                 id, name, color_hex, repository_path, created_at
-              ) VALUES (?, ?, ?, ?, ?)
+              ) VALUES (?, ?, ?, NULL, ?)
+              ON CONFLICT(id) DO UPDATE SET
+                name = excluded.name,
+                color_hex = excluded.color_hex,
+                created_at = excluded.created_at
             ''');
             for (final dynamic row in rows) {
               if (row is List<dynamic> && row.length >= 5) {
@@ -198,7 +304,6 @@ class TursoSyncService {
                   row[0]?['value'],
                   row[1]?['value'],
                   row[2]?['value'] ?? '#000000',
-                  row[3]?['value'],
                   _parseInteger(row[4]?['value'], DateTime.now().millisecondsSinceEpoch),
                 ]);
               }
@@ -208,13 +313,28 @@ class TursoSyncService {
         }
       }
 
-      debugPrint('⚡ Turso Sync Completed Successfully!');
+      debugPrint('Turso pull completed.');
       return true;
-    } catch (e, st) {
-      debugPrint('Turso Sync Exception: $e\n$st');
+    } catch (e) {
+      // Type only. An exception thrown while decoding carries the offending
+      // fragment of the response in its message, and that fragment is a row.
+      _logException('pull', e);
       return false;
     }
   }
+
+  /// A failed call, named by what it was and how it failed — never by what
+  /// came back.
+  ///
+  /// `debugPrint` is not stripped from a release build, so anything handed to
+  /// it lands in the OS log, outside everything this app can delete. A pipeline
+  /// body is the user's captures; an exception message routinely quotes the
+  /// input it choked on.
+  static void _logFailure(String phase, int statusCode) =>
+      debugPrint('Turso $phase failed: HTTP $statusCode.');
+
+  static void _logException(String phase, Object error) =>
+      debugPrint('Turso $phase failed: ${error.runtimeType}.');
 
   Future<bool> pushToTurso({
     required String dbUrl,
@@ -222,7 +342,13 @@ class TursoSyncService {
   }) async {
     if (dbUrl.isEmpty || authToken.isEmpty || TokenCipher.isSealed(authToken)) return false;
 
-    final String endpoint = _getPipelineEndpoint(dbUrl);
+    final String? endpoint = _getPipelineEndpoint(dbUrl);
+    if (endpoint == null) {
+      // The push is the half that uploads every capture, so an address that
+      // cannot be trusted with the token cannot be trusted with the notes.
+      debugPrint('Turso push refused: not an https/libsql address.');
+      return false;
+    }
 
     try {
       final List<Map<String, dynamic>> requests = <Map<String, dynamic>>[];
@@ -320,11 +446,15 @@ class TursoSyncService {
           'Content-Type': 'application/json',
         },
         body: jsonEncode(<String, dynamic>{'requests': requests}),
-      );
+      ).timeout(_requestTimeout);
 
-      return response.statusCode == 200;
+      if (response.statusCode != 200) {
+        _logFailure('push', response.statusCode);
+        return false;
+      }
+      return true;
     } catch (e) {
-      debugPrint('Turso Push Error: $e');
+      _logException('push', e);
       return false;
     }
   }
