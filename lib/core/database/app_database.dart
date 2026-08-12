@@ -8,6 +8,7 @@ import 'package:path_provider/path_provider.dart';
 import 'package:sqlite3/sqlite3.dart';
 
 import '../../features/costs/data/usage_repository.dart';
+import '../security/owner_only_file.dart';
 
 class AppDatabase {
   AppDatabase._({required Database db, required String dbPath})
@@ -38,6 +39,12 @@ class AppDatabase {
     db.execute('PRAGMA synchronous = NORMAL;');
     db.execute('PRAGMA foreign_keys = ON;');
 
+    // After the WAL pragma, so the sidecars exist to be restricted. The
+    // `settings` row in here holds provider bearer tokens and the sync
+    // credentials — sealed while the key store works, in the clear when it
+    // does not — and sqlite creates its files at whatever the umask says.
+    await restrictDatabaseFiles(path);
+
     _instance = AppDatabase._(db: db, dbPath: path);
     _instance!._initTables();
     return _instance!;
@@ -45,6 +52,18 @@ class AppDatabase {
 
   Database get rawDb => _db;
   String get dbPath => _dbPath;
+
+  /// Owner-only permissions for the database **and its WAL sidecars**.
+  ///
+  /// The sidecars are the point. Under `journal_mode = WAL` a committed row
+  /// lives in `-wal` until a checkpoint moves it, so restricting the database
+  /// alone leaves the most recent writes — the token just entered in the
+  /// Models tab, say — at the umask's mode.
+  static Future<void> restrictDatabaseFiles(String path) async {
+    for (final String each in <String>[path, '$path-wal', '$path-shm']) {
+      await restrictToOwner(each);
+    }
+  }
 
   void _initTables() {
     _db.execute('''
@@ -212,6 +231,12 @@ class AppDatabase {
     // 2. Migrate Settings
     final File settingsFile = File(p.join(docsDir.path, 'recordings', 'settings.json'));
     if (await settingsFile.exists()) {
+      // The legacy file is deliberately never deleted — it is the only copy if
+      // this migration is ever found wrong — so it keeps holding whatever
+      // tokens were current when SQLite took over, including plaintext ones
+      // from a launch with no key store. It was written at the umask's mode by
+      // a build that predates this; tighten it wherever it is found.
+      await restrictToOwner(settingsFile.path);
       try {
         final String raw = await settingsFile.readAsString();
         final Map<String, dynamic> decoded = jsonDecode(raw) as Map<String, dynamic>;

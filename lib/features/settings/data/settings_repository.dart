@@ -6,6 +6,7 @@ import 'package:path_provider/path_provider.dart';
 import 'package:sqlite3/sqlite3.dart';
 
 import '../../../core/database/app_database.dart';
+import '../../../core/security/owner_only_file.dart';
 import '../../../core/sync/sync_defaults.dart';
 import '../domain/app_settings.dart';
 import '../domain/provider_profile.dart';
@@ -166,6 +167,10 @@ class SettingsRepository {
       ).convert(sealed.toJson());
       final File temporary = File('${customFile.path}.tmp');
       await temporary.writeAsString(payload, flush: true);
+      // Tightened before the rename, so the tokens are never momentarily
+      // world-readable at their final path — the same ordering, and the same
+      // reason, as `FileMasterKeyStore.write`.
+      await restrictToOwner(temporary.path);
       await temporary.rename(customFile.path);
       return;
     }

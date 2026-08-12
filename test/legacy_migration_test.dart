@@ -41,6 +41,20 @@ void main() {
         as Map<String, dynamic>;
   }
 
+  test('the legacy settings file is tightened wherever it is found', () async {
+    // It is never deleted — it is the only copy if this migration is ever
+    // found wrong — so it keeps holding whatever tokens were current when
+    // SQLite took over, plaintext ones included. A build that predates
+    // `restrictToOwner` wrote it at the umask's mode.
+    writeLegacySettings(<String, dynamic>{'themeMode': 'dark'});
+    final File file = File('${docs.path}/recordings/settings.json');
+    Process.runSync('chmod', <String>['644', file.path]);
+
+    await app.migrateFromLegacyJsonIfNeeded(documentsDirectory: docs);
+
+    expect(file.statSync().mode & 0x1FF, 0x180); // 0600
+  }, skip: Platform.isWindows);
+
   test('an empty database adopts the legacy settings file', () async {
     writeLegacySettings(<String, dynamic>{'themeMode': 'dark'});
 

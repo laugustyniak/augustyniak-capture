@@ -3,6 +3,7 @@ import 'dart:io';
 import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
 
+import '../../../core/security/owner_only_file.dart';
 import 'aes_gcm_token_cipher.dart';
 
 /// [MasterKeyStore] backed by an owner-only file beside the database.
@@ -73,7 +74,7 @@ class FileMasterKeyStore implements MasterKeyStore {
     await temporary.writeAsString(value, flush: true);
     // Tighten the mode *before* the rename, so the key is never momentarily
     // world-readable at its final path.
-    await _restrictToOwner(temporary.path);
+    await restrictToOwner(temporary.path);
     await temporary.rename(file.path);
   }
 
@@ -116,15 +117,5 @@ class FileMasterKeyStore implements MasterKeyStore {
       // decrypts correctly, and the next launch retries the same adoption.
     }
     return inherited;
-  }
-
-  static Future<void> _restrictToOwner(String path) async {
-    if (Platform.isWindows) return;
-    try {
-      await Process.run('chmod', <String>['600', path]);
-    } catch (_) {
-      // No chmod on this box. The key is still written — encryption working
-      // at a laxer mode beats no encryption at all.
-    }
   }
 }
