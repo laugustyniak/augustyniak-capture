@@ -7,6 +7,7 @@ import '../../projects/domain/project.dart';
 import '../domain/agent_handoff.dart';
 import '../domain/capture_router.dart';
 import '../domain/route_record.dart';
+import '../domain/untrusted_markdown.dart';
 
 /// Writes a capture into `.agent-tasks/<id>.md` in its project's repository,
 /// then opens a coding agent session rooted there.
@@ -155,7 +156,7 @@ class ProjectAgentHandoff implements AgentHandoff {
     final StringBuffer buffer = StringBuffer();
     if (first) {
       buffer
-        ..writeln('# ${capture.title}')
+        ..writeln('# ${sanitizeUntrustedMarkdown(capture.title)}')
         ..writeln()
         ..writeln(
           '> **Output Contract**: Save your primary summary, deep research, or final results to `.agent-tasks/${request.captureId}-result.md`, or include `capture-id: ${request.captureId}` in created markdown notes.',
@@ -175,7 +176,7 @@ class ProjectAgentHandoff implements AgentHandoff {
       ..writeln('*${facts.join(' · ')}*')
       ..writeln();
 
-    final String summary = capture.summary?.trim() ?? '';
+    final String summary = sanitizeUntrustedMarkdown(capture.summary ?? '');
     if (summary.isNotEmpty) {
       buffer
         ..writeln('> $summary')

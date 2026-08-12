@@ -16,10 +16,30 @@ enum ProjectAgent {
   /// and a third would silently start every Antigravity session with its prompt
   /// read as a positional argument — which that CLI does not treat as a prompt
   /// at all, so the session would open with no task and no error.
-  List<String> promptArguments(String prompt) => switch (this) {
-    ProjectAgent.antigravity => <String>['--prompt-interactive', prompt],
-    ProjectAgent.codex || ProjectAgent.claude => <String>[prompt],
-  };
+  List<String> promptArguments(String prompt) {
+    final String safe = disarmOptionLookalike(prompt);
+    return switch (this) {
+      ProjectAgent.antigravity => <String>['--prompt-interactive', safe],
+      ProjectAgent.codex || ProjectAgent.claude => <String>[safe],
+    };
+  }
+
+  /// A prompt that would otherwise be read as an option, made positional.
+  ///
+  /// The prompt *is* the capture's own text — a dictated note, or OCR off an
+  /// image somebody else made — and it arrives here as an argv element that
+  /// every CLI argument parser inspects before it looks for positionals. A
+  /// capture opening with `--dangerously-skip-permissions` therefore does not
+  /// reach the agent as a task; it reaches it as a flag, and the one flag worth
+  /// smuggling is the one that turns tool approval off.
+  ///
+  /// A leading space rather than a `--` separator, deliberately: `--` has to be
+  /// supported by the parser on the other side, and this app cannot verify what
+  /// three third-party CLIs do with it. A value that does not start with `-` is
+  /// a positional to every parser there is, and a space is invisible to the
+  /// model that reads the prompt.
+  static String disarmOptionLookalike(String prompt) =>
+      prompt.startsWith('-') ? ' $prompt' : prompt;
 }
 
 /// The complete, structured input needed to launch an agent.

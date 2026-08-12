@@ -6,6 +6,7 @@ import 'package:path/path.dart' as p;
 
 import '../domain/capture_type.dart';
 import '../domain/note_vault.dart';
+import '../domain/untrusted_markdown.dart';
 
 /// Mirrors every capture into a directory the user owns — an Obsidian vault,
 /// a synced folder, a plain notes repository — as one markdown file per note,
@@ -123,9 +124,25 @@ class MarkdownNoteVault implements NoteVault {
   String _folderName() {
     final String raw = _folder().trim();
     if (raw.isEmpty) return VaultDefaults.folder;
-    // A leading separator would make `join` discard the vault root and write to
-    // the filesystem root instead — a typo must not be able to escape the vault.
-    return p.normalize(raw).replaceAll(RegExp(r'^[\\/]+'), '');
+    // Two ways a folder name escapes the vault, and stripping only the first
+    // left the second open. A leading separator makes `join` discard the vault
+    // root and write to the filesystem root; a `..` segment walks out of it one
+    // directory at a time, and `normalize` keeps those segments because from a
+    // relative path's point of view they are meaningful. Neither is a name a
+    // user meant to type, so both are dropped rather than reported.
+    final List<String> segments = p
+        .split(p.normalize(raw))
+        .where(
+          (String segment) =>
+              segment.isNotEmpty &&
+              segment != '.' &&
+              segment != '..' &&
+              segment != p.separator &&
+              segment != '/' &&
+              segment != r'\',
+        )
+        .toList();
+    return segments.isEmpty ? VaultDefaults.folder : p.joinAll(segments);
   }
 
   /// Atomic, like every index this app writes, and here for a sharper reason
@@ -217,10 +234,10 @@ class MarkdownNoteVault implements NoteVault {
   String _renderBody(VaultNote note, String? attachment) {
     final StringBuffer buffer = StringBuffer()
       ..writeln()
-      ..writeln('# ${note.title}')
+      ..writeln('# ${sanitizeUntrustedMarkdown(note.title)}')
       ..writeln();
 
-    final String summary = note.summary?.trim() ?? '';
+    final String summary = sanitizeUntrustedMarkdown(note.summary ?? '');
     if (summary.isNotEmpty) {
       buffer
         ..writeln('> $summary')

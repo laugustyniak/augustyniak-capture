@@ -3,6 +3,7 @@ import 'dart:io';
 import '../../projects/domain/project.dart';
 import '../domain/capture_router.dart';
 import '../domain/route_record.dart';
+import '../domain/untrusted_markdown.dart';
 
 /// Appends a capture to `inbox.md` in its project's repository.
 ///
@@ -67,7 +68,7 @@ class ProjectInboxRouter implements CaptureRouter {
   String _render(RoutedCapture capture) {
     final StringBuffer buffer = StringBuffer()
       ..writeln()
-      ..writeln('## ${capture.title}')
+      ..writeln('## ${sanitizeUntrustedMarkdown(capture.title)}')
       ..writeln();
 
     final List<String> facts = <String>[
@@ -79,7 +80,7 @@ class ProjectInboxRouter implements CaptureRouter {
       ..writeln('*${facts.join(' · ')}*')
       ..writeln();
 
-    final String summary = capture.summary?.trim() ?? '';
+    final String summary = sanitizeUntrustedMarkdown(capture.summary ?? '');
     if (summary.isNotEmpty) {
       buffer
         ..writeln('> $summary')
