@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../../../app/ui_kit.dart';
 import '../../../core/database/app_database.dart';
 import '../../../core/sync/sync_defaults.dart';
+import '../../../core/sync/sync_endpoint.dart';
 import '../../../core/sync/turso_sync_service.dart';
 import '../../costs/domain/model_price.dart';
 import '../../costs/domain/price_book.dart';
@@ -626,10 +627,13 @@ Future<void> _showEditTursoDialog(
         controller.settings.tursoAuthToken ?? SyncDefaults.tursoAuthToken ?? '',
   );
 
+  String? error;
+
   await showDialog<void>(
     context: context,
     builder: (BuildContext ctx) {
-      return AlertDialog(
+      return StatefulBuilder(
+        builder: (BuildContext ctx, StateSetter setDialogState) => AlertDialog(
         backgroundColor: Console.surface,
         title: const Text('Edit Turso Cloud Credentials'),
         content: Column(
@@ -645,6 +649,13 @@ Future<void> _showEditTursoDialog(
               decoration: const InputDecoration(labelText: 'Turso Auth Token'),
               maxLines: 3,
             ),
+            if (error != null) ...<Widget>[
+              const SizedBox(height: 12),
+              Text(
+                error!,
+                style: ConsoleText.body.copyWith(color: Console.red),
+              ),
+            ],
           ],
         ),
         actions: <Widget>[
@@ -656,6 +667,20 @@ Future<void> _showEditTursoDialog(
             onPressed: () async {
               final String url = urlCtrl.text.trim();
               final String token = tokenCtrl.text.trim();
+
+              // Refused *before* anything is stored, and inline rather than as
+              // a failed sync afterwards: an `http://` address would carry the
+              // bearer token and every transcript in the batch in the clear,
+              // and `TursoSyncService` now declines it silently at the point
+              // where the only visible symptom is "sync does nothing".
+              if (url.isNotEmpty && SyncEndpoint.normalize(url) == null) {
+                setDialogState(() {
+                  error =
+                      'The database URL must be an https:// or libsql:// '
+                      'address with a host.';
+                });
+                return;
+              }
 
               await controller.setTursoConfig(
                 url: url.isNotEmpty ? url : null,
@@ -675,6 +700,7 @@ Future<void> _showEditTursoDialog(
             child: const Text('Save & Sync'),
           ),
         ],
+        ),
       );
     },
   );

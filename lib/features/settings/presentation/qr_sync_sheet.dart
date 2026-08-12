@@ -7,10 +7,12 @@ import 'package:qr_flutter/qr_flutter.dart';
 import '../../../app/ui_kit.dart';
 import '../../../core/database/app_database.dart';
 import '../../../core/sync/sync_defaults.dart';
+import '../../../core/sync/sync_pairing_payload.dart';
 import '../../../core/sync/turso_sync_service.dart';
 import '../../recordings/presentation/recordings_controller.dart';
 import '../domain/app_settings.dart';
 import 'settings_controller.dart';
+import 'sync_pairing_confirmation.dart';
 
 /// Renders a QR code on Desktop for 1-tap mobile pairing.
 class QrSyncDisplaySheet extends StatelessWidget {
@@ -21,7 +23,9 @@ class QrSyncDisplaySheet extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final Map<String, dynamic> payload = <String, dynamic>{
-      'type': 'augustyniak_sync_v1',
+      // The scanner refuses any other marker, so the two halves are pinned to
+      // one constant rather than to two matching literals.
+      'type': SyncPairingPayload.typeMarker,
       'tursoDbUrl': settings.tursoDbUrl ?? SyncDefaults.tursoDbUrl,
       'tursoAuthToken': settings.tursoAuthToken ?? SyncDefaults.tursoAuthToken,
       'r2Endpoint': settings.r2Endpoint ?? SyncDefaults.r2Endpoint,
@@ -111,60 +115,85 @@ class _QrSyncScannerSheetState extends State<QrSyncScannerSheet> {
     super.dispose();
   }
 
+  /// A scanned code is **parsed, then confirmed, then applied** — three steps
+  /// that used to be one.
+  ///
+  /// A QR code is input from whatever is in front of the camera, and applying
+  /// one repoints where every future capture is uploaded. So nothing is written
+  /// until [confirmSyncPairing] has named the host and the user has agreed;
+  /// [SyncPairingPayload.parse] refuses a code that would send the token over
+  /// plain http before the question is even asked.
   void _onDetect(BarcodeCapture capture) async {
     if (_scanned) return;
+
+    // The whole frame is examined before anything is awaited: a code that is
+    // not ours, or one that would send the token over plain http, is simply
+    // not a candidate, and there is nothing the user could do about being told.
+    SyncPairingPayload? payload;
     for (final Barcode barcode in capture.barcodes) {
       final String? rawValue = barcode.rawValue;
       if (rawValue == null || rawValue.isEmpty) continue;
-
-      try {
-        final dynamic decoded = jsonDecode(rawValue);
-        if (decoded is Map<String, dynamic> &&
-            decoded['type'] == 'augustyniak_sync_v1') {
-          setState(() {
-            _scanned = true;
-          });
-
-          final String? tursoUrl = decoded['tursoDbUrl'] as String?;
-          final String? tursoToken = decoded['tursoAuthToken'] as String?;
-
-          await widget.controller.setTursoConfig(
-            url: tursoUrl,
-            token: tursoToken,
-            enabled: true,
-          );
-
-          await widget.controller.setR2Config(
-            endpoint: decoded['r2Endpoint'] as String?,
-            bucket: decoded['r2Bucket'] as String?,
-            accessKeyId: decoded['r2AccessKeyId'] as String?,
-            secretAccessKey: decoded['r2SecretAccessKey'] as String?,
-            enabled: true,
-          );
-
-          if (tursoUrl != null && tursoToken != null) {
-            final AppDatabase db = await AppDatabase.getInstance();
-            final TursoSyncService syncService = TursoSyncService(db: db);
-            await syncService.pullFromTurso(
-              dbUrl: tursoUrl,
-              authToken: tursoToken,
-            );
-            await widget.recordingsController?.reloadFromStorage();
-          }
-
-          if (mounted) {
-            Navigator.of(context).pop(true);
-            ScaffoldMessenger.of(context).showSnackBar(
-              SnackBar(
-                content: const Text('⚡ Sync paired & 103 notes downloaded successfully!'),
-                backgroundColor: Console.green,
-              ),
-            );
-          }
-          break;
-        }
-      } catch (_) {}
+      payload = SyncPairingPayload.parse(rawValue);
+      if (payload != null) break;
     }
+    if (payload == null) return;
+
+    // Taken before the confirmation, so a camera holding the code steady
+    // cannot stack a second dialog on top of the first.
+    setState(() => _scanned = true);
+
+    final bool agreed = await confirmSyncPairing(context, payload);
+    if (!agreed) {
+      // Back to scanning. A refusal is a decision about *this* code, not a
+      // reason to close the scanner.
+      if (mounted) setState(() => _scanned = false);
+      return;
+    }
+
+    await _applyPairing(payload);
+  }
+
+  Future<void> _applyPairing(SyncPairingPayload payload) async {
+    final NavigatorState navigator = Navigator.of(context);
+    final ScaffoldMessengerState messenger = ScaffoldMessenger.of(context);
+
+    await widget.controller.setTursoConfig(
+      url: payload.tursoDbUrl,
+      token: payload.tursoAuthToken,
+      enabled: true,
+    );
+
+    if (payload.hasR2) {
+      await widget.controller.setR2Config(
+        endpoint: payload.r2Endpoint,
+        bucket: payload.r2Bucket,
+        accessKeyId: payload.r2AccessKeyId,
+        secretAccessKey: payload.r2SecretAccessKey,
+        enabled: true,
+      );
+    }
+
+    final AppDatabase db = await AppDatabase.getInstance();
+    final TursoSyncService syncService = TursoSyncService(db: db);
+    final bool pulled = await syncService.pullFromTurso(
+      dbUrl: payload.tursoDbUrl,
+      authToken: payload.tursoAuthToken,
+    );
+    await widget.recordingsController?.reloadFromStorage();
+    final int count = widget.recordingsController?.recordings.length ?? 0;
+
+    if (!mounted) return;
+    navigator.pop(true);
+    messenger.showSnackBar(
+      SnackBar(
+        // Counted rather than claimed. This line used to report a hard-coded
+        // "103 notes" whatever happened, including when the pull failed.
+        content: Text(
+          pulled ? '⚡ Sync paired · $count notes' : 'Paired, but the pull failed',
+        ),
+        backgroundColor: pulled ? Console.green : Console.red,
+      ),
+    );
   }
 
   @override
