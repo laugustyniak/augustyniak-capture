@@ -4,6 +4,8 @@ import 'dart:io';
 
 import 'package:http/http.dart' as http;
 
+import '../../../core/http/provider_failure.dart';
+
 import '../../costs/domain/usage_parsing.dart';
 import '../../costs/domain/usage_sink.dart';
 import 'ocr_service.dart';
@@ -96,8 +98,11 @@ class HttpVisionOcrService implements OcrService {
 
     if (response.statusCode < 200 || response.statusCode >= 300) {
       throw HttpException(
-        'OCR failed (${response.statusCode}): '
-        '${utf8.decode(response.bodyBytes)}',
+        describeProviderFailure(
+          'OCR',
+          response.statusCode,
+          utf8.decode(response.bodyBytes),
+        ),
       );
     }
 

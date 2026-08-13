@@ -3,6 +3,8 @@ import 'dart:io';
 
 import 'package:http/http.dart' as http;
 
+import '../../../core/http/provider_failure.dart';
+
 import '../../costs/domain/usage_parsing.dart';
 import '../../costs/domain/usage_sink.dart';
 import '../../recordings/domain/capture_category.dart';
@@ -92,7 +94,11 @@ class HttpChatEnrichmentService implements EnrichmentService {
 
     if (response.statusCode < 200 || response.statusCode >= 300) {
       throw HttpException(
-        'Enrichment failed (${response.statusCode}): ${response.body}',
+        describeProviderFailure(
+          'Enrichment',
+          response.statusCode,
+          response.body,
+        ),
       );
     }
 

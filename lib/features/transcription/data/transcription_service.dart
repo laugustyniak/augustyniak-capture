@@ -3,6 +3,8 @@ import 'dart:io';
 
 import 'package:http/http.dart' as http;
 
+import '../../../core/http/provider_failure.dart';
+
 import '../../costs/domain/usage_parsing.dart';
 import '../../costs/domain/usage_sink.dart';
 
@@ -68,7 +70,7 @@ class HttpWhisperTranscriptionService implements TranscriptionService {
 
     if (response.statusCode < 200 || response.statusCode >= 300) {
       throw HttpException(
-        'Transcription failed (${response.statusCode}): $body',
+        describeProviderFailure('Transcription', response.statusCode, body),
       );
     }
 
