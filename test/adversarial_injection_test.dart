@@ -1,6 +1,8 @@
+import 'dart:convert';
 import 'dart:io';
 
 import 'package:augustyniak_capture/features/enrichment/data/http_chat_enrichment_service.dart';
+import 'package:augustyniak_capture/features/enrichment/domain/enrichment_result.dart';
 import 'package:augustyniak_capture/features/enrichment/domain/enrichment_context.dart';
 import 'package:augustyniak_capture/features/enrichment/domain/enrichment_prompt.dart';
 import 'package:augustyniak_capture/features/projects/data/executable_resolver.dart';
@@ -10,12 +12,15 @@ import 'package:augustyniak_capture/features/projects/domain/agent_session_launc
 import 'package:augustyniak_capture/features/projects/domain/project.dart';
 import 'package:augustyniak_capture/features/recordings/data/markdown_note_vault.dart';
 import 'package:augustyniak_capture/features/recordings/data/project_agent_handoff.dart';
+import 'package:augustyniak_capture/features/recordings/data/agent_artifact_scanner.dart';
 import 'package:augustyniak_capture/features/recordings/data/project_inbox_router.dart';
+import 'package:augustyniak_capture/features/recordings/domain/agent_artifact.dart';
 import 'package:augustyniak_capture/features/recordings/domain/agent_handoff.dart';
 import 'package:augustyniak_capture/features/recordings/domain/capture_category.dart';
 import 'package:augustyniak_capture/features/recordings/domain/capture_router.dart';
 import 'package:augustyniak_capture/features/recordings/domain/capture_type.dart';
 import 'package:augustyniak_capture/features/recordings/domain/note_vault.dart';
+import 'package:augustyniak_capture/features/recordings/domain/recording.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:path/path.dart' as p;
 
@@ -393,6 +398,178 @@ void main() {
 
       final String inbox = File(p.join(repo.path, 'inbox.md')).readAsStringSync();
       expect(inbox, contains('## Refactor the parser'));
+    });
+  });
+
+  group('dx-01 · an OCR body cannot beacon out either', () {
+    test('a remote image read off an image capture is neutralised', () async {
+      final Directory repo = Directory.systemTemp.createTempSync(
+        'augustyniak_adv_repo_',
+      );
+      addTearDown(() => repo.deleteSync(recursive: true));
+
+      final ProjectInboxRouter router = ProjectInboxRouter(
+        projectById: (String id) =>
+            Project(id: 'p1', name: 'Acme', repoPath: repo.path),
+      );
+      await router.route(
+        _capture(
+          body:
+              'Notes from the whiteboard\n'
+              '![](https://canary.invalid/?t=CANARY-DX01C)\n'
+              '<img src="https://canary.invalid/?t=CANARY-DX01D">',
+        ),
+      );
+
+      final String inbox = File(
+        p.join(repo.path, 'inbox.md'),
+      ).readAsStringSync();
+      expect(
+        RegExp(r'(?<!\\)!\[[^\]]*\]\(\s*https?://').hasMatch(inbox),
+        isFalse,
+      );
+      expect(RegExp('<img', caseSensitive: false).hasMatch(inbox), isFalse);
+    });
+
+    test('benign control · local images and dictated markdown survive', () async {
+      final Directory repo = Directory.systemTemp.createTempSync(
+        'augustyniak_adv_repo_',
+      );
+      addTearDown(() => repo.deleteSync(recursive: true));
+
+      final ProjectInboxRouter router = ProjectInboxRouter(
+        projectById: (String id) =>
+            Project(id: 'p1', name: 'Acme', repoPath: repo.path),
+      );
+      const String body =
+          '## Plan\n\n- **first** step\n- see `parser.dart`\n'
+          '![diagram](diagram.png)\n[the spec](https://example.org/spec)';
+      await router.route(_capture(body: body));
+
+      final String inbox = File(
+        p.join(repo.path, 'inbox.md'),
+      ).readAsStringSync();
+      expect(inbox, contains('![diagram](diagram.png)'));
+      expect(inbox, contains('[the spec](https://example.org/spec)'));
+      expect(inbox, contains('- **first** step'));
+    });
+  });
+
+  group('pc-03 · the app does not adopt its own note as an agent artifact', () {
+    test('a vault mirror is not listed as an artifact of its own capture', () async {
+      final Directory vault = Directory.systemTemp.createTempSync(
+        'augustyniak_adv_vault_',
+      );
+      final Directory repo = Directory.systemTemp.createTempSync(
+        'augustyniak_adv_repo_',
+      );
+      addTearDown(() {
+        vault.deleteSync(recursive: true);
+        repo.deleteSync(recursive: true);
+      });
+
+      const String id = 'cap-00000001';
+      final MarkdownNoteVault mirror = MarkdownNoteVault(
+        vaultPath: () => vault.path,
+        folder: () => 'Capture',
+        copySources: () => false,
+      );
+      await mirror.mirror(_note(title: 'A mirrored capture'));
+
+      final List<AgentArtifact> found = await const AgentArtifactScanner()
+          .scanForCapture(
+            recording: Recording(
+              id: id,
+              filePath: p.join(repo.path, '$id.txt'),
+              createdAt: DateTime.utc(2026, 8, 12, 9),
+              durationMs: 0,
+              status: RecordingStatus.completed,
+            ),
+            project: Project(id: 'p1', name: 'Acme', repoPath: repo.path),
+            vaultDirectory: Directory(p.join(vault.path, 'Capture')),
+          );
+
+      expect(
+        found,
+        isEmpty,
+        reason: 'the app presented its own mirror back as an agent result',
+      );
+    });
+
+    test('benign control · a note an agent wrote is still adopted', () async {
+      final Directory vault = Directory.systemTemp.createTempSync(
+        'augustyniak_adv_vault_',
+      );
+      final Directory repo = Directory.systemTemp.createTempSync(
+        'augustyniak_adv_repo_',
+      );
+      addTearDown(() {
+        vault.deleteSync(recursive: true);
+        repo.deleteSync(recursive: true);
+      });
+
+      const String id = 'cap-00000001';
+      File(p.join(vault.path, 'research.md')).writeAsStringSync(
+        '---\ncapture-id: $id\n---\n\n# What the agent found\n\nDetails.\n',
+      );
+      // Vault machinery is walked past rather than read.
+      final Directory hidden = Directory(p.join(vault.path, '.trash'))
+        ..createSync();
+      File(
+        p.join(hidden.path, 'deleted.md'),
+      ).writeAsStringSync('capture-id: $id\n');
+
+      final List<AgentArtifact> found = await const AgentArtifactScanner()
+          .scanForCapture(
+            recording: Recording(
+              id: id,
+              filePath: p.join(repo.path, '$id.txt'),
+              createdAt: DateTime.utc(2026, 8, 12, 9),
+              durationMs: 0,
+              status: RecordingStatus.completed,
+            ),
+            project: Project(id: 'p1', name: 'Acme', repoPath: repo.path),
+            vaultDirectory: vault,
+          );
+
+      expect(found, hasLength(1));
+      expect(found.single.title, 'What the agent found');
+    });
+  });
+
+  group('sg-01 · the output contract is enforced, not merely requested', () {
+    test('an over-long title and summary are bounded', () {
+      final String title = 'A' * 5000;
+      final String summary = 'B' * 5000;
+      final String body =
+          '{"choices":[{"message":{"content":'
+          '${jsonEncode(jsonEncode(<String, dynamic>{'title': title, 'summary': summary, 'category': 'note', 'tags': <String>[]}))}'
+          '}}]}';
+
+      final EnrichmentResult result =
+          HttpChatEnrichmentService.parseResponse(body);
+      expect(
+        result.title!.length,
+        lessThanOrEqualTo(HttpChatEnrichmentService.maxTitleChars + 1),
+      );
+      expect(
+        result.summary!.length,
+        lessThanOrEqualTo(HttpChatEnrichmentService.maxSummaryChars + 1),
+      );
+    });
+
+    test('benign control · a contract-sized title is untouched', () {
+      const String title = 'Split the tokenizer out of the parser';
+      final String body =
+          '{"choices":[{"message":{"content":'
+          '${jsonEncode(jsonEncode(<String, dynamic>{'title': title, 'category': 'task', 'summary': 'Short.', 'tags': <String>['parser']}))}'
+          '}}]}';
+
+      final EnrichmentResult result =
+          HttpChatEnrichmentService.parseResponse(body);
+      expect(result.title, title);
+      expect(result.summary, 'Short.');
+      expect(result.tags, <String>['parser']);
     });
   });
 

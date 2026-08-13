@@ -41,6 +41,19 @@ class HttpChatEnrichmentService implements EnrichmentService {
   /// three to five.
   static const int _maxTags = 5;
 
+  /// Defensive ceilings on the two free-text fields, well above what the prompt
+  /// asks for (60 and 200 characters).
+  ///
+  /// The contract is stated in the prompt and enforced nowhere, so a model that
+  /// ignores it — or one steered into ignoring it — could return a transcript's
+  /// worth of text as a "title". That value is then a card heading, a `## `
+  /// line in `inbox.md`, a `# ` line in an agent brief and a YAML property in
+  /// the vault. The bound is generous on purpose: a compliant answer, and even
+  /// a verbose one, is never touched, so this can only fire on an answer that
+  /// was already outside the contract.
+  static const int maxTitleChars = 200;
+  static const int maxSummaryChars = 600;
+
   @override
   Future<EnrichmentResult> enrich(
     String text, {
@@ -138,11 +151,11 @@ class HttpChatEnrichmentService implements EnrichmentService {
     }
 
     return EnrichmentResult(
-      title: _cleanText(decoded['title']),
+      title: _cleanText(decoded['title'], limit: maxTitleChars),
       category: CaptureCategory.fromName(
         decoded['category'] is String ? decoded['category'] as String : null,
       ),
-      summary: _cleanText(decoded['summary']),
+      summary: _cleanText(decoded['summary'], limit: maxSummaryChars),
       tags: _cleanTags(decoded['tags']),
     );
   }
@@ -166,10 +179,15 @@ class HttpChatEnrichmentService implements EnrichmentService {
         .trim();
   }
 
-  static String? _cleanText(dynamic value) {
+  /// Truncated rather than rejected: an over-long title is still the model's
+  /// answer to the question, and a blank field would cost the user the
+  /// classification as well as the length.
+  static String? _cleanText(dynamic value, {required int limit}) {
     if (value is! String) return null;
     final String trimmed = value.trim();
-    return trimmed.isEmpty ? null : trimmed;
+    if (trimmed.isEmpty) return null;
+    if (trimmed.length <= limit) return trimmed;
+    return '${trimmed.substring(0, limit).trimRight()}…';
   }
 
   static List<String> _cleanTags(dynamic value) {

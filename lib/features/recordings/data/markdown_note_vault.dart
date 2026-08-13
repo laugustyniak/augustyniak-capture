@@ -249,7 +249,7 @@ class MarkdownNoteVault implements NoteVault {
         ..writeln();
     }
 
-    final String body = note.body.trim();
+    final String body = sanitizeUntrustedMarkdownBody(note.body).trim();
     if (body.isNotEmpty) {
       buffer
         ..writeln(body)

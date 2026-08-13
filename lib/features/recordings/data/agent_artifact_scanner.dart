@@ -76,6 +76,14 @@ class AgentArtifactScanner {
       try {
         await for (final FileSystemEntity entity in vaultDirectory.list(recursive: true)) {
           if (entity is File && entity.path.endsWith('.md')) {
+            // `.obsidian`, `.trash`, `.git` — machinery of whatever application
+            // owns the vault, never a note an agent wrote. Walking them costs a
+            // read per file and can only produce false positives.
+            final bool hidden = p
+                .split(p.relative(entity.path, from: vaultDirectory.path))
+                .any((String segment) => segment.startsWith('.'));
+            if (hidden) continue;
+
             final AgentArtifact? artifact = await _checkFileForCaptureId(
               file: entity,
               captureId: captureId,
@@ -108,6 +116,12 @@ class AgentArtifactScanner {
   }) async {
     try {
       final String content = await file.readAsString();
+      // Our own vault mirror carries the capture id in its front matter, so
+      // without this every mirrored capture listed *itself* as an artifact —
+      // the note this app wrote, presented back as something an agent produced.
+      // `capture-hash` is the claim `MarkdownNoteVault` makes about a file it
+      // owns, and it is the only provenance either class has.
+      if (_isOwnVaultMirror(content)) return null;
       if (content.contains('capture-id: $captureId') ||
           content.contains('capture-id: "$captureId"') ||
           content.contains('parent-capture: $captureId')) {
@@ -119,6 +133,20 @@ class AgentArtifactScanner {
       }
     } catch (_) {}
     return null;
+  }
+
+  /// Whether [content] is a note `MarkdownNoteVault` wrote, judged the same way
+  /// that class judges it: a `capture-hash` key inside the front matter block.
+  /// The hash itself is not recomputed here — this only has to tell our own
+  /// mirror apart from an agent's note, not decide whether it was since edited.
+  static bool _isOwnVaultMirror(String content) {
+    if (!content.startsWith('---\n')) return false;
+    final int end = content.indexOf('\n---\n', 3);
+    if (end < 0) return false;
+    return content
+        .substring(4, end + 1)
+        .split('\n')
+        .any((String line) => line.trimLeft().startsWith('capture-hash:'));
   }
 
   Future<AgentArtifact?> _parseMarkdownArtifact({
