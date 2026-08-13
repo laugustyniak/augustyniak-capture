@@ -373,4 +373,37 @@ void main() {
     expect(find.textContaining('plaintext'), findsOneWidget);
     expect(find.textContaining('cannot be decrypted'), findsNothing);
   });
+
+  /// The endpoint is free text behind a `hasScheme` guard, so `http://` is
+  /// accepted as readily as `https://` — and then the token, the audio and the
+  /// transcript all go out in the clear with nothing on screen saying so.
+  testWidgets('a plain-http endpoint says so on the profile', (
+    WidgetTester tester,
+  ) async {
+    final SettingsController controller = buildSettingsController();
+    await controller.initialize();
+    await controller.addProfile(
+      name: 'Leaky',
+      endpoint: 'http://api.example.com/v1/audio/transcriptions',
+    );
+    await pumpModels(tester, controller);
+
+    expect(find.text('NO TLS'), findsWidgets);
+  });
+
+  testWidgets('a local model server is not accused of anything', (
+    WidgetTester tester,
+  ) async {
+    // `http://localhost:11434` is a preset this app ships. A warning on the
+    // documented setup is a warning nobody reads on the real one.
+    final SettingsController controller = buildSettingsController();
+    await controller.initialize();
+    await controller.addProfile(
+      name: 'Ollama',
+      endpoint: 'http://localhost:11434/v1/chat/completions',
+    );
+    await pumpModels(tester, controller);
+
+    expect(find.text('NO TLS'), findsNothing);
+  });
 }

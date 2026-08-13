@@ -313,6 +313,11 @@ class _ActiveProfileCard extends StatelessWidget {
                 StatusPill(label: 'TOKEN SET', color: Console.green)
               else if (item?.bearerToken != null)
                 StatusPill(label: 'TOKEN LOCKED', color: Console.red),
+              // The active profile is the one actually sending requests, so
+              // the warning belongs beside TOKEN SET rather than only on the
+              // card further down the tab.
+              if (item?.usesInsecureTransport ?? false)
+                StatusPill(label: 'NO TLS', color: Console.amber),
             ],
           ),
         ],
@@ -383,13 +388,27 @@ class _ProfileCard extends StatelessWidget {
                     fontSize: 10,
                   ),
                 ),
-                if (profile.model != null) ...<Widget>[
-                  const SizedBox(height: 6),
-                  StatusPill(
-                    label: profile.model!.toUpperCase(),
-                    color: Console.muted,
-                  ),
-                ],
+                if (profile.model != null || profile.usesInsecureTransport)
+                  ...<Widget>[
+                    const SizedBox(height: 6),
+                    Wrap(
+                      spacing: 6,
+                      runSpacing: 6,
+                      children: <Widget>[
+                        if (profile.model != null)
+                          StatusPill(
+                            label: profile.model!.toUpperCase(),
+                            color: Console.muted,
+                          ),
+                        // Amber rather than red: plain HTTP to a machine the
+                        // user controls is a documented setup, so this only
+                        // ever appears for a host on the internet — where it
+                        // is a mistake rather than a failure.
+                        if (profile.usesInsecureTransport)
+                          StatusPill(label: 'NO TLS', color: Console.amber),
+                      ],
+                    ),
+                  ],
               ],
             ),
           ),

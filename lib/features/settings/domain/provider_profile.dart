@@ -70,6 +70,54 @@ class ProviderProfile {
 
   bool get hasEndpoint => endpoint.trim().isNotEmpty;
 
+  /// Whether this profile would put the bearer token, the audio and the
+  /// transcript on the wire in the clear.
+  ///
+  /// **Reported rather than refused, and only for a host that is not the
+  /// user's own.** `http://localhost:11434` (Ollama) and
+  /// `http://localhost:8080` (llama.cpp) are first-class setups this app ships
+  /// presets for, and a model server on the desk under the LAN is the same
+  /// decision — flagging those would train the warning away, which costs more
+  /// than it buys. Plain HTTP to a host on the internet is the case that is
+  /// almost never chosen deliberately: the endpoint is free text behind a
+  /// `hasScheme` guard, so it takes one copied example.
+  ///
+  /// An endpoint that reaches nothing at all is not flagged: it already
+  /// degrades to the disabled service, and a second complaint about the same
+  /// field would bury the first.
+  bool get usesInsecureTransport {
+    final Uri? uri = hasEndpoint ? Uri.tryParse(endpoint.trim()) : null;
+    if (uri == null || uri.host.isEmpty) return false;
+    if (uri.scheme.toLowerCase() != 'http') return false;
+    return !_isOwnNetwork(uri.host);
+  }
+
+  /// Loopback, or one of the three private IPv4 ranges.
+  ///
+  /// The `172.16/12` boundary is the one worth getting exactly right: 172.15
+  /// and 172.32 are public, and a range that leaks either way in the
+  /// permissive direction makes the warning above useless.
+  static bool _isOwnNetwork(String host) {
+    final String name = host.toLowerCase();
+    if (name == 'localhost' || name == '::1' || name.endsWith('.localhost')) {
+      return true;
+    }
+
+    final List<String> octets = name.split('.');
+    if (octets.length != 4) return false;
+    final List<int?> parts = octets.map(int.tryParse).toList();
+    if (parts.any((int? part) => part == null || part < 0 || part > 255)) {
+      return false;
+    }
+    final int first = parts[0]!;
+    final int second = parts[1]!;
+    if (first == 127) return true;
+    if (first == 10) return true;
+    if (first == 192 && second == 168) return true;
+    if (first == 172 && second >= 16 && second <= 31) return true;
+    return false;
+  }
+
   /// The token a request may actually send: null when unset, blank, or still
   /// sealed because decryption failed. A sealed blob must never leak into an
   /// `Authorization` header.
