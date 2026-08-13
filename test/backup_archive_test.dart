@@ -9,6 +9,7 @@ import 'package:augustyniak_capture/features/backup/domain/capture_archive.dart'
 import 'package:augustyniak_capture/features/projects/data/projects_repository.dart';
 import 'package:augustyniak_capture/features/projects/domain/project.dart';
 import 'package:augustyniak_capture/features/recordings/data/recordings_repository.dart';
+import 'package:augustyniak_capture/features/recordings/domain/agent_artifact.dart';
 import 'package:augustyniak_capture/features/recordings/domain/recording.dart';
 
 /// The archive is the only answer this app has to a mobile reinstall, which
@@ -391,4 +392,88 @@ void main() {
       expect(restored.unreadable, 1);
     },
   );
+
+  test('the closure history survives a restore', () async {
+    await seed(source, <Recording>[capture('a')]);
+    // One closure, written the way `FileClosureLog` appends them.
+    await File(p.join(source.path, 'closures.jsonl')).writeAsString(
+      '${jsonEncode(<String, dynamic>{'recordingId': 'a', 'at': DateTime(2026, 8, 5, 13).toIso8601String(), 'kind': 'review', 'type': 'audioRecording'})}\n',
+    );
+
+    await archiveFor(source).exportTo(zipPath());
+    await archiveFor(target).importFrom(zipPath());
+
+    // It was already being *carried* in the archive; what was missing was the
+    // merge, so a restore shipped the bytes and then discarded them. Momentum
+    // is the one history nothing else can reconstruct.
+    final File merged = File(p.join(target.path, 'closures.jsonl'));
+    expect(merged.existsSync(), isTrue);
+    expect(merged.readAsStringSync(), contains('"recordingId":"a"'));
+  });
+
+  test('an agent artifact survives a round trip', () async {
+    final Recording withArtifact = capture('a').copyWith(
+      artifacts: <AgentArtifact>[
+        AgentArtifact(
+          id: 'artifact-1',
+          captureId: 'a',
+          title: 'Brief for a',
+          path: p.join(source.path, '.agent-tasks', 'a.md'),
+          updatedAt: DateTime(2026, 8, 5, 12, 30),
+        ),
+      ],
+    );
+    await seed(source, <Recording>[withArtifact]);
+
+    await archiveFor(source).exportTo(zipPath());
+    await archiveFor(target).importFrom(zipPath());
+
+    // `_relocate` rebuilds the row field by field, which is exactly the shape
+    // that loses a field added later — this asserts the one it already lost.
+    final Recording restored = (await repositoryFor(target).loadAll()).single;
+    expect(restored.artifacts, hasLength(1));
+    expect(restored.artifacts.single.id, 'artifact-1');
+  });
+
+  // **This does not reproduce the race it was written for**, and saying so is
+  // the point: with nothing mutating the index mid-export the sizes agree
+  // whether they are measured before compression or taken from the archived
+  // snapshot, so it passes against the broken version too. Reproducing the real
+  // failure needs either a production seam fired between the manifest and the
+  // members, or a wall-clock wait, and this repo has been bitten by the second
+  // already. What it does pin is the invariant `_validateManifest` enforces on
+  // the far end, which is what any future change to how members are added would
+  // have to keep.
+  test('every manifest size matches the member actually archived', () async {
+    await seed(source, <Recording>[capture('a'), capture('b')]);
+    await archiveFor(source).exportTo(zipPath());
+
+    final Archive archive = ZipDecoder().decodeStream(
+      InputFileStream(zipPath().path),
+    );
+    final Map<String, dynamic> manifest =
+        jsonDecode(
+              utf8.decode(
+                archive.findFile(ZipCaptureArchive.manifestName)!.readBytes()!,
+              ),
+            )
+            as Map<String, dynamic>;
+
+    // The manifest is written before the members are, and `_validateManifest`
+    // refuses the whole archive on a mismatch. This pins the agreement rather
+    // than the race that broke it: the durable indexes are rewritten on every
+    // pipeline tick, so a size read before compression could describe bytes
+    // that no longer exist by the time they are written.
+    for (final dynamic entry in manifest['files'] as List<dynamic>) {
+      final Map<String, dynamic> row = entry as Map<String, dynamic>;
+      final ArchiveFile? member = archive.findFile(row['name'] as String);
+      expect(member, isNotNull, reason: '${row['name']} is missing');
+      expect(
+        member!.size,
+        row['size'],
+        reason: '${row['name']} disagrees with the manifest',
+      );
+    }
+    archive.clearSync();
+  });
 }

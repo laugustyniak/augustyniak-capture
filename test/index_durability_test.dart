@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
@@ -274,6 +275,76 @@ void main() {
 
       expect(controller.recordings, isEmpty);
       expect(repository.saves, 0);
+    });
+  });
+
+  group('concurrent writers', () {
+    late Directory root;
+
+    setUp(() => root = Directory.systemTemp.createTempSync('index_race_'));
+    tearDown(() {
+      if (root.existsSync()) root.deleteSync(recursive: true);
+    });
+
+    Recording row(String id) => Recording(
+      id: id,
+      filePath: p.join(root.path, '$id.m4a'),
+      createdAt: DateTime(2026, 8, 5, 12),
+      durationMs: 1,
+      status: RecordingStatus.completed,
+    );
+
+    test('a second writer waits rather than sharing the .tmp file', () async {
+      final TempRepository repository = TempRepository(root);
+      final Completer<void> holdMerge = Completer<void>();
+      final List<String> order = <String>[];
+
+      // `updateAll` holds the gate across load, merge and write. The `saveAll`
+      // below is the pipeline landing a status change mid-import: without the
+      // gate both stage the whole index through one `recordings.json.tmp` and
+      // the rename publishes whichever half finished last.
+      final Future<void> merging = repository.updateAll((
+        List<Recording> current,
+      ) async {
+        order.add('merge-start');
+        await holdMerge.future;
+        order.add('merge-end');
+        return <Recording>[...current, row('imported')];
+      });
+
+      await pumpEventQueue();
+      final Future<void> saving = repository.saveAll(<Recording>[row('live')])
+        ..whenComplete(() => order.add('save-done'));
+
+      await pumpEventQueue();
+      expect(order, <String>[
+        'merge-start',
+      ], reason: 'the second writer must not start while the first holds it');
+
+      holdMerge.complete();
+      await Future.wait(<Future<void>>[merging, saving]);
+      expect(order, <String>['merge-start', 'merge-end', 'save-done']);
+    });
+
+    test('a merge reads the index as it is when it runs', () async {
+      final TempRepository repository = TempRepository(root);
+      await repository.saveAll(<Recording>[row('early')]);
+
+      // The import's plan is built before its source files are extracted, so
+      // by commit time the queue may hold a capture the plan never saw. The
+      // merge is handed the freshly loaded index for exactly that reason.
+      late List<String> seen;
+      await repository.updateAll((List<Recording> current) async {
+        seen = current.map((Recording item) => item.id).toList();
+        return <Recording>[...current, row('imported')];
+      });
+
+      expect(seen, <String>['early']);
+      final List<Recording> after = await repository.loadAll();
+      expect(after.map((Recording item) => item.id).toSet(), <String>{
+        'early',
+        'imported',
+      });
     });
   });
 }

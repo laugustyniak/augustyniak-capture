@@ -44,9 +44,17 @@ class ZipCaptureArchive implements CaptureArchive {
   };
 
   /// Merged line by line: append-only stores where a line is the whole record.
+  ///
+  /// All three of the repo's append-only stores belong here. `closures.jsonl`
+  /// was missing while it was still being *exported* as a payload member, so a
+  /// restore silently dropped the momentum history — the file that exists
+  /// precisely because no other store can answer "how many did I close last
+  /// Tuesday". A store that travels in the archive and is never merged back is
+  /// worse than one left out of it: the bytes are carried and then discarded.
   static const Set<String> journalFiles = <String>{
     'revisions.jsonl',
     'focus-sessions.jsonl',
+    'closures.jsonl',
   };
 
   /// Never archived.
@@ -72,6 +80,12 @@ class ZipCaptureArchive implements CaptureArchive {
       name.contains('.partial-') ||
       name.contains('.shrank-');
 
+  /// Members the live app rewrites underneath an export in progress. Everything
+  /// else in the payload is a capture's source, whose bytes never change once
+  /// written.
+  static bool _isMutable(String name) =>
+      indexFiles.contains(name) || journalFiles.contains(name);
+
   static bool _isPayload(String name) =>
       !excludedFiles.contains(name) &&
       !isDiagnosticCopy(name) &&
@@ -93,12 +107,33 @@ class ZipCaptureArchive implements CaptureArchive {
     members.sort((File a, File b) => a.path.compareTo(b.path));
 
     final int captures = await _countCaptures(directory);
+
+    // **The manifest must describe the bytes that were archived, not the bytes
+    // that were on disk when it was written.** `_validateManifest` refuses the
+    // whole archive on a size mismatch, so measuring with `length()` and then
+    // handing the encoder the *file* leaves a window the live app walks
+    // straight into: the durable indexes are rewritten on every pipeline tick,
+    // and a status transition landing during a compression pass that takes
+    // minutes produced an archive rejected at import time — on the far end,
+    // when the user has nothing else to fall back on.
+    //
+    // Mutable members are therefore snapshotted once and archived from that
+    // snapshot. Only the indexes and journals qualify, and they are small; a
+    // capture's source bytes are immutable once written, so those keep
+    // streaming and the archive stays out of RAM.
+    final Map<String, List<int>> snapshots = <String, List<int>>{};
     final List<Map<String, Object>> manifestFiles = <Map<String, Object>>[];
     for (final File member in members) {
-      manifestFiles.add(<String, Object>{
-        'name': p.basename(member.path),
-        'size': await member.length(),
-      });
+      final String name = p.basename(member.path);
+      final int size;
+      if (_isMutable(name)) {
+        final List<int> bytes = await member.readAsBytes();
+        snapshots[name] = bytes;
+        size = bytes.length;
+      } else {
+        size = await member.length();
+      }
+      manifestFiles.add(<String, Object>{'name': name, 'size': size});
     }
 
     final ZipFileEncoder encoder = ZipFileEncoder();
@@ -118,7 +153,13 @@ class ZipCaptureArchive implements CaptureArchive {
         ),
       );
       for (final File member in members) {
-        await encoder.addFile(member, p.basename(member.path));
+        final String name = p.basename(member.path);
+        final List<int>? snapshot = snapshots[name];
+        if (snapshot != null) {
+          encoder.addArchiveFile(ArchiveFile.bytes(name, snapshot));
+        } else {
+          await encoder.addFile(member, name);
+        }
       }
     } finally {
       // Closed even on failure: a half-written zip left open would keep its
@@ -388,11 +429,32 @@ class ZipCaptureArchive implements CaptureArchive {
 
   Future<RestoreSummary> _commitRecordings(_RecordingImportPlan plan) async {
     if (plan.additions.isNotEmpty) {
-      final List<Recording> merged = <Recording>[
-        ...plan.local,
-        ...plan.additions,
-      ]..sort((Recording a, Recording b) => b.createdAt.compareTo(a.createdAt));
-      await _recordings.saveAll(merged);
+      // **Merged against the index as it is now, not against `plan.local`.**
+      // That snapshot was taken before the source files were extracted, and
+      // extraction is the slow part: a capture indexed while it ran is present
+      // on disk and in `recordings.json`, and writing the older merge over it
+      // would drop the row. `updateAll` holds the repository's write gate
+      // across the reload, the merge and the write, so nothing lands in
+      // between — and the same gate is what stops this write from tearing the
+      // shared `.tmp` against a concurrent pipeline save.
+      //
+      // Ids already present are skipped rather than replaced, which is the
+      // additive rule this class is built on: the local row may have been
+      // edited, enriched and routed since, and the archived one is older by
+      // definition.
+      await _recordings.updateAll((List<Recording> current) async {
+        final Set<String> present = current
+            .map((Recording item) => item.id)
+            .toSet();
+        return <Recording>[
+          ...current,
+          ...plan.additions.where(
+            (Recording item) => !present.contains(item.id),
+          ),
+        ]..sort(
+          (Recording a, Recording b) => b.createdAt.compareTo(a.createdAt),
+        );
+      });
     }
     return RestoreSummary(
       added: plan.additions.length,
@@ -436,6 +498,7 @@ class ZipCaptureArchive implements CaptureArchive {
       isProcessedByUser: recording.isProcessedByUser,
       processedAt: recording.processedAt,
       routes: recording.routes,
+      artifacts: recording.artifacts,
     );
   }
 
