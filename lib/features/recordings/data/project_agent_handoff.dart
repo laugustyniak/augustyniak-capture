@@ -37,12 +37,24 @@ class ProjectAgentHandoff implements AgentHandoff {
   final AgentSessionLauncher _launcher;
   final String directoryName;
 
+  /// The project this launcher will act for, or null when it must not.
+  ///
+  /// **A bound project is refused here, and that is the demotion.** This
+  /// launcher opens one CLI in one terminal on this machine and loses sight of
+  /// it the moment it returns — no second prompt can reach the running session,
+  /// and nothing ever reports back. Where a control plane is bound, all three
+  /// of those are solved on the other side, and leaving both paths available
+  /// would give one capture two ways out that differ only in whether anything
+  /// will ever answer. So the offline case keeps the launcher, and the bound
+  /// case does not see it: `agentsFor` answers empty and the queue hides the
+  /// control rather than offering a worse one beside a better one.
   Project? _resolve(String? projectId) {
     if (projectId == null || projectId.isEmpty) return null;
     // A project deleted after the capture was filed leaves a dangling id on the
     // item, the same shape a dangling `activeProfileId` has in settings.
     final Project? project = _projectById(projectId);
     if (project == null) return null;
+    if (project.isBoundToCommand) return null;
     return project.repoPath.trim().isEmpty ? null : project;
   }
 

@@ -174,6 +174,27 @@ class _HandoffSheetState extends State<_HandoffSheet> {
               overflow: TextOverflow.ellipsis,
               style: ConsoleText.cardMeta,
             ),
+            const SizedBox(height: 14),
+            // **The label is the point of this sheet now.** This path opens one
+            // CLI in one terminal on this machine and then loses sight of it:
+            // no second prompt reaches the running session, and nothing ever
+            // reports back. A project bound to the control plane never gets
+            // here — `ProjectAgentHandoff` refuses it — so a sheet that is open
+            // is by definition the unsupervised path, and saying so is what
+            // stops the two reading as the same action.
+            Row(
+              children: <Widget>[
+                Icon(Icons.desktop_windows_outlined, size: 13, color: Console.amber),
+                const SizedBox(width: 6),
+                Expanded(
+                  child: Text(
+                    'Local session — not supervised. It runs on this machine '
+                    'and reports nothing back.',
+                    style: ConsoleText.micro.copyWith(color: Console.amber),
+                  ),
+                ),
+              ],
+            ),
             const SizedBox(height: 18),
 
             SectionHeader(title: 'AGENT'),

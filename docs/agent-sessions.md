@@ -1,14 +1,42 @@
 # Agent sessions
 
-Augustyniak Capture can open a coding agent directly in a project's repository.
-The project owns the working directory, optional Zellij session name, default
-agent, additional CLI arguments, and an initial prompt. This makes a captured
-agent task executable context rather than text that still needs to be copied and
-reconstructed elsewhere.
+A capture filed as `agentTask` can become work an agent actually does. There are
+**two ways that happens, and which one applies is decided by the project** — not
+by the capture, and not by a choice made at hand-off time.
 
-## Prerequisites
+| | Bound project | Unbound project |
+|---|---|---|
+| Where it runs | any host in the fleet | this machine |
+| Started by | the Command control plane | Ghostty + Zellij, here |
+| Second hand-off | updates the same brief | attaches to a live session, delivering nothing |
+| Reports back | state, issues, a PR link | nothing, ever |
+| Needs | an aggregator address and a fleet token | Ghostty, Zellij, an agent CLI |
 
-Session launch currently requires macOS plus:
+A project is *bound* when it names a Command host and workspace (Projects → edit
+→ **Command binding**, two pickers over a live read of the fleet). Everything
+below the binding section of this document describes the **unbound** path.
+
+## Which one you want
+
+**Bound, in almost every case.** The control plane spawns on any host, keeps the
+session in a fleet snapshot, refuses a second start of one already running, and
+returns an outcome the capture then shows on its own card. Set it up in Config →
+**Command control plane**, then bind the project.
+
+**Unbound is the offline case, and it is a real one**: one machine, no collector
+running, and you want an agent in a terminal now. It costs one file to keep and
+it is kept deliberately. What it cannot do is equally deliberate — it will not
+gain more hosts, status tracking, or a way to deliver a second prompt, because
+every one of those exists on the other side and building them twice is the cost
+this integration was designed to avoid.
+
+The hand-off sheet says **local session — not supervised** whenever it is about
+to take this path. Without that label the two look identical, and they differ in
+whether anything will ever tell you what happened.
+
+## Prerequisites (unbound path)
+
+Launching locally currently requires macOS plus:
 
 - [Ghostty](https://ghostty.org/) as the terminal,
 - [Zellij](https://zellij.dev/) for named, reusable sessions,
@@ -46,7 +74,12 @@ The first launch opens Ghostty, creates a named Zellij session rooted in the
 repository, and starts exactly one selected agent. Later launches attach to that
 session instead of starting a duplicate agent.
 
-## Hand a capture to an agent
+## Hand a capture to a local agent
+
+**This section applies to unbound projects only.** A bound project's `agentTask`
+captures leave through the control plane when you route them, and the local
+agent button is not offered at all — one capture with two ways out that differ
+only in whether anything answers would be a choice nobody can make well.
 
 The project card starts a session with no particular task in hand. To start one
 *on something you captured*, use the agent button on the capture itself — in the
@@ -108,6 +141,9 @@ version control instead of living in one provider's conversation history.
 
 ## Failure modes
 
+- **The agent button is missing on a capture:** its project is bound to Command.
+  That is the supervised path — route the capture instead, and watch the outcome
+  line on its card.
 - **Nothing opens:** confirm Ghostty is installed as `Ghostty.app` and `zellij`
   is on `PATH`.
 - **The terminal opens but the agent fails:** run its executable directly and

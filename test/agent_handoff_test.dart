@@ -4,6 +4,8 @@ import 'package:augustyniak_capture/features/projects/domain/agent_session_launc
 import 'package:augustyniak_capture/features/projects/domain/project.dart';
 import 'package:augustyniak_capture/features/recordings/data/project_agent_handoff.dart';
 import 'package:augustyniak_capture/features/recordings/domain/agent_handoff.dart';
+import 'package:augustyniak_capture/features/recordings/domain/capture_router.dart';
+import 'package:augustyniak_capture/features/recordings/domain/capture_type.dart';
 import 'package:augustyniak_capture/features/recordings/domain/recording.dart';
 import 'package:augustyniak_capture/features/recordings/domain/route_record.dart';
 import 'package:augustyniak_capture/features/recordings/presentation/recordings_controller.dart';
@@ -325,4 +327,56 @@ void main() {
     expect(launcher.requests, isEmpty);
     expect(controller.recordings.single.isProcessedByUser, isFalse);
   });
+
+  group('the local launcher is the offline case', () {
+    test('a bound project is never handed to it', () async {
+      final _FakeLauncher launcher = _FakeLauncher();
+      final ProjectAgentHandoff handoff = ProjectAgentHandoff(
+        projectById: (String id) => Project(
+          id: 'p1',
+          name: 'Acme',
+          repoPath: '/tmp/acme',
+          commandHost: 'studio',
+          commandWorkspace: 'capture',
+        ),
+        launcher: launcher,
+      );
+
+      // The control hides rather than offering a worse path beside a better
+      // one: one capture with two ways out that differ only in whether
+      // anything answers is a choice nobody can make well.
+      expect(handoff.agentsFor('p1'), isEmpty);
+
+      await expectLater(
+        handoff.handoff(
+          AgentHandoffRequest(
+            capture: RoutedCapture(
+              id: 'cap-1',
+              projectId: 'p1',
+              title: 'Split the router',
+              body: 'Split the tokenizer out of the parser.',
+              type: CaptureType.audioRecording,
+              capturedAt: DateTime.utc(2026, 8, 15, 9),
+            ),
+            agentId: 'claudeCode',
+            instruction: 'Split the router.',
+          ),
+        ),
+        throwsA(isA<AgentHandoffUnavailableException>()),
+      );
+      expect(launcher.requests, isEmpty);
+    });
+
+    test('an unbound project still offers every agent', () {
+      expect(
+        ProjectAgentHandoff(
+          projectById: (String id) =>
+              Project(id: 'p1', name: 'Acme', repoPath: '/tmp/acme'),
+          launcher: _FakeLauncher(),
+        ).agentsFor('p1'),
+        hasLength(AgentKind.values.length),
+      );
+    });
+  });
+
 }
