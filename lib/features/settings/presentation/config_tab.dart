@@ -312,6 +312,7 @@ class ConfigTab extends StatelessWidget {
           VaultSection(controller: controller, onMirrorAll: onMirrorAll),
           const SizedBox(height: 22),
           MomentumSection(onBackfill: onBackfillClosures),
+          const SizedBox(height: 22),
           // Below the vault on purpose: a mirror is the copy you read, an
           // archive is the copy you restore from, and the first is the one a
           // user is more likely to want set up today.

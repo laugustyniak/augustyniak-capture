@@ -7,6 +7,7 @@ import 'package:path/path.dart' as p;
 import '../../projects/data/projects_repository.dart';
 import '../../projects/domain/project.dart';
 import '../../recordings/data/recordings_repository.dart';
+import '../../recordings/data/source_content_hasher.dart';
 import '../../recordings/domain/recording.dart';
 import '../domain/capture_archive.dart';
 
@@ -24,12 +25,15 @@ class ZipCaptureArchive implements CaptureArchive {
     required ArchiveDirectoryProvider directoryProvider,
     RecordingsRepository? recordings,
     ProjectsRepository? projects,
+    SourceContentHasher hasher = const SourceContentHasher(),
   }) : _directoryProvider = directoryProvider,
+       _hasher = hasher,
        _recordings = recordings ?? RecordingsRepository(),
        _projects =
            projects ?? ProjectsRepository(directoryProvider: directoryProvider);
 
   final ArchiveDirectoryProvider _directoryProvider;
+  final SourceContentHasher _hasher;
   final RecordingsRepository _recordings;
   final ProjectsRepository _projects;
 
@@ -76,6 +80,9 @@ class ZipCaptureArchive implements CaptureArchive {
   /// install would re-import the very rows a backup was made to escape.
   static bool isDiagnosticCopy(String name) =>
       name.endsWith('.tmp') ||
+      // Staging file for a source being extracted. A failed import used to
+      // leave one behind, and without this the next export shipped it.
+      name.endsWith('.importing') ||
       name.contains('.corrupt-') ||
       name.contains('.partial-') ||
       name.contains('.shrank-');
@@ -187,6 +194,18 @@ class ZipCaptureArchive implements CaptureArchive {
     } catch (exception) {
       throw ArchiveUnreadableException(source.path, '$exception');
     }
+    try {
+      return await _importFrom(archive, source);
+    } finally {
+      // `decodeStream` holds the zip open through an `InputFileStream`, and
+      // nothing above ever released it: every import leaked a descriptor for
+      // the life of the process, and on Windows kept the user's chosen file
+      // locked against rename or delete.
+      archive.clearSync();
+    }
+  }
+
+  Future<RestoreSummary> _importFrom(Archive archive, File source) async {
     _validateManifest(archive, source.path);
 
     final Directory directory = await _directoryProvider();
@@ -203,8 +222,16 @@ class ZipCaptureArchive implements CaptureArchive {
     for (final String name in journalFiles) {
       await _mergeJournal(archive, directory, name);
     }
+
+    // **Recordings commit before the projects merge, not after.** The rule this
+    // class states for projects — a projects failure costs the projects and
+    // never the recordings — was not what the order delivered: `_mergeProjects`
+    // reads the *local* `projects.json`, which throws on a malformed one, and
+    // running it first meant a broken projects file aborted the whole restore
+    // after every source file had been written and before a single row was.
+    final RestoreSummary summary = await _commitRecordings(plan);
     await _mergeProjects(archive);
-    return _commitRecordings(plan);
+    return summary;
   }
 
   /// Validate the whole archive contract before writing a byte into the app's
@@ -399,24 +426,45 @@ class ZipCaptureArchive implements CaptureArchive {
       final ArchiveFile entry = archive.findFile(name)!;
       final File target = File(p.join(directory.path, name));
       if (await target.exists()) {
-        // A source without an index row is recoverable and may be valuable.
-        // Never overwrite it or point an imported row at unknown bytes.
+        // **An import that failed part-way must stay retryable.** Nothing is
+        // committed unless every file lands, so a throw on the tenth capture
+        // leaves the first nine extracted and no rows written. Refusing every
+        // pre-existing file on the retry would then drop those nine rows for
+        // good — their sources survive as orphans `recoverOrphans()` re-adopts,
+        // but the transcripts, which only ever lived in the index, do not.
+        //
+        // So a file that *is* the archived one counts as already extracted and
+        // keeps its row. Anything else is still refused: a source with no index
+        // row may be the user's own and is never overwritten, and an imported
+        // row must never be pointed at unknown bytes.
+        if (await _isSameSource(target, entry, item)) {
+          restored.add(item);
+          continue;
+        }
         plan.unreadable++;
         continue;
       }
       final File temporary = File('${target.path}.importing');
-      final OutputFileStream output = OutputFileStream(temporary.path);
       try {
-        entry.writeContent(output);
-      } finally {
-        output.closeSync();
-      }
-      if (!await temporary.exists() || await temporary.length() != entry.size) {
+        final OutputFileStream output = OutputFileStream(temporary.path);
+        try {
+          entry.writeContent(output);
+        } finally {
+          output.closeSync();
+        }
+        if (!await temporary.exists() ||
+            await temporary.length() != entry.size) {
+          throw ArchiveUnreadableException(
+            name,
+            'extracted size did not match ${entry.size} bytes',
+          );
+        }
+      } catch (_) {
+        // Every failure path clears the staging file, not just the size
+        // mismatch. A leftover `.importing` is a payload member `_isPayload`
+        // would otherwise ship in the next export.
         if (await temporary.exists()) await temporary.delete();
-        throw ArchiveUnreadableException(
-          name,
-          'extracted size did not match ${entry.size} bytes',
-        );
+        rethrow;
       }
       await temporary.rename(target.path);
       restored.add(item);
@@ -425,6 +473,30 @@ class ZipCaptureArchive implements CaptureArchive {
     plan.additions
       ..clear()
       ..addAll(restored);
+  }
+
+  /// Whether the file already on disk is the one this archive carries.
+  ///
+  /// Size first, because it is a `stat` and settles almost every case. The hash
+  /// is only consulted when the incoming row has one — legacy rows do not — and
+  /// only after the size matched, so a full read of a long video happens only
+  /// on the retry of a failed import, never on a first one. Name equality is
+  /// itself strong evidence: sources are `<capture-id>.<ext>` and the id is a
+  /// uuid, so a collision means the same capture.
+  Future<bool> _isSameSource(
+    File target,
+    ArchiveFile entry,
+    Recording incoming,
+  ) async {
+    try {
+      if (await target.length() != entry.size) return false;
+      final String? expected = incoming.contentHash;
+      if (expected == null) return true;
+      return await _hasher.hash(target) == expected;
+    } catch (_) {
+      // A file that cannot be measured is not one to claim as ours.
+      return false;
+    }
   }
 
   Future<RestoreSummary> _commitRecordings(_RecordingImportPlan plan) async {
@@ -506,7 +578,16 @@ class ZipCaptureArchive implements CaptureArchive {
     final ArchiveFile? entry = archive.findFile('projects.json');
     if (entry == null) return;
 
-    final List<Project> local = await _projects.loadAll();
+    final List<Project> local;
+    try {
+      local = await _projects.loadAll();
+    } catch (_) {
+      // A local `projects.json` this build cannot read throws out of `loadAll`.
+      // Merging into a list we cannot see would either drop the user's projects
+      // or duplicate them, so the archived list is left where it is — the
+      // captures, which are the point of the restore, are already committed.
+      return;
+    }
     final String? activeId = _projects.loadedActiveProjectId;
     final Set<String> known = local.map((Project item) => item.id).toSet();
 
@@ -574,10 +655,19 @@ class ZipCaptureArchive implements CaptureArchive {
         .toList();
     if (fresh.isEmpty) return;
 
+    // These files are documented as able to end mid-record after a kill, and
+    // `load` absorbs that by skipping the one torn line. Appending straight
+    // onto it would fuse the fresh first record to the partial one and cost
+    // both, so the separator is restored first when it is missing.
+    final bool needsSeparator =
+        await target.exists() &&
+        await target.length() > 0 &&
+        !(await target.readAsString()).endsWith('\n');
+
     // Appended, never rewritten — the same rule these files already live by,
     // and the reason a restore cannot destroy the history it is restoring.
     await target.writeAsString(
-      '${fresh.join('\n')}\n',
+      '${needsSeparator ? '\n' : ''}${fresh.join('\n')}\n',
       mode: FileMode.writeOnlyAppend,
       flush: true,
     );

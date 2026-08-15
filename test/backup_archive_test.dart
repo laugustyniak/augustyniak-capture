@@ -476,4 +476,110 @@ void main() {
     }
     archive.clearSync();
   });
+
+  test('a retry keeps rows whose files a failed attempt already wrote', () async {
+    await seed(source, <Recording>[capture('a'), capture('b')]);
+    await archiveFor(source).exportTo(zipPath());
+
+    // The state a part-way import leaves behind: `a.m4a` extracted, no rows
+    // committed. Refusing every pre-existing file on the retry dropped those
+    // rows for good — the source survives as an orphan, the transcript does not.
+    await File(p.join(target.path, 'a.m4a')).writeAsString('audio-a');
+
+    final RestoreSummary restored = await archiveFor(
+      target,
+    ).importFrom(zipPath());
+
+    expect(restored.added, 2, reason: 'the half-extracted row must still land');
+    expect(restored.unreadable, 0);
+    expect(restored.filesRestored, 1, reason: 'only b needed writing');
+    final List<Recording> rows = await repositoryFor(target).loadAll();
+    expect(rows.map((Recording item) => item.id).toSet(), <String>{'a', 'b'});
+    expect(
+      rows.firstWhere((Recording item) => item.id == 'a').transcript,
+      'body of a',
+    );
+  });
+
+  test('a foreign file of the same name is still refused', () async {
+    await seed(source, <Recording>[capture('a')]);
+    await archiveFor(source).exportTo(zipPath());
+
+    // Same name, different bytes and a different length: not the archive's.
+    await File(p.join(target.path, 'a.m4a')).writeAsString('something else');
+
+    final RestoreSummary restored = await archiveFor(
+      target,
+    ).importFrom(zipPath());
+
+    expect(restored.added, 0);
+    expect(restored.unreadable, 1);
+    expect(
+      File(p.join(target.path, 'a.m4a')).readAsStringSync(),
+      'something else',
+      reason: 'a source with no row may be the user\'s own',
+    );
+  });
+
+  test('an unreadable local projects file does not cost the captures', () async {
+    await seed(source, <Recording>[capture('a')]);
+    // The archive has to carry a projects list, or `_mergeProjects` returns at
+    // its `entry == null` guard and never reaches the local read at all.
+    await projectsFor(source).saveAll(<Project>[
+      const Project(id: 'p1', name: 'Acme', repoPath: '/tmp/acme'),
+    ], activeProjectId: null);
+    await archiveFor(source).exportTo(zipPath());
+
+    // `ProjectsRepository.loadAll` throws on this. The merge used to run before
+    // the recordings were committed, so the whole restore aborted after every
+    // source file had been written and before a single row was.
+    await File(
+      p.join(target.path, 'projects.json'),
+    ).writeAsString('{"not":"a project list"}');
+
+    final RestoreSummary restored = await archiveFor(
+      target,
+    ).importFrom(zipPath());
+
+    expect(restored.added, 1);
+    expect((await repositoryFor(target).loadAll()).single.id, 'a');
+  });
+
+  test(
+    'a torn final journal line does not swallow the first fresh one',
+    () async {
+      await seed(source, <Recording>[capture('a')]);
+      final String archived = jsonEncode(<String, dynamic>{
+        'recordingId': 'a',
+        'at': DateTime(2026, 8, 5, 13).toIso8601String(),
+        'field': 'title',
+        'from': 'old',
+        'to': 'new',
+        'source': 'user',
+      });
+      await File(
+        p.join(source.path, 'revisions.jsonl'),
+      ).writeAsString('$archived\n');
+      await archiveFor(source).exportTo(zipPath());
+
+      // Killed mid-append: the local file ends without its newline, which `load`
+      // absorbs by dropping that one row. Appending straight onto it fused the
+      // fresh record to the partial one and cost both.
+      await File(
+        p.join(target.path, 'revisions.jsonl'),
+      ).writeAsString('{"recordingId":"local","fie');
+      await archiveFor(target).importFrom(zipPath());
+
+      final List<String> lines = await File(
+        p.join(target.path, 'revisions.jsonl'),
+      ).readAsLines();
+      expect(lines.last, archived, reason: 'the fresh row must stand alone');
+    },
+  );
+
+  test('a staging file is never shipped as a payload member', () {
+    // A failed extraction used to leave `<id>.<ext>.importing` behind, and the
+    // next export carried it as if it were a capture.
+    expect(ZipCaptureArchive.isDiagnosticCopy('abc.m4a.importing'), isTrue);
+  });
 }

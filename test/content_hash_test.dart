@@ -17,6 +17,7 @@ class _Repo extends RecordingsRepository {
   final Directory directory;
   final List<Recording> seed;
   List<Recording> saved = <Recording>[];
+  int saves = 0;
 
   @override
   Future<File> createSourceFile(String id, String extension) async =>
@@ -26,8 +27,10 @@ class _Repo extends RecordingsRepository {
   Future<List<Recording>> loadAll() async => List<Recording>.of(seed);
 
   @override
-  Future<void> saveAll(List<Recording> recordings) async =>
-      saved = List<Recording>.of(recordings);
+  Future<void> saveAll(List<Recording> recordings) async {
+    saves++;
+    saved = List<Recording>.of(recordings);
+  }
 }
 
 class _GatedHasher extends SourceContentHasher {
@@ -182,4 +185,41 @@ void main() {
     await controller.waitForProcessing();
     expect(controller.recordings.single.contentHash, isNotNull);
   });
+
+  test(
+    'a legacy library is fingerprinted in one write, not one per row',
+    () async {
+      final List<Recording> legacy = <Recording>[];
+      for (int i = 0; i < 5; i++) {
+        final File source = File(p.join(directory.path, 'legacy$i.m4a'))
+          ..writeAsStringSync('bytes for $i');
+        legacy.add(_legacy('legacy$i', source));
+      }
+      final _Repo repository = _Repo(directory, legacy);
+      final RecordingsController controller = RecordingsController(
+        repository: repository,
+        transcriptionService: const DisabledTranscriptionService(),
+      );
+      addTearDown(controller.dispose);
+
+      await controller.initialize();
+      await controller.waitForProcessing();
+
+      // Every row hashed...
+      expect(
+        controller.recordings.every(
+          (Recording item) => item.contentHash != null,
+        ),
+        isTrue,
+      );
+      // ...and the index rewritten once. Routing each row through `_update` cost
+      // a whole-index rewrite, a full table delete-and-reinsert and a Turso push
+      // *per capture*, which on a real library is hundreds of each at start-up.
+      expect(
+        repository.saves,
+        1,
+        reason: 'the backfill must persist once, not once per row',
+      );
+    },
+  );
 }

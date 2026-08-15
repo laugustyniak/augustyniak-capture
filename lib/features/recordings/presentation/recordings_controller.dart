@@ -579,9 +579,9 @@ class RecordingsController extends ChangeNotifier {
         ...orphans,
       ]..sort((Recording a, Recording b) => b.createdAt.compareTo(a.createdAt));
       await _persistAll();
-      for (final Recording orphan in orphans) {
-        unawaited(_computeContentHash(orphan.id));
-      }
+      unawaited(
+        _hashInBatch(orphans.map((Recording orphan) => orphan.id).toList()),
+      );
       _logSink.log(
         'Recovered ${orphans.length} capture(s) with no index entry — '
         'restored as raw, re-run processing to get their text back.',
@@ -616,15 +616,54 @@ class RecordingsController extends ChangeNotifier {
 
   /// Give legacy and recovered captures a content fingerprint without holding
   /// up startup. Each row remains usable if its source cannot be read.
-  Future<void> _backfillContentHashes() async {
-    final List<String> missing = _recordings
+  Future<void> _backfillContentHashes() async => _hashInBatch(
+    _recordings
         .where((Recording item) => item.contentHash == null)
         .map((Recording item) => item.id)
-        .toList();
-    for (final String id in missing) {
+        .toList(),
+  );
+
+  /// Hash a whole set of sources, then persist them in **one** write.
+  ///
+  /// Routing each row through [_update] is what this replaces, and the cost was
+  /// not theoretical: every call rewrites the entire `recordings.json`, deletes
+  /// and re-inserts every row of the `recordings` table, and kicks a full Turso
+  /// push. On the first launch after this field shipped, a library of four
+  /// hundred captures therefore paid four hundred whole-index rewrites and four
+  /// hundred full-database pushes on top of reading every source through
+  /// SHA-256. The hashing still happens one file at a time — it is IO-bound and
+  /// a stampede buys nothing — but the result lands once.
+  ///
+  /// Best-effort under the [_copyToClipboard] contract: a source that cannot be
+  /// read costs its own fingerprint and nothing else, and a disposal mid-sweep
+  /// drops the rows not yet hashed rather than writing a partial result.
+  Future<void> _hashInBatch(List<String> ids) async {
+    if (ids.isEmpty) return;
+    final Map<String, String> hashed = <String, String>{};
+    for (final String id in ids) {
       if (_disposed) return;
-      await _computeContentHash(id);
+      final String? hash = await _hashSource(id);
+      if (hash != null) hashed[id] = hash;
     }
+    if (_disposed || hashed.isEmpty) return;
+
+    bool changed = false;
+    _recordings = _recordings.map((Recording item) {
+      final String? hash = hashed[item.id];
+      if (hash == null || item.contentHash != null) return item;
+      changed = true;
+      return item.copyWith(contentHash: hash);
+    }).toList();
+    if (!changed) return;
+
+    await _persistAll();
+    // Re-checked *after* the write, not only before it: this runs unawaited
+    // from `recoverOrphans` and from start-up, so a dispose can land inside
+    // `_persistAll` and `notifyListeners` on a disposed notifier throws. The
+    // rows are already on disk either way.
+    if (_disposed) return;
+    notifyListeners();
+    _logSink.log('Stored ${hashed.length} source fingerprint(s).');
   }
 
   /// Stream the immutable source through SHA-256 and persist only the hash.
@@ -634,27 +673,33 @@ class RecordingsController extends ChangeNotifier {
   /// are evidence in Logs, not status changes: a capture without a hash is
   /// still a complete capture and can be retried on the next launch.
   Future<void> _computeContentHash(String id) async {
+    final String? hash = await _hashSource(id);
+    if (hash == null || _disposed) return;
+    await _update(
+      id,
+      (Recording current) => current.contentHash == null
+          ? current.copyWith(contentHash: hash)
+          : current,
+    );
+    _logSink.log('Source fingerprint stored.', recordingId: id);
+  }
+
+  /// The fingerprint alone — no write, so a caller sweeping many rows can
+  /// persist them together. Null means "no fingerprint for this one", never a
+  /// failed capture.
+  Future<String?> _hashSource(String id) async {
     final int index = _recordings.indexWhere((Recording item) => item.id == id);
-    if (index < 0 || _recordings[index].contentHash != null) return;
-    if (!_hashesInFlight.add(id)) return;
+    if (index < 0 || _recordings[index].contentHash != null) return null;
+    if (!_hashesInFlight.add(id)) return null;
     try {
-      final String hash = await _contentHasher.hash(
-        File(_recordings[index].filePath),
-      );
-      if (_disposed) return;
-      await _update(
-        id,
-        (Recording current) => current.contentHash == null
-            ? current.copyWith(contentHash: hash)
-            : current,
-      );
-      _logSink.log('Source fingerprint stored.', recordingId: id);
+      return await _contentHasher.hash(File(_recordings[index].filePath));
     } catch (exception) {
       _logSink.log(
         'Source fingerprint unavailable: $exception',
         level: LogLevel.warn,
         recordingId: id,
       );
+      return null;
     } finally {
       _hashesInFlight.remove(id);
     }

@@ -20,8 +20,22 @@ class FilePickerArchiveLocation implements ArchiveLocationPicker {
   /// it is only paid where that path is taken. A desktop copy streams.
   static bool get _writesItsOwnBytes => Platform.isAndroid || Platform.isIOS;
 
+  /// What the SAF path will hold in memory before handing it to the picker.
+  ///
+  /// There is no streaming alternative on that path, so the only honest choice
+  /// above this size is to say so. Without the check the process is OOM-killed
+  /// mid-export and the user is told nothing at all — on the platform this
+  /// whole feature exists for, where an archive is mostly audio and video.
+  static const int maxInMemoryBytes = 512 * 1024 * 1024;
+
   @override
   Future<String?> deliver(File staged, String suggestedName) async {
+    if (_writesItsOwnBytes) {
+      final int size = await staged.length();
+      if (size > maxInMemoryBytes) {
+        throw ArchiveTooLargeException(size, maxInMemoryBytes);
+      }
+    }
     final Uint8List? bytes = _writesItsOwnBytes
         ? await staged.readAsBytes()
         : null;

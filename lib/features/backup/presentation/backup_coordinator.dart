@@ -56,9 +56,7 @@ class BackupCoordinator {
         _logSink.log('Export cancelled.', level: LogLevel.warn);
         return null;
       }
-      _logSink.log(
-        'Exported ${summary.captures} captures to $destination.',
-      );
+      _logSink.log('Exported ${summary.captures} captures to $destination.');
       return BackupSummary(
         captures: summary.captures,
         files: summary.files,

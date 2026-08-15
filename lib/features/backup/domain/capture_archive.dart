@@ -136,6 +136,25 @@ class ArchiveUnreadableException implements Exception {
   String toString() => 'Not a readable capture archive ($path): $reason';
 }
 
+/// An export too large for the platform path that has to buffer it.
+///
+/// Android and iOS hand the *bytes* to the storage-access framework rather than
+/// a path to write, so there is no streaming option there. Saying so is the
+/// only honest outcome above the ceiling: the alternative is an OOM kill with
+/// nothing on screen explaining it.
+class ArchiveTooLargeException implements Exception {
+  const ArchiveTooLargeException(this.bytes, this.limitBytes);
+
+  final int bytes;
+  final int limitBytes;
+
+  @override
+  String toString() =>
+      'The archive is ${(bytes / (1024 * 1024)).round()} MB and this platform '
+      'can save at most ${(limitBytes / (1024 * 1024)).round()} MB in one go. '
+      'Export to a computer instead.';
+}
+
 /// Where an exported archive goes, and where an imported one comes from.
 ///
 /// A seam for the same reason `DirectoryPicker` and `MediaPicker` are: the real
