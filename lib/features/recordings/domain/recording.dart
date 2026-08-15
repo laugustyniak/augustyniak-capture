@@ -20,6 +20,8 @@ enum RecordingStatus {
 /// mic recordings, uploads, images, text notes and video — because they share
 /// every field and the whole persistence stack is keyed on one list type.
 class Recording {
+  static final RegExp _sha256 = RegExp(r'^[0-9a-f]{64}$');
+
   const Recording({
     required this.id,
     required this.filePath,
@@ -27,6 +29,7 @@ class Recording {
     required this.durationMs,
     required this.status,
     this.sizeBytes = 0,
+    this.contentHash,
     this.type = CaptureType.audioRecording,
     this.sourceMimeType,
     this.transcript,
@@ -56,6 +59,14 @@ class Recording {
   /// that verifies the file is non-empty at capture time. `0` on legacy rows,
   /// where the card simply omits the size from its verification footer.
   final int sizeBytes;
+
+  /// Lowercase hexadecimal SHA-256 of the immutable source artifact.
+  ///
+  /// Null means it has not been computed yet, which is valid for legacy rows
+  /// and for a source that was unavailable when the best-effort backfill ran.
+  /// This is an attribute used for cross-device duplicate detection; [id]
+  /// remains the capture's identity and two rows may legitimately share it.
+  final String? contentHash;
 
   /// Immutable identity, set at construction and never changed by the pipeline.
   final CaptureType type;
@@ -124,6 +135,7 @@ class Recording {
 
   Recording copyWith({
     RecordingStatus? status,
+    String? contentHash,
     String? transcript,
     String? thumbPath,
     bool clearThumbPath = false,
@@ -150,6 +162,7 @@ class Recording {
       createdAt: createdAt,
       durationMs: durationMs,
       sizeBytes: sizeBytes,
+      contentHash: contentHash ?? this.contentHash,
       type: type,
       sourceMimeType: sourceMimeType,
       status: status ?? this.status,
@@ -174,6 +187,7 @@ class Recording {
     'createdAt': createdAt.toIso8601String(),
     'durationMs': durationMs,
     'sizeBytes': sizeBytes,
+    'contentHash': contentHash,
     'status': status.name,
     'type': type.name,
     'sourceMimeType': sourceMimeType,
@@ -199,6 +213,12 @@ class Recording {
       durationMs: json['durationMs'] as int,
       // Absent on every row written before the card showed a size.
       sizeBytes: json['sizeBytes'] as int? ?? 0,
+      // Absent on every row written before content fingerprints existed.
+      contentHash:
+          json['contentHash'] is String &&
+              _sha256.hasMatch(json['contentHash'] as String)
+          ? json['contentHash'] as String
+          : null,
       status: RecordingStatus.values.byName(json['status'] as String),
       // Legacy rows have no `type`; unknown names from a newer build degrade
       // the same way rather than throwing.

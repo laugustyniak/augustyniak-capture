@@ -35,6 +35,7 @@ import '../data/revisions_repository.dart';
 import '../../projects/domain/project.dart';
 import '../data/agent_artifact_scanner.dart';
 import '../domain/agent_artifact.dart';
+import '../data/source_content_hasher.dart';
 import '../domain/agent_handoff.dart';
 import '../domain/capture_category.dart';
 import '../domain/capture_type.dart';
@@ -78,6 +79,7 @@ class RecordingsController extends ChangeNotifier {
     Project? Function(String projectId)? projectById,
     Directory? Function()? vaultDirectory,
     AgentArtifactScanner artifactScanner = const AgentArtifactScanner(),
+    SourceContentHasher contentHasher = const SourceContentHasher(),
     RevisionsRepository? revisionsRepository,
     ProcessorRegistry? processorRegistry,
     MediaPicker? mediaPicker,
@@ -110,6 +112,7 @@ class RecordingsController extends ChangeNotifier {
        _projectById = projectById,
        _vaultDirectory = vaultDirectory,
        _artifactScanner = artifactScanner,
+       _contentHasher = contentHasher,
        _mediaPicker = mediaPicker ?? const FilePickerMediaPicker(),
        _importer = MediaImporter(repository),
        _recorder = recorder ?? AudioRecorder(),
@@ -197,6 +200,7 @@ class RecordingsController extends ChangeNotifier {
   final Project? Function(String projectId)? _projectById;
   final Directory? Function()? _vaultDirectory;
   final AgentArtifactScanner _artifactScanner;
+  final SourceContentHasher _contentHasher;
   final MediaPicker _mediaPicker;
   final MediaImporter _importer;
   late final ProcessorRegistry _registry;
@@ -316,6 +320,13 @@ class RecordingsController extends ChangeNotifier {
   /// The startup backfill, kept so [waitForProcessing] can await it. Null until
   /// [initialize] runs.
   Future<void>? _posterBackfill;
+
+  /// Source hashes in flight. Capture creation and the startup sweep can both
+  /// reach the same legacy row, so ids are claimed synchronously before I/O.
+  final Set<String> _hashesInFlight = <String>{};
+
+  /// The startup hash sweep, retained so tests have one settlement point.
+  Future<void>? _hashBackfill;
 
   /// Ids whose enrichment call is in flight right now — the second AI stage,
   /// which runs *after* the item is already `completed` and persisted.
@@ -448,8 +459,11 @@ class RecordingsController extends ChangeNotifier {
     if (!Platform.environment.containsKey('FLUTTER_TEST')) {
       try {
         final AppDatabase db = await AppDatabase.getInstance();
-        final AppSettings settings = await SettingsRepository().load() ?? AppSettings.empty;
-        if (settings.tursoDbUrl != null && settings.tursoAuthToken != null && settings.tursoSyncEnabled) {
+        final AppSettings settings =
+            await SettingsRepository().load() ?? AppSettings.empty;
+        if (settings.tursoDbUrl != null &&
+            settings.tursoAuthToken != null &&
+            settings.tursoSyncEnabled) {
           final TursoSyncService syncService = TursoSyncService(db: db);
           final bool synced = await syncService.pullFromTurso(
             dbUrl: settings.tursoDbUrl!,
@@ -457,7 +471,9 @@ class RecordingsController extends ChangeNotifier {
           );
           if (synced) {
             _recordings = await _repository.loadAll();
-            _logSink.log('Synced ${_recordings.length} captures from Turso Cloud.');
+            _logSink.log(
+              'Synced ${_recordings.length} captures from Turso Cloud.',
+            );
           }
         }
       } catch (e) {
@@ -507,6 +523,8 @@ class RecordingsController extends ChangeNotifier {
     // per video must never be something the first frame of the app waits for.
     _posterBackfill = _backfillPosters();
     unawaited(_posterBackfill!);
+    _hashBackfill = _backfillContentHashes();
+    unawaited(_hashBackfill!);
   }
 
   /// Reloads recordings from SQLite storage into RAM and notifies listeners.
@@ -519,7 +537,8 @@ class RecordingsController extends ChangeNotifier {
   Future<bool> syncTurso() async {
     try {
       final AppDatabase db = await AppDatabase.getInstance();
-      final AppSettings settings = await SettingsRepository().load() ?? AppSettings.empty;
+      final AppSettings settings =
+          await SettingsRepository().load() ?? AppSettings.empty;
 
       final String url = (settings.tursoDbUrl ?? '').trim().isNotEmpty
           ? settings.tursoDbUrl!
@@ -528,7 +547,8 @@ class RecordingsController extends ChangeNotifier {
       // Falling through to the build-time value would paper over exactly the
       // failure the Config tab is trying to report, so it stays empty and the
       // sync declines below with its own message.
-      final String token = (settings.tursoAuthToken != null &&
+      final String token =
+          (settings.tursoAuthToken != null &&
               !TokenCipher.isSealed(settings.tursoAuthToken!))
           ? settings.tursoAuthToken!
           : (SyncDefaults.tursoAuthToken ?? '');
@@ -588,6 +608,9 @@ class RecordingsController extends ChangeNotifier {
         ...orphans,
       ]..sort((Recording a, Recording b) => b.createdAt.compareTo(a.createdAt));
       await _persistAll();
+      unawaited(
+        _hashInBatch(orphans.map((Recording orphan) => orphan.id).toList()),
+      );
       _logSink.log(
         'Recovered ${orphans.length} capture(s) with no index entry — '
         'restored as raw, re-run processing to get their text back.',
@@ -617,6 +640,97 @@ class RecordingsController extends ChangeNotifier {
     for (final String id in videos) {
       if (_disposed) return;
       await _extractPoster(id);
+    }
+  }
+
+  /// Give legacy and recovered captures a content fingerprint without holding
+  /// up startup. Each row remains usable if its source cannot be read.
+  Future<void> _backfillContentHashes() async => _hashInBatch(
+    _recordings
+        .where((Recording item) => item.contentHash == null)
+        .map((Recording item) => item.id)
+        .toList(),
+  );
+
+  /// Hash a whole set of sources, then persist them in **one** write.
+  ///
+  /// Routing each row through [_update] is what this replaces, and the cost was
+  /// not theoretical: every call rewrites the entire `recordings.json`, deletes
+  /// and re-inserts every row of the `recordings` table, and kicks a full Turso
+  /// push. On the first launch after this field shipped, a library of four
+  /// hundred captures therefore paid four hundred whole-index rewrites and four
+  /// hundred full-database pushes on top of reading every source through
+  /// SHA-256. The hashing still happens one file at a time — it is IO-bound and
+  /// a stampede buys nothing — but the result lands once.
+  ///
+  /// Best-effort under the [_copyToClipboard] contract: a source that cannot be
+  /// read costs its own fingerprint and nothing else, and a disposal mid-sweep
+  /// drops the rows not yet hashed rather than writing a partial result.
+  Future<void> _hashInBatch(List<String> ids) async {
+    if (ids.isEmpty) return;
+    final Map<String, String> hashed = <String, String>{};
+    for (final String id in ids) {
+      if (_disposed) return;
+      final String? hash = await _hashSource(id);
+      if (hash != null) hashed[id] = hash;
+    }
+    if (_disposed || hashed.isEmpty) return;
+
+    bool changed = false;
+    _recordings = _recordings.map((Recording item) {
+      final String? hash = hashed[item.id];
+      if (hash == null || item.contentHash != null) return item;
+      changed = true;
+      return item.copyWith(contentHash: hash);
+    }).toList();
+    if (!changed) return;
+
+    await _persistAll();
+    // Re-checked *after* the write, not only before it: this runs unawaited
+    // from `recoverOrphans` and from start-up, so a dispose can land inside
+    // `_persistAll` and `notifyListeners` on a disposed notifier throws. The
+    // rows are already on disk either way.
+    if (_disposed) return;
+    notifyListeners();
+    _logSink.log('Stored ${hashed.length} source fingerprint(s).');
+  }
+
+  /// Stream the immutable source through SHA-256 and persist only the hash.
+  ///
+  /// The id is claimed before the first await, making this a single-flight
+  /// operation between capture-time scheduling and startup backfill. Errors
+  /// are evidence in Logs, not status changes: a capture without a hash is
+  /// still a complete capture and can be retried on the next launch.
+  Future<void> _computeContentHash(String id) async {
+    final String? hash = await _hashSource(id);
+    if (hash == null || _disposed) return;
+    await _update(
+      id,
+      (Recording current) => current.contentHash == null
+          ? current.copyWith(contentHash: hash)
+          : current,
+    );
+    _logSink.log('Source fingerprint stored.', recordingId: id);
+  }
+
+  /// The fingerprint alone — no write, so a caller sweeping many rows can
+  /// persist them together. Null means "no fingerprint for this one", never a
+  /// failed capture.
+  Future<String?> _hashSource(String id) async {
+    final int index = _recordings.indexWhere((Recording item) => item.id == id);
+    if (index < 0 || _recordings[index].contentHash != null) return null;
+    if (!_hashesInFlight.add(id)) return null;
+    try {
+      return await _contentHasher.hash(File(_recordings[index].filePath));
+    } catch (exception) {
+      _logSink.log(
+        'Source fingerprint unavailable: $exception',
+        level: LogLevel.warn,
+        recordingId: id,
+      );
+      return null;
+    } finally {
+      _hashesInFlight.remove(id);
     }
   }
 
@@ -794,6 +908,7 @@ class RecordingsController extends ChangeNotifier {
       // Critical invariant: persist metadata only after the audio file exists.
       _recordings = <Recording>[saved, ..._recordings];
       await _persistAll();
+      unawaited(_computeContentHash(saved.id));
       unawaited(_gamificationController?.onCaptureCreated(_recordings.length));
       _logSink.log(
         'File verified and saved · $sizeBytes B',
@@ -1030,6 +1145,7 @@ class RecordingsController extends ChangeNotifier {
       // Critical invariant: index the note only after the .txt exists on disk.
       _recordings = <Recording>[saved, ..._recordings];
       await _persistAll();
+      unawaited(_computeContentHash(saved.id));
       unawaited(_gamificationController?.onCaptureCreated(_recordings.length));
       _logSink.log('Note saved · $sizeBytes B', recordingId: saved.id);
 
@@ -1073,6 +1189,7 @@ class RecordingsController extends ChangeNotifier {
       // Critical invariant: index only after the source is copied and verified.
       _recordings = <Recording>[saved, ..._recordings];
       await _persistAll();
+      unawaited(_computeContentHash(saved.id));
       unawaited(_gamificationController?.onCaptureCreated(_recordings.length));
       _logSink.log(
         'File imported · ${type.name} · ${await File(saved.filePath).length()} B',
@@ -1456,10 +1573,7 @@ class RecordingsController extends ChangeNotifier {
     );
 
     if (!_areArtifactsEqual(recording.artifacts, found)) {
-      await _update(
-        id,
-        (Recording item) => item.copyWith(artifacts: found),
-      );
+      await _update(id, (Recording item) => item.copyWith(artifacts: found));
     }
     return found;
   }
@@ -1488,16 +1602,10 @@ class RecordingsController extends ChangeNotifier {
       artifact,
     ];
 
-    await _update(
-      id,
-      (Recording item) => item.copyWith(artifacts: updated),
-    );
+    await _update(id, (Recording item) => item.copyWith(artifacts: updated));
   }
 
-  static bool _areArtifactsEqual(
-    List<AgentArtifact> a,
-    List<AgentArtifact> b,
-  ) {
+  static bool _areArtifactsEqual(List<AgentArtifact> a, List<AgentArtifact> b) {
     if (a.length != b.length) return false;
     for (int i = 0; i < a.length; i++) {
       if (a[i].path != b[i].path || a[i].updatedAt != b[i].updatedAt) {
@@ -1761,13 +1869,15 @@ class RecordingsController extends ChangeNotifier {
   /// assert a `completed` status must await this first.
   @visibleForTesting
   Future<void> waitForProcessing() async {
-    // The startup poster backfill runs unawaited off `initialize`, so it is part
-    // of "the background work has settled" for a test's purposes.
+    // Startup poster/hash backfills and capture-time hashing run unawaited, so
+    // they are part of "the background work has settled" for test purposes.
     await _posterBackfill;
+    await _hashBackfill;
     int guard = 0;
     while ((_isDraining ||
             pendingProcessingCount > 0 ||
-            _postersInFlight.isNotEmpty) &&
+            _postersInFlight.isNotEmpty ||
+            _hashesInFlight.isNotEmpty) &&
         guard++ < 10000) {
       await Future<void>.delayed(Duration.zero);
     }
@@ -1842,8 +1952,9 @@ class RecordingsController extends ChangeNotifier {
         _beginUsageJob(
           id,
           _stageFor(recording.type),
-          audioSeconds:
-              recording.durationMs > 0 ? recording.durationMs / 1000 : null,
+          audioSeconds: recording.durationMs > 0
+              ? recording.durationMs / 1000
+              : null,
         );
         final String transcript;
         try {
@@ -2424,9 +2535,9 @@ class RecordingsController extends ChangeNotifier {
     // by eye — the same courtesy `revisions.jsonl` gets for free by being
     // written as changes happen.
     final List<Recording> closed =
-        List<Recording>.of(_recordings)
-            .where((Recording item) => item.isProcessedByUser)
-            .toList()
+        List<Recording>.of(
+            _recordings,
+          ).where((Recording item) => item.isProcessedByUser).toList()
           ..sort((Recording a, Recording b) {
             final DateTime? left = a.processedAt;
             final DateTime? right = b.processedAt;
@@ -2612,19 +2723,24 @@ class RecordingsController extends ChangeNotifier {
 
   void _pushToTursoInBackground() {
     if (Platform.environment.containsKey('FLUTTER_TEST')) return;
-    unawaited(Future<void>(() async {
-      try {
-        final AppDatabase db = await AppDatabase.getInstance();
-        final AppSettings settings = await SettingsRepository().load() ?? AppSettings.empty;
-        if (settings.tursoDbUrl != null && settings.tursoAuthToken != null && settings.tursoSyncEnabled) {
-          final TursoSyncService syncService = TursoSyncService(db: db);
-          await syncService.pushToTurso(
-            dbUrl: settings.tursoDbUrl!,
-            authToken: settings.tursoAuthToken!,
-          );
-        }
-      } catch (_) {}
-    }));
+    unawaited(
+      Future<void>(() async {
+        try {
+          final AppDatabase db = await AppDatabase.getInstance();
+          final AppSettings settings =
+              await SettingsRepository().load() ?? AppSettings.empty;
+          if (settings.tursoDbUrl != null &&
+              settings.tursoAuthToken != null &&
+              settings.tursoSyncEnabled) {
+            final TursoSyncService syncService = TursoSyncService(db: db);
+            await syncService.pushToTurso(
+              dbUrl: settings.tursoDbUrl!,
+              authToken: settings.tursoAuthToken!,
+            );
+          }
+        } catch (_) {}
+      }),
+    );
   }
 
   @override

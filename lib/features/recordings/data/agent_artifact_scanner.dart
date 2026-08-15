@@ -125,7 +125,7 @@ class AgentArtifactScanner {
       if (content.contains('capture-id: $captureId') ||
           content.contains('capture-id: "$captureId"') ||
           content.contains('parent-capture: $captureId')) {
-        return _parseMarkdownArtifact(
+        return await _parseMarkdownArtifact(
           file: file,
           captureId: captureId,
           defaultKind: AgentArtifactKind.connectedNote,

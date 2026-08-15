@@ -9,6 +9,10 @@ import 'package:path/path.dart' as p;
 
 import '../../../app/ui_kit.dart';
 import '../../../core/database/app_database.dart';
+import '../../backup/data/file_picker_archive_location.dart';
+import '../../backup/data/zip_capture_archive.dart';
+import '../../backup/domain/capture_archive.dart';
+import '../../backup/presentation/backup_coordinator.dart';
 import '../../clipboard/domain/clipboard_watcher_service.dart';
 import '../../clipboard/presentation/clipboard_history_sheet.dart';
 import '../../clipboard/presentation/clipboard_tab.dart';
@@ -150,6 +154,7 @@ class _RecordingsPageState extends State<RecordingsPage>
   late final MomentumController momentum;
   late final ShortcutsCoordinator shortcuts;
   late final ClipboardWatcherService clipboardWatcher;
+  late final BackupCoordinator backup;
   late final Listenable listenable;
 
   int navigationIndex = queueIndex;
@@ -236,6 +241,17 @@ class _RecordingsPageState extends State<RecordingsPage>
     projects = ProjectsController(
       repository: ProjectsRepository(),
       launcher: launcher,
+    );
+    // Handed the same repositories the app is already using, so an export is a
+    // copy of the live store rather than of a second reading of it.
+    backup = BackupCoordinator(
+      archive: ZipCaptureArchive(
+        directoryProvider: repository.recordingsDirectory,
+        recordings: repository,
+        projects: ProjectsRepository(),
+      ),
+      picker: const FilePickerArchiveLocation(),
+      logSink: logs,
     );
     controller = RecordingsController(
       repository: repository,
@@ -488,6 +504,28 @@ class _RecordingsPageState extends State<RecordingsPage>
   static WindowPresenter _buildWindowPresenter() =>
       _isDesktop ? const SystemWindowPresenter() : const NoopWindowPresenter();
 
+  /// Import, then re-read what the import wrote.
+  ///
+  /// The merge happens at the repository layer, underneath the controller's
+  /// in-memory list — deliberately, because that is where the "existing row
+  /// wins" rule can be enforced against the file rather than against whatever
+  /// the UI currently holds. The cost is that the queue on screen is stale the
+  /// instant it succeeds, so the reload is part of the operation and not a
+  /// refresh the user has to think of. Projects come back first: a restored
+  /// capture may carry a `projectId` that only the imported list explains.
+  Future<RestoreSummary?> _importArchive() async {
+    final RestoreSummary? summary = await backup.import();
+    if (summary == null) return null;
+    await projects.initialize();
+    await controller.initialize();
+    // Sources can arrive without their rows — an archive whose index was
+    // unreadable still restores its files — and this is what walks them back
+    // into the queue instead of leaving them invisible on disk.
+    await controller.recoverOrphans();
+    if (mounted) _applyActiveProject();
+    return summary;
+  }
+
   Future<void> _bootstrap() async {
     await logs.initialize();
     // Opens (or creates) the SQLite database `usageSink` writes cost rows
@@ -568,19 +606,17 @@ class _RecordingsPageState extends State<RecordingsPage>
   /// rows with no cost yet, so it cannot rewrite a price already charged
   /// against an earlier rate.
   void _onPriceRateChanged(String key, ModelPrice? price) {
-    unawaited(
-      () async {
-        await settings.setPriceOverride(key, price);
-        if (price == null) return;
-        final UsageRepository? repository = _usageRepository;
-        if (repository == null) return;
-        final int filled = repository.backfill(
-          key,
-          PriceBook(overrides: settings.settings.priceOverrides),
-        );
-        if (filled > 0 && mounted) setState(() {});
-      }(),
-    );
+    unawaited(() async {
+      await settings.setPriceOverride(key, price);
+      if (price == null) return;
+      final UsageRepository? repository = _usageRepository;
+      if (repository == null) return;
+      final int filled = repository.backfill(
+        key,
+        PriceBook(overrides: settings.settings.priceOverrides),
+      );
+      if (filled > 0 && mounted) setState(() {});
+    }());
   }
 
   /// Push provider + audio changes into the recordings controller. Only affects
@@ -801,6 +837,17 @@ class _RecordingsPageState extends State<RecordingsPage>
                                     projects: projects,
                                     initialProjectId:
                                         activeQueueProjectFilterId,
+                                    // The amber dot on the Models destination
+                                    // already says this, but it says it where
+                                    // nobody on a first run is looking. The
+                                    // queue is the screen the app opens on and
+                                    // the one an unconfigured install leaves
+                                    // empty, so the prompt belongs there too.
+                                    hasTranscriptionProfile:
+                                        settings.activeProfile != null,
+                                    onConfigureModels: () => setState(
+                                      () => navigationIndex = modelsIndex,
+                                    ),
                                     // Null until `_bootstrap()`'s database open
                                     // resolves — same nullable resolver shape
                                     // the PRICING section below already reads
@@ -864,39 +911,45 @@ class _RecordingsPageState extends State<RecordingsPage>
                                     // open resolves, so every read here falls
                                     // back to the same "nothing yet" value the
                                     // section would show on a fresh install.
-                                    thisMonthUsd: _usageRepository?.totalSince(
+                                    thisMonthUsd:
+                                        _usageRepository?.totalSince(
                                           DateTime(
                                             DateTime.now().year,
                                             DateTime.now().month,
                                           ),
                                         ) ??
                                         UsageTotal.none,
-                                    allTimeUsd: _usageRepository?.totalAll() ??
+                                    allTimeUsd:
+                                        _usageRepository?.totalAll() ??
                                         UsageTotal.none,
                                     // Both R2 (source files) and Turso (the
                                     // index) scale with the same total, so one
                                     // measured sum feeds both halves of the
                                     // monthly-rate formula.
-                                    storageBytes: controller.recordings.fold<
-                                        int>(
-                                      0,
-                                      (int sum, Recording r) =>
-                                          sum + r.sizeBytes,
-                                    ),
+                                    storageBytes: controller.recordings
+                                        .fold<int>(
+                                          0,
+                                          (int sum, Recording r) =>
+                                              sum + r.sizeBytes,
+                                        ),
                                     storagePrice: settings.storagePrice,
                                     priceBook: PriceBook(
-                                      overrides: settings.settings.priceOverrides,
+                                      overrides:
+                                          settings.settings.priceOverrides,
                                     ),
                                     models: _usageModels(),
                                     missingRateCounts:
                                         _usageRepository?.missingRateCounts() ??
-                                            const <String, MissingRateInfo>{},
-                                    unknownQuantityCount: _usageRepository
+                                        const <String, MissingRateInfo>{},
+                                    unknownQuantityCount:
+                                        _usageRepository
                                             ?.unknownQuantityCount() ??
                                         0,
                                     onRateChanged: _onPriceRateChanged,
                                     onBackfillClosures:
                                         controller.backfillClosures,
+                                    onExportArchive: backup.export,
+                                    onImportArchive: _importArchive,
                                   ),
                                 ],
                               ),
