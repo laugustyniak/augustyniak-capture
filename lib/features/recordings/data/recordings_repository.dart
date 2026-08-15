@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
@@ -164,7 +165,9 @@ class RecordingsRepository {
             } catch (_) {}
           }
           degraded.add(row['id'] as String);
-          final dynamic rawTags = jsonDecode(row['tags_json'] as String? ?? '[]');
+          final dynamic rawTags = jsonDecode(
+            row['tags_json'] as String? ?? '[]',
+          );
           final List<String> tags = rawTags is List<dynamic>
               ? rawTags.map((dynamic e) => e.toString()).toList()
               : <String>[];
@@ -185,7 +188,9 @@ class RecordingsRepository {
               durationMs: row['duration_ms'] as int,
               type: CaptureType.fromName(row['type'] as String?),
               status: status,
-              category: row['category'] != null ? CaptureCategory.fromName(row['category'] as String) : null,
+              category: row['category'] != null
+                  ? CaptureCategory.fromName(row['category'] as String)
+                  : null,
               title: row['title'] as String?,
               summary: row['summary'] as String?,
               tags: tags,
@@ -248,7 +253,68 @@ class RecordingsRepository {
     }
   }
 
+  /// Serialized per recordings directory.
+  ///
+  /// `saveAll` stages the **whole** index in one `<dir>/recordings.json.tmp`
+  /// before renaming it into place, so two writers overlapping tear that file
+  /// and the rename then publishes the torn bytes *as* the index — precisely
+  /// the failure the durability rules exist to prevent, and one the atomic
+  /// rename cannot see because each half of the write is individually fine.
+  ///
+  /// Keyed by directory rather than held per instance: the `.tmp` path is a
+  /// property of the directory, not of the object. The shell hands one
+  /// repository to both the controller and the backup archive today, but a
+  /// second instance built for the same directory still has to queue behind the
+  /// first. `RecordingsController._saveInFlight` remains as the controller's
+  /// own ordering guarantee; this is the floor underneath every caller.
+  static final Map<String, Future<void>> _directoryWrites =
+      <String, Future<void>>{};
+
+  static Future<T> _serialized<T>(
+    String key,
+    Future<T> Function() action,
+  ) async {
+    while (_directoryWrites[key] != null) {
+      await _directoryWrites[key];
+    }
+    final Completer<void> gate = Completer<void>();
+    _directoryWrites[key] = gate.future;
+    try {
+      return await action();
+    } finally {
+      _directoryWrites.remove(key);
+      gate.complete();
+    }
+  }
+
   Future<void> saveAll(List<Recording> recordings) async {
+    final Directory directory = await recordingsDirectory();
+    return _serialized(directory.path, () => _writeAll(recordings));
+  }
+
+  /// Read, merge and write back without letting go of the write gate.
+  ///
+  /// The backup import is the caller this exists for: it has to merge into the
+  /// index it is about to write over. Loading first and saving later leaves a
+  /// window in which the pipeline indexes a new capture, and the merged list —
+  /// built from the older snapshot — silently drops it. The source file would
+  /// survive as an orphan `recoverOrphans()` re-adopts; its transcript, which
+  /// only ever lived in the index, would not.
+  ///
+  /// [merge] receives the freshly loaded index and returns the list to write.
+  /// A throw from it leaves the index untouched, and an unreadable index throws
+  /// out of here before [merge] is ever called.
+  Future<void> updateAll(
+    Future<List<Recording>> Function(List<Recording> current) merge,
+  ) async {
+    final Directory directory = await recordingsDirectory();
+    return _serialized(directory.path, () async {
+      final List<Recording> current = await loadAll();
+      await _writeAll(await merge(current));
+    });
+  }
+
+  Future<void> _writeAll(List<Recording> recordings) async {
     bool databaseWritten = false;
     try {
       final AppDatabase db = await AppDatabase.getInstance();

@@ -8,6 +8,7 @@ import '../../costs/domain/model_price.dart';
 import '../../costs/domain/price_book.dart';
 import '../../costs/domain/usage_event.dart';
 import '../../costs/presentation/pricing_section.dart';
+import '../../backup/domain/capture_archive.dart';
 import '../../projects/domain/project.dart';
 import '../../recordings/domain/note_vault.dart';
 import '../../recordings/presentation/recordings_controller.dart';
@@ -17,6 +18,7 @@ import '../domain/app_theme_mode.dart';
 import '../domain/audio_config.dart';
 import '../domain/provider_profile.dart';
 import '../domain/token_cipher.dart';
+import 'backup_section.dart';
 import 'enrichment_context_section.dart';
 import 'qr_sync_sheet.dart';
 import 'settings_controller.dart';
@@ -51,6 +53,8 @@ class ConfigTab extends StatelessWidget {
     this.verifiedOn,
     this.onRateChanged = _noRateChange,
     this.onBackfillClosures,
+    this.onExportArchive,
+    this.onImportArchive,
   });
 
   /// Default for callers with no coordinator (mobile, tests): just run it.
@@ -110,9 +114,19 @@ class ConfigTab extends StatelessWidget {
   /// Persists an edited or reset rate, then backfills the rows it unblocks.
   /// The no-op default is what every pre-existing Config test still gets.
   final void Function(String key, ModelPrice? price) onRateChanged;
+
   /// Reads already-closed captures back into the closure history. Null under
   /// the same rule as [onMirrorAll] — the button renders disabled, not absent.
   final Future<ClosureBackfill> Function()? onBackfillClosures;
+
+  /// Takes a portable copy of the whole store, and merges one back in. Null in
+  /// hosts with no archive wired — the section still renders, with its buttons
+  /// disabled, because the explanation of what a backup covers is worth reading
+  /// even where the buttons are not live.
+  ///
+  /// Both answer null when the user cancels the dialog, which is not a failure.
+  final Future<BackupSummary?> Function()? onExportArchive;
+  final Future<RestoreSummary?> Function()? onImportArchive;
 
   @override
   Widget build(BuildContext context) {
@@ -298,6 +312,11 @@ class ConfigTab extends StatelessWidget {
           VaultSection(controller: controller, onMirrorAll: onMirrorAll),
           const SizedBox(height: 22),
           MomentumSection(onBackfill: onBackfillClosures),
+          const SizedBox(height: 22),
+          // Below the vault on purpose: a mirror is the copy you read, an
+          // archive is the copy you restore from, and the first is the one a
+          // user is more likely to want set up today.
+          BackupSection(onExport: onExportArchive, onImport: onImportArchive),
           if (showShortcuts) ...<Widget>[
             const SizedBox(height: 22),
             ShortcutsSection(
@@ -393,7 +412,11 @@ class ConfigTab extends StatelessWidget {
                       style: TextButton.styleFrom(
                         foregroundColor: Console.accent,
                       ),
-                      onPressed: () => _showEditTursoDialog(context, controller, recordingsController),
+                      onPressed: () => _showEditTursoDialog(
+                        context,
+                        controller,
+                        recordingsController,
+                      ),
                     ),
                   ],
                 ),
@@ -462,7 +485,10 @@ class ConfigTab extends StatelessWidget {
                           padding: const EdgeInsets.symmetric(vertical: 12),
                         ),
                         onPressed: () {
-                          final bool isMobile = Theme.of(context).platform == TargetPlatform.android || Theme.of(context).platform == TargetPlatform.iOS;
+                          final bool isMobile =
+                              Theme.of(context).platform ==
+                                  TargetPlatform.android ||
+                              Theme.of(context).platform == TargetPlatform.iOS;
                           if (isMobile) {
                             Navigator.of(context).push(
                               MaterialPageRoute<bool>(
@@ -477,9 +503,13 @@ class ConfigTab extends StatelessWidget {
                               context: context,
                               backgroundColor: Console.surface,
                               shape: const RoundedRectangleBorder(
-                                borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+                                borderRadius: BorderRadius.vertical(
+                                  top: Radius.circular(20),
+                                ),
                               ),
-                              builder: (_) => QrSyncDisplaySheet(settings: controller.settings),
+                              builder: (_) => QrSyncDisplaySheet(
+                                settings: controller.settings,
+                              ),
                             );
                           }
                         },
@@ -637,7 +667,9 @@ Future<void> _showEditTursoDialog(
           children: <Widget>[
             TextField(
               controller: urlCtrl,
-              decoration: const InputDecoration(labelText: 'Turso Database URL'),
+              decoration: const InputDecoration(
+                labelText: 'Turso Database URL',
+              ),
             ),
             const SizedBox(height: 12),
             TextField(
@@ -694,7 +726,8 @@ Future<void> _showEditR2Dialog(
     text: controller.settings.r2AccessKeyId ?? SyncDefaults.r2AccessKeyId ?? '',
   );
   final TextEditingController secretCtrl = TextEditingController(
-    text: controller.settings.r2SecretAccessKey ??
+    text:
+        controller.settings.r2SecretAccessKey ??
         SyncDefaults.r2SecretAccessKey ??
         '',
   );
@@ -726,7 +759,9 @@ Future<void> _showEditR2Dialog(
               const SizedBox(height: 12),
               TextField(
                 controller: secretCtrl,
-                decoration: const InputDecoration(labelText: 'Secret Access Key'),
+                decoration: const InputDecoration(
+                  labelText: 'Secret Access Key',
+                ),
                 obscureText: true,
               ),
             ],
@@ -740,11 +775,21 @@ Future<void> _showEditR2Dialog(
           ElevatedButton(
             onPressed: () async {
               await controller.setR2Config(
-                bucket: bucketCtrl.text.trim().isNotEmpty ? bucketCtrl.text.trim() : null,
-                endpoint: endpointCtrl.text.trim().isNotEmpty ? endpointCtrl.text.trim() : null,
-                accessKeyId: keyIdCtrl.text.trim().isNotEmpty ? keyIdCtrl.text.trim() : null,
-                secretAccessKey: secretCtrl.text.trim().isNotEmpty ? secretCtrl.text.trim() : null,
-                enabled: bucketCtrl.text.trim().isNotEmpty && secretCtrl.text.trim().isNotEmpty,
+                bucket: bucketCtrl.text.trim().isNotEmpty
+                    ? bucketCtrl.text.trim()
+                    : null,
+                endpoint: endpointCtrl.text.trim().isNotEmpty
+                    ? endpointCtrl.text.trim()
+                    : null,
+                accessKeyId: keyIdCtrl.text.trim().isNotEmpty
+                    ? keyIdCtrl.text.trim()
+                    : null,
+                secretAccessKey: secretCtrl.text.trim().isNotEmpty
+                    ? secretCtrl.text.trim()
+                    : null,
+                enabled:
+                    bucketCtrl.text.trim().isNotEmpty &&
+                    secretCtrl.text.trim().isNotEmpty,
               );
               if (ctx.mounted) Navigator.of(ctx).pop();
             },
@@ -775,11 +820,7 @@ class _SyncNowButtonState extends State<_SyncNowButton> {
   @override
   Widget build(BuildContext context) {
     return ElevatedButton.icon(
-      icon: SyncSpinIcon(
-        isSyncing: _isSyncing,
-        size: 14,
-        color: Colors.black,
-      ),
+      icon: SyncSpinIcon(isSyncing: _isSyncing, size: 14, color: Colors.black),
       label: Text(_isSyncing ? 'SYNCING…' : 'SYNC NOW (TURSO & R2)'),
       style: ElevatedButton.styleFrom(
         backgroundColor: Console.green,
