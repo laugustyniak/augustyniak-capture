@@ -5,9 +5,9 @@ import 'package:path/path.dart' as p;
 import '../../projects/domain/agent_session_launcher.dart';
 import '../../projects/domain/project.dart';
 import '../domain/agent_handoff.dart';
+import '../domain/capture_brief.dart';
 import '../domain/capture_router.dart';
 import '../domain/route_record.dart';
-import '../domain/untrusted_markdown.dart';
 
 /// Writes a capture into `.agent-tasks/<id>.md` in its project's repository,
 /// then opens a coding agent session rooted there.
@@ -151,46 +151,21 @@ class ProjectAgentHandoff implements AgentHandoff {
   File _taskFile(Project project, String captureId) =>
       File(p.join(project.repoPath, directoryName, '$captureId.md'));
 
-  String _render(AgentHandoffRequest request, {required bool first}) {
-    final RoutedCapture capture = request.capture;
-    final StringBuffer buffer = StringBuffer();
-    if (first) {
-      buffer
-        ..writeln('# ${sanitizeUntrustedMarkdown(capture.title)}')
-        ..writeln()
-        ..writeln(
-          '> **Output Contract**: Save your primary summary, deep research, or final results to `.agent-tasks/${request.captureId}-result.md`, or include `capture-id: ${request.captureId}` in created markdown notes.',
-        )
-        ..writeln();
-    }
-    buffer
-      ..writeln('## Handoff ${DateTime.now().toIso8601String()}')
-      ..writeln();
-
-    final List<String> facts = <String>[
-      'captured ${capture.capturedAt.toIso8601String()}',
-      if (capture.category != null) capture.category!.name,
-      ...capture.tags.map((String tag) => '#$tag'),
-    ];
-    buffer
-      ..writeln('*${facts.join(' · ')}*')
-      ..writeln();
-
-    final String summary = sanitizeUntrustedMarkdown(capture.summary ?? '');
-    if (summary.isNotEmpty) {
-      buffer
-        ..writeln('> $summary')
-        ..writeln();
-    }
-
-    final String body = sanitizeUntrustedMarkdownBody(capture.body).trim();
-    if (body.isNotEmpty) {
-      buffer
-        ..writeln(body)
-        ..writeln();
-    }
-    return buffer.toString();
-  }
+  /// Delegates to [renderCaptureBrief], which is now the single definition of
+  /// this format — see there for why it exists before there is a second writer.
+  ///
+  /// The italic facts line the old renderer printed under each `## Handoff` is
+  /// gone: capture time, category and tags are in the front matter now, where a
+  /// reader can parse them, and repeating them as decoration would leave two
+  /// copies of one fact to disagree.
+  String _render(AgentHandoffRequest request, {required bool first}) =>
+      renderCaptureBrief(
+        captureId: request.captureId,
+        capture: request.capture,
+        at: DateTime.now(),
+        includeHeader: first,
+        resultPath: '$directoryName/${request.captureId}-result.md',
+      );
 
   static String agentLabel(AgentKind agent) => switch (agent) {
     AgentKind.codex => 'Codex',

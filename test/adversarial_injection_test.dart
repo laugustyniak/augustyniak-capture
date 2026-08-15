@@ -91,6 +91,7 @@ RoutedCapture _capture({
   category: CaptureCategory.task,
   tags: const <String>['parser'],
   capturedAt: DateTime.utc(2026, 8, 12, 9),
+  type: CaptureType.text,
 );
 
 VaultNote _note({required String title, String body = 'body text'}) => VaultNote(

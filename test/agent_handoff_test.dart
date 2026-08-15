@@ -98,7 +98,12 @@ void main() {
     expect(brief, contains('# Add the delegate button'));
     expect(brief, contains('Dictate a note, then hand it to an agent.'));
     expect(brief, contains('> One button from capture to session.'));
-    expect(brief, contains('#ui'));
+    // Tags moved off the italic facts line into the front matter, where a
+    // reader can parse them rather than scrape them — see capture_brief.dart
+    // and `test/capture_brief_test.dart` for the format itself.
+    expect(brief, startsWith('---\n'));
+    expect(brief, contains('tags: ["ui"]'));
+    expect(brief, contains('capture-id: r1'));
 
     // The prompt is the capture's own text. A session opened on an errand to go
     // and read a file is a session waiting for a second turn, which is the one

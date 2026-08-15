@@ -1268,19 +1268,10 @@ class RecordingsController extends ChangeNotifier {
 
     final RouteRecord record;
     try {
-      record = await _captureRouter.route(
-        RoutedCapture(
-          projectId: recording.projectId,
-          // Resolved here so a destination never has to reimplement the card's
-          // fallback cascade — and never writes a uuid as a heading.
-          title: displayNameFor(recording),
-          body: recording.transcript ?? '',
-          capturedAt: recording.createdAt,
-          summary: recording.summary,
-          category: recording.category,
-          tags: recording.tags,
-        ),
-      );
+      // Through the same flattener the handoff sheet uses. Inlining a second
+      // copy is what `_routedCapture`'s own comment warns about: two builders
+      // that must agree, and no reason they would notice when they stop.
+      record = await _captureRouter.route(_routedCapture(recording));
     } catch (exception) {
       _error = exception.toString();
       _logSink.log(
@@ -1325,9 +1316,12 @@ class RecordingsController extends ChangeNotifier {
   /// the sheet shows and the prompt the launch uses cannot drift apart.
   RoutedCapture _routedCapture(Recording recording) => RoutedCapture(
     projectId: recording.projectId,
+    // Resolved here so a destination never has to reimplement the card's
+    // fallback cascade — and never writes a uuid as a heading.
     title: displayNameFor(recording),
     body: recording.transcript ?? '',
     capturedAt: recording.createdAt,
+    type: recording.type,
     summary: recording.summary,
     category: recording.category,
     tags: recording.tags,

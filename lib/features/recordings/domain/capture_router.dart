@@ -1,4 +1,5 @@
 import 'capture_category.dart';
+import 'capture_type.dart';
 import 'route_record.dart';
 
 /// Everything a destination needs to write a capture down, flattened off the
@@ -10,12 +11,24 @@ class RoutedCapture {
     required this.title,
     required this.body,
     required this.capturedAt,
+    required this.type,
     this.summary,
     this.category,
     this.tags = const <String>[],
   });
 
   final String? projectId;
+
+  /// What was captured — dictation, an upload, a photograph, a typed note.
+  ///
+  /// Required rather than defaulted, unlike every persisted type in this app.
+  /// `CaptureType.fromName` defaults because it reads rows written before the
+  /// field existed and has to answer *something*; this object is built fresh on
+  /// every delivery, so a default here could only ever mean "the caller forgot",
+  /// and the value it would invent — `audioRecording` — is the one that reads
+  /// as a plain fact rather than as a gap. A brief claiming a typed note was
+  /// dictated is worse than a brief that will not compile.
+  final CaptureType type;
 
   /// Already resolved by the caller — the item's own title when it has one, and
   /// the card's fallback name when it does not. A destination must never have
