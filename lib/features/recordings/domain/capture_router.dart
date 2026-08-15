@@ -7,6 +7,7 @@ import 'route_record.dart';
 /// router can be tested without building one.
 class RoutedCapture {
   const RoutedCapture({
+    required this.id,
     required this.projectId,
     required this.title,
     required this.body,
@@ -16,6 +17,16 @@ class RoutedCapture {
     this.category,
     this.tags = const <String>[],
   });
+
+  /// The capture's own id.
+  ///
+  /// It was deliberately absent while `inbox.md` was the only destination — an
+  /// inbox entry has no identity to keep — and it is here now because a second
+  /// destination needs one: the control plane keys a brief on `capture_id` so
+  /// that a retried delivery updates the brief it already has rather than
+  /// filing a second one. `AgentHandoffRequest.captureId` now reads through to
+  /// this rather than carrying its own copy.
+  final String id;
 
   final String? projectId;
 

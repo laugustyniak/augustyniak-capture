@@ -56,6 +56,64 @@ class HttpCommandClient implements CommandClient {
         .toList();
   }
 
+  @override
+  Future<CommandBrief> putBrief({
+    required String host,
+    required String workspace,
+    required String captureId,
+    required String content,
+  }) async {
+    final Map<String, dynamic> body = await _send(
+      'PUT',
+      _resolve(<String>['api', host, 'workspaces', workspace, 'briefs']),
+      what: 'Filing the Command brief',
+      payload: <String, dynamic>{
+        // Snake case because the other end owns this contract — see RFC-0008 in
+        // the Command repository. This app's own JSON is camel case and stays
+        // that way; matching it here would simply be wrong on the wire.
+        'capture_id': captureId,
+        'content': content,
+      },
+    );
+    final CommandBrief? brief = CommandBrief.fromJson(body);
+    if (brief == null) {
+      throw const FormatException(
+        'The control plane accepted the brief but named no brief id.',
+      );
+    }
+    return brief;
+  }
+
+  @override
+  Future<CommandSession> startSession({
+    required String host,
+    required String workspace,
+    required String briefId,
+  }) async {
+    final Map<String, dynamic> body = await _send(
+      'POST',
+      _resolve(<String>['api', 'sessions', host]),
+      what: 'Starting the Command session',
+      payload: <String, dynamic>{
+        'workspace': workspace,
+        'engine': planEngine,
+        'prompt': briefId,
+      },
+    );
+    final CommandSession? session = CommandSession.fromJson(body);
+    if (session == null) {
+      throw const FormatException(
+        'The control plane started a session but named no session.',
+      );
+    }
+    return session;
+  }
+
+  /// The engine the brief is handed to. Planning, never execution: RFC-0008
+  /// gives this app read access to a run and no writes, so what leaves here is
+  /// a request to *think about* the capture.
+  static const String planEngine = 'command-plan';
+
   /// Joins onto the configured base **path**, rather than replacing it.
   ///
   /// `Uri.resolve` would discard everything after the host, so an aggregator
@@ -68,6 +126,35 @@ class HttpCommandClient implements CommandClient {
         .where((String segment) => segment.isNotEmpty)
         .toList();
     return baseUrl.replace(pathSegments: <String>[...base, ...segments]);
+  }
+
+  /// One write, with the same failure policy as the reads.
+  Future<Map<String, dynamic>> _send(
+    String method,
+    Uri url, {
+    required String what,
+    required Map<String, dynamic> payload,
+  }) async {
+    final http.Request request = http.Request(method, url)
+      ..headers.addAll(<String, String>{
+        'content-type': 'application/json; charset=utf-8',
+        'accept': 'application/json',
+        if (bearerToken != null && bearerToken!.isNotEmpty)
+          'Authorization': 'Bearer $bearerToken',
+      })
+      ..bodyBytes = utf8.encode(jsonEncode(payload));
+
+    final http.Response response = await http.Response.fromStream(
+      await _client.send(request).timeout(requestTimeout),
+    );
+    final String body = utf8.decode(response.bodyBytes);
+    if (response.statusCode < 200 || response.statusCode >= 300) {
+      throw HttpException(
+        describeProviderFailure(what, response.statusCode, body),
+      );
+    }
+    final dynamic decoded = body.trim().isEmpty ? null : jsonDecode(body);
+    return decoded is Map<String, dynamic> ? decoded : <String, dynamic>{};
   }
 
   /// The list at [key], or the body itself when the endpoint answers a bare

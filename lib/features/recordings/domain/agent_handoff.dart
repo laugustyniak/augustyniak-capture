@@ -26,18 +26,19 @@ class HandoffAgent {
 
 class AgentHandoffRequest {
   const AgentHandoffRequest({
-    required this.captureId,
     required this.capture,
     required this.agentId,
     required this.instruction,
   });
 
   /// Names the brief this capture owns, so a second handoff appends to the same
-  /// file instead of scattering one task across several. Carried beside
-  /// [capture] rather than added to `RoutedCapture`, which is deliberately the
-  /// *content* a destination needs and is shared with the inbox router — an
-  /// inbox entry has no identity to keep.
-  final String captureId;
+  /// file instead of scattering one task across several.
+  ///
+  /// Read through to [RoutedCapture.id] rather than carried beside it. It was a
+  /// field of its own while `RoutedCapture` had no identity — see there for why
+  /// it has one now — and two copies of one id is a drift waiting for the day
+  /// a caller fills in only one of them.
+  String get captureId => capture.id;
 
   final RoutedCapture capture;
 

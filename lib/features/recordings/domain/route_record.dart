@@ -12,7 +12,22 @@ enum RouteKind {
   file,
 
   /// Handed to a coding agent as the opening prompt of a session.
-  agent;
+  agent,
+
+  /// Delivered to the Command control plane as a brief, which then plans the
+  /// work on a host in the fleet.
+  ///
+  /// **Not `agent`, and reusing it was considered and rejected.** That kind
+  /// means a session was opened on this capture's own text; Command receives a
+  /// brief and plans issues from it, on a machine this app does not own and
+  /// with an outcome that comes back later. Collapsing the two would make the
+  /// one line the card prints about a capture say the same thing about two
+  /// materially different journeys.
+  ///
+  /// The cost is stated rather than hidden: an older build reading a row with
+  /// this kind drops it, because [fromName] refuses to guess. The capture
+  /// survives; only its "where did it go" line does not.
+  command;
 
   /// Null for an unrecognised name, which drops that one row on load.
   ///

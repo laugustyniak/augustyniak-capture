@@ -295,6 +295,23 @@ class _FakeCommandClient implements CommandClient {
       CommandWorkspace(name: hostId == 'studio' ? 'capture' : 'command'),
     ];
   }
+
+  // Binding never delivers anything, so the two writes are out of this fake's
+  // scope — reaching them from the project editor would itself be the bug.
+  @override
+  Future<CommandBrief> putBrief({
+    required String host,
+    required String workspace,
+    required String captureId,
+    required String content,
+  }) async => throw UnimplementedError();
+
+  @override
+  Future<CommandSession> startSession({
+    required String host,
+    required String workspace,
+    required String briefId,
+  }) async => throw UnimplementedError();
 }
 
 

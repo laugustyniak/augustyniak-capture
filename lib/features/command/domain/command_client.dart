@@ -51,6 +51,44 @@ class CommandWorkspace {
   }
 }
 
+/// One brief the control plane is holding, as it answered.
+class CommandBrief {
+  const CommandBrief({required this.id, this.path});
+
+  final String id;
+
+  /// Where the collector put it on the host, when it says. Shown, never
+  /// resolved by this app.
+  final String? path;
+
+  static CommandBrief? fromJson(Object? json) {
+    if (json is! Map<String, dynamic>) return null;
+    final Object? id = json['brief_id'] ?? json['id'];
+    if (id is! String || id.trim().isEmpty) return null;
+    final Object? path = json['path'];
+    return CommandBrief(
+      id: id.trim(),
+      path: path is String && path.trim().isNotEmpty ? path.trim() : null,
+    );
+  }
+}
+
+/// A planning session the control plane started for a brief.
+class CommandSession {
+  const CommandSession({required this.name});
+
+  /// The multiplexer session on the host — what the user would attach to, and
+  /// what the capture's route record names.
+  final String name;
+
+  static CommandSession? fromJson(Object? json) {
+    if (json is! Map<String, dynamic>) return null;
+    final Object? name = json['tmux_session'] ?? json['session'] ?? json['name'];
+    if (name is! String || name.trim().isEmpty) return null;
+    return CommandSession(name: name.trim());
+  }
+}
+
 /// Reads the fleet, so a project can be bound to a real `(host, workspace)`.
 ///
 /// A seam of the same shape as `TranscriptionService` and `OcrService`: the
@@ -70,6 +108,31 @@ abstract interface class CommandClient {
   Future<List<CommandHost>> hosts();
 
   Future<List<CommandWorkspace>> workspaces(String hostId);
+
+  /// Files [content] as the brief for [captureId], and answers what the
+  /// control plane now holds.
+  ///
+  /// **Idempotent on `captureId`, and this app depends on that.** The routing
+  /// contract is deliver-first-mark-second, so a delivery that times out leaves
+  /// the capture open and the user retries it — which must update the brief the
+  /// collector already has rather than filing a second copy of one thought.
+  Future<CommandBrief> putBrief({
+    required String host,
+    required String workspace,
+    required String captureId,
+    required String content,
+  });
+
+  /// Starts a planning session on [host] for a brief already filed.
+  ///
+  /// Separate from [putBrief] because the two fail differently and the
+  /// difference matters to the user: a brief that landed with no session is
+  /// queued and unstarted, while a brief that never landed is simply lost.
+  Future<CommandSession> startSession({
+    required String host,
+    required String workspace,
+    required String briefId,
+  });
 }
 
 class DisabledCommandClient implements CommandClient {
@@ -85,6 +148,21 @@ class DisabledCommandClient implements CommandClient {
   @override
   Future<List<CommandWorkspace>> workspaces(String hostId) async =>
       throw const CommandNotConfiguredException();
+
+  @override
+  Future<CommandBrief> putBrief({
+    required String host,
+    required String workspace,
+    required String captureId,
+    required String content,
+  }) async => throw const CommandNotConfiguredException();
+
+  @override
+  Future<CommandSession> startSession({
+    required String host,
+    required String workspace,
+    required String briefId,
+  }) async => throw const CommandNotConfiguredException();
 }
 
 class CommandNotConfiguredException implements Exception {

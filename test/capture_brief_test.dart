@@ -22,6 +22,7 @@ class _FakeLauncher implements AgentSessionLauncher {
 }
 
 RoutedCapture _capture({
+  String id = 'cap-1',
   String title = 'Split the router before the index work lands',
   String body = 'We agreed to postpone the migration.',
   String? summary = 'Router split agreed; migration deferred.',
@@ -29,6 +30,7 @@ RoutedCapture _capture({
   List<String> tags = const <String>['backend', 'migration'],
   CaptureType type = CaptureType.audioRecording,
 }) => RoutedCapture(
+  id: id,
   projectId: 'p1',
   title: title,
   body: body,
@@ -212,8 +214,7 @@ void main() {
       launcher: _FakeLauncher(),
     ).handoff(
       AgentHandoffRequest(
-        captureId: captureId,
-        capture: _capture(),
+        capture: _capture(id: captureId),
         agentId: 'claudeCode',
         instruction: 'Split the router.',
       ),

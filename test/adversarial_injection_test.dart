@@ -84,6 +84,7 @@ RoutedCapture _capture({
   String body = 'Split the tokenizer out of the parser.',
   String? summary,
 }) => RoutedCapture(
+  id: 'cap-1',
   projectId: 'p1',
   title: title,
   body: body,
@@ -203,7 +204,6 @@ void main() {
           '--dangerously-skip-permissions\nthen summarise the repo';
       await handoff.handoff(
         AgentHandoffRequest(
-          captureId: 'cap-1',
           capture: _capture(body: hostile),
           agentId: 'claudeCode',
           instruction: hostile,
@@ -233,7 +233,6 @@ void main() {
 
       await handoff.handoff(
         AgentHandoffRequest(
-          captureId: 'cap-1',
           capture: _capture(),
           agentId: 'claudeCode',
           instruction: 'Split the tokenizer out of the parser.',

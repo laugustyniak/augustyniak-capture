@@ -1315,6 +1315,7 @@ class RecordingsController extends ChangeNotifier {
   /// The one place a `Recording` is flattened for a destination, so the prompt
   /// the sheet shows and the prompt the launch uses cannot drift apart.
   RoutedCapture _routedCapture(Recording recording) => RoutedCapture(
+    id: recording.id,
     projectId: recording.projectId,
     // Resolved here so a destination never has to reimplement the card's
     // fallback cascade — and never writes a uuid as a heading.
@@ -1365,7 +1366,6 @@ class RecordingsController extends ChangeNotifier {
     try {
       result = await _agentHandoff.handoff(
         AgentHandoffRequest(
-          captureId: id,
           capture: capture,
           agentId: agentId,
           instruction: instruction?.trim().isNotEmpty == true
@@ -2345,7 +2345,10 @@ class RecordingsController extends ChangeNotifier {
     if (item.routes.isEmpty) return ClosureKind.review;
     return switch (item.routes.last.kind) {
       RouteKind.file => ClosureKind.route,
-      RouteKind.agent => ClosureKind.handoff,
+      // Both hand the capture to something that executes it, and the momentum
+      // history counts *how it left the desk* rather than which wire carried
+      // it — a separate kind here would split one habit across two bars.
+      RouteKind.agent || RouteKind.command => ClosureKind.handoff,
     };
   }
 

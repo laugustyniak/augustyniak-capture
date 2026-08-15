@@ -67,6 +67,7 @@ import '../data/foreground_capture_session.dart';
 import '../data/markdown_note_vault.dart';
 import '../domain/capture_session.dart';
 import '../data/project_agent_handoff.dart';
+import '../data/command_router.dart';
 import '../data/project_inbox_router.dart';
 import '../data/recordings_repository.dart';
 import '../data/system_clipboard_sink.dart';
@@ -272,7 +273,19 @@ class _RecordingsPageState extends State<RecordingsPage> {
       // The queue's only way out. Reads the project list live for the same
       // reason the enrichment context does: a project can be created, renamed
       // or repointed long after this runs, and the destination must follow.
-      captureRouter: ProjectInboxRouter(projectById: _projectById),
+      // A bound project sends `agentTask` to the control plane and everything
+      // else to its own inbox; an unbound one behaves exactly as it did before
+      // Command existed. One decision point, so no surface has to repeat it.
+      captureRouter: ProjectCaptureRouter(
+        command: CommandRouter(
+          projectById: _projectById,
+          // Read off the settings controller rather than captured, like every
+          // other service here: an address edited in Config reaches the next
+          // delivery without rebuilding the page.
+          client: settings.commandClient,
+        ),
+        fallback: ProjectInboxRouter(projectById: _projectById),
+      ),
       // The queue's other way out: a capture becomes an agent's opening task.
       // Disabled wherever no launcher exists, which hides the control rather
       // than offering one that can only fail.
