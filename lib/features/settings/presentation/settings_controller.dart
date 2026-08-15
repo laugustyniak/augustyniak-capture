@@ -4,6 +4,8 @@ import 'package:uuid/uuid.dart';
 import '../../costs/domain/model_price.dart';
 import '../../costs/domain/price_book.dart';
 import '../../costs/domain/usage_sink.dart';
+import '../../command/data/http_command_client.dart';
+import '../../command/domain/command_client.dart';
 import '../../enrichment/domain/enrichment_service.dart';
 import '../../processing/data/ocr_service.dart';
 import '../../shortcuts/domain/hotkey_binding.dart';
@@ -106,7 +108,8 @@ class SettingsController extends ChangeNotifier {
           (ProviderProfile profile) => sealed(profile.bearerToken),
         ) ||
         sealed(_settings.tursoAuthToken) ||
-        sealed(_settings.r2SecretAccessKey);
+        sealed(_settings.r2SecretAccessKey) ||
+        sealed(_settings.commandToken);
   }
 
   /// The service the recordings controller should use right now. No active
@@ -187,6 +190,39 @@ class SettingsController extends ChangeNotifier {
     }
     return _ocr!;
   }
+
+  /// The Command control-plane client, or the disabled one while no address is
+  /// configured.
+  ///
+  /// Same caching rule as the three services above, and for the same reason:
+  /// this notifier fires on every settings change, and rebuilding an
+  /// `http.Client` per notification would throw away the connection pool a
+  /// picker is about to use twice. The signature is the address and the token,
+  /// which are the only two things that change what this client can reach.
+  ///
+  /// **A blank or schemeless address degrades to disabled rather than throwing**
+  /// — the same rule `ProviderProfile.toService` follows. Half-typed
+  /// configuration is the normal state of a text field, and it must not be able
+  /// to fail anything but the call that needs it.
+  CommandClient get commandClient {
+    final String raw = _settings.commandBaseUrl?.trim() ?? '';
+    final String token = _settings.commandToken ?? '';
+    final String signature = '$raw|$token';
+    if (_command != null && _commandSignature == signature) return _command!;
+
+    final Uri? url = Uri.tryParse(raw);
+    _command = raw.isEmpty || url == null || !url.hasScheme || url.host.isEmpty
+        ? const DisabledCommandClient()
+        : HttpCommandClient(
+            baseUrl: url,
+            bearerToken: _settings.usableCommandToken,
+          );
+    _commandSignature = signature;
+    return _command!;
+  }
+
+  CommandClient? _command;
+  String? _commandSignature;
 
   Future<void> initialize() async {
     try {
@@ -343,6 +379,22 @@ class SettingsController extends ChangeNotifier {
         tursoDbUrl: url,
         tursoAuthToken: token,
         tursoSyncEnabled: enabled,
+      ),
+    );
+  }
+
+  /// The control plane's address and fleet token.
+  ///
+  /// One setter for both, like [setTursoConfig]: they are useless apart, and a
+  /// pair written in two saves has a moment on disk where the token belongs to
+  /// an address that is no longer there.
+  Future<void> setCommandConfig({String? baseUrl, String? token}) async {
+    await _persist(
+      _settings.copyWith(
+        commandBaseUrl: baseUrl,
+        clearCommandBaseUrl: baseUrl != null && baseUrl.trim().isEmpty,
+        commandToken: token,
+        clearCommandToken: token != null && token.trim().isEmpty,
       ),
     );
   }

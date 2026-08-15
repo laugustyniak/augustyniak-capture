@@ -18,6 +18,7 @@ import '../domain/app_theme_mode.dart';
 import '../domain/audio_config.dart';
 import '../domain/provider_profile.dart';
 import '../domain/token_cipher.dart';
+import 'command_section.dart';
 import 'enrichment_context_section.dart';
 import 'qr_sync_sheet.dart';
 import 'settings_controller.dart';
@@ -297,6 +298,11 @@ class ConfigTab extends StatelessWidget {
           EnrichmentContextSection(controller: controller, projects: projects),
           const SizedBox(height: 22),
           VaultSection(controller: controller, onMirrorAll: onMirrorAll),
+          const SizedBox(height: 22),
+          // Above the sync sections and below the vault: it configures where
+          // *work* goes, which belongs beside the other destinations rather
+          // than among the storage credentials.
+          CommandSection(controller: controller),
           const SizedBox(height: 22),
           MomentumSection(onBackfill: onBackfillClosures),
           if (showShortcuts) ...<Widget>[

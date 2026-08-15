@@ -1,7 +1,9 @@
 import 'dart:io';
 
+import 'package:augustyniak_capture/features/command/domain/command_client.dart';
 import 'package:augustyniak_capture/features/projects/data/directory_picker.dart';
 import 'package:augustyniak_capture/features/projects/data/projects_repository.dart';
+import 'package:augustyniak_capture/features/projects/domain/project.dart';
 import 'package:augustyniak_capture/features/projects/presentation/projects_controller.dart';
 import 'package:augustyniak_capture/features/projects/presentation/projects_tab.dart';
 import 'package:flutter/material.dart';
@@ -152,7 +154,149 @@ void main() {
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 300));
   });
+
+  testWidgets('binding walks two pickers and stores the pair', (
+    WidgetTester tester,
+  ) async {
+    final _FakeCommandClient client = _FakeCommandClient();
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: ThemeData.dark(useMaterial3: true),
+        home: Scaffold(
+          body: ListenableBuilder(
+            listenable: controller,
+            builder: (BuildContext context, Widget? child) =>
+                ProjectsTab(controller: controller, commandClient: client),
+          ),
+        ),
+      ),
+    );
+
+    await tester.tap(find.byIcon(Icons.more_vert));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 300));
+    await tester.tap(find.text('Edit').last);
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 300));
+
+    // The sheet has its own scrollable on top of the tab's list, so the target
+    // has to be named — `scrollUntilVisible` refuses to guess between two.
+    await tester.scrollUntilVisible(
+      find.text('COMMAND BINDING'),
+      120,
+      scrollable: find.byType(Scrollable).last,
+    );
+    await tester.pump();
+    expect(find.text('Not bound — work stays local.'), findsOneWidget);
+
+    await tester.tap(find.text('HOSTS'));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 50));
+    expect(find.text('Studio (macOS)'), findsOneWidget);
+
+    await tester.tap(find.text('Studio (macOS)'));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 50));
+    // Workspaces are read for the host that was picked, never listed globally.
+    expect(client.workspacesFor, <String>['studio']);
+
+    await tester.tap(find.text('capture'));
+    await tester.pump();
+
+    await tester.ensureVisible(
+      find.byKey(const ValueKey<String>('save-project')),
+    );
+    await tester.pump();
+    await tester.tap(
+      find.byKey(const ValueKey<String>('save-project')),
+      warnIfMissed: true,
+    );
+    // Saving writes `projects.json`, which is real IO the fake-async zone does
+    // not pump — the same rule `settleIo` follows in the capture suite.
+    // Each round lets roughly one awaited IO call land, and a project save is
+    // a chain of them — the JSON write, the rename, the SQLite mirror.
+    for (int i = 0; i < 24; i++) {
+      await tester.runAsync(() => Future<void>.delayed(Duration.zero));
+      await tester.pump(const Duration(milliseconds: 100));
+    }
+
+    final Project saved = controller.projects.single;
+    expect(saved.commandHost, 'studio');
+    expect(saved.commandWorkspace, 'capture');
+    expect(saved.isBoundToCommand, isTrue);
+    expect(saved.commandBoundAt, isNotNull);
+  });
+
+  testWidgets('an unconfigured control plane says so instead of hiding', (
+    WidgetTester tester,
+  ) async {
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: ThemeData.dark(useMaterial3: true),
+        home: Scaffold(
+          body: ListenableBuilder(
+            listenable: controller,
+            builder: (BuildContext context, Widget? child) => ProjectsTab(
+              controller: controller,
+              commandClient: _FakeCommandClient(configured: false),
+            ),
+          ),
+        ),
+      ),
+    );
+
+    await tester.tap(find.byIcon(Icons.more_vert));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 300));
+    await tester.tap(find.text('Edit').last);
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 300));
+
+    // The sheet has its own scrollable on top of the tab's list, so the target
+    // has to be named — `scrollUntilVisible` refuses to guess between two.
+    await tester.scrollUntilVisible(
+      find.text('COMMAND BINDING'),
+      120,
+      scrollable: find.byType(Scrollable).last,
+    );
+    await tester.pump();
+    expect(find.textContaining('No control plane configured'), findsOneWidget);
+    expect(find.text('HOSTS'), findsNothing);
+
+    tester.state<NavigatorState>(find.byType(Navigator).first).pop();
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 300));
+  });
+
 }
+
+/// Answers from a table instead of a control plane, and records which host it
+/// was asked about — the fake that proves the picker asks per host rather than
+/// listing everything once.
+class _FakeCommandClient implements CommandClient {
+  _FakeCommandClient({this.configured = true});
+
+  final bool configured;
+  final List<String> workspacesFor = <String>[];
+
+  @override
+  bool get isConfigured => configured;
+
+  @override
+  Future<List<CommandHost>> hosts() async => const <CommandHost>[
+    CommandHost(id: 'studio', label: 'Studio (macOS)'),
+    CommandHost(id: 'rack-01', label: 'Rack 01'),
+  ];
+
+  @override
+  Future<List<CommandWorkspace>> workspaces(String hostId) async {
+    workspacesFor.add(hostId);
+    return <CommandWorkspace>[
+      CommandWorkspace(name: hostId == 'studio' ? 'capture' : 'command'),
+    ];
+  }
+}
+
 
 /// Stands in for the native folder dialog, the way `_FakeRegistrar` stands in
 /// for the OS hotkey table — the widget suite must not reach `file_picker`.

@@ -64,6 +64,9 @@ class Project {
     this.sessionName,
     this.defaultAgent,
     this.agentSettings = const <AgentKind, AgentSettings>{},
+    this.commandHost,
+    this.commandWorkspace,
+    this.commandBoundAt,
   });
 
   final String id;
@@ -73,6 +76,36 @@ class Project {
   final String? sessionName;
   final AgentKind? defaultAgent;
   final Map<AgentKind, AgentSettings> agentSettings;
+
+  /// Where this project's work goes on the Command control plane.
+  ///
+  /// `repoPath` says where the checkout is on *this* machine; these say which
+  /// `(host, workspace)` owns the work on the fleet. Left implicit the two
+  /// drift apart the first time a repository moves, which is the failure this
+  /// binding exists to prevent — so the pair is stored rather than derived from
+  /// a path, and it is filled from two pickers over live reads rather than
+  /// typed, because a typed workspace is a third source of truth with no
+  /// validation.
+  ///
+  /// All three are absent on every project written before this existed, and on
+  /// every project the user never binds. [isBoundToCommand] is the one question
+  /// worth asking of them.
+  final String? commandHost;
+  final String? commandWorkspace;
+
+  /// When the binding was made, so a stale one can be recognised as stale
+  /// rather than merely wrong. Absent while unbound.
+  final DateTime? commandBoundAt;
+
+  /// A capture from this project can be addressed on the control plane.
+  ///
+  /// Both halves or neither: a host with no workspace addresses nothing, and a
+  /// workspace with no host cannot be reached at all. Answering true for half a
+  /// binding would put an enabled control in front of a request that cannot be
+  /// built.
+  bool get isBoundToCommand =>
+      (commandHost?.trim().isNotEmpty ?? false) &&
+      (commandWorkspace?.trim().isNotEmpty ?? false);
 
   AgentSettings settingsFor(AgentKind agent) =>
       agentSettings[agent] ?? const AgentSettings();
@@ -87,6 +120,10 @@ class Project {
     AgentKind? defaultAgent,
     bool clearDefaultAgent = false,
     Map<AgentKind, AgentSettings>? agentSettings,
+    String? commandHost,
+    String? commandWorkspace,
+    DateTime? commandBoundAt,
+    bool clearCommandBinding = false,
   }) {
     return Project(
       id: id,
@@ -98,9 +135,26 @@ class Project {
           ? null
           : (defaultAgent ?? this.defaultAgent),
       agentSettings: agentSettings ?? this.agentSettings,
+      // One flag clears all three, because half a binding is not a state this
+      // type admits — see [isBoundToCommand].
+      commandHost: clearCommandBinding ? null : (commandHost ?? this.commandHost),
+      commandWorkspace: clearCommandBinding
+          ? null
+          : (commandWorkspace ?? this.commandWorkspace),
+      commandBoundAt: clearCommandBinding
+          ? null
+          : (commandBoundAt ?? this.commandBoundAt),
     );
   }
 
+  /// The three Command keys are **omitted when absent**, unlike every field
+  /// above them.
+  ///
+  /// The surrounding style writes `description: null` and always has, so
+  /// changing that would rewrite every row in `projects.json` on the next save.
+  /// Omitting instead means a project nobody binds serialises byte for byte as
+  /// it did before this feature existed — which is the only way to tell "this
+  /// build added nothing" from "this build quietly touched every project".
   Map<String, dynamic> toJson() => <String, dynamic>{
     'id': id,
     'name': name,
@@ -113,6 +167,10 @@ class Project {
           in agentSettings.entries)
         entry.key.name: entry.value.toJson(),
     },
+    if (commandHost != null) 'commandHost': commandHost,
+    if (commandWorkspace != null) 'commandWorkspace': commandWorkspace,
+    if (commandBoundAt != null)
+      'commandBoundAt': commandBoundAt!.toIso8601String(),
   };
 
   factory Project.fromJson(Map<String, dynamic> json) {
@@ -147,6 +205,18 @@ class Project {
         json['defaultAgent'] is String ? json['defaultAgent'] as String : null,
       ),
       agentSettings: settings,
+      commandHost: _text(json['commandHost']),
+      commandWorkspace: _text(json['commandWorkspace']),
+      // A hand-edited or newer-build timestamp that will not parse costs the
+      // binding's *age*, never the binding — the same degrade every other
+      // optional field here makes, and the pair is what addresses the work.
+      commandBoundAt: DateTime.tryParse(_text(json['commandBoundAt']) ?? ''),
     );
+  }
+
+  static String? _text(Object? value) {
+    if (value is! String) return null;
+    final String trimmed = value.trim();
+    return trimmed.isEmpty ? null : trimmed;
   }
 }

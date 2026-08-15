@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../../../app/ui_kit.dart';
 import '../../recordings/domain/recording.dart';
 import '../../recordings/presentation/recordings_controller.dart';
+import '../../command/domain/command_client.dart';
 import '../data/directory_picker.dart';
 import '../domain/project.dart';
 import 'project_captures_sheet.dart';
@@ -16,6 +17,7 @@ class ProjectsTab extends StatelessWidget {
     required this.controller,
     this.recordingsController,
     this.directoryPicker = const FilePickerDirectoryPicker(),
+    this.commandClient = const DisabledCommandClient(),
     this.onNavigateToQueue,
   });
 
@@ -25,6 +27,11 @@ class ProjectsTab extends StatelessWidget {
   /// Fills the repository-path field from a native folder dialog. Injectable so
   /// the widget suite never reaches `file_picker`'s platform channel.
   final DirectoryPicker directoryPicker;
+
+  /// Reads the fleet so a project can be bound to a real `(host, workspace)`.
+  /// Defaults to the disabled client, so a host that has configured no control
+  /// plane — and every widget test — renders the editor exactly as before.
+  final CommandClient commandClient;
 
   final ValueChanged<String>? onNavigateToQueue;
 
@@ -140,6 +147,7 @@ class ProjectsTab extends StatelessWidget {
         builder: (BuildContext context) => _ProjectEditorSheet(
           existing: existing,
           directoryPicker: directoryPicker,
+          commandClient: commandClient,
         ),
       ),
     );
@@ -155,6 +163,8 @@ class ProjectsTab extends StatelessWidget {
           sessionName: draft.sessionName,
           defaultAgent: draft.defaultAgent,
           agentSettings: draft.agentSettings,
+          commandHost: draft.commandHost,
+          commandWorkspace: draft.commandWorkspace,
         );
       } else {
         await controller.update(
@@ -165,6 +175,8 @@ class ProjectsTab extends StatelessWidget {
           sessionName: draft.sessionName,
           defaultAgent: draft.defaultAgent,
           agentSettings: draft.agentSettings,
+          commandHost: draft.commandHost,
+          commandWorkspace: draft.commandWorkspace,
         );
       }
     } catch (exception) {
@@ -397,10 +409,12 @@ class _ProjectEditorSheet extends StatefulWidget {
   const _ProjectEditorSheet({
     required this.existing,
     required this.directoryPicker,
+    required this.commandClient,
   });
 
   final Project? existing;
   final DirectoryPicker directoryPicker;
+  final CommandClient commandClient;
 
   @override
   State<_ProjectEditorSheet> createState() => _ProjectEditorSheetState();
@@ -423,6 +437,20 @@ class _ProjectEditorSheetState extends State<_ProjectEditorSheet> {
   late final Map<AgentKind, TextEditingController> _arguments;
   late final Map<AgentKind, TextEditingController> _prompts;
   late AgentKind? _defaultAgent = widget.existing?.defaultAgent;
+
+  /// The binding, held as the two strings that address work rather than as the
+  /// objects they were picked from: the fleet's labels are for reading and its
+  /// ids are what `projects.json` stores.
+  late String? _commandHost = widget.existing?.commandHost;
+  late String? _commandWorkspace = widget.existing?.commandWorkspace;
+
+  /// Loaded on demand, never on open. A sheet that fired an HTTP request every
+  /// time somebody edited a project name would make an unreachable control
+  /// plane a delay on renaming a project.
+  List<CommandHost>? _hosts;
+  List<CommandWorkspace>? _workspaces;
+  bool _loadingFleet = false;
+  String? _fleetError;
 
   /// A folder dialog that refuses is reported in the sheet rather than swallowed
   /// — the field still accepts a typed path, so the failure must not look like
@@ -569,6 +597,25 @@ class _ProjectEditorSheetState extends State<_ProjectEditorSheet> {
                 ],
               ),
               const SizedBox(height: 18),
+              _CommandBinding(
+                client: widget.commandClient,
+                host: _commandHost,
+                workspace: _commandWorkspace,
+                hosts: _hosts,
+                workspaces: _workspaces,
+                loading: _loadingFleet,
+                error: _fleetError,
+                onLoadHosts: _loadHosts,
+                onPickHost: _pickHost,
+                onPickWorkspace: (String name) =>
+                    setState(() => _commandWorkspace = name),
+                onUnbind: () => setState(() {
+                  _commandHost = null;
+                  _commandWorkspace = null;
+                  _workspaces = null;
+                }),
+              ),
+              const SizedBox(height: 18),
               SectionHeader(title: 'AGENT SETTINGS'),
               const SizedBox(height: 9),
               ...AgentKind.values.map(
@@ -667,6 +714,8 @@ class _ProjectEditorSheetState extends State<_ProjectEditorSheet> {
         description: _description.text,
         sessionName: _sessionName.text,
         defaultAgent: _defaultAgent,
+        commandHost: _commandHost,
+        commandWorkspace: _commandWorkspace,
         agentSettings: <AgentKind, AgentSettings>{
           for (final AgentKind agent in AgentKind.values)
             if (_settingsFor(agent) case final AgentSettings settings
@@ -675,6 +724,52 @@ class _ProjectEditorSheetState extends State<_ProjectEditorSheet> {
         },
       ),
     );
+  }
+
+  Future<void> _loadHosts() async {
+    if (_loadingFleet) return;
+    setState(() {
+      _loadingFleet = true;
+      _fleetError = null;
+    });
+    try {
+      final List<CommandHost> hosts = await widget.commandClient.hosts();
+      if (!mounted) return;
+      setState(() => _hosts = hosts);
+    } catch (exception) {
+      // Inline, like the directory picker's failure and for the same reason: a
+      // control that answers nothing is indistinguishable from a dead one, and
+      // this app uses no snackbars.
+      if (!mounted) return;
+      setState(() => _fleetError = exception.toString());
+    } finally {
+      if (mounted) setState(() => _loadingFleet = false);
+    }
+  }
+
+  /// Choosing a host drops the workspace with it. A workspace belongs to the
+  /// host it was listed from, so carrying it across would leave a pair that
+  /// names a checkout the new host has never heard of — the exact drift two
+  /// live pickers exist to prevent.
+  Future<void> _pickHost(String id) async {
+    setState(() {
+      _commandHost = id;
+      _commandWorkspace = null;
+      _workspaces = null;
+      _loadingFleet = true;
+      _fleetError = null;
+    });
+    try {
+      final List<CommandWorkspace> spaces = await widget.commandClient
+          .workspaces(id);
+      if (!mounted) return;
+      setState(() => _workspaces = spaces);
+    } catch (exception) {
+      if (!mounted) return;
+      setState(() => _fleetError = exception.toString());
+    } finally {
+      if (mounted) setState(() => _loadingFleet = false);
+    }
   }
 
   AgentSettings _settingsFor(AgentKind agent) {
@@ -702,6 +797,8 @@ class _ProjectDraft {
     required this.sessionName,
     required this.defaultAgent,
     required this.agentSettings,
+    this.commandHost,
+    this.commandWorkspace,
   });
 
   final String name;
@@ -710,6 +807,11 @@ class _ProjectDraft {
   final String sessionName;
   final AgentKind? defaultAgent;
   final Map<AgentKind, AgentSettings> agentSettings;
+
+  /// Null on either half means unbound — the controller clears all three
+  /// fields rather than storing a pair that cannot address anything.
+  final String? commandHost;
+  final String? commandWorkspace;
 }
 
 String _agentLabel(AgentKind agent) => switch (agent) {
@@ -728,4 +830,130 @@ void _showFailure(BuildContext context, Object exception) {
   ScaffoldMessenger.of(
     context,
   ).showSnackBar(SnackBar(content: Text(exception.toString())));
+}
+
+/// Binds a project to a `(host, workspace)` on the Command control plane.
+///
+/// **Two pickers over live reads, never a typed name.** A typed workspace is a
+/// third source of truth with nothing to validate it against, and it drifts
+/// from the fleet the first time a checkout is renamed — which is the failure
+/// this binding exists to prevent. So the only way to set one here is to pick
+/// it out of what the control plane just said it has.
+///
+/// Stateless: every piece of state belongs to the editor sheet, which is what
+/// carries it into the draft on save. Cancelling the sheet therefore discards a
+/// binding exactly as it discards a renamed project.
+class _CommandBinding extends StatelessWidget {
+  _CommandBinding({
+    required this.client,
+    required this.host,
+    required this.workspace,
+    required this.hosts,
+    required this.workspaces,
+    required this.loading,
+    required this.error,
+    required this.onLoadHosts,
+    required this.onPickHost,
+    required this.onPickWorkspace,
+    required this.onUnbind,
+  });
+
+  final CommandClient client;
+  final String? host;
+  final String? workspace;
+  final List<CommandHost>? hosts;
+  final List<CommandWorkspace>? workspaces;
+  final bool loading;
+  final String? error;
+  final Future<void> Function() onLoadHosts;
+  final Future<void> Function(String id) onPickHost;
+  final ValueChanged<String> onPickWorkspace;
+  final VoidCallback onUnbind;
+
+  bool get _bound =>
+      (host?.isNotEmpty ?? false) && (workspace?.isNotEmpty ?? false);
+
+  @override
+  Widget build(BuildContext context) {
+    if (!client.isConfigured) {
+      // Said rather than hidden: an absent section is indistinguishable from a
+      // feature this build does not have, and the fix is two fields away.
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: <Widget>[
+          SectionHeader(title: 'COMMAND BINDING'),
+          const SizedBox(height: 9),
+          Text(
+            'No control plane configured. Set its address in Config to bind '
+            'this project to a host and workspace.',
+            style: ConsoleText.micro,
+          ),
+        ],
+      );
+    }
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: <Widget>[
+        SectionHeader(title: 'COMMAND BINDING'),
+        const SizedBox(height: 9),
+        Row(
+          children: <Widget>[
+            Expanded(
+              child: Text(
+                _bound ? '$host · $workspace' : 'Not bound — work stays local.',
+                style: ConsoleText.micro.copyWith(
+                  color: _bound ? Console.accent : Console.dimText,
+                ),
+              ),
+            ),
+            if (_bound)
+              TextButton(onPressed: onUnbind, child: const Text('UNBIND')),
+            TextButton(
+              onPressed: loading ? null : onLoadHosts,
+              child: Text(loading ? 'LOADING…' : 'HOSTS'),
+            ),
+          ],
+        ),
+        if (hosts != null) ...<Widget>[
+          const SizedBox(height: 8),
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            children: <Widget>[
+              for (final CommandHost item in hosts!)
+                ChoiceChip(
+                  label: Text(item.label),
+                  selected: host == item.id,
+                  onSelected: (_) => onPickHost(item.id),
+                ),
+              if (hosts!.isEmpty)
+                Text('No hosts registered.', style: ConsoleText.micro),
+            ],
+          ),
+        ],
+        if (workspaces != null) ...<Widget>[
+          const SizedBox(height: 8),
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            children: <Widget>[
+              for (final CommandWorkspace item in workspaces!)
+                ChoiceChip(
+                  label: Text(item.name),
+                  selected: workspace == item.name,
+                  onSelected: (_) => onPickWorkspace(item.name),
+                ),
+              if (workspaces!.isEmpty)
+                Text('No workspaces on this host.', style: ConsoleText.micro),
+            ],
+          ),
+        ],
+        if (error != null) ...<Widget>[
+          const SizedBox(height: 8),
+          Text(error!, style: ConsoleText.micro.copyWith(color: Console.red)),
+        ],
+      ],
+    );
+  }
 }

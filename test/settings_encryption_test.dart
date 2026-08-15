@@ -148,6 +148,46 @@ void main() {
       expect(raw, contains(TokenCipher.sealedPrefix));
     });
 
+    test('the Command fleet token is sealed like any other token', () async {
+      final AesGcmTokenCipher cipher = AesGcmTokenCipher(
+        keyStore: _MemoryKeyStore(),
+      );
+      final _TempFileSettingsRepository repository =
+          _TempFileSettingsRepository(fileIn(tempDir), cipher: cipher);
+
+      await repository.save(
+        const AppSettings(
+          commandBaseUrl: 'https://fleet.example',
+          commandToken: 'canary fleet token',
+        ),
+      );
+
+      final String raw = await fileIn(tempDir).readAsString();
+      expect(raw, isNot(contains('canary fleet token')));
+      expect(raw, contains(TokenCipher.sealedPrefix));
+      // The address is not a secret and stays readable, which is what makes a
+      // hand-inspected settings.json diagnosable at all.
+      expect(raw, contains('https://fleet.example'));
+
+      final AppSettings? loaded = await repository.load();
+      expect(loaded!.commandToken, 'canary fleet token');
+      expect(loaded.usableCommandToken, 'canary fleet token');
+    });
+
+    test('a fleet token sealed under a lost key never reaches a header', () async {
+      // `usableCommandToken` is what keeps an unopenable blob out of the
+      // Authorization header, where it would be sent literally and answered
+      // with a 401 that says nothing about the real cause.
+      // The literal prefix rather than `TokenCipher.sealedPrefix` interpolated:
+      // the pre-commit credential rule excludes a quoted value that *starts*
+      // with `enc:v1:`, and it cannot see through interpolation.
+      const AppSettings settings = AppSettings(
+        commandToken: 'enc:v1:unreadable-blob',
+      );
+      expect(settings.commandToken, isNotNull);
+      expect(settings.usableCommandToken, isNull);
+    });
+
     test('load returns the plaintext token again (round trip)', () async {
       final AesGcmTokenCipher cipher = AesGcmTokenCipher(
         keyStore: _MemoryKeyStore(),

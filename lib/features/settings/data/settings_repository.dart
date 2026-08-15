@@ -229,11 +229,21 @@ class SettingsRepository {
       }
     }
 
+    String? commandToken = settings.commandToken;
+    if (commandToken != null && commandToken.isNotEmpty) {
+      final String value = await transform(commandToken);
+      if (value != commandToken) {
+        changed = true;
+        commandToken = value;
+      }
+    }
+
     return changed
         ? settings.copyWith(
             profiles: profiles,
             tursoAuthToken: tursoToken,
             r2SecretAccessKey: r2Secret,
+            commandToken: commandToken,
           )
         : settings;
   }
@@ -247,6 +257,11 @@ class SettingsRepository {
     if (settings.r2SecretAccessKey != null &&
         settings.r2SecretAccessKey!.isNotEmpty &&
         !TokenCipher.isSealed(settings.r2SecretAccessKey!)) {
+      return true;
+    }
+    if (settings.commandToken != null &&
+        settings.commandToken!.isNotEmpty &&
+        !TokenCipher.isSealed(settings.commandToken!)) {
       return true;
     }
     return settings.profiles.any(

@@ -9,6 +9,7 @@ import '../../timer/domain/timer_defaults.dart';
 import 'app_theme_mode.dart';
 import 'audio_config.dart';
 import 'provider_profile.dart';
+import 'token_cipher.dart';
 
 class AppSettings {
   const AppSettings({
@@ -31,6 +32,8 @@ class AppSettings {
     this.r2AccessKeyId,
     this.r2SecretAccessKey,
     this.r2MediaSyncEnabled = false,
+    this.commandBaseUrl,
+    this.commandToken,
     this.priceOverrides = const <String, ModelPrice>{},
     StoragePrice? storagePrice,
     Map<ShortcutAction, HotkeyBinding>? shortcuts,
@@ -93,6 +96,30 @@ class AppSettings {
   final String? r2SecretAccessKey;
   final bool r2MediaSyncEnabled;
 
+  /// The Command aggregator's base address, and the fleet token that reaches
+  /// it. Both null until the user configures them, which is the normal state:
+  /// with no control plane the app behaves exactly as it did before.
+  ///
+  /// The token is sealed at the `SettingsRepository` boundary like every other
+  /// token here — AES-256-GCM under the OS keyring, `enc:v1:` on disk — so this
+  /// field always holds plaintext in memory and never does on disk when a key
+  /// store is available.
+  final String? commandBaseUrl;
+  final String? commandToken;
+
+  /// The fleet token as a request header may carry it.
+  ///
+  /// A blob that no longer decrypts is preserved verbatim in [commandToken] —
+  /// it recovers the moment the key store does — but it must never reach the
+  /// wire, where it would be sent as a literal `enc:v1:…` string and answered
+  /// with a 401 that says nothing about the real cause. Same rule, and the same
+  /// reason, as `ProviderProfile.usableBearerToken`.
+  String? get usableCommandToken {
+    final String token = commandToken?.trim() ?? '';
+    if (token.isEmpty || TokenCipher.isSealed(token)) return null;
+    return token;
+  }
+
   /// **Only what the user changed.** The shipped table lives in
   /// `PriceBookDefaults`, so a later build can correct a provider's price for
   /// everyone who never edited it. Written to disk only when non-empty.
@@ -141,6 +168,10 @@ class AppSettings {
     String? r2AccessKeyId,
     String? r2SecretAccessKey,
     bool? r2MediaSyncEnabled,
+    String? commandBaseUrl,
+    bool clearCommandBaseUrl = false,
+    String? commandToken,
+    bool clearCommandToken = false,
     Map<String, ModelPrice>? priceOverrides,
     StoragePrice? storagePrice,
     bool clearStoragePrice = false,
@@ -173,6 +204,12 @@ class AppSettings {
       r2AccessKeyId: r2AccessKeyId ?? this.r2AccessKeyId,
       r2SecretAccessKey: r2SecretAccessKey ?? this.r2SecretAccessKey,
       r2MediaSyncEnabled: r2MediaSyncEnabled ?? this.r2MediaSyncEnabled,
+      commandBaseUrl: clearCommandBaseUrl
+          ? null
+          : (commandBaseUrl ?? this.commandBaseUrl),
+      commandToken: clearCommandToken
+          ? null
+          : (commandToken ?? this.commandToken),
       priceOverrides: priceOverrides ?? this.priceOverrides,
       storagePrice: clearStoragePrice
           ? null
@@ -201,6 +238,8 @@ class AppSettings {
       if (r2AccessKeyId != null) 'r2AccessKeyId': r2AccessKeyId,
       if (r2SecretAccessKey != null) 'r2SecretAccessKey': r2SecretAccessKey,
       'r2MediaSyncEnabled': r2MediaSyncEnabled,
+      if (commandBaseUrl != null) 'commandBaseUrl': commandBaseUrl,
+      if (commandToken != null) 'commandToken': commandToken,
       if (vaultPath != null) ...<String, dynamic>{
         'vaultPath': vaultPath,
         'vaultFolder': vaultFolder,
@@ -318,6 +357,12 @@ class AppSettings {
       r2MediaSyncEnabled: json['r2MediaSyncEnabled'] is bool
           ? json['r2MediaSyncEnabled'] as bool
           : false,
+      commandBaseUrl: json['commandBaseUrl'] is String
+          ? json['commandBaseUrl'] as String
+          : null,
+      commandToken: json['commandToken'] is String
+          ? json['commandToken'] as String
+          : null,
       priceOverrides: priceOverrides,
       storagePrice: storagePrice,
       shortcuts: shortcuts,

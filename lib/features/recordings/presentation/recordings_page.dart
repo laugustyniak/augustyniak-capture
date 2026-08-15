@@ -784,6 +784,12 @@ class _RecordingsPageState extends State<RecordingsPage> {
                                   ProjectsTab(
                                     controller: projects,
                                     recordingsController: controller,
+                                    // Read off the settings controller rather
+                                    // than held, on the same rule as the
+                                    // transcription and enrichment services:
+                                    // an address edited in Config reaches the
+                                    // next binding without rebuilding the tab.
+                                    commandClient: settings.commandClient,
                                     onNavigateToQueue: (String projectId) {
                                       setState(() {
                                         activeQueueProjectFilterId = projectId;

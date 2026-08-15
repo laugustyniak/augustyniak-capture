@@ -69,15 +69,22 @@ class ProjectsController extends ChangeNotifier {
     AgentKind? defaultAgent,
     Map<AgentKind, AgentSettings> agentSettings =
         const <AgentKind, AgentSettings>{},
+    String? commandHost,
+    String? commandWorkspace,
   }) async {
-    final Project project = Project(
-      id: _uuid.v4(),
-      name: _required(name, 'Project name'),
-      repoPath: _required(repoPath, 'Repository path'),
-      description: _optional(description),
-      sessionName: _optional(sessionName),
-      defaultAgent: defaultAgent,
-      agentSettings: Map<AgentKind, AgentSettings>.unmodifiable(agentSettings),
+    final Project project = _bind(
+      Project(
+        id: _uuid.v4(),
+        name: _required(name, 'Project name'),
+        repoPath: _required(repoPath, 'Repository path'),
+        description: _optional(description),
+        sessionName: _optional(sessionName),
+        defaultAgent: defaultAgent,
+        agentSettings: Map<AgentKind, AgentSettings>.unmodifiable(agentSettings),
+      ),
+      host: commandHost,
+      workspace: commandWorkspace,
+      previous: null,
     );
     final String nextActive = _activeProjectId ?? project.id;
     await _save(<Project>[..._projects, project], activeProjectId: nextActive);
@@ -92,26 +99,61 @@ class ProjectsController extends ChangeNotifier {
     String? sessionName,
     AgentKind? defaultAgent,
     Map<AgentKind, AgentSettings>? agentSettings,
+    String? commandHost,
+    String? commandWorkspace,
   }) async {
     if (!_projects.any((Project item) => item.id == project.id)) {
       throw StateError('Project ${project.id} no longer exists.');
     }
-    final Project replacement = Project(
-      id: project.id,
-      name: _required(name, 'Project name'),
-      repoPath: _required(repoPath, 'Repository path'),
-      description: _optional(description),
-      sessionName: _optional(sessionName),
-      defaultAgent: defaultAgent,
-      agentSettings: Map<AgentKind, AgentSettings>.unmodifiable(
-        agentSettings ?? project.agentSettings,
+    final Project replacement = _bind(
+      Project(
+        id: project.id,
+        name: _required(name, 'Project name'),
+        repoPath: _required(repoPath, 'Repository path'),
+        description: _optional(description),
+        sessionName: _optional(sessionName),
+        defaultAgent: defaultAgent,
+        agentSettings: Map<AgentKind, AgentSettings>.unmodifiable(
+          agentSettings ?? project.agentSettings,
+        ),
       ),
+      host: commandHost,
+      workspace: commandWorkspace,
+      previous: project,
     );
     await _save(
       _projects
           .map((Project item) => item.id == project.id ? replacement : item)
           .toList(),
       activeProjectId: _activeProjectId,
+    );
+  }
+
+  /// Applies a `(host, workspace)` pair to [project], stamping [commandBoundAt]
+  /// only when the pair actually changed.
+  ///
+  /// Re-stamping on every unrelated save — a renamed project, a corrected repo
+  /// path — would make the timestamp measure the last edit rather than the age
+  /// of the binding, which is the one question it exists to answer. Half a pair
+  /// clears the binding rather than storing it: see [Project.isBoundToCommand].
+  static Project _bind(
+    Project project, {
+    required String? host,
+    required String? workspace,
+    required Project? previous,
+  }) {
+    final String? boundHost = _optional(host);
+    final String? boundWorkspace = _optional(workspace);
+    if (boundHost == null || boundWorkspace == null) {
+      return project.copyWith(clearCommandBinding: true);
+    }
+    final bool unchanged =
+        previous?.commandHost == boundHost &&
+        previous?.commandWorkspace == boundWorkspace;
+    return project.copyWith(
+      commandHost: boundHost,
+      commandWorkspace: boundWorkspace,
+      commandBoundAt: unchanged ? previous?.commandBoundAt : DateTime.now(),
     );
   }
 
