@@ -8,6 +8,7 @@ import '../../gamification/presentation/done_burst_animation.dart';
 import '../domain/agent_artifact.dart';
 import '../domain/capture_type.dart';
 import '../domain/recording.dart';
+import '../domain/route_record.dart';
 import 'card_parts.dart';
 import 'transcript_focus_modal.dart';
 
@@ -38,6 +39,8 @@ class RecordingCard extends StatelessWidget {
     required this.onHandoff,
     this.canHandoff = false,
     this.onSelectArtifact,
+    this.onOpenOutcome,
+    this.canOpenOutcome,
     this.focused = false,
     this.costUsd,
   });
@@ -120,6 +123,16 @@ class RecordingCard extends StatelessWidget {
   /// would otherwise carry a dead button on every row.
   final bool canHandoff;
   final void Function(AgentArtifact artifact)? onSelectArtifact;
+
+  /// Opens the delivery's own page on the control plane. Null where nothing can
+  /// open a link, which renders the line dimmed rather than hiding it: what
+  /// came back is worth reading even where it cannot be followed.
+  final void Function(RouteOutcome outcome)? onOpenOutcome;
+
+  /// Whether *this* outcome has somewhere to go — a pull request, or a control
+  /// plane whose address is still configured. Asked per outcome rather than
+  /// once for the card, because the answer differs row by row.
+  final bool Function(RouteOutcome outcome)? canOpenOutcome;
 
   /// This row is the one the keyboard is on.
   ///
@@ -371,6 +384,32 @@ class RecordingCard extends StatelessWidget {
                 ),
               ],
             ),
+            // **One line, and a link out — never a fleet view.** Command has a
+            // dashboard, it installs on the same phone, and rebuilding it here
+            // is the overlap this whole integration exists to avoid.
+            if (recording.routes.last.outcome case final RouteOutcome outcome)
+              Builder(
+                builder: (BuildContext context) {
+                  final bool canOpen =
+                      onOpenOutcome != null &&
+                      (canOpenOutcome?.call(outcome) ?? true);
+                  return Padding(
+                    padding: const EdgeInsets.only(top: 5, left: 18),
+                    child: InkWell(
+                      onTap: canOpen ? () => onOpenOutcome!(outcome) : null,
+                      borderRadius: BorderRadius.circular(6),
+                      child: Text(
+                        outcomeLineFor(outcome),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: ConsoleText.micro.copyWith(
+                          color: canOpen ? Console.accent : Console.mutedSoft,
+                        ),
+                      ),
+                    ),
+                  );
+                },
+              ),
           ],
           if (recording.artifacts.isNotEmpty) ...<Widget>[
             const SizedBox(height: 9),

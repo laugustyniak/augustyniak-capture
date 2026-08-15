@@ -6,6 +6,7 @@ import '../../../app/ui_kit.dart';
 import '../domain/capture_category.dart';
 import '../domain/capture_type.dart';
 import '../domain/recording.dart';
+import '../domain/route_record.dart';
 
 /// The pieces a queue row draws in **both** of its modes.
 ///
@@ -311,4 +312,36 @@ IconData typeIconFor(CaptureType type) => switch (type) {
   CaptureType.image => Icons.image_outlined,
   CaptureType.text => Icons.description_outlined,
   CaptureType.video => Icons.movie_outlined,
+};
+
+
+/// The one line a capture gets about what became of it.
+///
+/// `checkedAt` is when this app last *asked*, not when anything changed, and
+/// the line says so — "nobody has looked lately" and "nothing has happened"
+/// are different facts and the whole reason a failed refresh keeps the previous
+/// answer instead of clearing it.
+String outcomeLineFor(RouteOutcome outcome) {
+  final StringBuffer buffer = StringBuffer(_stateLabel(outcome.state));
+  if (outcome.issues.isNotEmpty) {
+    final String numbers = outcome.issues
+        .take(3)
+        .map((int issue) => '#$issue')
+        .join(' ');
+    buffer.write(
+      ' · $numbers${outcome.issues.length > 3 ? ' +${outcome.issues.length - 3}' : ''}',
+    );
+  }
+  if (outcome.prUrl != null) buffer.write(' · PR');
+  buffer.write(' · checked ${formatClock(outcome.checkedAt)}');
+  return buffer.toString();
+}
+
+String _stateLabel(CommandState state) => switch (state) {
+  CommandState.submitted => 'SUBMITTED',
+  CommandState.planned => 'PLANNED',
+  CommandState.inProgress => 'IN PROGRESS',
+  CommandState.done => 'DONE',
+  CommandState.blocked => 'BLOCKED',
+  CommandState.needsReview => 'NEEDS REVIEW',
 };

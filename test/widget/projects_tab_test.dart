@@ -312,6 +312,10 @@ class _FakeCommandClient implements CommandClient {
     required String workspace,
     required String briefId,
   }) async => throw UnimplementedError();
+
+  @override
+  Future<CommandBriefStatus> briefStatus(String briefId) async =>
+      throw UnimplementedError();
 }
 
 

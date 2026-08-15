@@ -97,6 +97,14 @@ class CommandRouter implements CaptureRouter {
       at: DateTime.now(),
       kind: RouteKind.command,
       target: '$host · $workspace · ${session.name}',
+      // The outcome starts here rather than at the first poll, because this is
+      // the only moment the brief id is in hand — the poll is keyed on it, and
+      // a record written without one could never be refreshed at all.
+      outcome: RouteOutcome(
+        briefId: brief.id,
+        state: CommandState.submitted,
+        checkedAt: DateTime.now(),
+      ),
     );
   }
 }

@@ -109,6 +109,43 @@ class HttpCommandClient implements CommandClient {
     return session;
   }
 
+  @override
+  Future<CommandBriefStatus> briefStatus(String briefId) async {
+    final Uri url = _resolve(<String>['api', 'briefs', briefId]);
+    final http.Response response = await _client
+        .get(
+          url,
+          headers: <String, String>{
+            'accept': 'application/json',
+            if (bearerToken != null && bearerToken!.isNotEmpty)
+              'Authorization': 'Bearer $bearerToken',
+          },
+        )
+        .timeout(requestTimeout);
+
+    // The one status code with its own meaning here: it will not come right by
+    // waiting, so the caller is told to stop rather than to retry.
+    if (response.statusCode == 404) {
+      throw CommandBriefGoneException(briefId);
+    }
+
+    final String body = utf8.decode(response.bodyBytes);
+    if (response.statusCode < 200 || response.statusCode >= 300) {
+      throw HttpException(
+        describeProviderFailure('Reading the Command brief', response.statusCode, body),
+      );
+    }
+
+    final CommandBriefStatus? status = CommandBriefStatus.fromJson(
+      jsonDecode(body),
+      briefId: briefId,
+    );
+    if (status == null) {
+      throw const FormatException('The brief status is not a JSON object.');
+    }
+    return status;
+  }
+
   /// The engine the brief is handed to. Planning, never execution: RFC-0008
   /// gives this app read access to a run and no writes, so what leaves here is
   /// a request to *think about* the capture.

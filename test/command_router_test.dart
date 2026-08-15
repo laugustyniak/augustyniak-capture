@@ -59,6 +59,10 @@ class _FakeCommandClient implements CommandClient {
     sessionsFor.add(briefId);
     return const CommandSession(name: 'plan-capture-01');
   }
+
+  @override
+  Future<CommandBriefStatus> briefStatus(String briefId) async =>
+      throw UnimplementedError();
 }
 
 Project _project({

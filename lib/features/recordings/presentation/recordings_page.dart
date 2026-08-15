@@ -102,7 +102,8 @@ class RecordingsPage extends StatefulWidget {
   State<RecordingsPage> createState() => _RecordingsPageState();
 }
 
-class _RecordingsPageState extends State<RecordingsPage> {
+class _RecordingsPageState extends State<RecordingsPage>
+    with WidgetsBindingObserver {
   // Indices used in code; Timer, Projects, Logs and Config are selected only by
   // the navigation itself.
   static const int queueIndex = 0;
@@ -177,6 +178,10 @@ class _RecordingsPageState extends State<RecordingsPage> {
   @override
   void initState() {
     super.initState();
+    // The other of the two moments Command outcomes are read back — see
+    // `refreshCommandOutcomes`. Coming to the foreground is when somebody is
+    // actually looking; a timer would spend battery when nobody is.
+    WidgetsBinding.instance.addObserver(this);
     logs = LogStore(archive: FileLogArchive());
     // Built once and shared by the settings and recordings controllers: both
     // sides of a job — the HTTP call the settings-built service makes, and
@@ -276,6 +281,11 @@ class _RecordingsPageState extends State<RecordingsPage> {
       // A bound project sends `agentTask` to the control plane and everything
       // else to its own inbox; an unbound one behaves exactly as it did before
       // Command existed. One decision point, so no surface has to repeat it.
+      commandClient: settings.commandClient,
+      // Read live rather than captured, on the same rule as the vault's
+      // directory: the address can change in Config at any moment and the next
+      // tap on an outcome must follow it.
+      commandBaseUrl: () => settings.settings.commandBaseUrl,
       captureRouter: ProjectCaptureRouter(
         command: CommandRouter(
           projectById: _projectById,
@@ -706,7 +716,16 @@ class _RecordingsPageState extends State<RecordingsPage> {
   }
 
   @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    super.didChangeAppLifecycleState(state);
+    if (state == AppLifecycleState.resumed) {
+      unawaited(controller.refreshCommandOutcomes());
+    }
+  }
+
+  @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     settings.removeListener(_applySettings);
     projects.removeListener(_applyActiveProject);
     // The OS keeps a registration until it is told otherwise. This cannot be

@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:path/path.dart' as p;
 import 'package:record/record.dart';
+import 'package:augustyniak_capture/features/command/domain/command_client.dart';
 import 'package:augustyniak_capture/features/costs/domain/usage_sink.dart';
 import 'package:augustyniak_capture/features/logs/data/log_store.dart';
 import 'package:augustyniak_capture/features/gamification/presentation/gamification_controller.dart';
@@ -126,6 +127,8 @@ Future<RecordingsController> buildRecordingsController(
   ClosureLog closureLog = const NoopClosureLog(),
   Project? Function(String projectId)? projectById,
   GamificationController? gamificationController,
+  CommandClient commandClient = const DisabledCommandClient(),
+  String? Function()? commandBaseUrl,
 }) async {
   final RecordingsController controller = RecordingsController(
     repository: repository ?? FakeRecordingsRepository(appDir, seed: seed),
@@ -140,6 +143,8 @@ Future<RecordingsController> buildRecordingsController(
     closureLog: closureLog,
     projectById: projectById,
     gamificationController: gamificationController,
+    commandClient: commandClient,
+    commandBaseUrl: commandBaseUrl,
   );
   addTearDown(controller.dispose);
   await controller.initialize();

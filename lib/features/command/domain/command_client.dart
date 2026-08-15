@@ -1,3 +1,5 @@
+import '../../recordings/domain/route_record.dart';
+
 /// One machine the Command control plane can start work on.
 ///
 /// [id] is what every later call addresses — the path segment in
@@ -89,6 +91,67 @@ class CommandSession {
   }
 }
 
+/// What the control plane answered about one brief.
+///
+/// A transport-level shape rather than `RouteOutcome`: the client's job ends at
+/// reading the reply, and stamping `checkedAt` belongs to whoever asked. Two
+/// nulls are meaningful — an unrecognised state and an unparseable timestamp
+/// both mean *this build cannot read that part*, not *there is nothing there*.
+class CommandBriefStatus {
+  const CommandBriefStatus({
+    required this.briefId,
+    required this.state,
+    this.issues = const <int>[],
+    this.prUrl,
+  });
+
+  final String briefId;
+
+  /// Null when the control plane named a state this build does not know.
+  final CommandState? state;
+
+  final List<int> issues;
+  final String? prUrl;
+
+  static CommandBriefStatus? fromJson(Object? json, {required String briefId}) {
+    if (json is! Map<String, dynamic>) return null;
+    final Object? issues = json['issues'];
+    final Object? prUrl = json['pr_url'] ?? json['prUrl'];
+    return CommandBriefStatus(
+      briefId: briefId,
+      state: CommandState.fromName(
+        json['state'] is String ? json['state'] as String : null,
+      ),
+      issues: issues is List
+          ? <int>[
+              for (final Object? item in issues)
+                if (item is int)
+                  item
+                else if (item is Map<String, dynamic> && item['number'] is int)
+                  item['number'] as int,
+            ]
+          : const <int>[],
+      prUrl: prUrl is String && prUrl.trim().isNotEmpty ? prUrl.trim() : null,
+    );
+  }
+}
+
+/// The control plane no longer knows this brief.
+///
+/// Separated from every other failure because it is the one that will not come
+/// right by waiting: a workspace was unregistered, or the brief was removed. A
+/// poller that treated it like a timeout would ask again forever.
+class CommandBriefGoneException implements Exception {
+  const CommandBriefGoneException(this.briefId);
+
+  final String briefId;
+
+  @override
+  String toString() =>
+      'The control plane no longer knows brief $briefId — its workspace may '
+      'have been unregistered. Nothing more will come back for it.';
+}
+
 /// Reads the fleet, so a project can be bound to a real `(host, workspace)`.
 ///
 /// A seam of the same shape as `TranscriptionService` and `OcrService`: the
@@ -133,6 +196,13 @@ abstract interface class CommandClient {
     required String workspace,
     required String briefId,
   });
+
+  /// What has become of a brief.
+  ///
+  /// Throws [CommandBriefGoneException] on a 404 so the caller can stop asking,
+  /// and any other transport failure as itself so the caller can keep the last
+  /// answer and try again later. That split is the whole contract here.
+  Future<CommandBriefStatus> briefStatus(String briefId);
 }
 
 class DisabledCommandClient implements CommandClient {
@@ -163,6 +233,10 @@ class DisabledCommandClient implements CommandClient {
     required String workspace,
     required String briefId,
   }) async => throw const CommandNotConfiguredException();
+
+  @override
+  Future<CommandBriefStatus> briefStatus(String briefId) async =>
+      throw const CommandNotConfiguredException();
 }
 
 class CommandNotConfiguredException implements Exception {

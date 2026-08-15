@@ -8,6 +8,7 @@ import 'package:record/record.dart';
 import 'package:uuid/uuid.dart';
 
 import '../../costs/domain/usage_event.dart';
+import '../../command/domain/command_client.dart';
 import '../../costs/domain/usage_sink.dart';
 import '../../enrichment/domain/enrichment_context.dart';
 import '../../enrichment/domain/enrichment_result.dart';
@@ -84,7 +85,11 @@ class RecordingsController extends ChangeNotifier {
     AudioPlayer? player,
     GamificationController? gamificationController,
     ClosureLog closureLog = const NoopClosureLog(),
+    CommandClient commandClient = const DisabledCommandClient(),
+    String? Function()? commandBaseUrl,
   }) : _repository = repository,
+       _commandClient = commandClient,
+       _commandBaseUrl = commandBaseUrl,
        _closureLog = closureLog,
        _revisionsRepository = revisionsRepository,
        _transcriptionService = transcriptionService,
@@ -159,6 +164,30 @@ class RecordingsController extends ChangeNotifier {
   final ClipboardSink _clipboardSink;
   final MediaOpener _mediaOpener;
   final CaptureRouter _captureRouter;
+
+  /// Reads back what became of a delivery. The disabled default answers
+  /// "not configured" and [refreshCommandOutcomes] then does nothing, which is
+  /// the state of every install with no control plane.
+  final CommandClient _commandClient;
+
+  /// Briefs the control plane has said it no longer knows.
+  ///
+  /// In memory only, like `_enrichingIds` and `_closedIds`. A 404 is a claim
+  /// about the *other* side's current state — a workspace can be registered
+  /// again — so writing "never ask about this" into the capture would outlive
+  /// the fact it records. Holding it for the session is what stops the poll
+  /// retrying forever without making the decision permanent.
+  final Set<String> _abandonedBriefs = <String>{};
+
+  /// Where the control plane's own pages live, read live for the same reason
+  /// the vault reads its directory through a callback: the address can change
+  /// in Config at any time and the next tap must follow.
+  final String? Function()? _commandBaseUrl;
+
+  /// Single-flight, on the same rule as `_isDraining`: a foreground event and a
+  /// pull-to-refresh land together often enough to matter, and two sweeps would
+  /// both write the index.
+  bool _refreshingOutcomes = false;
   final AgentHandoff _agentHandoff;
   final NoteVault _noteVault;
 
@@ -1491,6 +1520,123 @@ class RecordingsController extends ChangeNotifier {
   /// purpose — it is a user-initiated sweep over the user's own disk, and a
   /// hundred concurrent writes into a directory their notes application is
   /// watching buys nothing but a stampede of file events.
+  /// Refreshes what the control plane says about every capture it holds.
+  ///
+  /// **Called on foreground and on pull-to-refresh, never on a timer.** Nothing
+  /// here is worth a wake-up, and a phone polling a homelab on a schedule is a
+  /// battery cost with nobody waiting on the answer.
+  ///
+  /// Best-effort under the `ClipboardSink` contract, and more strongly so: an
+  /// outcome is a *cache* of somebody else's state, so a failed refresh must
+  /// cost nothing at all. In particular an unreachable aggregator **keeps the
+  /// last outcome and its `checkedAt`** rather than clearing it — the stale
+  /// answer plus the time it was true is strictly more than a blank line, and
+  /// clearing would turn "nobody has looked lately" into "nothing has
+  /// happened".
+  Future<int> refreshCommandOutcomes() async {
+    if (_refreshingOutcomes || _indexUnreadable) return 0;
+    _refreshingOutcomes = true;
+    int updated = 0;
+    try {
+      // A snapshot: the list is rewritten by `_update` inside the loop, and an
+      // item can be deleted while a request is in flight.
+      for (final String id in _recordings
+          .map((Recording item) => item.id)
+          .toList(growable: false)) {
+        final Recording? item = _recordingOrNull(id);
+        final RouteRecord? route = item?.routes.isNotEmpty == true
+            ? item!.routes.last
+            : null;
+        final RouteOutcome? known = route?.outcome;
+        if (route == null || known == null) continue;
+        if (route.kind != RouteKind.command) continue;
+        if (_abandonedBriefs.contains(known.briefId)) continue;
+
+        final CommandBriefStatus status;
+        try {
+          status = await _commandClient.briefStatus(known.briefId);
+        } on CommandBriefGoneException catch (error) {
+          // The one failure that will not come right by waiting.
+          _abandonedBriefs.add(known.briefId);
+          _logSink.log('$error', level: LogLevel.warn, recordingId: id);
+          continue;
+        } catch (exception) {
+          _logSink.log(
+            'Could not refresh the Command outcome: $exception',
+            level: LogLevel.warn,
+            recordingId: id,
+          );
+          continue;
+        }
+        if (_disposed) return updated;
+
+        final RouteOutcome next = known.copyWith(
+          // A state this build cannot read keeps the one it had: the poll is a
+          // cache refresh, and a newer label must not blank out a known answer.
+          state: status.state ?? known.state,
+          issues: status.issues.isEmpty ? known.issues : status.issues,
+          prUrl: status.prUrl ?? known.prUrl,
+          checkedAt: DateTime.now(),
+        );
+        updated++;
+        await _update(
+          id,
+          (Recording current) => current.copyWith(
+            routes: <RouteRecord>[
+              ...current.routes.sublist(0, current.routes.length - 1),
+              current.routes.last.withOutcome(next),
+            ],
+          ),
+        );
+      }
+    } finally {
+      _refreshingOutcomes = false;
+    }
+    return updated;
+  }
+
+  /// Opens a delivery's page on the control plane, or its pull request.
+  ///
+  /// The pull request wins when there is one: it is the thing the user actually
+  /// wants to look at by then, and the brief page is a step on the way to it.
+  Future<void> openCommandOutcome(RouteOutcome outcome) async {
+    final Uri? url = commandOutcomeUrl(outcome);
+    if (url == null) return;
+    try {
+      await _mediaOpener.open(url.toString());
+      _error = null;
+    } catch (exception) {
+      _error = 'Could not open $url: $exception';
+      _logSink.log('$_error', level: LogLevel.error);
+    }
+    notifyListeners();
+  }
+
+  /// Null when nothing can be opened — no pull request and no configured
+  /// address — which the card renders as a dimmed line rather than hiding it.
+  Uri? commandOutcomeUrl(RouteOutcome outcome) {
+    final String? pr = outcome.prUrl;
+    if (pr != null) return Uri.tryParse(pr);
+    final String base = _commandBaseUrl?.call()?.trim() ?? '';
+    if (base.isEmpty) return null;
+    final Uri? parsed = Uri.tryParse(base);
+    if (parsed == null || !parsed.hasScheme) return null;
+    return parsed.replace(
+      pathSegments: <String>[
+        ...parsed.pathSegments.where((String segment) => segment.isNotEmpty),
+        'briefs',
+        outcome.briefId,
+      ],
+    );
+  }
+
+  Recording? _recordingOrNull(String id) {
+    for (final Recording item in _recordings) {
+      if (item.id == id) return item;
+    }
+    return null;
+  }
+
   Future<VaultMirrorSummary> mirrorAll() async {
     VaultMirrorSummary summary = const VaultMirrorSummary();
     if (!_noteVault.isConfigured) return summary;

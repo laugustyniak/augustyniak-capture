@@ -13,6 +13,7 @@ import '../../projects/presentation/projects_controller.dart';
 import '../domain/agent_artifact.dart';
 import '../domain/capture_category.dart';
 import '../domain/recording.dart';
+import '../domain/route_record.dart';
 import 'agent_artifact_viewer_modal.dart';
 import 'card_parts.dart';
 import 'compact_queue_header.dart';
@@ -151,6 +152,11 @@ class _QueueTabState extends State<QueueTab> {
     if (_isSyncing) return;
     setState(() => _isSyncing = true);
     try {
+      // Pull-to-refresh is one of the two moments Command outcomes are read
+      // back — the other is the app coming to the foreground. Never a timer:
+      // nothing here is worth a wake-up, and a phone polling a homelab on a
+      // schedule spends battery with nobody waiting on the answer.
+      unawaited(controller.refreshCommandOutcomes());
       final bool ok = await controller.syncTurso();
       if (context.mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -582,6 +588,9 @@ class _QueueTabState extends State<QueueTab> {
       onRoute: () => controller.route(recording.id),
       canHandoff: controller.canHandoff(recording),
       onHandoff: () => _openHandoff(recording),
+      onOpenOutcome: controller.openCommandOutcome,
+      canOpenOutcome: (RouteOutcome outcome) =>
+          controller.commandOutcomeUrl(outcome) != null,
       onSelectArtifact: (AgentArtifact artifact) {
         showAgentArtifactViewer(
           context,
