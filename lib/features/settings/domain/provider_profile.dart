@@ -14,7 +14,24 @@ import 'token_cipher.dart';
 /// methods below.
 enum ProfileKind {
   transcription,
-  enrichment;
+  enrichment,
+
+  /// A speech model running on this machine rather than an endpoint.
+  ///
+  /// It is a profile kind rather than a separate setting because the Models tab
+  /// already manages named things with an active selection per kind, and a
+  /// local model is asked the same questions: what is it called, which one is
+  /// active, and what language should it assume. A separate local-engine
+  /// setting beside the profile list would make two sources of truth about
+  /// which transcriber is active, and the bug that follows is a user who
+  /// switched one and is still being charged by the other.
+  ///
+  /// **An older build reads this as [transcription]** — [fromName] falls back
+  /// rather than dropping, which is right for every row written before kinds
+  /// existed and wrong here. Such a build then posts to a blank endpoint and
+  /// degrades to the disabled service: a local profile in an old build is
+  /// inert, not destructive. Written down before it is discovered.
+  localWhisper;
 
   /// Legacy rows have no `kind`, and every profile written before enrichment
   /// existed was a transcription profile.
@@ -25,7 +42,12 @@ enum ProfileKind {
   String get label => switch (this) {
     ProfileKind.transcription => 'TRANSCRIPTION PROFILES',
     ProfileKind.enrichment => 'ENRICHMENT PROFILES',
+    ProfileKind.localWhisper => 'ON-DEVICE MODELS',
   };
+
+  /// Whether this kind reaches the network at all. Read by the editor, which
+  /// has no endpoint or token to ask for on a local profile.
+  bool get isRemote => this != ProfileKind.localWhisper;
 }
 
 /// A named transcription endpoint the user can switch between.
@@ -159,9 +181,18 @@ class ProviderProfile {
   /// Build the service for this profile. Returns the disabled service when the
   /// endpoint is blank or unparseable, so a half-filled profile degrades to the
   /// "not configured" error instead of throwing at capture time.
+  ///
+  /// **The kind is read before the endpoint, and that order is the change a
+  /// local profile forced.** The blank-endpoint guard below is deliberate and
+  /// documented — but a local profile has no endpoint by definition, and
+  /// reading a missing URL as a broken profile would make every on-device
+  /// model silently disabled. Local transcription is built by the settings
+  /// controller, which owns the engine and the model store; this method only
+  /// refuses to invent a remote service for it.
   TranscriptionService toService({
     UsageSink usageSink = const NoopUsageSink(),
   }) {
+    if (!kind.isRemote) return const DisabledTranscriptionService();
     final Uri? uri = hasEndpoint ? Uri.tryParse(endpoint.trim()) : null;
     if (uri == null || !uri.hasScheme) {
       return const DisabledTranscriptionService();

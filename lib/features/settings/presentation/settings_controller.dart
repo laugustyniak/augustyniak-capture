@@ -12,7 +12,9 @@ import '../../shortcuts/domain/hotkey_binding.dart';
 import '../../shortcuts/domain/shortcut_action.dart';
 import '../../timer/domain/alarm_sound.dart';
 import '../../timer/domain/timer_defaults.dart';
+import '../../transcription/data/local_transcription_service.dart';
 import '../../transcription/data/transcription_service.dart';
+import '../../transcription/domain/local_transcription_engine.dart';
 import '../data/settings_repository.dart';
 import '../domain/app_settings.dart';
 import '../domain/app_theme_mode.dart';
@@ -27,8 +29,29 @@ class SettingsController extends ChangeNotifier {
   SettingsController({
     SettingsRepository? repository,
     UsageSink usageSink = const NoopUsageSink(),
+    LocalTranscriptionEngine localEngine = const UnavailableLocalEngine(),
+    Future<String?> Function(String modelId)? localModelPath,
   }) : _repository = repository ?? SettingsRepository(),
-       _usageSink = usageSink;
+       _usageSink = usageSink,
+       _localEngine = localEngine,
+       _localModelPath = localModelPath ?? _noLocalModel;
+
+  /// Runs a model on this machine. Unavailable until a build ships the native
+  /// engine, which is what makes a local profile fail readably rather than
+  /// silently doing nothing.
+  final LocalTranscriptionEngine _localEngine;
+
+  /// Where an installed model lives, or null when it is not installed. Answers
+  /// null everywhere until the model store lands — a local profile is then a
+  /// profile pointing at nothing, and says so.
+  final Future<String?> Function(String modelId) _localModelPath;
+
+  static Future<String?> _noLocalModel(String modelId) async => null;
+
+  /// Whether this build can run a model at all, and why not when it cannot.
+  /// Read by the Models tab, which says it once rather than per capture.
+  bool get localEngineAvailable => _localEngine.isAvailable;
+  String? get localEngineIssue => _localEngine.unavailableReason;
 
   static const String openAiEndpoint =
       'https://api.openai.com/v1/audio/transcriptions';
@@ -123,6 +146,10 @@ class SettingsController extends ChangeNotifier {
     final String signature = active == null
         ? 'disabled'
         : <String?>[
+            // The kind is in the signature because it decides *which* service
+            // is built, not merely how one is configured — without it, editing
+            // a profile from remote to local would keep the cached HTTP client.
+            active.kind.name,
             active.id,
             active.endpoint,
             active.model,
@@ -131,11 +158,30 @@ class SettingsController extends ChangeNotifier {
           ].join('|');
 
     if (_service == null || _serviceSignature != signature) {
-      _service = active?.toService(usageSink: _usageSink) ??
-          const DisabledTranscriptionService();
+      _service = _buildTranscriptionService(active);
       _serviceSignature = signature;
     }
     return _service!;
+  }
+
+  /// A local profile is built here rather than in `ProviderProfile.toService`,
+  /// because it needs two things the profile does not own: the engine and the
+  /// model store. The profile only names which model it wants.
+  TranscriptionService _buildTranscriptionService(ProviderProfile? active) {
+    if (active == null) return const DisabledTranscriptionService();
+    if (active.kind == ProfileKind.localWhisper) {
+      return LocalTranscriptionService(
+        engine: _localEngine,
+        // The `model` field names the catalog entry here, exactly as it names
+        // the remote model elsewhere — one field, one meaning per kind.
+        modelId: active.model?.trim() ?? '',
+        modelPath: _localModelPath,
+        language: active.language?.trim().isEmpty ?? true
+            ? null
+            : active.language!.trim(),
+      );
+    }
+    return active.toService(usageSink: _usageSink);
   }
 
   /// The enrichment service the recordings controller should use right now.
