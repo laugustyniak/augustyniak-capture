@@ -82,7 +82,10 @@ class BackupCoordinator {
     final RestoreSummary summary = await _archive.importFrom(source);
     _logSink.log(
       'Imported ${summary.added} captures '
-      '(${summary.alreadyPresent} already here, '
+      '(${summary.alreadyPresent} already here'
+      '${summary.matchedByIdAlone > 0 ? ', ${summary.matchedByIdAlone} of them '
+                'matched by id alone — that archive predates content hashing '
+                'and its rows were not compared by content' : ''}, '
       '${summary.filesRestored} files restored).',
     );
     return summary;

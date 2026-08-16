@@ -36,6 +36,7 @@ class RestoreSummary {
     required this.alreadyPresent,
     required this.unreadable,
     required this.filesRestored,
+    this.matchedByIdAlone = 0,
   });
 
   /// Rows that were not in the local index and now are.
@@ -51,6 +52,19 @@ class RestoreSummary {
 
   /// Immutable source artifacts copied in. Derived posters are regenerated.
   final int filesRestored;
+
+  /// How many of [alreadyPresent] were recognised **only** because the archive
+  /// and the local library share an id — the archived row carried no
+  /// `contentHash` to compare.
+  ///
+  /// Reported rather than folded into [alreadyPresent], because the two are
+  /// different promises. A hash match means *these are the same bytes*; an id
+  /// match means *this archive was taken from this library*, which says nothing
+  /// about a copy that travelled through another device. An archive written
+  /// before content hashing existed restores looking perfectly deduplicated
+  /// while having compared nothing, and silently degrading to the weaker rule
+  /// is exactly what the feature was asked not to do.
+  final int matchedByIdAlone;
 }
 
 /// A portable copy of everything the queue is made of.

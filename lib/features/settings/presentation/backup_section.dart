@@ -74,6 +74,12 @@ class _BackupSectionState extends State<BackupSection> {
     final List<String> parts = <String>[
       '${summary.added} restored',
       '${summary.alreadyPresent} already here',
+      // Named on screen, not only in the log: an archive taken before content
+      // hashing looks perfectly deduplicated while nothing was compared by
+      // content, and the user is the only one who can tell whether that
+      // matters for the copy they are restoring.
+      if (summary.matchedByIdAlone > 0)
+        '${summary.matchedByIdAlone} matched by id only',
       '${summary.filesRestored} files',
       if (summary.unreadable > 0) '${summary.unreadable} unreadable',
     ];

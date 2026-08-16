@@ -381,11 +381,17 @@ class ZipCaptureArchive implements CaptureArchive {
       final bool sameLocalBytes =
           incoming.contentHash != null &&
           localHashes.contains(incoming.contentHash);
-      if (localIds.contains(incoming.id) || sameLocalBytes) {
+      final bool sameId = localIds.contains(incoming.id);
+      if (sameId || sameLocalBytes) {
         // The local copy has been edited, enriched and possibly routed since
         // the archive was taken. The archived one is older by definition, so
         // it never wins — a restore must not be able to undo work.
         plan.alreadyPresent++;
+        // Recorded, not swallowed: an id match only proves this archive came
+        // from this library, while a hash match proves the bytes are the same
+        // wherever they were captured. An archive predating `contentHash`
+        // restores looking fully deduplicated having compared nothing.
+        if (!sameLocalBytes) plan.matchedByIdAlone++;
         continue;
       }
       if (!acceptedIds.add(incoming.id)) {
@@ -531,6 +537,7 @@ class ZipCaptureArchive implements CaptureArchive {
     return RestoreSummary(
       added: plan.additions.length,
       alreadyPresent: plan.alreadyPresent,
+      matchedByIdAlone: plan.matchedByIdAlone,
       unreadable: plan.unreadable,
       filesRestored: plan.filesRestored,
     );
@@ -694,6 +701,7 @@ class _RecordingImportPlan {
   final List<Recording> local;
   final List<Recording> additions = <Recording>[];
   int alreadyPresent = 0;
+  int matchedByIdAlone = 0;
   int unreadable = 0;
   int filesRestored = 0;
 }

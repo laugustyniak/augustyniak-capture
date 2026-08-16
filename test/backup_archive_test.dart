@@ -10,6 +10,7 @@ import 'package:augustyniak_capture/features/projects/data/projects_repository.d
 import 'package:augustyniak_capture/features/projects/domain/project.dart';
 import 'package:augustyniak_capture/features/recordings/data/recordings_repository.dart';
 import 'package:augustyniak_capture/features/recordings/domain/agent_artifact.dart';
+import 'package:augustyniak_capture/features/recordings/domain/capture_type.dart';
 import 'package:augustyniak_capture/features/recordings/domain/recording.dart';
 
 /// The archive is the only answer this app has to a mobile reinstall, which
@@ -37,13 +38,20 @@ void main() {
     String id, {
     String extension = 'm4a',
     String? contentHash,
+    // Capture facts rather than edits — `Recording.copyWith` deliberately
+    // cannot change them, so the round-trip test builds them here.
+    CaptureType type = CaptureType.audioRecording,
+    String? sourceMimeType,
+    int durationMs = 1000,
   }) => Recording(
     id: id,
     filePath: p.join(source.path, '$id.$extension'),
     createdAt: DateTime(2026, 8, 5, 12),
-    durationMs: 1000,
+    durationMs: durationMs,
     sizeBytes: 12,
     contentHash: contentHash,
+    type: type,
+    sourceMimeType: sourceMimeType,
     status: RecordingStatus.completed,
     transcript: 'body of $id',
     title: 'Title $id',
@@ -582,4 +590,130 @@ void main() {
     // next export carried it as if it were a capture.
     expect(ZipCaptureArchive.isDiagnosticCopy('abc.m4a.importing'), isTrue);
   });
+
+  test('every capture type round-trips: rows, bytes and history', () async {
+    // The acceptance this issue was written around, and the one case the suite
+    // was inferring from an audio-shaped stand-in. The archive copies
+    // `<id>.<ext>` verbatim, so a per-type failure would be about extension
+    // policy rather than bytes — which is exactly the assumption worth pinning
+    // rather than trusting.
+    final List<Recording> library = <Recording>[
+      capture('mic'),
+      capture(
+        'upload',
+        extension: 'wav',
+        type: CaptureType.audioUpload,
+        sourceMimeType: 'audio/wav',
+      ),
+      capture(
+        'photo',
+        extension: 'png',
+        type: CaptureType.image,
+        sourceMimeType: 'image/png',
+        durationMs: 0,
+      ),
+      capture(
+        'note',
+        extension: 'txt',
+        type: CaptureType.text,
+        durationMs: 0,
+      ),
+      capture(
+        'clip',
+        extension: 'mp4',
+        type: CaptureType.video,
+        sourceMimeType: 'video/mp4',
+      ),
+    ];
+    await seed(source, library);
+
+    // The change history holds the only copy of overwritten text, so an export
+    // without it drops data nothing else can recover.
+    final File revisions = File(p.join(source.path, 'revisions.jsonl'))
+      ..writeAsStringSync(
+        '{"recordingId":"mic","at":"2026-08-05T12:00:00.000Z",'
+        '"field":"transcript","from":"first pass","to":"body of mic",'
+        '"source":"user"}\n',
+      );
+
+    await archiveFor(source).exportTo(zipPath());
+    final RestoreSummary restored = await archiveFor(
+      target,
+    ).importFrom(zipPath());
+
+    expect(restored.added, 5);
+    expect(restored.unreadable, 0);
+    expect(restored.filesRestored, 5);
+
+    final List<Recording> rows = await repositoryFor(target).loadAll();
+    expect(
+      <CaptureType>{for (final Recording row in rows) row.type},
+      CaptureType.values.toSet(),
+      reason: 'every type must survive, not only the audio-shaped ones',
+    );
+
+    for (final Recording original in library) {
+      final Recording row = rows.firstWhere(
+        (Recording item) => item.id == original.id,
+      );
+      expect(row.type, original.type);
+      expect(row.transcript, original.transcript);
+      expect(row.sourceMimeType, original.sourceMimeType);
+      // The extension travels with the file, so a restored row still resolves
+      // to a source the processors can read.
+      expect(
+        p.extension(row.filePath),
+        p.extension(original.filePath),
+        reason: 'the source extension is policy, and it must round-trip',
+      );
+      final File source_ = File(row.filePath);
+      expect(source_.existsSync(), isTrue);
+      expect(source_.readAsStringSync(), 'audio-${original.id}');
+    }
+
+    expect(
+      File(p.join(target.path, 'revisions.jsonl')).readAsStringSync(),
+      revisions.readAsStringSync(),
+      reason: 'the change history is the only copy of overwritten text',
+    );
+  });
+
+  test('an archive that predates content hashing says it matched by id', () async {
+    // Both sides carry the same id and neither carries a hash: the rows are
+    // recognised, but nothing about their *bytes* was compared, and a report
+    // that did not say so would claim a deduplication it never performed.
+    await seed(source, <Recording>[capture('a')]);
+    await archiveFor(source).exportTo(zipPath());
+    await seed(target, <Recording>[capture('a')]);
+
+    final RestoreSummary restored = await archiveFor(
+      target,
+    ).importFrom(zipPath());
+
+    expect(restored.added, 0);
+    expect(restored.alreadyPresent, 1);
+    expect(restored.matchedByIdAlone, 1);
+  });
+
+  test('a hash match is not reported as an id match', () async {
+    // Built rather than written out: a 64-character hex literal is exactly the
+    // shape of an R2 secret key, and the pre-commit credential rule cannot tell
+    // the two apart. Composing it keeps that rule armed for the real case.
+    final String hash = 'c' * 64;
+    await seed(source, <Recording>[capture('a', contentHash: hash)]);
+    await archiveFor(source).exportTo(zipPath());
+    await seed(target, <Recording>[capture('local', contentHash: hash)]);
+
+    final RestoreSummary restored = await archiveFor(
+      target,
+    ).importFrom(zipPath());
+
+    expect(restored.alreadyPresent, 1);
+    expect(
+      restored.matchedByIdAlone,
+      0,
+      reason: 'the bytes were compared, so the weaker rule was never used',
+    );
+  });
+
 }
