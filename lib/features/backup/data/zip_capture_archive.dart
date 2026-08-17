@@ -2,6 +2,7 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:archive/archive_io.dart';
+import 'package:flutter/foundation.dart';
 import 'package:path/path.dart' as p;
 
 import '../../projects/data/projects_repository.dart';
@@ -31,6 +32,16 @@ class ZipCaptureArchive implements CaptureArchive {
        _recordings = recordings ?? RecordingsRepository(),
        _projects =
            projects ?? ProjectsRepository(directoryProvider: directoryProvider);
+
+  /// Fired once the manifest is computed and before any member is written.
+  ///
+  /// A test-only seam, and the only way to reach the failure this ordering was
+  /// changed for: the live app rewrites a durable index *during* a compression
+  /// pass that takes minutes, which no test can schedule and no clock-based
+  /// wait may stand in for. Null in production, so the export reads as one
+  /// straight line there.
+  @visibleForTesting
+  Future<void> Function()? onManifestSealed;
 
   final ArchiveDirectoryProvider _directoryProvider;
   final SourceContentHasher _hasher;
@@ -142,6 +153,8 @@ class ZipCaptureArchive implements CaptureArchive {
       }
       manifestFiles.add(<String, Object>{'name': name, 'size': size});
     }
+
+    await onManifestSealed?.call();
 
     final ZipFileEncoder encoder = ZipFileEncoder();
     // Streamed to disk rather than built in memory: an archive is mostly audio,
