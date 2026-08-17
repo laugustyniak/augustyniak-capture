@@ -3,6 +3,7 @@ import 'dart:io';
 import 'package:flutter/services.dart';
 import 'package:path/path.dart' as p;
 
+import '../../transcription/data/audio_decoder.dart';
 import '../../transcription/data/audio_splitter.dart';
 import 'video_audio_extractor.dart';
 import 'video_poster_extractor.dart';
@@ -13,7 +14,11 @@ import 'video_poster_extractor.dart';
 /// AVFoundation. No executable is spawned, so the implementation works inside
 /// the mobile application sandbox and adds no bundled codec binary.
 class NativeMobileMediaProcessor
-    implements VideoAudioExtractor, VideoPosterExtractor, AudioSplitter {
+    implements
+        VideoAudioExtractor,
+        VideoPosterExtractor,
+        AudioSplitter,
+        AudioDecoder {
   const NativeMobileMediaProcessor();
 
   static const MethodChannel _channel = MethodChannel(
@@ -22,6 +27,7 @@ class NativeMobileMediaProcessor
 
   static const String _videoAudioPrefix = 'augustyniak_video_audio';
   static const String _audioSplitPrefix = 'augustyniak_split';
+  static const String _audioDecodePrefix = 'augustyniak_pcm';
 
   @override
   bool get isAvailable => Platform.isAndroid || Platform.isIOS;
@@ -59,6 +65,35 @@ class NativeMobileMediaProcessor
       return destination;
     } catch (_) {
       await _deleteFile(destination);
+      rethrow;
+    }
+  }
+
+  /// Decodes to what a local speech model reads. The native side owns the
+  /// codec — MediaCodec on Android, AVFoundation on iOS — exactly as it does
+  /// for splitting, so this adds a channel method rather than a dependency.
+  @override
+  Future<DecodedAudio> decodeToPcm(File audio) async {
+    await _requireSource(audio, 'Audio');
+
+    final Directory tempDir = await Directory.systemTemp.createTemp(
+      _audioDecodePrefix,
+    );
+    final File output = File('${tempDir.path}/audio.f32le');
+    try {
+      await _channel.invokeMethod<void>('decodeAudioToPcm', <String, Object>{
+        'sourcePath': audio.path,
+        'outputPath': output.path,
+        'sampleRate': FfmpegAudioDecoder.sampleRate,
+      });
+      // A channel call that returns without throwing has still written nothing
+      // often enough to matter — the same trap the poster extractor documents.
+      // An empty buffer reaches a model as silence and comes back as confident
+      // nonsense rather than as a failure.
+      await _requireOutput(output, 'Native audio decoding');
+      return DecodedAudio(file: output, tempDir: tempDir);
+    } catch (_) {
+      if (await tempDir.exists()) await tempDir.delete(recursive: true);
       rethrow;
     }
   }
