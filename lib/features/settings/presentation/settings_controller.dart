@@ -376,6 +376,51 @@ class SettingsController extends ChangeNotifier {
     );
   }
 
+  /// The catalog id of the on-device model currently doing the transcribing,
+  /// or null when a remote profile is active.
+  String? get activeLocalModelId {
+    final ProviderProfile? active = _settings.activeProfile;
+    if (active == null || active.kind != ProfileKind.localWhisper) return null;
+    final String id = active.model?.trim() ?? '';
+    return id.isEmpty ? null : id;
+  }
+
+  /// Makes [modelId] the transcriber.
+  ///
+  /// **One profile per model, reused rather than accumulated.** Selecting a
+  /// model twice must not leave two identical entries in the Models tab — the
+  /// profile is an implementation detail of "which model is active", and a list
+  /// that grows every time somebody switches back and forth is a list nobody
+  /// can read. The profile's `name` is refreshed from the catalog on each call
+  /// so a relabelled model does not keep an old name forever.
+  Future<void> useLocalModel(String modelId, {required String label}) async {
+    final ProviderProfile? existing = _settings.profiles
+        .where(
+          (ProviderProfile item) =>
+              item.kind == ProfileKind.localWhisper &&
+              (item.model?.trim() ?? '') == modelId,
+        )
+        .firstOrNull;
+
+    if (existing != null) {
+      if (existing.name != label) {
+        await updateProfile(existing.copyWith(name: label));
+      }
+      await setActiveProfile(existing.id);
+      return;
+    }
+
+    final ProviderProfile created = await addProfile(
+      name: label,
+      // No endpoint by definition — see `ProviderProfile.toService`, which
+      // reads the kind before it looks at this.
+      endpoint: '',
+      kind: ProfileKind.localWhisper,
+      model: modelId,
+    );
+    await setActiveProfile(created.id);
+  }
+
   Future<void> setActiveProfile(String? id) async {
     await _persist(
       _settings.copyWith(activeProfileId: id, clearActiveProfileId: id == null),

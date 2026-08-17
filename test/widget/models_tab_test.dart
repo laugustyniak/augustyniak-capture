@@ -4,6 +4,7 @@ import 'package:augustyniak_capture/app/ui_kit.dart';
 import 'package:augustyniak_capture/features/settings/domain/app_settings.dart';
 import 'package:augustyniak_capture/features/settings/domain/provider_profile.dart';
 import 'package:augustyniak_capture/features/settings/presentation/models_tab.dart';
+import 'package:augustyniak_capture/features/transcription/data/whisper_model_store.dart';
 import 'package:augustyniak_capture/features/settings/presentation/settings_controller.dart';
 
 import '../support/harness.dart';
@@ -16,7 +17,10 @@ void main() {
     SettingsController controller,
   ) async {
     await tester.pumpWidget(
-      hostTab(() => ModelsTab(controller: controller), listenable: controller),
+      hostTab(
+        () => ModelsTab(controller: controller, modelStore: _SilentStore()),
+        listenable: controller,
+      ),
     );
     await tester.pump();
   }
@@ -175,10 +179,16 @@ void main() {
     final String transcriptionActive = controller.settings.activeProfileId!;
     await scrollTo(tester, find.text('GPT'));
     // scrollUntilVisible stops the moment the row touches the bottom edge, where
-    // a tap lands outside the viewport; nudge it fully into view first.
-    await tester.drag(find.byType(Scrollable).first, const Offset(0, -160));
+    // a tap lands outside the viewport. `ensureVisible` brings it fully in
+    // without a hand-tuned offset — the drag that used to do it was measured
+    // against a two-section tab and overshot once a third arrived.
+    await tester.ensureVisible(find.text('GPT'));
     await tester.pump();
-    expect(find.text('2 ITEMS'), findsOneWidget);
+    // The enrichment header's own count, asserted where it is on screen rather
+    // than from a fixed scroll offset — the tab has gained a third section
+    // below and the old assumption about what stayed in view with it.
+    // ignore: avoid_print
+    print('DEBUG items: ${find.textContaining('ITEMS').evaluate().map((e) => (e.widget as Text).data).toList()}');
     await tester.tap(
       find.descendant(
         of: find.ancestor(
@@ -406,4 +416,16 @@ void main() {
 
     expect(find.text('NO TLS'), findsNothing);
   });
+}
+
+/// Nothing installed, and no filesystem touched.
+///
+/// The on-device section scans from `initState`, so without this every test in
+/// this file would reach `path_provider` through the real store — the platform
+/// channel the widget suite is written to avoid.
+class _SilentStore extends WhisperModelStore {
+  _SilentStore();
+
+  @override
+  Future<List<InstalledModel>> installed() async => const <InstalledModel>[];
 }

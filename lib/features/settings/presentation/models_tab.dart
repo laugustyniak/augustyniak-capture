@@ -2,6 +2,8 @@ import 'package:flutter/material.dart';
 
 import '../../../app/ui_kit.dart';
 import '../domain/provider_profile.dart';
+import '../../transcription/data/whisper_model_store.dart';
+import 'local_models_section.dart';
 import 'settings_controller.dart';
 
 /// Manages provider profiles for both pipeline stages.
@@ -12,9 +14,17 @@ import 'settings_controller.dart';
 /// the recordings controller. They are independent — running transcription with
 /// no enrichment profile (or the reverse) is a supported configuration.
 class ModelsTab extends StatelessWidget {
-  const ModelsTab({super.key, required this.controller});
+  ModelsTab({super.key, required this.controller, WhisperModelStore? modelStore})
+    : modelStore = modelStore ?? WhisperModelStore();
 
   final SettingsController controller;
+
+  /// Injectable for the same reason every other IO seam here is: the widget
+  /// suite must not reach `path_provider` or the network. Constructed rather
+  /// than nullable, because the section is not optional — a build with no
+  /// native engine still manages models, and hiding the whole thing would make
+  /// "cannot run one" indistinguishable from "this build has no such feature".
+  final WhisperModelStore modelStore;
 
   @override
   Widget build(BuildContext context) {
@@ -34,6 +44,10 @@ class ModelsTab extends StatelessWidget {
           ..._section(context, ProfileKind.transcription),
           const SizedBox(height: 22),
           ..._section(context, ProfileKind.enrichment),
+          const SizedBox(height: 22),
+          // Last of the three: it is the newest, and the two remote sections
+          // are what an existing install is here to edit.
+          LocalModelsSection(controller: controller, store: modelStore),
           const SizedBox(height: 14),
           // Three states, not two. "Encrypted, key unreachable" is a failure
           // and shares nothing with the plaintext fallback below it: there the

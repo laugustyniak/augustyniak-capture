@@ -26,6 +26,7 @@ import 'package:augustyniak_capture/features/settings/data/settings_repository.d
 import 'package:augustyniak_capture/features/settings/domain/app_settings.dart';
 import 'package:augustyniak_capture/features/settings/presentation/settings_controller.dart';
 import 'package:augustyniak_capture/features/transcription/data/transcription_service.dart';
+import 'package:augustyniak_capture/features/transcription/domain/local_transcription_engine.dart';
 
 /// Shared fakes and builders for the widget tests.
 ///
@@ -151,11 +152,15 @@ Future<RecordingsController> buildRecordingsController(
   return controller;
 }
 
-SettingsController buildSettingsController({AppSettings? stored}) {
+SettingsController buildSettingsController({
+  AppSettings? stored,
+  LocalTranscriptionEngine localEngine = const UnavailableLocalEngine(),
+}) {
   final FakeSettingsRepository repository = FakeSettingsRepository()
     ..stored = stored;
   final SettingsController controller = SettingsController(
     repository: repository,
+    localEngine: localEngine,
   );
   addTearDown(controller.dispose);
   return controller;
