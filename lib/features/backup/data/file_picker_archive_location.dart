@@ -14,11 +14,25 @@ import '../domain/capture_archive.dart';
 /// `file_picker` exposes both through one call, so the split is absorbed here
 /// rather than leaking into the coordinator above.
 class FilePickerArchiveLocation implements ArchiveLocationPicker {
-  const FilePickerArchiveLocation();
+  /// [bufferingPlatform] and [limitBytes] exist for one reason: the ceiling
+  /// below is the only guard here that can be reached without a system dialog,
+  /// and on a desktop test host neither the platform branch nor a half-gigabyte
+  /// file is reachable. Both default to the real answers, so production reads
+  /// exactly as it did — the same test-only seam `ExecutableResolver` keeps for
+  /// its conventional-directory list.
+  const FilePickerArchiveLocation({bool? bufferingPlatform, int? limitBytes})
+    : _bufferingPlatform = bufferingPlatform,
+      _limitBytes = limitBytes;
+
+  final bool? _bufferingPlatform;
+  final int? _limitBytes;
 
   /// Reading the staged archive into memory is the price of the SAF path, so
   /// it is only paid where that path is taken. A desktop copy streams.
-  static bool get _writesItsOwnBytes => Platform.isAndroid || Platform.isIOS;
+  bool get _writesItsOwnBytes =>
+      _bufferingPlatform ?? (Platform.isAndroid || Platform.isIOS);
+
+  int get _ceiling => _limitBytes ?? maxInMemoryBytes;
 
   /// What the SAF path will hold in memory before handing it to the picker.
   ///
@@ -32,8 +46,8 @@ class FilePickerArchiveLocation implements ArchiveLocationPicker {
   Future<String?> deliver(File staged, String suggestedName) async {
     if (_writesItsOwnBytes) {
       final int size = await staged.length();
-      if (size > maxInMemoryBytes) {
-        throw ArchiveTooLargeException(size, maxInMemoryBytes);
+      if (size > _ceiling) {
+        throw ArchiveTooLargeException(size, _ceiling);
       }
     }
     final Uint8List? bytes = _writesItsOwnBytes

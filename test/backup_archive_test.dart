@@ -4,6 +4,7 @@ import 'dart:io';
 import 'package:archive/archive_io.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:path/path.dart' as p;
+import 'package:augustyniak_capture/features/backup/data/file_picker_archive_location.dart';
 import 'package:augustyniak_capture/features/backup/data/zip_capture_archive.dart';
 import 'package:augustyniak_capture/features/backup/domain/capture_archive.dart';
 import 'package:augustyniak_capture/features/projects/data/projects_repository.dart';
@@ -443,6 +444,70 @@ void main() {
     expect(restored.artifacts.single.id, 'artifact-1');
   });
 
+  test('a mid-export index rewrite cannot invalidate the archive', () async {
+    await seed(source, <Recording>[capture('a'), capture('b')]);
+
+    final ZipCaptureArchive archive = archiveFor(source);
+    final File index = File(p.join(source.path, 'recordings.json'));
+    // What the live app does on any pipeline tick, at the one moment that used
+    // to matter: the manifest is sealed, the members are not written yet. The
+    // sizes were read off the file, so the archive carried bytes the manifest
+    // did not describe and `_validateManifest` refused the whole thing — at
+    // import time, on the far end, when the user has nothing else.
+    archive.onManifestSealed = () async {
+      await index.writeAsString('${index.readAsStringSync()}   ');
+    };
+    await archive.exportTo(zipPath());
+
+    // The proof is that it still imports: validation is what the drift broke.
+    final RestoreSummary restored = await archiveFor(
+      target,
+    ).importFrom(zipPath());
+    expect(restored.added, 2);
+  });
+
+  test('the closure history survives a restore', () async {
+    await seed(source, <Recording>[capture('a')]);
+    // One closure, written the way `FileClosureLog` appends them.
+    await File(p.join(source.path, 'closures.jsonl')).writeAsString(
+      '${jsonEncode(<String, dynamic>{'recordingId': 'a', 'at': DateTime(2026, 8, 5, 13).toIso8601String(), 'kind': 'review', 'type': 'audioRecording'})}\n',
+    );
+
+    await archiveFor(source).exportTo(zipPath());
+    await archiveFor(target).importFrom(zipPath());
+
+    // It was already being *carried* in the archive; what was missing was the
+    // merge, so a restore shipped the bytes and then discarded them. Momentum
+    // is the one history nothing else can reconstruct.
+    final File merged = File(p.join(target.path, 'closures.jsonl'));
+    expect(merged.existsSync(), isTrue);
+    expect(merged.readAsStringSync(), contains('"recordingId":"a"'));
+  });
+
+  test('an agent artifact survives a round trip', () async {
+    final Recording withArtifact = capture('a').copyWith(
+      artifacts: <AgentArtifact>[
+        AgentArtifact(
+          id: 'artifact-1',
+          captureId: 'a',
+          title: 'Brief for a',
+          path: p.join(source.path, '.agent-tasks', 'a.md'),
+          updatedAt: DateTime(2026, 8, 5, 12, 30),
+        ),
+      ],
+    );
+    await seed(source, <Recording>[withArtifact]);
+
+    await archiveFor(source).exportTo(zipPath());
+    await archiveFor(target).importFrom(zipPath());
+
+    // `_relocate` rebuilds the row field by field, which is exactly the shape
+    // that loses a field added later — this asserts the one it already lost.
+    final Recording restored = (await repositoryFor(target).loadAll()).single;
+    expect(restored.artifacts, hasLength(1));
+    expect(restored.artifacts.single.id, 'artifact-1');
+  });
+
   // **This does not reproduce the race it was written for**, and saying so is
   // the point: with nothing mutating the index mid-export the sizes agree
   // whether they are measured before compression or taken from the archived
@@ -612,12 +677,7 @@ void main() {
         sourceMimeType: 'image/png',
         durationMs: 0,
       ),
-      capture(
-        'note',
-        extension: 'txt',
-        type: CaptureType.text,
-        durationMs: 0,
-      ),
+      capture('note', extension: 'txt', type: CaptureType.text, durationMs: 0),
       capture(
         'clip',
         extension: 'mp4',
@@ -678,22 +738,25 @@ void main() {
     );
   });
 
-  test('an archive that predates content hashing says it matched by id', () async {
-    // Both sides carry the same id and neither carries a hash: the rows are
-    // recognised, but nothing about their *bytes* was compared, and a report
-    // that did not say so would claim a deduplication it never performed.
-    await seed(source, <Recording>[capture('a')]);
-    await archiveFor(source).exportTo(zipPath());
-    await seed(target, <Recording>[capture('a')]);
+  test(
+    'an archive that predates content hashing says it matched by id',
+    () async {
+      // Both sides carry the same id and neither carries a hash: the rows are
+      // recognised, but nothing about their *bytes* was compared, and a report
+      // that did not say so would claim a deduplication it never performed.
+      await seed(source, <Recording>[capture('a')]);
+      await archiveFor(source).exportTo(zipPath());
+      await seed(target, <Recording>[capture('a')]);
 
-    final RestoreSummary restored = await archiveFor(
-      target,
-    ).importFrom(zipPath());
+      final RestoreSummary restored = await archiveFor(
+        target,
+      ).importFrom(zipPath());
 
-    expect(restored.added, 0);
-    expect(restored.alreadyPresent, 1);
-    expect(restored.matchedByIdAlone, 1);
-  });
+      expect(restored.added, 0);
+      expect(restored.alreadyPresent, 1);
+      expect(restored.matchedByIdAlone, 1);
+    },
+  );
 
   test('a hash match is not reported as an id match', () async {
     // Built rather than written out: a 64-character hex literal is exactly the
@@ -716,4 +779,29 @@ void main() {
     );
   });
 
+  test('the buffering platform refuses an archive it cannot hold', () async {
+    final File staged = File(p.join(scratch.path, 'big.zip'))
+      ..writeAsStringSync('x' * 100);
+
+    // Android and iOS hand the *bytes* to the storage-access framework, so
+    // there is no streaming option and no ceiling meant an OOM kill with
+    // nothing on screen — on the platform this whole feature exists for.
+    const FilePickerArchiveLocation picker = FilePickerArchiveLocation(
+      bufferingPlatform: true,
+      limitBytes: 10,
+    );
+
+    await expectLater(
+      picker.deliver(staged, 'capture.zip'),
+      throwsA(
+        isA<ArchiveTooLargeException>()
+            .having((ArchiveTooLargeException e) => e.bytes, 'bytes', 100)
+            .having(
+              (ArchiveTooLargeException e) => e.limitBytes,
+              'limitBytes',
+              10,
+            ),
+      ),
+    );
+  });
 }
