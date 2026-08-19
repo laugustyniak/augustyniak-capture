@@ -121,6 +121,39 @@ flutter build macos --release
 cp -R "build/macos/Build/Products/Release/Augustyniak Capture.app" /Applications/
 ```
 
+**`tool/deploy.sh` is that pair of commands and the Linux equivalent behind one
+entry point**, so the same line deploys from whichever machine the work is being
+done on: `uname -s` picks the target, macOS gets the `/Applications` copy above
+(plus `LocalSigning.xcconfig` restored from `~/.config/augustyniak-capture/`
+first, which is the worktree trap two paragraphs up) and Linux gets the bundle in
+`~/.local/opt/augustyniak-capture`, a symlink in `~/.local/bin`, seven `hicolor`
+icon sizes and a `.desktop` entry.
+
+```bash
+tool/deploy.sh          # build and install for this host
+tool/deploy.sh --run    # …and launch it when the install lands
+```
+
+**Nothing in it is a literal.** The Linux launcher names the application
+identifier in six places, none of them compiled, so a stale copy costs the dock
+icon or the single-instance handle and reports nothing — the identifiers are read
+back out of `linux/CMakeLists.txt` and `AppInfo.xcconfig`, and
+`test/rebrand_test.dart` refuses a copy of them appearing in the script.
+`StartupWMClass` is the **identifier**, not the binary name, because the GTK
+runner calls `g_set_prgname(APPLICATION_ID)`.
+
+**It passes no credentials on the command line**, for the reason the
+`--dart-define` block below states: a Turso JWT in argv is a Turso JWT in the
+shell history of every machine deployed from. A defines file is passed with
+`--dart-define-from-file` instead, looked for at
+`~/.config/augustyniak-capture/deploy.defines.json` first (outside the repository,
+where `git add -A` cannot reach it) and then at `tool/deploy.defines.json`, which
+is gitignored and warned about. With neither the build comes up unpaired, and on
+desktop **that is usually the right answer**: `settings.json` lives in the app's
+documents directory, outside the install, so a copy paired once through the Config
+tab or a QR code stays paired across every redeploy after it. The defines file is
+for a machine being set up from nothing.
+
 `SystemHotkeyRegistrar` is now genuinely reachable on macOS (it was dead code while there was no `macos/` target), but its `rejected` set still relies on `hotKeyManager.register` throwing on refusal, which the plugin does not document — check the Config tab rather than trusting an empty rejection list.
 
 **Regenerating one platform rewrites `.metadata`.** `flutter create --platforms=macos .` left _only_ `root` and `macos` under `migration.platforms`, silently dropping android/ios/linux/windows. Restore the other entries by hand; `flutter migrate` reads that list.

@@ -61,4 +61,33 @@ void main() {
     expect(linux, contains(applicationId));
     expect(read('windows/CMakeLists.txt'), contains(packageName));
   });
+
+  // The desktop installer names the app in six more places — the bundle
+  // directory, the symlink, seven icon file names, the `.desktop` file name,
+  // its `Icon=` key and its `StartupWMClass`. None of them is compiled, so a
+  // stale copy costs the dock icon or the single-instance handle and nothing
+  // reports it. The script therefore reads the identity out of the files
+  // above instead of restating it, and this is what keeps it that way: a
+  // literal added there would pass every other check in this file.
+  test('the desktop deploy script derives the identity rather than restating it', () {
+    final String script = read('tool/deploy.sh');
+
+    expect(script, contains('linux/CMakeLists.txt'));
+    expect(script, contains('macos/Runner/Configs/AppInfo.xcconfig'));
+
+    for (final String literal in <String>[
+      applicationId,
+      displayName,
+      packageName,
+    ]) {
+      expect(
+        script,
+        isNot(contains(literal)),
+        reason:
+            'tool/deploy.sh must read "$literal" from the platform files, not '
+            'carry its own copy — the next identity change would leave the '
+            'launcher pointing at the previous app',
+      );
+    }
+  });
 }
