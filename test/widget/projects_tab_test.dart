@@ -9,6 +9,29 @@ import 'package:augustyniak_capture/features/projects/presentation/projects_tab.
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
+/// Waits for real filesystem work started inside the fake-async zone by asking
+/// whether it has landed, rather than by counting rounds. A project save is a
+/// chain — the JSON write, the rename, the SQLite mirror — and a round costs
+/// whatever the machine gives it, so a fixed count measures the machine and not
+/// the save. At 24 rounds this failed roughly one idle run in three and passed
+/// under full-suite load, where every round takes long enough for the IO to win
+/// the race. Same rule `_until` encodes in `recording_limit_test.dart`, with the
+/// polarity inverted: there a busy machine broke a fixed span, here an idle one
+/// does. The bound is a backstop, not a schedule — a run that meets the
+/// condition on the first check pays for one round.
+Future<void> _untilIo(
+  WidgetTester tester,
+  bool Function() condition, {
+  int maxRounds = 200,
+}) async {
+  for (int i = 0; i < maxRounds && !condition(); i++) {
+    await tester.runAsync(
+      () => Future<void>.delayed(const Duration(milliseconds: 25)),
+    );
+    await tester.pump(const Duration(milliseconds: 100));
+  }
+}
+
 void main() {
   late Directory directory;
   late ProjectsController controller;
@@ -212,13 +235,12 @@ void main() {
       warnIfMissed: true,
     );
     // Saving writes `projects.json`, which is real IO the fake-async zone does
-    // not pump — the same rule `settleIo` follows in the capture suite.
-    // Each round lets roughly one awaited IO call land, and a project save is
-    // a chain of them — the JSON write, the rename, the SQLite mirror.
-    for (int i = 0; i < 24; i++) {
-      await tester.runAsync(() => Future<void>.delayed(Duration.zero));
-      await tester.pump(const Duration(milliseconds: 100));
-    }
+    // not pump. Wait for the binding to actually be there rather than for a
+    // number of rounds to go by.
+    await _untilIo(
+      tester,
+      () => controller.projects.single.commandHost != null,
+    );
 
     final Project saved = controller.projects.single;
     expect(saved.commandHost, 'studio');
