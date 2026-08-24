@@ -29,7 +29,8 @@ import '../../logs/presentation/logs_tab.dart';
 import '../../processing/data/native_media_processor.dart';
 import '../../processing/data/video_audio_extractor.dart';
 import '../../processing/data/video_poster_extractor.dart';
-import '../../projects/data/ghostty_zellij_agent_session_launcher.dart';
+import '../../projects/data/terminal_launcher.dart';
+import '../../projects/data/zellij_agent_session_launcher.dart';
 import '../../projects/data/projects_repository.dart';
 import '../../projects/domain/agent_session_launcher.dart';
 import '../../projects/domain/project.dart';
@@ -235,8 +236,13 @@ class _RecordingsPageState extends State<RecordingsPage>
     // task in hand, the queue starts one on a capture. Sharing the instance is
     // what keeps them landing in the same named session rather than opening a
     // second agent on the same repository.
-    final AgentSessionLauncher? launcher = Platform.isMacOS
-        ? GhosttyZellijAgentSessionLauncher()
+    // Asked of `TerminalLauncher` rather than of `Platform`, because that is
+    // where the answer is decided: macOS and Linux both drive Zellij and differ
+    // only in how a window is opened. A null launcher hides the queue's agent
+    // button entirely, so this predicate and the one picking an implementation
+    // must not be able to disagree.
+    final AgentSessionLauncher? launcher = TerminalLauncher.isSupportedPlatform
+        ? ZellijAgentSessionLauncher()
         : null;
     projects = ProjectsController(
       repository: ProjectsRepository(),

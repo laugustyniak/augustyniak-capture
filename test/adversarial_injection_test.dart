@@ -6,7 +6,8 @@ import 'package:augustyniak_capture/features/enrichment/domain/enrichment_result
 import 'package:augustyniak_capture/features/enrichment/domain/enrichment_context.dart';
 import 'package:augustyniak_capture/features/enrichment/domain/enrichment_prompt.dart';
 import 'package:augustyniak_capture/features/projects/data/executable_resolver.dart';
-import 'package:augustyniak_capture/features/projects/data/ghostty_zellij_agent_session_launcher.dart';
+import 'package:augustyniak_capture/features/projects/data/terminal_launcher.dart';
+import 'package:augustyniak_capture/features/projects/data/zellij_agent_session_launcher.dart';
 import 'package:augustyniak_capture/features/projects/data/process_runner.dart';
 import 'package:augustyniak_capture/features/projects/domain/agent_session_launcher.dart';
 import 'package:augustyniak_capture/features/projects/domain/project.dart';
@@ -260,12 +261,12 @@ void main() {
       });
 
       final _FakeProcessRunner runner = _FakeProcessRunner();
-      final GhosttyZellijAgentSessionLauncher launcher =
-          GhosttyZellijAgentSessionLauncher(
+      final ZellijAgentSessionLauncher launcher =
+          ZellijAgentSessionLauncher(
             processRunner: runner,
             executables: const _FakeResolver(),
             layoutDirectory: layouts,
-            isMacOS: true,
+            terminal: MacOsGhosttyTerminalLauncher(),
           );
 
       await launcher.launch(
