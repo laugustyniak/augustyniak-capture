@@ -3,61 +3,34 @@ import 'package:flutter/services.dart';
 
 import '../../../app/ui_kit.dart';
 import '../../gamification/presentation/done_burst_animation.dart';
-import '../domain/capture_type.dart';
 import '../domain/recording.dart';
 import 'card_parts.dart';
-import 'recording_card.dart';
 
-/// A compact queue item for narrow windows.
+/// One queue item on a narrow window.
 ///
-/// The collapsed row stays scannable; expanding it exposes the same durable
-/// information and actions as the desktop card without forcing every item to
-/// occupy a full phone screen.
+/// The row is a single line and stays that way: tapping it opens the capture's
+/// focus view, which is where its summary, tags, text and every action live.
+/// It used to be an accordion instead, revealing all of that in place — two
+/// surfaces showing one capture, of which only the phone's had to be kept in
+/// step with the card by hand. One destination is also one gesture: the same
+/// tap opens a capture here and on the desktop card.
 class RecordingRow extends StatelessWidget {
   const RecordingRow({
     super.key,
     required this.recording,
-    required this.expanded,
     required this.focused,
-    required this.isPlaying,
     required this.isEnriching,
-    required this.canRoute,
-    required this.canHandoff,
     required this.onTap,
-    required this.onTogglePlay,
-    required this.onOpen,
-    required this.onRetry,
-    required this.onEnrich,
-    required this.onEdit,
-    required this.onRoute,
-    required this.onHandoff,
     required this.onToggleProcessed,
-    this.projectName,
-    this.costUsd,
   });
 
   final Recording recording;
-  final bool expanded;
   final bool focused;
-  final bool isPlaying;
   final bool isEnriching;
-  final bool canRoute;
-  final bool canHandoff;
-  final String? projectName;
-  final VoidCallback onTap;
-  final VoidCallback onTogglePlay;
-  final VoidCallback onOpen;
-  final VoidCallback onRetry;
-  final VoidCallback onEnrich;
-  final VoidCallback onEdit;
-  final VoidCallback onRoute;
-  final VoidCallback onHandoff;
-  final VoidCallback onToggleProcessed;
 
-  /// This capture's summed usage-event cost, resolved by the caller the same
-  /// way `RecordingCard.costUsd` is — see that field's doc. Null renders
-  /// `cost —`.
-  final double? costUsd;
+  /// Opens the capture. Not a toggle any more — see the class doc.
+  final VoidCallback onTap;
+  final VoidCallback onToggleProcessed;
 
   static const double _indent = 16;
 
@@ -66,10 +39,6 @@ class RecordingRow extends StatelessWidget {
     final bool failed = recording.status == RecordingStatus.failed;
     final bool reviewed = recording.isProcessedByUser;
     final String filename = Uri.file(recording.filePath).pathSegments.last;
-    final String transcript = (recording.transcript ?? '').trim();
-    final String summary = (recording.summary ?? '').trim();
-    final bool hasTranscript = transcript.isNotEmpty;
-    final bool openable = recording.type == CaptureType.video;
     // The two stages that are actually running. `pendingTranscription` is not
     // one of them: an item waiting its turn behind the single-flight drain is
     // not moving, and animating it would claim work that has not started.
@@ -78,7 +47,7 @@ class RecordingRow extends StatelessWidget {
 
     return Semantics(
       button: true,
-      expanded: expanded,
+      label: 'Open capture',
       child: InkWell(
         onTap: onTap,
         borderRadius: BorderRadius.circular(11),
@@ -88,20 +57,16 @@ class RecordingRow extends StatelessWidget {
           padding: const EdgeInsets.fromLTRB(12, 8, 8, 8),
           decoration: BoxDecoration(
             // A row with work running on it lifts off the page even when it is
-            // collapsed and off screen-centre. The 180 ms tween is what makes
-            // the end of a stage read as the row settling rather than as the
-            // list repainting.
-            color: expanded
-                ? Console.surface
-                : processing
+            // off screen-centre. The 180 ms tween is what makes the end of a
+            // stage read as the row settling rather than as the list
+            // repainting.
+            color: processing
                 ? Console.accent.withValues(alpha: .05)
                 : Colors.transparent,
             borderRadius: BorderRadius.circular(11),
             border: Border.all(
               color: focused
                   ? Console.accent
-                  : expanded
-                  ? Console.borderStrong
                   : processing
                   ? Console.accent.withValues(alpha: .28)
                   : Colors.transparent,
@@ -149,8 +114,7 @@ class RecordingRow extends StatelessWidget {
                   _ReviewToggle(reviewed: reviewed, onTap: onToggleProcessed),
                 ],
               ),
-              // Drawn collapsed as well as expanded, which is the whole point:
-              // the phone form shows nine rows of one line each, and a capture
+              // The phone form shows nine rows of one line each, and a capture
               // being transcribed or read by the model is the one row worth
               // finding without opening anything. The pill above says *what*
               // stage it is; this says it is still moving.
@@ -159,167 +123,6 @@ class RecordingRow extends StatelessWidget {
                   padding: const EdgeInsets.fromLTRB(_indent, 9, 4, 2),
                   child: ProcessingStrip(enriching: isEnriching),
                 ),
-              if (expanded) ...<Widget>[
-                if (summary.isNotEmpty)
-                  Padding(
-                    padding: const EdgeInsets.fromLTRB(_indent, 8, 4, 0),
-                    child: Row(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: <Widget>[
-                        Expanded(
-                          child: Text(
-                            summary,
-                            style: ConsoleText.cardMeta.copyWith(
-                              color: Console.textSoft,
-                              height: 1.4,
-                            ),
-                          ),
-                        ),
-                        const SizedBox(width: 6),
-                        CopyButton(
-                          text: summary,
-                          tooltip: 'Copy summary',
-                          semanticLabel: 'Copy summary to clipboard',
-                          size: 26,
-                          iconSize: 13,
-                        ),
-                      ],
-                    ),
-                  ),
-                if (hasTranscript)
-                  Padding(
-                    padding: const EdgeInsets.fromLTRB(_indent, 8, 4, 0),
-                    child: Text(transcript, style: ConsoleText.body),
-                  ),
-                if (projectName != null || recording.tags.isNotEmpty)
-                  Padding(
-                    padding: const EdgeInsets.fromLTRB(_indent, 8, 4, 0),
-                    child: Wrap(
-                      spacing: 5,
-                      runSpacing: 5,
-                      crossAxisAlignment: WrapCrossAlignment.center,
-                      children: <Widget>[
-                        if (projectName != null)
-                          StatusPill(
-                            label: projectName!,
-                            // Neutral — violet belongs to `agentTask` now. See
-                            // the same pill on `RecordingCard`.
-                            color: Console.mutedSoft,
-                            outlined: true,
-                          ),
-                        for (final String tag in recording.tags)
-                          _TagLabel(label: tag),
-                        if (recording.tags.isNotEmpty)
-                          CopyButton(
-                            text: tagsClipboardText(recording.tags),
-                            tooltip: 'Copy tags',
-                            semanticLabel: 'Copy tags to clipboard',
-                            size: 24,
-                            iconSize: 12,
-                          ),
-                      ],
-                    ),
-                  ),
-                if (recording.error != null)
-                  Padding(
-                    padding: const EdgeInsets.fromLTRB(_indent, 8, 4, 0),
-                    child: Text(
-                      recording.error!,
-                      maxLines: 3,
-                      overflow: TextOverflow.ellipsis,
-                      style: ConsoleText.micro.copyWith(color: Console.redSoft),
-                    ),
-                  ),
-                if (recording.routes.isNotEmpty)
-                  Padding(
-                    padding: const EdgeInsets.fromLTRB(_indent, 8, 4, 0),
-                    child: Row(
-                      children: <Widget>[
-                        Icon(
-                          Icons.subdirectory_arrow_right_rounded,
-                          size: 13,
-                          color: Console.green,
-                        ),
-                        const SizedBox(width: 5),
-                        Expanded(
-                          child: Text(
-                            recording.routes.last.target,
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                            style: ConsoleText.micro.copyWith(
-                              color: Console.green,
-                            ),
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                Padding(
-                  padding: const EdgeInsets.fromLTRB(_indent, 10, 4, 0),
-                  child: VerificationLine(recording: recording, costUsd: costUsd),
-                ),
-                Padding(
-                  padding: const EdgeInsets.fromLTRB(_indent, 8, 4, 0),
-                  child: Wrap(
-                    spacing: 7,
-                    runSpacing: 7,
-                    children: <Widget>[
-                      if (failed)
-                        ConsoleIconButton(
-                          icon: Icons.refresh_rounded,
-                          onTap: onRetry,
-                          semanticLabel: 'Retry processing',
-                        ),
-                      if (hasTranscript && !isEnriching)
-                        ConsoleIconButton(
-                          icon: Icons.auto_awesome_outlined,
-                          onTap: onEnrich,
-                          semanticLabel: 'Run LLM enrichment',
-                        ),
-                      if (recording.type.isPlayableAudio)
-                        ConsoleIconButton(
-                          icon: isPlaying
-                              ? Icons.stop_rounded
-                              : Icons.play_arrow_rounded,
-                          onTap: onTogglePlay,
-                          semanticLabel: isPlaying
-                              ? 'Stop playback'
-                              : 'Play recording',
-                          active: isPlaying,
-                        )
-                      else if (openable)
-                        ConsoleIconButton(
-                          icon: Icons.play_arrow_rounded,
-                          onTap: onOpen,
-                          semanticLabel: RecordingCard.openVideoLabel,
-                        ),
-                      if (canHandoff && !reviewed)
-                        ConsoleIconButton(
-                          icon: Icons.smart_toy_outlined,
-                          onTap: onHandoff,
-                          semanticLabel: RecordingCard.handoffLabel,
-                        ),
-                      if (canRoute && !reviewed)
-                        ConsoleIconButton(
-                          icon: Icons.outbound_outlined,
-                          onTap: onRoute,
-                          semanticLabel: RecordingCard.routeLabel,
-                        ),
-                      ConsoleIconButton(
-                        icon: Icons.edit_outlined,
-                        onTap: onEdit,
-                        semanticLabel: 'Edit title and text',
-                      ),
-                      if (hasTranscript)
-                        CopyButton(
-                          text: transcript,
-                          tooltip: 'Copy text',
-                          semanticLabel: 'Copy text to clipboard',
-                        ),
-                    ],
-                  ),
-                ),
-              ],
               Padding(
                 padding: const EdgeInsets.only(left: _indent, top: 5, right: 4),
                 child: Text(
@@ -417,14 +220,18 @@ class _ReviewToggle extends StatelessWidget {
               reviewed: reviewed,
               child: AnimatedSwitcher(
                 duration: const Duration(milliseconds: 320),
-                transitionBuilder: (Widget child, Animation<double> animation) =>
-                    ScaleTransition(
-                      scale: CurvedAnimation(
-                        parent: animation,
-                        curve: Curves.easeOutBack,
-                      ),
-                      child: FadeTransition(opacity: animation, child: child),
-                    ),
+                transitionBuilder:
+                    (Widget child, Animation<double> animation) =>
+                        ScaleTransition(
+                          scale: CurvedAnimation(
+                            parent: animation,
+                            curve: Curves.easeOutBack,
+                          ),
+                          child: FadeTransition(
+                            opacity: animation,
+                            child: child,
+                          ),
+                        ),
                 child: Icon(
                   reviewed
                       ? Icons.check_circle_rounded
@@ -437,28 +244,6 @@ class _ReviewToggle extends StatelessWidget {
             ),
           ),
         ),
-      ),
-    );
-  }
-}
-
-class _TagLabel extends StatelessWidget {
-  const _TagLabel({required this.label});
-
-  final String label;
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
-      decoration: BoxDecoration(
-        color: Console.accent.withValues(alpha: .07),
-        borderRadius: BorderRadius.circular(999),
-        border: Border.all(color: Console.accent.withValues(alpha: .22)),
-      ),
-      child: Text(
-        '#$label',
-        style: ConsoleText.micro.copyWith(color: Console.accent),
       ),
     );
   }

@@ -55,49 +55,16 @@ void main() {
     expect(find.byType(RecordingCard), findsOneWidget);
   });
 
-  testWidgets('expanding a compact row reveals summary and transcript', (
+  testWidgets('review target is 44 pixels and does not open the capture', (
     WidgetTester tester,
   ) async {
-    addTearDown(tester.view.reset);
-    tester.view.physicalSize = const Size(599, 900);
-    tester.view.devicePixelRatio = 1;
-    final RecordingsController controller = await buildRecordingsController(
-      appDir,
-      seed: <Recording>[
-        makeRecording(
-          id: 'details',
-          title: 'Expandable capture',
-          summary: 'A concise summary.',
-          transcript: 'The complete transcript.',
-        ),
-      ],
-    );
-    await tester.pumpWidget(
-      hostTab(() => QueueTab(controller: controller), listenable: controller),
-    );
-    await tester.pump();
-
-    expect(find.text('A concise summary.'), findsNothing);
-    expect(find.text('The complete transcript.'), findsNothing);
-
-    await tester.tap(find.text('Expandable capture'));
-    await tester.pump(const Duration(milliseconds: 200));
-
-    expect(find.text('A concise summary.'), findsOneWidget);
-    expect(find.text('The complete transcript.'), findsOneWidget);
-  });
-
-  testWidgets('review target is 44 pixels and does not expand the row', (
-    WidgetTester tester,
-  ) async {
-    bool expanded = false;
     bool reviewed = false;
     int rowTaps = 0;
     int reviewTaps = 0;
     final Recording recording = makeRecording(
       id: 'review',
       title: 'Review capture',
-      summary: 'Hidden until expanded.',
+      summary: 'A concise summary.',
     );
 
     await tester.pumpWidget(
@@ -105,23 +72,9 @@ void main() {
         () => StatefulBuilder(
           builder: (BuildContext context, StateSetter setState) => RecordingRow(
             recording: recording.copyWith(isProcessedByUser: reviewed),
-            expanded: expanded,
             focused: false,
-            isPlaying: false,
             isEnriching: false,
-            canRoute: false,
-            canHandoff: false,
-            onTap: () => setState(() {
-              rowTaps++;
-              expanded = !expanded;
-            }),
-            onTogglePlay: () {},
-            onOpen: () {},
-            onRetry: () {},
-            onEnrich: () {},
-            onEdit: () {},
-            onRoute: () {},
-            onHandoff: () {},
+            onTap: () => setState(() => rowTaps++),
             onToggleProcessed: () => setState(() {
               reviewTaps++;
               reviewed = !reviewed;
@@ -137,11 +90,14 @@ void main() {
     await tester.tap(review);
     await tester.pump(const Duration(milliseconds: 400));
 
+    // Closing an item is a child gesture inside the row's own tap target, and
+    // it must not also open the capture the user is finished with.
     expect(reviewTaps, 1);
     expect(rowTaps, 0);
-    expect(expanded, isFalse);
-    expect(find.text('Hidden until expanded.'), findsNothing);
     expect(find.bySemanticsLabel('Mark as not done'), findsOneWidget);
+    // The row is one line either way — its content lives in the focus view,
+    // which `capture_focus_view_test.dart` covers.
+    expect(find.text('A concise summary.'), findsNothing);
   });
 
   group('processing strip', () {
@@ -166,20 +122,9 @@ void main() {
                   ? 'gotowy tekst'
                   : null,
             ),
-            expanded: false,
             focused: false,
-            isPlaying: false,
             isEnriching: isEnriching,
-            canRoute: false,
-            canHandoff: false,
             onTap: () {},
-            onTogglePlay: () {},
-            onOpen: () {},
-            onRetry: () {},
-            onEnrich: () {},
-            onEdit: () {},
-            onRoute: () {},
-            onHandoff: () {},
             onToggleProcessed: () {},
           ),
         ),
