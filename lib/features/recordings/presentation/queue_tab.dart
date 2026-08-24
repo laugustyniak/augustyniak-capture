@@ -1056,8 +1056,16 @@ class _QueueShortcuts extends StatelessWidget {
         // Reading a capture is what the list is *for*, so it takes the key a
         // list already means it with. `O` would have been a second mnemonic
         // for the one thing every row does.
-        const SingleActivator(LogicalKeyboardKey.enter): onOpen,
-        const SingleActivator(LogicalKeyboardKey.numpadEnter): onOpen,
+        //
+        // Guarded, unlike every binding above it. The letters need no guard
+        // because a focused field consumes them as text — but a single-line
+        // field does not insert a newline, so `Enter` reaches this layer
+        // unhandled, and submitting a search query would have opened whatever
+        // row the keyboard was last on.
+        const SingleActivator(LogicalKeyboardKey.enter): _unlessTyping(onOpen),
+        const SingleActivator(LogicalKeyboardKey.numpadEnter): _unlessTyping(
+          onOpen,
+        ),
         const SingleActivator(LogicalKeyboardKey.escape): onClearFocus,
         // Both spellings: control on Linux/Windows, meta on macOS.
         const SingleActivator(LogicalKeyboardKey.keyF, control: true): onSearch,
@@ -1072,6 +1080,25 @@ class _QueueShortcuts extends StatelessWidget {
       ),
     );
   }
+
+  /// Drops the press when the caret is in a text field — the search box, or a
+  /// field in the inline editor.
+  ///
+  /// Asked of the focus manager rather than of this tab's own search node: the
+  /// editor's title and transcript fields live in the same subtree, and a
+  /// binding that only knew about one of them would be a bug the next field
+  /// reintroduces.
+  ///
+  /// The ancestor lookup is the part that is easy to get wrong: a focused
+  /// field's primary focus node belongs to the `Focus` *inside* `EditableText`,
+  /// so the node's own widget is a `Focus` — identical to this layer's own
+  /// node, and to every other focus scope on the page. Only the ancestor
+  /// separates them.
+  VoidCallback _unlessTyping(VoidCallback action) => () {
+    final BuildContext? focused = FocusManager.instance.primaryFocus?.context;
+    if (focused?.findAncestorWidgetOfExactType<EditableText>() != null) return;
+    action();
+  };
 }
 
 /// [hasAny] separates "this install has captured nothing" from "the filters

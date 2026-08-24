@@ -1,6 +1,7 @@
 import 'dart:io';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:augustyniak_capture/app/ui_kit.dart';
 import 'package:augustyniak_capture/features/recordings/domain/recording.dart';
@@ -294,5 +295,47 @@ void main() {
     // stop printing the markup at the reader.
     expect(find.text('Plan\ncall the joiner'), findsOneWidget);
     expect(find.textContaining('## Plan'), findsNothing);
+  });
+
+  testWidgets('Enter opens the keyboard-selected row, but not while typing', (
+    WidgetTester tester,
+  ) async {
+    final RecordingsController controller = await buildRecordingsController(
+      appDir,
+      seed: <Recording>[
+        makeRecording(id: 'typed', title: 'Standup', transcript: 'Body.'),
+      ],
+    );
+    await pumpQueue(tester, controller);
+
+    // Nothing is selected when the tab opens — a selection the user did not
+    // ask for would make the first key press act on a guessed capture.
+    await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+    await tester.pump();
+    expect(find.byType(Dialog), findsNothing);
+
+    await tester.sendKeyEvent(LogicalKeyboardKey.arrowDown);
+    await tester.pump();
+    await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+    await tester.pumpAndSettle();
+    expect(find.byType(Dialog), findsOneWidget);
+
+    await tester.tap(find.text('CLOSE'));
+    await tester.pumpAndSettle();
+    expect(find.byType(Dialog), findsNothing);
+
+    // The row is still selected, so this is the same key that just opened it —
+    // only the focus has moved into the search box, which is what has to
+    // swallow it. A real key event, not `receiveAction`: the soft-keyboard
+    // action never reaches the shortcut layer, so asserting on that would
+    // pass against a binding that does fire on the hardware key.
+    await tester.tap(find.byType(TextField));
+    await tester.pump();
+    await tester.enterText(find.byType(TextField), 'stand');
+    await tester.pump();
+    await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+    await tester.pump();
+
+    expect(find.byType(Dialog), findsNothing);
   });
 }
