@@ -7,10 +7,10 @@ by the capture, and not by a choice made at hand-off time.
 | | Bound project | Unbound project |
 |---|---|---|
 | Where it runs | any host in the fleet | this machine |
-| Started by | the Command control plane | Ghostty + Zellij, here |
+| Started by | the Command control plane | a terminal + Zellij, here |
 | Second hand-off | updates the same brief | attaches to a live session, delivering nothing |
 | Reports back | state, issues, a PR link | nothing, ever |
-| Needs | an aggregator address and a fleet token | Ghostty, Zellij, an agent CLI |
+| Needs | an aggregator address and a fleet token | a terminal, Zellij, an agent CLI |
 
 A project is *bound* when it names a Command host and workspace (Projects → edit
 → **Command binding**, two pickers over a live read of the fleet). Everything
@@ -36,19 +36,32 @@ whether anything will ever tell you what happened.
 
 ## Prerequisites (unbound path)
 
-Launching locally currently requires macOS plus:
+Launching locally requires **macOS or Linux**, plus:
 
-- [Ghostty](https://ghostty.org/) as the terminal,
+- a terminal the app can drive,
+  - macOS: [Ghostty](https://ghostty.org/), installed as `Ghostty.app`,
+  - Linux: the first of `ghostty`, `wezterm`, `kitty`, `alacritty`, `konsole`,
+    `gnome-terminal`, `xfce4-terminal` that is installed;
 - [Zellij](https://zellij.dev/) for named, reusable sessions,
 - at least one supported agent CLI on `PATH`:
   - `codex` for Codex,
   - `claude` for Claude Code,
   - `agy` for Antigravity. **AGY is the Antigravity CLI abbreviation.**
 
+**Windows is not supported and is not a gap waiting to be filled.** Zellij has no
+native Windows build, and the named-session model — attach an existing session,
+or start a new one from a layout — is Zellij's rather than the terminal's. A
+Windows path would be a different design with no `attachedToExistingSession`, so
+the app shows no agent button there rather than a control that cannot work.
+
 Verify the environment before creating a project:
 
 ```bash
+# macOS
 test -d /Applications/Ghostty.app && echo "Ghostty installed"
+# Linux — any one of these is enough
+command -v ghostty wezterm kitty alacritty konsole gnome-terminal xfce4-terminal
+
 command -v zellij
 command -v codex   # if you use Codex
 command -v claude  # if you use Claude Code
@@ -144,7 +157,8 @@ version control instead of living in one provider's conversation history.
 - **The agent button is missing on a capture:** its project is bound to Command.
   That is the supervised path — route the capture instead, and watch the outcome
   line on its card.
-- **Nothing opens:** confirm Ghostty is installed as `Ghostty.app` and `zellij`
+- **Nothing opens:** confirm the terminal is installed — `Ghostty.app` on macOS,
+  or one of the seven supported terminals on Linux — and that `zellij`
   is on `PATH`.
 - **The terminal opens but the agent fails:** run its executable directly and
   finish installation or authentication.
