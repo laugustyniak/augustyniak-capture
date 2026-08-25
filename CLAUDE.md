@@ -78,7 +78,7 @@ Dart SDK `>=3.10.0 <4.0.0`. Runtime deps: `record` (capture), `audioplayers` (pl
 
 ## Architecture
 
-Feature-first layout under `lib/features/<feature>/{domain,data,presentation}`. Twelve features: `recordings`, `projects`, `transcription`, `processing`, `enrichment`, `settings`, `logs`, `shortcuts`, `timer`, `clipboard`, `gamification`, `momentum`. No state-management or DI package — plain `ChangeNotifier` + constructor injection. The one thing that is not feature-scoped is `core/database/app_database.dart` — see Persistence.
+Feature-first layout under `lib/features/<feature>/{domain,data,presentation}`. Fifteen features: `recordings`, `projects`, `transcription`, `processing`, `enrichment`, `settings`, `logs`, `shortcuts`, `timer`, `clipboard`, `gamification`, `momentum`, `backup`, `command`, `costs`. No state-management or DI package — plain `ChangeNotifier` + constructor injection. The one thing that is not feature-scoped is `core/database/app_database.dart` — see Persistence.
 
 **Deep reference lives under `docs/`, one file per area.** This file carries the invariants — the ordering rules, the durability rules and the seams. Open the matching reference before changing anything in its area; each is written to be read whole.
 
