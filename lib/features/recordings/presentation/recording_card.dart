@@ -3,6 +3,7 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
+import '../../../app/markdown/simple_markdown.dart';
 import '../../../app/ui_kit.dart';
 import '../../gamification/presentation/done_burst_animation.dart';
 import '../domain/agent_artifact.dart';
@@ -10,7 +11,6 @@ import '../domain/capture_type.dart';
 import '../domain/recording.dart';
 import '../domain/route_record.dart';
 import 'card_parts.dart';
-import 'transcript_focus_modal.dart';
 
 /// One queue item, in the design's "console card" form.
 ///
@@ -43,6 +43,7 @@ class RecordingCard extends StatelessWidget {
     this.canOpenOutcome,
     this.focused = false,
     this.costUsd,
+    this.onOpenFocus,
   });
 
   /// Said in both places the action is offered — the poster and the button —
@@ -149,6 +150,18 @@ class RecordingCard extends StatelessWidget {
   /// never claims a cost it was not handed.
   final double? costUsd;
 
+  /// Opens the capture's focus view. Null leaves the card inert to a tap, which
+  /// is what a host with nowhere to open it should get rather than a gesture
+  /// that does nothing.
+  ///
+  /// The card body used to be deliberately non-tappable, on the reasoning that
+  /// "tap anywhere" would make the controls inside it ambiguous. It does not:
+  /// every control here is a button that consumes its own tap, so the gesture
+  /// only ever fires on the parts of the card that were dead space — the name,
+  /// the excerpt, the durability line. What it buys is the thing the phone had
+  /// no other route to, now that the row's accordion is gone.
+  final VoidCallback? onOpenFocus;
+
   @override
   Widget build(BuildContext context) {
     final bool failed = recording.status == RecordingStatus.failed;
@@ -166,7 +179,7 @@ class RecordingCard extends StatelessWidget {
     final bool hasTranscript = transcript.trim().isNotEmpty;
     final bool openable = recording.type == CaptureType.video;
 
-    return RecordingCardShell(
+    final Widget card = RecordingCardShell(
       borderColor: focused
           ? Console.accent
           : failed
@@ -347,8 +360,7 @@ class RecordingCard extends StatelessWidget {
           if (hasTranscript) ...<Widget>[
             _CardTranscriptSection(
               recording: recording,
-              projectName: projectName,
-              onEdit: onEdit,
+              onOpenFocus: onOpenFocus,
             ),
           ],
           if (recording.error != null) ...<Widget>[
@@ -556,6 +568,20 @@ class RecordingCard extends StatelessWidget {
             ],
           ),
         ],
+      ),
+    );
+    if (onOpenFocus == null) return card;
+    // Opaque rather than deferToChild: the padding and the gaps between the
+    // card's controls are part of "the note", and a tap that lands in one of
+    // them has to open it too. The buttons inside still win, because hit
+    // testing reaches them first.
+    return Semantics(
+      button: true,
+      label: 'Open capture',
+      child: GestureDetector(
+        behavior: HitTestBehavior.opaque,
+        onTap: onOpenFocus,
+        child: card,
       ),
     );
   }
@@ -776,13 +802,15 @@ _StatusVisual? _statusVisual(RecordingStatus status) => switch (status) {
 class _CardTranscriptSection extends StatefulWidget {
   const _CardTranscriptSection({
     required this.recording,
-    this.projectName,
-    required this.onEdit,
+    required this.onOpenFocus,
   });
 
   final Recording recording;
-  final String? projectName;
-  final VoidCallback onEdit;
+
+  /// Same callback the whole card body carries. The button stays even though
+  /// the body is tappable now: it is the one affordance that *says* a focus
+  /// view exists, and it sits next to the expand chevron it is contrasted with.
+  final VoidCallback? onOpenFocus;
 
   @override
   State<_CardTranscriptSection> createState() => _CardTranscriptSectionState();
@@ -791,19 +819,14 @@ class _CardTranscriptSection extends StatefulWidget {
 class _CardTranscriptSectionState extends State<_CardTranscriptSection> {
   bool _expanded = false;
 
-  void _openFocusModal() {
-    showTranscriptFocusModal(
-      context,
-      recording: widget.recording,
-      projectName: widget.projectName,
-      onEdit: widget.onEdit,
-    );
-  }
-
   @override
   Widget build(BuildContext context) {
-    final String transcript = (widget.recording.transcript ?? '').trim();
-    final bool isLong = transcript.length > 120 || transcript.contains('\n');
+    final String raw = (widget.recording.transcript ?? '').trim();
+    // Markers off, markup not rendered: see `markdownPreviewText`. The copy
+    // button below still carries the *source*, because what gets pasted into
+    // an editor should keep its formatting.
+    final String transcript = markdownPreviewText(raw);
+    final bool isLong = raw.length > 120 || raw.contains('\n');
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -841,17 +864,19 @@ class _CardTranscriptSectionState extends State<_CardTranscriptSection> {
                     iconSize: 18,
                   ),
                   const SizedBox(width: 4),
-                  ConsoleIconButton(
-                    icon: Icons.open_in_full_rounded,
-                    onTap: _openFocusModal,
-                    semanticLabel: 'Focus view',
-                    size: 34,
-                    iconSize: 16,
-                  ),
-                  const SizedBox(width: 4),
+                  if (widget.onOpenFocus != null) ...<Widget>[
+                    ConsoleIconButton(
+                      icon: Icons.open_in_full_rounded,
+                      onTap: widget.onOpenFocus!,
+                      semanticLabel: 'Focus view',
+                      size: 34,
+                      iconSize: 16,
+                    ),
+                    const SizedBox(width: 4),
+                  ],
                 ],
                 CopyButton(
-                  text: transcript,
+                  text: raw,
                   tooltip: 'Copy text',
                   semanticLabel: 'Copy text to clipboard',
                 ),

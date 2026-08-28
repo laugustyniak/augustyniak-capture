@@ -15,6 +15,7 @@ import '../domain/capture_category.dart';
 import '../domain/recording.dart';
 import '../domain/route_record.dart';
 import 'agent_artifact_viewer_modal.dart';
+import 'capture_focus_view.dart';
 import 'card_parts.dart';
 import 'compact_queue_header.dart';
 import 'handoff_sheet.dart';
@@ -108,9 +109,6 @@ class _QueueTabState extends State<QueueTab> {
   String searchQuery = '';
   String? projectFilterId;
   final TextEditingController searchController = TextEditingController();
-
-  /// The one compact row currently opened for reading.
-  String? expandedId;
 
   /// The row currently in edit mode, if any.
   ///
@@ -312,6 +310,7 @@ class _QueueTabState extends State<QueueTab> {
             setState(() => searchPanelOpen = true);
             searchFocus.requestFocus();
           },
+          onOpen: () => _onFocused(visible, _openFocus),
           onClearFocus: () => setState(() => focusedId = null),
           child: Stack(
             children: <Widget>[
@@ -687,6 +686,23 @@ class _QueueTabState extends State<QueueTab> {
       onEnrich: () => controller.retryEnrichment(recording.id),
       onEdit: () => setState(() => editingId = recording.id),
       onToggleProcessed: () => _toggleProcessed(recording),
+      onOpenFocus: () => _openFocus(recording),
+      costUsd: _costTotals[recording.id],
+    );
+  }
+
+  /// Opens the capture's reading view. The one destination for "show me this
+  /// note": the card body, the card's focus button, the compact row and the
+  /// keyboard's Enter all land here, so there is a single answer to what
+  /// opening a capture does.
+  void _openFocus(Recording recording) {
+    setState(() => focusedId = recording.id);
+    showCaptureFocusView(
+      context,
+      controller: widget.controller,
+      recordingId: recording.id,
+      projectName: _projectName(recording.projectId),
+      onEdit: () => setState(() => editingId = recording.id),
       costUsd: _costTotals[recording.id],
     );
   }
@@ -752,36 +768,21 @@ class _QueueTabState extends State<QueueTab> {
     });
   }
 
-  /// Narrow layouts use an accordion row, while the desktop path above remains
-  /// the full card with its existing keyboard selection and action surface.
+  /// Narrow layouts use a one-line row; tapping it opens the same focus view
+  /// the desktop card opens, which is where the capture's content and every
+  /// action on it now live.
   Widget _buildMobileRow(Recording recording) {
     final RecordingsController controller = widget.controller;
     return RecordingRow(
       key: ValueKey<String>('row-${recording.id}'),
       recording: recording,
-      expanded: recording.id == expandedId,
       focused: recording.id == focusedId,
-      isPlaying: controller.playingId == recording.id,
       isEnriching: controller.isEnriching(recording.id),
-      projectName: _projectName(recording.projectId),
-      canRoute: controller.canRoute(recording),
-      canHandoff: controller.canHandoff(recording),
-      onTap: () => setState(() {
-        focusedId = recording.id;
-        expandedId = recording.id == expandedId ? null : recording.id;
-      }),
-      onTogglePlay: () => controller.togglePlayback(recording.id),
-      onOpen: () => controller.openSource(recording.id),
-      onRetry: () => controller.retryTranscription(recording.id),
-      onEnrich: () => controller.retryEnrichment(recording.id),
-      onEdit: () => setState(() => editingId = recording.id),
-      onRoute: () => controller.route(recording.id),
-      onHandoff: () => _openHandoff(recording),
+      onTap: () => _openFocus(recording),
       onToggleProcessed: () async {
         unawaited(HapticFeedback.selectionClick());
         await controller.toggleProcessed(recording.id);
       },
-      costUsd: _costTotals[recording.id],
     );
   }
 
@@ -864,7 +865,6 @@ class _QueueTabState extends State<QueueTab> {
       // The selection is an id, and this one no longer resolves — leaving it
       // would point the keyboard layer at a row that is gone.
       if (focusedId == recording.id) focusedId = null;
-      if (expandedId == recording.id) expandedId = null;
     });
   }
 
@@ -1018,6 +1018,7 @@ class _QueueShortcuts extends StatelessWidget {
     required this.onTogglePlay,
     required this.onRoute,
     required this.onHandoff,
+    required this.onOpen,
     required this.onSearch,
     required this.onClearFocus,
     required this.child,
@@ -1031,6 +1032,7 @@ class _QueueShortcuts extends StatelessWidget {
   final VoidCallback onTogglePlay;
   final VoidCallback onRoute;
   final VoidCallback onHandoff;
+  final VoidCallback onOpen;
   final VoidCallback onSearch;
   final VoidCallback onClearFocus;
   final Widget child;
@@ -1051,6 +1053,19 @@ class _QueueShortcuts extends StatelessWidget {
         // and the two destinations must not share a mnemonic.
         const SingleActivator(LogicalKeyboardKey.keyA): onHandoff,
         const SingleActivator(LogicalKeyboardKey.space): onTogglePlay,
+        // Reading a capture is what the list is *for*, so it takes the key a
+        // list already means it with. `O` would have been a second mnemonic
+        // for the one thing every row does.
+        //
+        // Guarded, unlike every binding above it. The letters need no guard
+        // because a focused field consumes them as text — but a single-line
+        // field does not insert a newline, so `Enter` reaches this layer
+        // unhandled, and submitting a search query would have opened whatever
+        // row the keyboard was last on.
+        const SingleActivator(LogicalKeyboardKey.enter): _unlessTyping(onOpen),
+        const SingleActivator(LogicalKeyboardKey.numpadEnter): _unlessTyping(
+          onOpen,
+        ),
         const SingleActivator(LogicalKeyboardKey.escape): onClearFocus,
         // Both spellings: control on Linux/Windows, meta on macOS.
         const SingleActivator(LogicalKeyboardKey.keyF, control: true): onSearch,
@@ -1065,6 +1080,25 @@ class _QueueShortcuts extends StatelessWidget {
       ),
     );
   }
+
+  /// Drops the press when the caret is in a text field — the search box, or a
+  /// field in the inline editor.
+  ///
+  /// Asked of the focus manager rather than of this tab's own search node: the
+  /// editor's title and transcript fields live in the same subtree, and a
+  /// binding that only knew about one of them would be a bug the next field
+  /// reintroduces.
+  ///
+  /// The ancestor lookup is the part that is easy to get wrong: a focused
+  /// field's primary focus node belongs to the `Focus` *inside* `EditableText`,
+  /// so the node's own widget is a `Focus` — identical to this layer's own
+  /// node, and to every other focus scope on the page. Only the ancestor
+  /// separates them.
+  VoidCallback _unlessTyping(VoidCallback action) => () {
+    final BuildContext? focused = FocusManager.instance.primaryFocus?.context;
+    if (focused?.findAncestorWidgetOfExactType<EditableText>() != null) return;
+    action();
+  };
 }
 
 /// [hasAny] separates "this install has captured nothing" from "the filters
