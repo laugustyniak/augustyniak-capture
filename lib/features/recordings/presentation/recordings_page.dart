@@ -1024,7 +1024,7 @@ class _RecordingsPageState extends State<RecordingsPage>
                           onSelected: (int value) =>
                               setState(() => navigationIndex = value),
                           busy: controller.isBusy,
-                          onRecord: controller.startRecording,
+                          onRecord: _startRecording,
                           onOpenCaptureMenu: () => _openCaptureMenu(context),
                         )
                       : _buildDesktopNavigationBar(),
@@ -1035,6 +1035,30 @@ class _RecordingsPageState extends State<RecordingsPage>
         },
       ),
     );
+  }
+
+  /// Starts a capture from the Queue, whichever tab the button was pressed on.
+  ///
+  /// The same rule the hotkey path follows (`ShortcutsCoordinator`'s
+  /// `revealQueue`), and for the same reason: the Queue is the only tab that
+  /// renders `controller.error`. The capture screen overlays whatever is showing
+  /// and then closes itself on the way out — so a save that fails after it
+  /// closes reports into an `IndexedStack` layer nobody is looking at, and the
+  /// recording is simply gone with no signal at all. The compact bar and the
+  /// rail are both reachable from every tab, which is what made this possible;
+  /// the floating dock never was, because it is only mounted on the Queue.
+  ///
+  /// Revealed *before* starting rather than after. The hotkey path is the other
+  /// way round — deliberately, because raising the window costs a
+  /// window-manager round trip and a record hotkey that spends it first loses
+  /// the opening word. A `setState` costs nothing, so there is no word to lose
+  /// here, and going first means the reveal still holds if `startRecording`
+  /// throws.
+  Future<void> _startRecording() async {
+    if (navigationIndex != queueIndex) {
+      setState(() => navigationIndex = queueIndex);
+    }
+    await controller.startRecording();
   }
 
   /// The wide shell's navigation. Built from the same [destinations] list the
@@ -1068,7 +1092,7 @@ class _RecordingsPageState extends State<RecordingsPage>
           .length,
       total: total,
       busy: controller.isBusy,
-      onRecord: controller.startRecording,
+      onRecord: _startRecording,
       onCapture: () => _openCaptureMenu(context),
     );
   }
