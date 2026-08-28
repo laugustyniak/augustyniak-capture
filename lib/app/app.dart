@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'ui_kit.dart';
 
 import '../features/recordings/presentation/recordings_page.dart';
+import '../features/settings/domain/app_settings.dart';
 import '../features/settings/domain/app_theme_mode.dart';
 
 /// The app shell, and the one place the palette is chosen.
@@ -27,10 +28,14 @@ class _AugustyniakCaptureAppState extends State<AugustyniakCaptureApp> {
   final ValueNotifier<AppThemeMode> _themeMode = ValueNotifier<AppThemeMode>(
     AppThemeMode.system,
   );
+  final ValueNotifier<double> _textScale = ValueNotifier<double>(
+    AppSettings.defaultTextScale,
+  );
 
   @override
   void dispose() {
     _themeMode.dispose();
+    _textScale.dispose();
     super.dispose();
   }
 
@@ -63,9 +68,24 @@ class _AugustyniakCaptureAppState extends State<AugustyniakCaptureApp> {
                   ? ConsolePalette.dark
                   : ConsolePalette.light,
             );
-            return child!;
+            return ValueListenableBuilder<double>(
+              valueListenable: _textScale,
+              builder: (
+                BuildContext context,
+                double scale,
+                Widget? innerChild,
+              ) {
+                return MediaQuery(
+                  data: MediaQuery.of(context).copyWith(
+                    textScaler: TextScaler.linear(scale),
+                  ),
+                  child: innerChild!,
+                );
+              },
+              child: child,
+            );
           },
-          home: RecordingsPage(themeMode: _themeMode),
+          home: RecordingsPage(themeMode: _themeMode, textScale: _textScale),
         );
       },
     );

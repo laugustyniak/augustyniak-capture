@@ -5,6 +5,7 @@ import 'dart:io';
 // material re-exports from it.
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:path/path.dart' as p;
 
 import '../../../app/ui_kit.dart';
@@ -93,7 +94,7 @@ import 'text_note_sheet.dart';
 /// recordings controller in sync with settings; every tab body lives in its own
 /// file.
 class RecordingsPage extends StatefulWidget {
-  const RecordingsPage({super.key, this.themeMode});
+  const RecordingsPage({super.key, this.themeMode, this.textScale});
 
   /// Where the shell publishes the persisted theme so `AugustyniakCaptureApp`,
   /// which sits *above* this page, can read it. Write-only from here.
@@ -102,6 +103,10 @@ class RecordingsPage extends StatefulWidget {
   /// `MaterialApp` with no theme host above it, and the palette it paints in is
   /// then whatever that test set up.
   final ValueNotifier<AppThemeMode>? themeMode;
+
+  /// Where the shell publishes the persisted text and font scale so
+  /// `AugustyniakCaptureApp` can apply it to `MediaQuery.textScaler`.
+  final ValueNotifier<double>? textScale;
 
   @override
   State<RecordingsPage> createState() => _RecordingsPageState();
@@ -665,6 +670,7 @@ class _RecordingsPageState extends State<RecordingsPage>
     // unchanged value, so this costs nothing on the settings changes that are
     // not about the theme.
     widget.themeMode?.value = settings.themeMode;
+    widget.textScale?.value = settings.textScale;
     // Fire-and-forget: an unchanged binding map short-circuits inside the
     // coordinator, so this does not churn the OS hotkey table on every
     // unrelated settings change.
@@ -810,9 +816,71 @@ class _RecordingsPageState extends State<RecordingsPage>
               // sizing its surface.
               final bool wide = constraints.maxWidth >= Console.railBreakpoint;
 
-              return CelebrationOverlay(
-                controller: gamification,
-                child: Scaffold(
+              return CallbackShortcuts(
+                bindings: <ShortcutActivator, VoidCallback>{
+                  // Zoom in: Ctrl/Cmd + = or +, plus keypad
+                  const SingleActivator(LogicalKeyboardKey.equal, control: true):
+                      settings.zoomIn,
+                  const SingleActivator(LogicalKeyboardKey.equal, meta: true):
+                      settings.zoomIn,
+                  const SingleActivator(
+                    LogicalKeyboardKey.equal,
+                    control: true,
+                    shift: true,
+                  ): settings.zoomIn,
+                  const SingleActivator(
+                    LogicalKeyboardKey.equal,
+                    meta: true,
+                    shift: true,
+                  ): settings.zoomIn,
+                  const SingleActivator(LogicalKeyboardKey.add, control: true):
+                      settings.zoomIn,
+                  const SingleActivator(LogicalKeyboardKey.add, meta: true):
+                      settings.zoomIn,
+                  const SingleActivator(
+                    LogicalKeyboardKey.numpadAdd,
+                    control: true,
+                  ): settings.zoomIn,
+                  const SingleActivator(
+                    LogicalKeyboardKey.numpadAdd,
+                    meta: true,
+                  ): settings.zoomIn,
+
+                  // Zoom out: Ctrl/Cmd + -
+                  const SingleActivator(LogicalKeyboardKey.minus, control: true):
+                      settings.zoomOut,
+                  const SingleActivator(LogicalKeyboardKey.minus, meta: true):
+                      settings.zoomOut,
+                  const SingleActivator(
+                    LogicalKeyboardKey.numpadSubtract,
+                    control: true,
+                  ): settings.zoomOut,
+                  const SingleActivator(
+                    LogicalKeyboardKey.numpadSubtract,
+                    meta: true,
+                  ): settings.zoomOut,
+
+                  // Reset zoom: Ctrl/Cmd + 0
+                  const SingleActivator(
+                    LogicalKeyboardKey.digit0,
+                    control: true,
+                  ): settings.resetZoom,
+                  const SingleActivator(
+                    LogicalKeyboardKey.digit0,
+                    meta: true,
+                  ): settings.resetZoom,
+                  const SingleActivator(
+                    LogicalKeyboardKey.numpad0,
+                    control: true,
+                  ): settings.resetZoom,
+                  const SingleActivator(
+                    LogicalKeyboardKey.numpad0,
+                    meta: true,
+                  ): settings.resetZoom,
+                },
+                child: CelebrationOverlay(
+                  controller: gamification,
+                  child: Scaffold(
                   // No AppBar: each tab draws the design's own header (accent eyebrow +
                   // large title) inside its scroll area, so the title scrolls with the
                   // content instead of sitting in a separate bar above it.
@@ -1029,8 +1097,9 @@ class _RecordingsPageState extends State<RecordingsPage>
                         )
                       : _buildDesktopNavigationBar(),
                 ),
-              );
-            },
+              ),
+            );
+          },
           );
         },
       ),

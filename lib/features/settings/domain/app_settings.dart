@@ -19,6 +19,7 @@ class AppSettings {
     String? enrichmentInstructions,
     this.audio = AudioConfig.defaults,
     this.themeMode = AppThemeMode.system,
+    this.textScale = defaultTextScale,
     this.vaultPath,
     this.vaultFolder = VaultDefaults.folder,
     this.vaultCopySources = true,
@@ -42,6 +43,15 @@ class AppSettings {
        _shortcuts = shortcuts;
 
   static const AppSettings empty = AppSettings();
+
+  static const double defaultTextScale = 1.0;
+  static const double minTextScale = 0.75;
+  static const double maxTextScale = 2.0;
+
+  static double clampTextScale(double value) {
+    final double clamped = value.clamp(minTextScale, maxTextScale);
+    return double.parse(clamped.toStringAsFixed(2));
+  }
 
   final List<ProviderProfile> profiles;
   final String? activeProfileId;
@@ -74,6 +84,7 @@ class AppSettings {
 
   final AudioConfig audio;
   final AppThemeMode themeMode;
+  final double textScale;
   final String? vaultPath;
   final String vaultFolder;
   final bool vaultCopySources;
@@ -154,6 +165,8 @@ class AppSettings {
     bool resetEnrichmentInstructions = false,
     AudioConfig? audio,
     AppThemeMode? themeMode,
+    double? textScale,
+    bool resetTextScale = false,
     String? vaultPath,
     bool clearVaultPath = false,
     String? vaultFolder,
@@ -191,6 +204,9 @@ class AppSettings {
           : (enrichmentInstructions ?? _enrichmentInstructions),
       audio: audio ?? this.audio,
       themeMode: themeMode ?? this.themeMode,
+      textScale: resetTextScale
+          ? defaultTextScale
+          : (textScale != null ? clampTextScale(textScale) : this.textScale),
       vaultPath: clearVaultPath ? null : (vaultPath ?? this.vaultPath),
       vaultFolder: vaultFolder ?? this.vaultFolder,
       vaultCopySources: vaultCopySources ?? this.vaultCopySources,
@@ -228,6 +244,7 @@ class AppSettings {
       'activeEnrichmentProfileId': activeEnrichmentProfileId,
       'audio': audio.toJson(),
       'themeMode': themeMode.name,
+      if (textScale != defaultTextScale) 'textScale': textScale,
       'timerMinutes': timerMinutes,
       'timerAlarm': timerAlarm.name,
       if (tursoDbUrl != null) 'tursoDbUrl': tursoDbUrl,
@@ -318,6 +335,9 @@ class AppSettings {
       themeMode: AppThemeMode.fromName(
         json['themeMode'] is String ? json['themeMode'] as String : null,
       ),
+      textScale: json['textScale'] is num
+          ? AppSettings.clampTextScale((json['textScale'] as num).toDouble())
+          : AppSettings.defaultTextScale,
       vaultPath: json['vaultPath'] is String
           ? json['vaultPath'] as String
           : null,

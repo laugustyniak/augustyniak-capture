@@ -226,4 +226,42 @@ void main() {
     // Desktop-only; the shell does the platform check, not the tab.
     expect(find.text('GLOBAL SHORTCUTS'), findsNothing);
   });
+
+  testWidgets('font scale options and steppers update textScale', (
+    WidgetTester tester,
+  ) async {
+    final SettingsController controller = buildSettingsController();
+    await controller.initialize();
+    await pumpConfig(tester, controller);
+
+    expect(find.text('FONT SCALE / ZOOM'), findsOneWidget);
+    expect(find.text('100% (Default)'), findsOneWidget);
+    expect(find.text('RESET (100%)'), findsNothing);
+
+    // Tap 125%
+    await tester.tap(find.text('125%'));
+    await tester.pumpAndSettle();
+
+    expect(controller.textScale, 1.25);
+    expect(find.text('RESET (100%)'), findsOneWidget);
+
+    // Reset back to 100%
+    await tester.tap(find.text('RESET (100%)'));
+    await tester.pumpAndSettle();
+
+    expect(controller.textScale, 1.0);
+    expect(find.text('RESET (100%)'), findsNothing);
+
+    // Tap Zoom In stepper button
+    await tester.tap(find.bySemanticsLabel('Zoom In (Ctrl +)'));
+    await tester.pumpAndSettle();
+
+    expect(controller.textScale, 1.1);
+
+    // Tap Zoom Out stepper button
+    await tester.tap(find.bySemanticsLabel('Zoom Out (Ctrl -)'));
+    await tester.pumpAndSettle();
+
+    expect(controller.textScale, 1.0);
+  });
 }

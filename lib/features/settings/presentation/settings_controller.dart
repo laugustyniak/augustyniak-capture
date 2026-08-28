@@ -93,6 +93,9 @@ class SettingsController extends ChangeNotifier {
   /// the `MaterialApp`.
   AppThemeMode get themeMode => _settings.themeMode;
 
+  /// Text and font scale across the app.
+  double get textScale => _settings.textScale;
+
   /// Never null: an untouched install resolves to the shipped default.
   String get enrichmentInstructions => _settings.enrichmentInstructions;
 
@@ -619,6 +622,22 @@ class SettingsController extends ChangeNotifier {
     if (mode == _settings.themeMode) return;
     await _persist(_settings.copyWith(themeMode: mode));
   }
+
+  /// Change the font and UI text scale across the app.
+  Future<void> setTextScale(double value) async {
+    final double clamped = AppSettings.clampTextScale(value);
+    if ((clamped - _settings.textScale).abs() < 0.001) return;
+    await _persist(_settings.copyWith(textScale: clamped));
+  }
+
+  /// Zoom in by 10%.
+  Future<void> zoomIn() => setTextScale(_settings.textScale + 0.1);
+
+  /// Zoom out by 10%.
+  Future<void> zoomOut() => setTextScale(_settings.textScale - 0.1);
+
+  /// Reset zoom to default 100%.
+  Future<void> resetZoom() => setTextScale(AppSettings.defaultTextScale);
 
   /// Bind [action] to [binding].
   ///

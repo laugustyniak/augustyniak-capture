@@ -209,6 +209,30 @@ void main() {
       );
     });
 
+    test('textScale survives a round-trip and clamps bounds', () {
+      const AppSettings original = AppSettings(textScale: 1.25);
+
+      expect(AppSettings.fromJson(original.toJson()).textScale, 1.25);
+
+      // Default (1.0) is omitted from JSON to keep payloads clean
+      expect(const AppSettings().toJson().containsKey('textScale'), isFalse);
+
+      // Clamping out-of-range values
+      expect(
+        AppSettings.fromJson(<String, dynamic>{'textScale': 3.5}).textScale,
+        2.0,
+      );
+      expect(
+        AppSettings.fromJson(<String, dynamic>{'textScale': 0.2}).textScale,
+        0.75,
+      );
+      // Non-num defaults to 1.0
+      expect(
+        AppSettings.fromJson(<String, dynamic>{'textScale': 'big'}).textScale,
+        1.0,
+      );
+    });
+
     test('vault settings survive a round-trip', () {
       const AppSettings original = AppSettings(
         vaultPath: '/Users/me/Vault',
@@ -900,6 +924,29 @@ void main() {
       );
 
       expect(controller.sealedTokensUnreadable, isTrue);
+    });
+  });
+
+  group('SettingsController textScale', () {
+    test('setTextScale, zoomIn, zoomOut and resetZoom persist and notify', () async {
+      final _FakeSettingsRepository repo = _FakeSettingsRepository();
+      final SettingsController controller = SettingsController(repository: repo);
+      await controller.initialize();
+
+      expect(controller.textScale, 1.0);
+
+      await controller.setTextScale(1.25);
+      expect(controller.textScale, 1.25);
+      expect(repo.stored?.textScale, 1.25);
+
+      await controller.zoomIn();
+      expect(controller.textScale, 1.35);
+
+      await controller.zoomOut();
+      expect(controller.textScale, 1.25);
+
+      await controller.resetZoom();
+      expect(controller.textScale, 1.0);
     });
   });
 }
