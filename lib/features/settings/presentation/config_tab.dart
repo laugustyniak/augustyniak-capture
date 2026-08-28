@@ -15,6 +15,7 @@ import '../../recordings/domain/note_vault.dart';
 import '../../recordings/presentation/recordings_controller.dart';
 import '../../shortcuts/domain/shortcut_action.dart';
 import '../../shortcuts/presentation/shortcuts_section.dart';
+import '../domain/app_settings.dart';
 import '../domain/app_theme_mode.dart';
 import '../domain/audio_config.dart';
 import '../domain/provider_profile.dart';
@@ -159,6 +160,53 @@ class ConfigTab extends StatelessWidget {
                 Text(
                   'SYSTEM follows the operating system and changes with it. '
                   'DARK and LIGHT pin the app to one palette regardless.',
+                  style: TextStyle(
+                    color: Console.mutedSoft,
+                    fontSize: 10,
+                    height: 1.45,
+                  ),
+                ),
+                Divider(color: Console.border, height: 22),
+                _ChoiceRow<double>(
+                  label: 'FONT SCALE / ZOOM',
+                  value: controller.textScale,
+                  options: const <double>[0.8, 0.9, 1.0, 1.1, 1.25, 1.5, 2.0],
+                  labelFor: (double scale) {
+                    final int pct = (scale * 100).round();
+                    if (scale == AppSettings.defaultTextScale) {
+                      return '$pct% (Default)';
+                    }
+                    return '$pct%';
+                  },
+                  onChanged: controller.setTextScale,
+                ),
+                const SizedBox(height: 8),
+                Row(
+                  children: <Widget>[
+                    ConsoleIconButton(
+                      icon: Icons.remove,
+                      semanticLabel: 'Zoom Out (Ctrl -)',
+                      onTap: controller.zoomOut,
+                    ),
+                    const SizedBox(width: 8),
+                    ConsoleIconButton(
+                      icon: Icons.add,
+                      semanticLabel: 'Zoom In (Ctrl +)',
+                      onTap: controller.zoomIn,
+                    ),
+                    const SizedBox(width: 8),
+                    if (controller.textScale != AppSettings.defaultTextScale)
+                      ConsoleChip(
+                        label: 'RESET (100%)',
+                        selected: false,
+                        onSelected: controller.resetZoom,
+                      ),
+                  ],
+                ),
+                const SizedBox(height: 6),
+                Text(
+                  'Scales font and UI text size. On desktop, use Ctrl +/- (Cmd +/- on macOS) '
+                  'and Ctrl 0 (Cmd 0) to zoom.',
                   style: TextStyle(
                     color: Console.mutedSoft,
                     fontSize: 10,
