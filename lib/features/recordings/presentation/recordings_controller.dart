@@ -34,6 +34,7 @@ import '../data/recordings_repository.dart';
 import '../data/revisions_repository.dart';
 import '../../projects/domain/project.dart';
 import '../data/agent_artifact_scanner.dart';
+import '../data/capture_history.dart';
 import '../domain/agent_artifact.dart';
 import '../data/source_content_hasher.dart';
 import '../domain/agent_handoff.dart';
@@ -92,8 +93,12 @@ class RecordingsController extends ChangeNotifier {
   }) : _repository = repository,
        _commandClient = commandClient,
        _commandBaseUrl = commandBaseUrl,
-       _closureLog = closureLog,
-       _revisionsRepository = revisionsRepository,
+       _history = CaptureHistory(
+         revisionsRepository: revisionsRepository,
+         closureLog: closureLog,
+         projectById: projectById,
+         logSink: logSink,
+       ),
        _transcriptionService = transcriptionService,
        _enrichmentService = enrichmentService,
        _enrichmentContextSource = enrichmentContextSource,
@@ -136,28 +141,12 @@ class RecordingsController extends ChangeNotifier {
 
   final RecordingsRepository _repository;
 
-  /// Where the change history is appended. Null disables history entirely — the
-  /// same optional-seam shape as [ClipboardSink] and [MediaOpener], so the
-  /// pure-Dart tests that never touch a platform channel keep working unchanged
-  /// and the shell is the one place that opts in.
-  final RevisionsRepository? _revisionsRepository;
+  /// What every mutation overwrote, and when each capture left the desk. Both
+  /// are driven from [_update] and nowhere else — see [CaptureHistory] for why
+  /// that single funnel is the whole design.
+  final CaptureHistory _history;
+
   final GamificationController? _gamificationController;
-
-  final ClosureLog _closureLog;
-
-  /// Ids already counted as closed, so a capture closes once and only once
-  /// however many times it is re-ticked or re-delivered.
-  ///
-  /// In memory and transient, the same class of fact as `_enrichingIds` and
-  /// `_postersInFlight`: nothing about it survives a restart, and the log on
-  /// disk is what repopulates it — see [loadClosures].
-  final Set<String> _closedIds = <String>{};
-
-  /// Change history by capture id, newest first. Loaded once at [initialize]
-  /// and kept in step by [_recordRevisions]; the file is append-only, so memory
-  /// and disk can only ever diverge by a write that failed and was logged.
-  Map<String, List<RecordingRevision>> _revisions =
-      <String, List<RecordingRevision>>{};
 
   final LogSink _logSink;
 
@@ -344,10 +333,7 @@ class RecordingsController extends ChangeNotifier {
   /// title a model replaced, the transcript a re-run threw away. Empty when
   /// nothing has ever been overwritten, which is the normal state of a capture
   /// that was processed once and left alone.
-  List<RecordingRevision> revisionsFor(String id) =>
-      List<RecordingRevision>.unmodifiable(
-        _revisions[id] ?? const <RecordingRevision>[],
-      );
+  List<RecordingRevision> revisionsFor(String id) => _history.revisionsFor(id);
 
   /// Whether the index could not be read at start-up. While true the controller
   /// refuses every write, so the queue is showing nothing rather than nothing
@@ -489,18 +475,7 @@ class RecordingsController extends ChangeNotifier {
       ),
     );
 
-    // Supporting evidence, never a precondition: a history that will not load
-    // costs the edit sheet's HISTORY section, not the queue.
-    try {
-      _revisions =
-          await _revisionsRepository?.load() ??
-          <String, List<RecordingRevision>>{};
-    } catch (exception) {
-      _logSink.log(
-        'Change history could not be read: $exception',
-        level: LogLevel.warn,
-      );
-    }
+    await _history.loadRevisions();
 
     notifyListeners();
 
@@ -1135,7 +1110,7 @@ class RecordingsController extends ChangeNotifier {
     // The change history is append-only by design, so the rows on disk stay —
     // dropping the in-memory entry only stops a later capture that happens to
     // reuse the id from inheriting them, which `uuid.v4()` makes theoretical.
-    _revisions.remove(id);
+    _history.forget(id);
     await _persistAll(expectShrink: true);
     _logSink.log(
       'Capture deleted · ${item.type.name} · source and index row removed.',
@@ -1428,7 +1403,7 @@ class RecordingsController extends ChangeNotifier {
       ),
     );
     // The tally is raised inside `_update`, which is the only place that can
-    // tell a first closure from a re-tick — see `_recordClosure`.
+    // tell a first closure from a re-tick — see [CaptureHistory].
   }
 
   /// Whether [route] has anywhere to send this capture. Synchronous because the
@@ -1690,9 +1665,10 @@ class RecordingsController extends ChangeNotifier {
     try {
       // A snapshot: the list is rewritten by `_update` inside the loop, and an
       // item can be deleted while a request is in flight.
-      for (final String id in _recordings
-          .map((Recording item) => item.id)
-          .toList(growable: false)) {
+      for (final String id
+          in _recordings
+              .map((Recording item) => item.id)
+              .toList(growable: false)) {
         final Recording? item = _recordingOrNull(id);
         final RouteRecord? route = item?.routes.isNotEmpty == true
             ? item!.routes.last
@@ -2425,55 +2401,6 @@ class RecordingsController extends ChangeNotifier {
   ///
   /// Best-effort on the [_copyToClipboard] contract: a failed history write is
   /// logged and swallowed, never allowed to fail the capture it describes.
-  Future<void> _recordRevisions(
-    Recording before,
-    Recording after,
-    RevisionSource source,
-  ) async {
-    final RevisionsRepository? repository = _revisionsRepository;
-    if (repository == null) return;
-
-    final List<RecordingRevision> changes = <RecordingRevision>[];
-    void diff(String field, String? from, String? to) {
-      if (from == to) return;
-      // Nothing was overwritten — see the doc comment above.
-      if (from == null || from.isEmpty) return;
-      changes.add(
-        RecordingRevision(
-          recordingId: after.id,
-          at: DateTime.now(),
-          field: field,
-          from: RecordingRevision.truncate(from),
-          to: RecordingRevision.truncate(to),
-          source: source,
-        ),
-      );
-    }
-
-    diff('title', before.title, after.title);
-    diff('category', before.category?.name, after.category?.name);
-    diff('summary', before.summary, after.summary);
-    diff('tags', before.tags.join(', '), after.tags.join(', '));
-    diff('transcript', before.transcript, after.transcript);
-    if (changes.isEmpty) return;
-
-    // Update the in-memory view first so the edit sheet shows the entry even if
-    // the append below fails — the history is then correct for this session and
-    // merely incomplete on disk, rather than invisible in both.
-    _revisions
-        .putIfAbsent(after.id, () => <RecordingRevision>[])
-        .insertAll(0, changes);
-    try {
-      await repository.append(changes);
-    } catch (exception) {
-      _logSink.log(
-        'Change history not written: $exception',
-        level: LogLevel.warn,
-        recordingId: after.id,
-      );
-    }
-  }
-
   /// Whether anything the vault actually prints has changed.
   ///
   /// The same five fields the change history diffs, plus the project — status
@@ -2487,66 +2414,6 @@ class RecordingsController extends ChangeNotifier {
       before.transcript != after.transcript ||
       before.projectId != after.projectId ||
       !listEquals(before.tags, after.tags);
-
-  /// Appends one [ClosureEvent] the first time a capture becomes closed, and
-  /// tells the gamification counter about that same first time.
-  ///
-  /// **In `_update` rather than at the call sites, and that is the point.**
-  /// Three paths set `isProcessedByUser` — `toggleProcessed`, `route` and the
-  /// agent handoff, the latter two because closing the item is the
-  /// *consequence* of delivering it rather than a second chore. Counting at
-  /// each of them is what the previous arrangement did, and it had both
-  /// failures a scattered counter tends to have: the handoff path was simply
-  /// forgotten, so the most laborious way to finish a capture was the one that
-  /// never counted, and re-ticking one row incremented the total again because
-  /// no call site knew whether that capture had ever been closed before. A
-  /// funnel cannot be bypassed by adding a new setter, which is the same
-  /// argument that put [_recordRevisions] here.
-  ///
-  /// **A capture closes once, ever.** [_closedIds] is what makes that true, so
-  /// the tally measures work rather than clicking.
-  ///
-  /// Best-effort on the [_copyToClipboard] contract: the in-memory set is
-  /// updated first, so a failed write leaves this session's deduplication
-  /// correct and merely incomplete on disk, rather than wrong in both places.
-  Future<void> _recordClosure(
-    Recording before,
-    Recording after,
-    ClosureKind kind,
-  ) async {
-    if (before.isProcessedByUser || !after.isProcessedByUser) return;
-    if (!_closedIds.add(after.id)) return;
-
-    final String? projectId = after.projectId;
-    final Project? project = projectId == null
-        ? null
-        : _projectById?.call(projectId);
-
-    unawaited(
-      _gamificationController?.onCaptureDone(
-        _recordings.where((Recording item) => item.isProcessedByUser).length,
-      ),
-    );
-
-    try {
-      await _closureLog.append(
-        ClosureEvent(
-          recordingId: after.id,
-          at: after.processedAt ?? DateTime.now(),
-          kind: kind,
-          type: after.type,
-          projectId: projectId,
-          projectName: project?.name,
-        ),
-      );
-    } catch (exception) {
-      _logSink.log(
-        'Closure not written: $exception',
-        level: LogLevel.warn,
-        recordingId: after.id,
-      );
-    }
-  }
 
   /// Writes a closure for every capture that was already closed before the log
   /// existed.
@@ -2568,7 +2435,7 @@ class RecordingsController extends ChangeNotifier {
   /// The kind is read from where the capture actually went, so a backfilled
   /// history splits by destination exactly as a live one does.
   ///
-  /// Idempotent through [_closedIds], so pressing it twice is free.
+  /// Idempotent through [CaptureHistory], so pressing it twice is free.
   Future<ClosureBackfill> backfillClosures() async {
     ClosureBackfill summary = const ClosureBackfill();
 
@@ -2588,7 +2455,7 @@ class RecordingsController extends ChangeNotifier {
           });
 
     for (final Recording item in closed) {
-      if (_closedIds.contains(item.id)) {
+      if (_history.hasClosed(item.id)) {
         summary = summary.plus(alreadyKnown: 1);
         continue;
       }
@@ -2599,31 +2466,19 @@ class RecordingsController extends ChangeNotifier {
       }
 
       final String? projectId = item.projectId;
-      final Project? project = projectId == null
-          ? null
-          : _projectById?.call(projectId);
-
-      try {
-        await _closureLog.append(
-          ClosureEvent(
-            recordingId: item.id,
-            at: at,
-            kind: _closureKindFor(item),
-            type: item.type,
-            projectId: projectId,
-            projectName: project?.name,
-          ),
-        );
-        _closedIds.add(item.id);
-        summary = summary.plus(recorded: 1);
-      } catch (exception) {
-        summary = summary.plus(failed: 1);
-        _logSink.log(
-          'Closure backfill failed: $exception',
-          level: LogLevel.warn,
+      final bool written = await _history.recordBackfilled(
+        ClosureEvent(
           recordingId: item.id,
-        );
-      }
+          at: at,
+          kind: _closureKindFor(item),
+          type: item.type,
+          projectId: projectId,
+          projectName: projectId == null
+              ? null
+              : _projectById?.call(projectId)?.name,
+        ),
+      );
+      summary = written ? summary.plus(recorded: 1) : summary.plus(failed: 1);
       if (_disposed) break;
     }
 
@@ -2651,27 +2506,13 @@ class RecordingsController extends ChangeNotifier {
     };
   }
 
-  /// Populates [_closedIds] from the log.
+  /// Populates the session's closed-id set from the log.
   ///
   /// Called by the shell after `initialize`, never from inside it — the rule
   /// `recoverOrphans` follows, and for the same reason: it is IO that an
   /// in-memory repository fake cannot stand in for, and running it from
   /// `initialize` would make every widget test reach the developer's real disk.
-  Future<void> loadClosures() async {
-    try {
-      for (final ClosureEvent event in await _closureLog.load()) {
-        _closedIds.add(event.recordingId);
-      }
-    } catch (exception) {
-      // Best-effort: an unreadable log costs deduplication accuracy for this
-      // session, never a close. Reporting the unreadable state to the user is
-      // `MomentumController`'s job; this side only has to keep working.
-      _logSink.log(
-        'Closure history not read: $exception',
-        level: LogLevel.warn,
-      );
-    }
-  }
+  Future<void> loadClosures() => _history.loadClosures();
 
   Future<void> _update(
     String id,
@@ -2711,8 +2552,17 @@ class RecordingsController extends ChangeNotifier {
     // change that never reached `recordings.json` would describe a state no
     // file ever held. Recording it here means the history can only ever lag the
     // index, never lead it.
-    await _recordRevisions(before, _recordings[index], source);
-    await _recordClosure(before, _recordings[index], closure);
+    await _history.recordRevisions(before, _recordings[index], source);
+    if (await _history.recordClosure(before, _recordings[index], closure)) {
+      // Raised from the funnel rather than from the three call sites that can
+      // close a capture — see [CaptureHistory] for the bug that came of doing
+      // it the other way. Cosmetic by construction, so it is never awaited.
+      unawaited(
+        _gamificationController?.onCaptureDone(
+          _recordings.where((Recording item) => item.isProcessedByUser).length,
+        ),
+      );
+    }
     // A hand edit is the one change that reaches the vault from here. The
     // processing and enrichment paths mirror explicitly at their own tails
     // (see `_processOne`), and doing it from this funnel as well would write
