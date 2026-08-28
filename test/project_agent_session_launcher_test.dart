@@ -1,8 +1,9 @@
 import 'dart:io';
 
 import 'package:augustyniak_capture/features/projects/data/executable_resolver.dart';
-import 'package:augustyniak_capture/features/projects/data/ghostty_zellij_agent_session_launcher.dart';
+import 'package:augustyniak_capture/features/projects/data/zellij_agent_session_launcher.dart';
 import 'package:augustyniak_capture/features/projects/data/process_runner.dart';
+import 'package:augustyniak_capture/features/projects/data/terminal_launcher.dart';
 import 'package:augustyniak_capture/features/projects/domain/agent_session_launcher.dart';
 import 'package:flutter_test/flutter_test.dart';
 
@@ -65,15 +66,18 @@ void main() {
     if (layouts.existsSync()) layouts.deleteSync(recursive: true);
   });
 
-  GhosttyZellijAgentSessionLauncher build(
+  /// Defaults to the macOS terminal so every assertion below keeps describing
+  /// the `open -na Ghostty.app` vector this launcher has always produced —
+  /// enabling Linux must not quietly change what macOS does.
+  ZellijAgentSessionLauncher build(
     ProcessRunner runner, {
-    bool isMacOS = true,
+    TerminalLauncher? terminal,
     Set<String> missing = const <String>{},
-  }) => GhosttyZellijAgentSessionLauncher(
+  }) => ZellijAgentSessionLauncher(
     processRunner: runner,
     executables: _FakeResolver(missing: missing),
     layoutDirectory: layouts,
-    isMacOS: isMacOS,
+    terminal: terminal ?? MacOsGhosttyTerminalLauncher(),
   );
 
   /// The layout Zellij will actually read, fetched the way Zellij fetches it —
@@ -102,7 +106,7 @@ void main() {
         _success,
         _success,
       ]);
-      final GhosttyZellijAgentSessionLauncher launcher = build(runner);
+      final ZellijAgentSessionLauncher launcher = build(runner);
 
       final AgentSessionLaunchResult result = await launcher.launch(
         request(arguments: <String>['--model', 'x; touch /tmp/not-run']),
@@ -154,7 +158,7 @@ void main() {
 
   test('a tool that is not installed is named before a window opens', () async {
     final _FakeProcessRunner runner = _FakeProcessRunner(<CommandResult>[]);
-    final GhosttyZellijAgentSessionLauncher launcher = build(
+    final ZellijAgentSessionLauncher launcher = build(
       runner,
       missing: <String>{'zellij'},
     );
@@ -178,7 +182,7 @@ void main() {
     final _FakeProcessRunner runner = _FakeProcessRunner(<CommandResult>[
       _success,
     ]);
-    final GhosttyZellijAgentSessionLauncher launcher = build(
+    final ZellijAgentSessionLauncher launcher = build(
       runner,
       missing: <String>{'codex'},
     );
@@ -202,7 +206,7 @@ void main() {
       _success,
       _success,
     ]);
-    final GhosttyZellijAgentSessionLauncher launcher = build(runner);
+    final ZellijAgentSessionLauncher launcher = build(runner);
 
     await launcher.launch(
       request(
@@ -230,7 +234,7 @@ void main() {
       ),
       _success,
     ]);
-    final GhosttyZellijAgentSessionLauncher launcher = build(runner);
+    final ZellijAgentSessionLauncher launcher = build(runner);
 
     final AgentSessionLaunchResult result = await launcher.launch(request());
 
@@ -253,7 +257,7 @@ void main() {
     // The user's words lead — that is the point of naming a session — but the
     // project id still rides along, for the reason the next test states.
     expect(
-      GhosttyZellijAgentSessionLauncher.buildSessionName(configured),
+      ZellijAgentSessionLauncher.buildSessionName(configured),
       'my-client-workspace-550e8400-agy',
     );
   });
@@ -272,11 +276,11 @@ void main() {
     // `_sessionExists` would report a hit for the second project, and it would
     // attach to a session whose panes are open in the *first* project's repo.
     expect(
-      GhosttyZellijAgentSessionLauncher.buildSessionName(
+      ZellijAgentSessionLauncher.buildSessionName(
         named('550E8400-E29B-41D4-A716-446655440000'),
       ),
       isNot(
-        GhosttyZellijAgentSessionLauncher.buildSessionName(
+        ZellijAgentSessionLauncher.buildSessionName(
           named('6BA7B810-9DAD-11D1-80B4-00C04FD430C8'),
         ),
       ),
@@ -294,7 +298,7 @@ void main() {
     // `ab-cdef-gh-ij` cut at 8 is `ab-cdef-`; the separator has to go, or the
     // name reads `augustyniak-notes-ab-cdef--codex`.
     expect(
-      GhosttyZellijAgentSessionLauncher.buildSessionName(shortId),
+      ZellijAgentSessionLauncher.buildSessionName(shortId),
       'augustyniak-notes-ab-cdef-codex',
     );
   });
@@ -307,7 +311,7 @@ void main() {
         const CommandResult(exitCode: 0, stdout: '$session\n', stderr: ''),
         _success,
       ]);
-      final GhosttyZellijAgentSessionLauncher launcher = build(runner);
+      final ZellijAgentSessionLauncher launcher = build(runner);
 
       final AgentSessionLaunchResult result = await launcher.launch(
         request(agent: ProjectAgent.claude),
@@ -336,7 +340,7 @@ void main() {
         _success,
         _success,
       ]);
-      final GhosttyZellijAgentSessionLauncher launcher = build(runner);
+      final ZellijAgentSessionLauncher launcher = build(runner);
 
       await launcher.launch(request(agent: agent));
 
@@ -349,9 +353,9 @@ void main() {
     'fails clearly on unsupported platforms without running a process',
     () async {
       final _FakeProcessRunner runner = _FakeProcessRunner(<CommandResult>[]);
-      final GhosttyZellijAgentSessionLauncher launcher = build(
+      final ZellijAgentSessionLauncher launcher = build(
         runner,
-        isMacOS: false,
+        terminal: const UnsupportedTerminalLauncher(),
       );
 
       await expectLater(
@@ -360,7 +364,76 @@ void main() {
           isA<AgentSessionLaunchException>().having(
             (AgentSessionLaunchException error) => error.message,
             'message',
-            contains('require macOS'),
+            contains('only available on macOS and Linux'),
+          ),
+        ),
+      );
+      // Nothing spawned, and no layout written: the terminal is looked for
+      // before `zellij list-sessions`, so a machine that cannot open a window
+      // never starts a server on its way to saying so.
+      expect(runner.invocations, isEmpty);
+      expect(layouts.listSync(), isEmpty);
+    },
+  );
+
+  test('runs the whole session through a resolved Linux terminal', () async {
+    final _FakeProcessRunner runner = _FakeProcessRunner(<CommandResult>[
+      _success,
+      _success,
+    ]);
+    final ZellijAgentSessionLauncher launcher = build(
+      runner,
+      terminal: LinuxTerminalLauncher(
+        executables: const _FakeResolver(),
+        // Pinned rather than left to `LinuxTerminal.values`, so the assertion
+        // below describes one terminal's vector instead of whichever one the
+        // machine running the suite happens to have first.
+        candidates: const <LinuxTerminal>[LinuxTerminal.kitty],
+      ),
+    );
+
+    final AgentSessionLaunchResult result = await launcher.launch(request());
+
+    expect(result.attachedToExistingSession, isFalse);
+    final _Invocation open = runner.invocations.last;
+    expect(open.executable, '/opt/fake/bin/kitty');
+    expect(open.arguments.take(3), <String>[
+      '--directory',
+      repo.path,
+      '/opt/fake/bin/zellij',
+    ]);
+    // The layout still reaches Zellij by path, exactly as it does on macOS.
+    expect(
+      layoutFrom(open.arguments),
+      contains('command="/opt/fake/bin/codex"'),
+    );
+  });
+
+  test(
+    'reports what to install when no terminal is present, before spawning',
+    () async {
+      final _FakeProcessRunner runner = _FakeProcessRunner(<CommandResult>[]);
+      final ZellijAgentSessionLauncher launcher = build(
+        runner,
+        terminal: LinuxTerminalLauncher(
+          executables: const _FakeResolver(
+            missing: <String>{'ghostty', 'wezterm', 'kitty'},
+          ),
+          candidates: const <LinuxTerminal>[
+            LinuxTerminal.ghostty,
+            LinuxTerminal.wezterm,
+            LinuxTerminal.kitty,
+          ],
+        ),
+      );
+
+      await expectLater(
+        launcher.launch(request()),
+        throwsA(
+          isA<AgentSessionLaunchException>().having(
+            (AgentSessionLaunchException error) => error.message,
+            'message',
+            allOf(contains('ghostty'), contains('wezterm'), contains('kitty')),
           ),
         ),
       );
@@ -371,7 +444,7 @@ void main() {
   test('rejects a missing repository before running a process', () async {
     repo.deleteSync(recursive: true);
     final _FakeProcessRunner runner = _FakeProcessRunner(<CommandResult>[]);
-    final GhosttyZellijAgentSessionLauncher launcher = build(runner);
+    final ZellijAgentSessionLauncher launcher = build(runner);
 
     await expectLater(
       launcher.launch(request()),
