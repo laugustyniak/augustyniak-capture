@@ -83,3 +83,12 @@ docs/security/
 # directory rather than by file, because which files Wrangler puts here is
 # its decision and not ours.
 .wrangler/
+
+# The deploy script's credentials file, when someone keeps it in the tree
+# rather than in the config directory `tool/deploy.sh` prefers. It holds a
+# Turso JWT and an R2 secret access key — the same two values that were once
+# committed as literals and are still reachable through `refs/pull/*` after
+# the commit that removed them. Ignored by exact path rather than by glob, so
+# a file named anything else stays visible and the script's own warning is
+# what catches it.
+tool/deploy.defines.json
