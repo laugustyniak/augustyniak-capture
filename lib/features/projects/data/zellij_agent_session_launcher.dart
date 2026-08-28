@@ -5,11 +5,12 @@ import 'package:path/path.dart' as p;
 import '../domain/agent_session_launcher.dart';
 import 'executable_resolver.dart';
 import 'process_runner.dart';
+import 'terminal_launcher.dart';
 
-/// macOS launcher that gives each project/agent pair one named Zellij session.
+/// Desktop launcher that gives each project/agent pair one named Zellij session.
 ///
 /// Existing sessions are only attached. New sessions start exactly one
-/// controlled agent executable in a generated Zellij layout. `/usr/bin/open`
+/// controlled agent executable in a generated Zellij layout. The terminal
 /// receives an argument vector; no shell command is constructed.
 ///
 /// **Both binaries are resolved to absolute paths before anything is run**, via
@@ -17,32 +18,34 @@ import 'process_runner.dart';
 /// at all. The rule extends inside the layout: Zellij inherits this app's
 /// environment, so a bare `command="claude"` would fail in the pane for exactly
 /// the same reason, and would do it after the window is already on screen.
-class GhosttyZellijAgentSessionLauncher implements AgentSessionLauncher {
-  GhosttyZellijAgentSessionLauncher({
+///
+/// **Only the terminal differs between platforms**, and that difference lives
+/// entirely in [TerminalLauncher]. This class was macOS-only for as long as
+/// `/usr/bin/open -na Ghostty.app` was written into it — everything around that
+/// one call (Zellij itself, the layout file, `list-sessions`, the agent CLIs)
+/// behaves identically on Linux, so the platform gate was costing the feature
+/// rather than describing it.
+class ZellijAgentSessionLauncher implements AgentSessionLauncher {
+  ZellijAgentSessionLauncher({
     ProcessRunner processRunner = const SystemProcessRunner(),
     ExecutableResolver? executables,
     Directory? layoutDirectory,
-    bool? isMacOS,
+    TerminalLauncher? terminal,
   }) : _processRunner = processRunner,
        _executables =
            executables ?? PathExecutableResolver(processRunner: processRunner),
        _layoutDirectory = layoutDirectory,
-       _isMacOS = isMacOS ?? Platform.isMacOS;
+       _terminal = terminal ?? TerminalLauncher.forCurrentPlatform();
 
   final ProcessRunner _processRunner;
   final ExecutableResolver _executables;
   final Directory? _layoutDirectory;
-  final bool _isMacOS;
+  final TerminalLauncher _terminal;
 
   @override
   Future<AgentSessionLaunchResult> launch(
     AgentSessionLaunchRequest request,
   ) async {
-    if (!_isMacOS) {
-      throw const AgentSessionLaunchException(
-        'Agent sessions currently require macOS, Ghostty, and Zellij.',
-      );
-    }
     _validateRequest(request);
 
     final Directory repo = Directory(request.repoPath);
@@ -52,6 +55,13 @@ class GhosttyZellijAgentSessionLauncher implements AgentSessionLauncher {
       );
     }
 
+    // Both asked for before anything is spawned: a missing tool has to be
+    // reported as a missing tool, and a window that opens and closes again is
+    // the one failure shape this launcher has already been caught producing.
+    final ResolvedTerminal? terminal = await _terminal.resolve();
+    if (terminal == null) {
+      throw AgentSessionLaunchException(_terminal.missingTerminalMessage);
+    }
     final String zellij = await _require('zellij');
     final String canonicalRepoPath = repo.absolute.path;
     final String sessionName = buildSessionName(request);
@@ -83,19 +93,16 @@ class GhosttyZellijAgentSessionLauncher implements AgentSessionLauncher {
       ];
     }
 
-    final List<String> openArguments = <String>[
-      '-na',
-      'Ghostty.app',
-      '--args',
-      '--working-directory=$canonicalRepoPath',
-      '-e',
-      zellij,
-      ...zellijArguments,
-    ];
-    final CommandResult result = await _run('/usr/bin/open', openArguments);
+    final CommandResult result = await _run(
+      terminal.executable,
+      terminal.argumentsFor(canonicalRepoPath, <String>[
+        zellij,
+        ...zellijArguments,
+      ]),
+    );
     if (result.exitCode != 0) {
       throw AgentSessionLaunchException(
-        'Ghostty failed to open: ${_errorText(result)}',
+        'The terminal failed to open: ${_errorText(result)}',
       );
     }
 

@@ -864,7 +864,38 @@ class RecordingsController extends ChangeNotifier {
     notifyListeners();
 
     try {
-      final String? stoppedPath = await _recorder.stop();
+      String? stoppedPath;
+      // Held rather than dropped: if the salvage below finds nothing, this is
+      // the *cause* and "the file was not persisted" is only its consequence.
+      // Reporting the consequence would leave the user's banner explaining that
+      // an empty file is empty while the disconnected input it came from is
+      // only in the Logs tab.
+      Object? stopFailure;
+      // Caught rather than allowed to reach the outer `catch`, because a throw
+      // here says nothing about whether there is audio to keep: the encoder has
+      // been writing to `_activeFilePath` for the whole capture, and the file is
+      // sitting there with the take in it. Left to fail, the capture becomes an
+      // orphan that `recoverOrphans()` re-adopts — on the *next launch*, which
+      // is a restart later than the user needs to hear about it. Falling through
+      // salvages the same file, now, and visibly.
+      //
+      // Worth stating because the recovery is real but partial: a stop that
+      // failed part-way may leave the MP4 container without its `moov` atom, so
+      // the row can point at audio that will not play. That is still strictly
+      // better than losing it, and it is exactly what the orphan sweep would
+      // have adopted anyway. The emptiness check below is what separates this
+      // from the case where nothing was written at all.
+      try {
+        stoppedPath = await _recorder.stop();
+      } catch (exception) {
+        stopFailure = exception;
+        _logSink.log(
+          'Recorder failed to stop cleanly — salvaging the file on disk: '
+          '$exception',
+          level: LogLevel.warn,
+          recordingId: _activeId,
+        );
+      }
       // Stopped here rather than in the teardown below so `durationMs` is the
       // length of the audio, not of the audio plus the two `stat` calls that
       // verify it.
@@ -880,6 +911,17 @@ class RecordingsController extends ChangeNotifier {
       // gates persistence, and it is the size the card reports afterwards.
       final int sizeBytes = await file.exists() ? await file.length() : 0;
       if (sizeBytes == 0) {
+        // Deleted rather than left where it is, and this is the one place in
+        // the app that deletes a source outside `deleteRecording`. It does not
+        // weaken persist-before-process: an empty file is not a capture the app
+        // ever accepted, and nothing downstream will ever look at it again —
+        // `findOrphans` skips zero-length files, so left here it is litter that
+        // only ever accumulates. Swallowed because the failure being reported
+        // is the one that matters; a delete that also fails must not replace it.
+        try {
+          await file.delete();
+        } catch (_) {}
+        if (stopFailure != null) throw stopFailure;
         throw FileSystemException(
           'Recording file was not persisted correctly.',
           path,
