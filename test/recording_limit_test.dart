@@ -227,7 +227,12 @@ void main() {
       await _until(() => !controller.isRecording);
 
       expect(controller.isRecording, isFalse);
-      expect(controller.error, contains('input went away'));
+      // The capture itself survives: the file was written as the recording ran,
+      // so a throw from `stop()` costs the clean shutdown and nothing else. What
+      // this test is about is the teardown — that the tick stopped and the
+      // screen closed — and both hold either way.
+      expect(controller.recordings, hasLength(1));
+      expect(controller.error, isNull);
       controller.dispose();
     });
 

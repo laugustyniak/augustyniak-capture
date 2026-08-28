@@ -29,7 +29,8 @@ import '../../logs/presentation/logs_tab.dart';
 import '../../processing/data/native_media_processor.dart';
 import '../../processing/data/video_audio_extractor.dart';
 import '../../processing/data/video_poster_extractor.dart';
-import '../../projects/data/ghostty_zellij_agent_session_launcher.dart';
+import '../../projects/data/terminal_launcher.dart';
+import '../../projects/data/zellij_agent_session_launcher.dart';
 import '../../projects/data/projects_repository.dart';
 import '../../projects/domain/agent_session_launcher.dart';
 import '../../projects/domain/project.dart';
@@ -235,8 +236,13 @@ class _RecordingsPageState extends State<RecordingsPage>
     // task in hand, the queue starts one on a capture. Sharing the instance is
     // what keeps them landing in the same named session rather than opening a
     // second agent on the same repository.
-    final AgentSessionLauncher? launcher = Platform.isMacOS
-        ? GhosttyZellijAgentSessionLauncher()
+    // Asked of `TerminalLauncher` rather than of `Platform`, because that is
+    // where the answer is decided: macOS and Linux both drive Zellij and differ
+    // only in how a window is opened. A null launcher hides the queue's agent
+    // button entirely, so this predicate and the one picking an implementation
+    // must not be able to disagree.
+    final AgentSessionLauncher? launcher = TerminalLauncher.isSupportedPlatform
+        ? ZellijAgentSessionLauncher()
         : null;
     projects = ProjectsController(
       repository: ProjectsRepository(),
@@ -1018,7 +1024,7 @@ class _RecordingsPageState extends State<RecordingsPage>
                           onSelected: (int value) =>
                               setState(() => navigationIndex = value),
                           busy: controller.isBusy,
-                          onRecord: controller.startRecording,
+                          onRecord: _startRecording,
                           onOpenCaptureMenu: () => _openCaptureMenu(context),
                         )
                       : _buildDesktopNavigationBar(),
@@ -1029,6 +1035,30 @@ class _RecordingsPageState extends State<RecordingsPage>
         },
       ),
     );
+  }
+
+  /// Starts a capture from the Queue, whichever tab the button was pressed on.
+  ///
+  /// The same rule the hotkey path follows (`ShortcutsCoordinator`'s
+  /// `revealQueue`), and for the same reason: the Queue is the only tab that
+  /// renders `controller.error`. The capture screen overlays whatever is showing
+  /// and then closes itself on the way out — so a save that fails after it
+  /// closes reports into an `IndexedStack` layer nobody is looking at, and the
+  /// recording is simply gone with no signal at all. The compact bar and the
+  /// rail are both reachable from every tab, which is what made this possible;
+  /// the floating dock never was, because it is only mounted on the Queue.
+  ///
+  /// Revealed *before* starting rather than after. The hotkey path is the other
+  /// way round — deliberately, because raising the window costs a
+  /// window-manager round trip and a record hotkey that spends it first loses
+  /// the opening word. A `setState` costs nothing, so there is no word to lose
+  /// here, and going first means the reveal still holds if `startRecording`
+  /// throws.
+  Future<void> _startRecording() async {
+    if (navigationIndex != queueIndex) {
+      setState(() => navigationIndex = queueIndex);
+    }
+    await controller.startRecording();
   }
 
   /// The wide shell's navigation. Built from the same [destinations] list the
@@ -1062,7 +1092,7 @@ class _RecordingsPageState extends State<RecordingsPage>
           .length,
       total: total,
       busy: controller.isBusy,
-      onRecord: controller.startRecording,
+      onRecord: _startRecording,
       onCapture: () => _openCaptureMenu(context),
     );
   }

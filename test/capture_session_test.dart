@@ -95,16 +95,17 @@ void main() {
   });
 
   test('a recorder that throws on stop still releases the hold', () async {
-    // The failure mode the teardown-in-finally rule was written for: the
-    // capture is lost either way, and a stuck notification would be the part
-    // that outlives it.
+    // The failure mode the teardown-in-finally rule was written for. The
+    // capture is no longer lost with it — the bytes were on disk before `stop()`
+    // was ever called, so it is salvaged — but the hold is the question here,
+    // and it has to come off on the way through either way.
     final RecordingsController controller = build(recorderFailsOnStop: true);
     await controller.startRecording();
     await controller.stopRecording();
     await controller.waitForProcessing();
 
     expect(events, contains('session.end'));
-    expect(controller.error, isNotNull);
+    expect(controller.recordings, hasLength(1));
   });
 
   test('a session that cannot start never costs the recording', () async {
