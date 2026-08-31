@@ -595,7 +595,12 @@ class RecordingsController extends ChangeNotifier {
       ]..sort((Recording a, Recording b) => b.createdAt.compareTo(a.createdAt));
       await _persistAll();
       unawaited(
-        _hashInBatch(orphans.map((Recording orphan) => orphan.id).toList()),
+        _hashInBatch(<({String id, int segmentIndex})>[
+          // A recovered orphan is always a single-segment capture — the row it
+          // lost is the only place a fragment list could have lived.
+          for (final Recording orphan in orphans)
+            (id: orphan.id, segmentIndex: 0),
+        ]),
       );
       _logSink.log(
         'Recovered ${orphans.length} capture(s) with no index entry — '
@@ -631,12 +636,17 @@ class RecordingsController extends ChangeNotifier {
 
   /// Give legacy and recovered captures a content fingerprint without holding
   /// up startup. Each row remains usable if its source cannot be read.
-  Future<void> _backfillContentHashes() async => _hashInBatch(
-    _recordings
-        .where((Recording item) => item.contentHash == null)
-        .map((Recording item) => item.id)
-        .toList(),
-  );
+  Future<void> _backfillContentHashes() async =>
+      _hashInBatch(<({String id, int segmentIndex})>[
+        // Every segment, not every row: a capture whose first fragment was
+        // hashed long ago still has an unhashed one after an append, and a row
+        // that has never gained a fragment yields exactly the single
+        // synthesised segment it always did.
+        for (final Recording item in _recordings)
+          for (final CaptureSegment segment in item.segments)
+            if (segment.contentHash == null)
+              (id: item.id, segmentIndex: segment.index),
+      ]);
 
   /// Hash a whole set of sources, then persist them in **one** write.
   ///
@@ -652,23 +662,67 @@ class RecordingsController extends ChangeNotifier {
   /// Best-effort under the [_copyToClipboard] contract: a source that cannot be
   /// read costs its own fingerprint and nothing else, and a disposal mid-sweep
   /// drops the rows not yet hashed rather than writing a partial result.
-  Future<void> _hashInBatch(List<String> ids) async {
-    if (ids.isEmpty) return;
+  Future<void> _hashInBatch(
+    List<({String id, int segmentIndex})> targets,
+  ) async {
+    if (targets.isEmpty) return;
     final Map<String, String> hashed = <String, String>{};
-    for (final String id in ids) {
+    for (final ({String id, int segmentIndex}) target in targets) {
       if (_disposed) return;
-      final String? hash = await _hashSource(id);
-      if (hash != null) hashed[id] = hash;
+      final String? hash = await _hashSource(
+        target.id,
+        segmentIndex: target.segmentIndex,
+      );
+      if (hash != null) hashed['${target.id}#${target.segmentIndex}'] = hash;
     }
     if (_disposed || hashed.isEmpty) return;
 
     bool changed = false;
-    _recordings = _recordings.map((Recording item) {
-      final String? hash = hashed[item.id];
-      if (hash == null || item.contentHash != null) return item;
+    final List<Recording> updated = <Recording>[];
+    for (final Recording item in _recordings) {
+      // The row-level field describes segment 0 and nothing else — it is what
+      // the archive deduplicates on, so it is never recomputed across the list.
+      final String? rowHash = hashed['${item.id}#0'];
+      final bool setsRow = rowHash != null && item.contentHash == null;
+
+      // Left without a `segments` key on purpose: the synthesised segment of a
+      // capture that never gained a fragment reads the row-level hash, so
+      // materialising the list here would cost the byte-for-byte
+      // serialisation and buy nothing.
+      if (!item.hasStoredSegments) {
+        if (!setsRow) {
+          updated.add(item);
+          continue;
+        }
+        changed = true;
+        updated.add(item.copyWith(contentHash: rowHash));
+        continue;
+      }
+
+      bool touched = false;
+      final List<CaptureSegment> segments = <CaptureSegment>[];
+      for (final CaptureSegment segment in item.segments) {
+        final String? hash = hashed['${item.id}#${segment.index}'];
+        if (hash == null || segment.contentHash != null) {
+          segments.add(segment);
+          continue;
+        }
+        touched = true;
+        segments.add(segment.copyWith(contentHash: hash));
+      }
+      if (!touched && !setsRow) {
+        updated.add(item);
+        continue;
+      }
       changed = true;
-      return item.copyWith(contentHash: hash);
-    }).toList();
+      updated.add(
+        item.copyWith(
+          segments: touched ? segments : null,
+          contentHash: setsRow ? rowHash : null,
+        ),
+      );
+    }
+    _recordings = updated;
     if (!changed) return;
 
     await _persistAll();

@@ -6,6 +6,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:path/path.dart' as p;
 import 'package:augustyniak_capture/features/recordings/data/recordings_repository.dart';
 import 'package:augustyniak_capture/features/recordings/data/source_content_hasher.dart';
+import 'package:augustyniak_capture/features/recordings/domain/capture_segment.dart';
 import 'package:augustyniak_capture/features/recordings/domain/capture_type.dart';
 import 'package:augustyniak_capture/features/recordings/domain/recording.dart';
 import 'package:augustyniak_capture/features/recordings/presentation/recordings_controller.dart';
@@ -219,6 +220,71 @@ void main() {
         repository.saves,
         1,
         reason: 'the backfill must persist once, not once per row',
+      );
+    },
+  );
+
+  test(
+    'the backfill hashes every segment and leaves the row hash alone',
+    () async {
+      final File first = File(p.join(directory.path, 'abc.m4a'))
+        ..writeAsStringSync('first bytes');
+      final File second = File(p.join(directory.path, 'abc-1.m4a'))
+        ..writeAsStringSync('second bytes');
+
+      final String rowHash = 'c' * 64;
+      final Recording seeded = Recording(
+        id: 'abc',
+        filePath: first.path,
+        createdAt: DateTime.utc(2026, 8, 28),
+        durationMs: 1000,
+        sizeBytes: first.lengthSync(),
+        contentHash: rowHash,
+        status: RecordingStatus.completed,
+        type: CaptureType.audioRecording,
+        transcript: 'first fragment',
+        segments: <CaptureSegment>[
+          CaptureSegment(
+            index: 0,
+            filePath: first.path,
+            type: CaptureType.audioRecording,
+            createdAt: DateTime.utc(2026, 8, 28),
+            sizeBytes: first.lengthSync(),
+            contentHash: rowHash,
+            text: 'first fragment',
+          ),
+          CaptureSegment(
+            index: 1,
+            filePath: second.path,
+            type: CaptureType.audioRecording,
+            createdAt: DateTime.utc(2026, 8, 28),
+            sizeBytes: second.lengthSync(),
+            text: 'second fragment',
+          ),
+        ],
+      );
+
+      final _Repo repository = _Repo(directory, <Recording>[seeded]);
+      final RecordingsController controller = RecordingsController(
+        repository: repository,
+        transcriptionService: const DisabledTranscriptionService(),
+      );
+      addTearDown(controller.dispose);
+
+      await controller.initialize();
+      await controller.waitForProcessing();
+
+      final Recording item = controller.recordings.single;
+      expect(item.segments[1].contentHash, matches(RegExp(r'^[0-9a-f]{64}$')));
+      expect(
+        item.segments[1].contentHash,
+        isNot(item.segments[0].contentHash),
+        reason: 'different bytes, different hash',
+      );
+      expect(
+        item.contentHash,
+        rowHash,
+        reason: 'the row hash describes segment 0 and must survive an append',
       );
     },
   );
