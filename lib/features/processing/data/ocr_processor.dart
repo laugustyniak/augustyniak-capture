@@ -1,6 +1,6 @@
 import 'dart:io';
 
-import '../../recordings/domain/recording.dart';
+import '../../recordings/domain/capture_segment.dart';
 import '../domain/processor.dart';
 import 'ocr_service.dart';
 
@@ -14,6 +14,6 @@ class OcrProcessor implements Processor {
   final OcrService Function() _service;
 
   @override
-  Future<String> process(Recording item) =>
-      _service().extractText(File(item.filePath));
+  Future<String> process(CaptureSegment segment) =>
+      _service().extractText(File(segment.filePath));
 }

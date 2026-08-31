@@ -2,7 +2,9 @@ import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter/services.dart';
+import 'package:augustyniak_capture/features/recordings/domain/capture_segment.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:path/path.dart' as p;
 import 'package:augustyniak_capture/features/processing/domain/processor.dart';
 import 'package:augustyniak_capture/features/processing/domain/processor_registry.dart';
 import 'package:augustyniak_capture/features/recordings/data/recordings_repository.dart';
@@ -58,7 +60,9 @@ class _TestProcessor implements Processor {
   int calls = 0;
 
   @override
-  Future<String> process(Recording item) async {
+  Future<String> process(CaptureSegment segment) async {
+    // The capture id is the segment file's stem: `<id>.<ext>` for segment 0.
+    final String id = p.basenameWithoutExtension(segment.filePath);
     active++;
     if (active > maxActive) maxActive = active;
     calls++;
@@ -72,8 +76,8 @@ class _TestProcessor implements Processor {
         await Future<void>.delayed(Duration.zero);
       }
       if (call <= failFirst) throw Exception('boom $call');
-      processed.add(item.id);
-      return 'ok:${item.id}';
+      processed.add(id);
+      return 'ok:\$id';
     } finally {
       active--;
     }

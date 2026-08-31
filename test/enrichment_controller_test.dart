@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter/services.dart';
+import 'package:augustyniak_capture/features/recordings/domain/capture_segment.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:augustyniak_capture/features/enrichment/domain/enrichment_context.dart';
 import 'package:augustyniak_capture/features/enrichment/domain/enrichment_result.dart';
@@ -40,8 +41,8 @@ class _EchoProcessor implements Processor {
   const _EchoProcessor();
 
   @override
-  Future<String> process(Recording item) async =>
-      File(item.filePath).readAsString();
+  Future<String> process(CaptureSegment segment) async =>
+      File(segment.filePath).readAsString();
 }
 
 class _FakeEnrichment implements EnrichmentService {
@@ -102,7 +103,7 @@ class _BlankProcessor implements Processor {
   const _BlankProcessor();
 
   @override
-  Future<String> process(Recording item) async => '   ';
+  Future<String> process(CaptureSegment segment) async => '   ';
 }
 
 /// Answers a fixed context and records which project it was asked about, so a

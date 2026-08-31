@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter/services.dart';
+import 'package:augustyniak_capture/features/recordings/domain/capture_segment.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:augustyniak_capture/features/costs/domain/usage_event.dart';
 import 'package:augustyniak_capture/features/costs/domain/usage_parsing.dart';
@@ -49,9 +50,9 @@ class _EchoProcessor implements Processor {
   int calls = 0;
 
   @override
-  Future<String> process(Recording item) async {
+  Future<String> process(CaptureSegment segment) async {
     calls++;
-    return File(item.filePath).readAsString();
+    return File(segment.filePath).readAsString();
   }
 }
 

@@ -1976,7 +1976,7 @@ class RecordingsController extends ChangeNotifier {
         );
         final String transcript;
         try {
-          transcript = await processor.process(recording);
+          transcript = await processor.process(recording.segments.first);
         } finally {
           _endUsageJob();
         }

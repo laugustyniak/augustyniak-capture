@@ -74,7 +74,7 @@ void main() {
           status: RecordingStatus.pendingTranscription,
           type: CaptureType.image,
         );
-        expect(await processor.process(item), 'OCR!');
+        expect(await processor.process(item.segments.first), 'OCR!');
       },
     );
   });

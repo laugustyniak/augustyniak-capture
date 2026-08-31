@@ -1,6 +1,6 @@
 import 'dart:io';
 
-import '../../recordings/domain/recording.dart';
+import '../../recordings/domain/capture_segment.dart';
 import '../../transcription/data/transcription_service.dart';
 import '../domain/processor.dart';
 
@@ -17,8 +17,8 @@ class TranscriptionProcessor implements Processor {
   final TranscriptionService Function() _resolveService;
 
   @override
-  Future<String> process(Recording item) {
+  Future<String> process(CaptureSegment segment) {
     final TranscriptionService service = _resolveService();
-    return service.transcribe(File(item.filePath));
+    return service.transcribe(File(segment.filePath));
   }
 }

@@ -1,15 +1,19 @@
 import 'dart:io';
 
-import '../../recordings/domain/recording.dart';
+import '../../recordings/domain/capture_segment.dart';
 
-/// Turns an item's source artifact into text.
+/// Turns one source artifact into text.
 ///
 /// **The rule reviewers must enforce:** a processor only ever *reads* the
 /// source file. It must never write to it, move it, or delete it. On failure it
-/// throws; the controller catches, marks the item `failed` with an error
-/// string, and the source stays on disk, retryable.
+/// throws; the controller records the failure against that segment, marks the
+/// capture `failed`, and the source stays on disk, retryable.
+///
+/// It takes a [CaptureSegment] rather than a capture because a capture can hold
+/// several artifacts of different types — an appended photo on an audio note
+/// has to reach the OCR processor, and the registry keys on the segment's type.
 abstract interface class Processor {
-  Future<String> process(Recording item);
+  Future<String> process(CaptureSegment segment);
 }
 
 /// Text notes: the body written at ingestion already is the extracted text, so
@@ -19,10 +23,10 @@ class TextPassthroughProcessor implements Processor {
   const TextPassthroughProcessor();
 
   @override
-  Future<String> process(Recording item) async {
-    final File file = File(item.filePath);
+  Future<String> process(CaptureSegment segment) async {
+    final File file = File(segment.filePath);
     if (!await file.exists()) {
-      throw FileSystemException('Source file is missing.', item.filePath);
+      throw FileSystemException('Source file is missing.', segment.filePath);
     }
     return file.readAsString();
   }
@@ -38,7 +42,7 @@ class UnavailableProcessor implements Processor {
   final String reason;
 
   @override
-  Future<String> process(Recording item) async {
+  Future<String> process(CaptureSegment segment) async {
     throw ProcessorNotConfiguredException(reason);
   }
 }

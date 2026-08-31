@@ -9,6 +9,7 @@ import 'package:augustyniak_capture/features/recordings/domain/recording.dart';
 import 'package:augustyniak_capture/features/recordings/presentation/recordings_controller.dart';
 import 'package:augustyniak_capture/features/transcription/data/transcription_service.dart';
 import 'package:flutter/services.dart';
+import 'package:augustyniak_capture/features/recordings/domain/capture_segment.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:record/record.dart';
 import 'package:path/path.dart' as p;
@@ -68,12 +69,14 @@ class _GatedProcessor implements Processor {
   final List<String> processed = <String>[];
 
   @override
-  Future<String> process(Recording item) async {
+  Future<String> process(CaptureSegment segment) async {
     final Completer<void> gate = Completer<void>();
     gates.add(gate);
     await gate.future;
-    processed.add(item.id);
-    return 'text:${item.id}';
+    // The capture id is the segment file's stem: `<id>.<ext>` for segment 0.
+    final String id = p.basenameWithoutExtension(segment.filePath);
+    processed.add(id);
+    return 'text:\$id';
   }
 }
 
