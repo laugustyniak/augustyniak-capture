@@ -176,6 +176,8 @@ void main() {
 
     await controller.addUpload(CaptureType.audioUpload);
     await controller.waitForProcessing();
+    expect(controller.recordings.single.status, RecordingStatus.completed);
+    expect(controller.recordings.single.error, isNull);
     final String path = notes().single.path;
 
     await controller.setTitle(controller.recordings.single.id, 'Mój tytuł');
