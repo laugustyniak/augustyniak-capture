@@ -706,7 +706,10 @@ class _RecordingsPageState extends State<RecordingsPage>
     }
   }
 
-  Future<void> _composeTextNote(BuildContext context) async {
+  Future<void> _composeTextNote(
+    BuildContext context, {
+    String? appendTo,
+  }) async {
     final String? body = await showModalBottomSheet<String>(
       context: context,
       isScrollControlled: true,
@@ -725,7 +728,7 @@ class _RecordingsPageState extends State<RecordingsPage>
       ),
     );
     if (body != null && body.trim().isNotEmpty) {
-      await controller.addTextNote(body);
+      await controller.addTextNote(body, appendTo: appendTo);
     }
   }
 
@@ -922,6 +925,16 @@ class _RecordingsPageState extends State<RecordingsPage>
                                     onConfigureModels: () => setState(
                                       () => navigationIndex = modelsIndex,
                                     ),
+                                    onAppendRecording: (String id) =>
+                                        _startRecording(appendTo: id),
+                                    onAppendNote: (String id) =>
+                                        _composeTextNote(context, appendTo: id),
+                                    onAppendUpload:
+                                        (String id, CaptureType type) =>
+                                            controller.addUpload(
+                                              type,
+                                              appendTo: id,
+                                            ),
                                     // Null until `_bootstrap()`'s database open
                                     // resolves — same nullable resolver shape
                                     // the PRICING section below already reads
@@ -1123,11 +1136,11 @@ class _RecordingsPageState extends State<RecordingsPage>
   /// the opening word. A `setState` costs nothing, so there is no word to lose
   /// here, and going first means the reveal still holds if `startRecording`
   /// throws.
-  Future<void> _startRecording() async {
+  Future<void> _startRecording({String? appendTo}) async {
     if (navigationIndex != queueIndex) {
       setState(() => navigationIndex = queueIndex);
     }
-    await controller.startRecording();
+    await controller.startRecording(appendTo: appendTo);
   }
 
   /// The wide shell's navigation. Built from the same [destinations] list the

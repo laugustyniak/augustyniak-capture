@@ -12,6 +12,7 @@ import '../../projects/domain/project.dart';
 import '../../projects/presentation/projects_controller.dart';
 import '../domain/agent_artifact.dart';
 import '../domain/capture_category.dart';
+import '../domain/capture_type.dart';
 import '../domain/recording.dart';
 import '../domain/route_record.dart';
 import 'agent_artifact_viewer_modal.dart';
@@ -64,11 +65,24 @@ class QueueTab extends StatefulWidget {
     this.onConfigureModels,
     this.usageRepository,
     this.storagePrice = StoragePrice.defaults,
+    this.onAppendRecording,
+    this.onAppendNote,
+    this.onAppendUpload,
   });
 
   final RecordingsController controller;
   final ProjectsController? projects;
   final String? initialProjectId;
+
+  /// Add a further source artifact to the capture with the given id.
+  ///
+  /// Owned by the shell rather than run here: appending a recording has to
+  /// reveal the Queue before the mic opens, and appending a note has to compose
+  /// one — both are the shell's jobs, and the same ones the capture dock uses.
+  /// Null on every host that has neither, which renders the editor as before.
+  final ValueChanged<String>? onAppendRecording;
+  final ValueChanged<String>? onAppendNote;
+  final void Function(String id, CaptureType type)? onAppendUpload;
 
   /// Whether audio captured here has anywhere to be transcribed.
   ///
@@ -826,6 +840,15 @@ class _QueueTabState extends State<QueueTab> {
           controller.setProject(recording.id, value),
       onDelete: () => _confirmDelete(recording),
       onDone: () => setState(() => editingId = null),
+      onAppendRecording: widget.onAppendRecording == null
+          ? null
+          : () => widget.onAppendRecording!(recording.id),
+      onAppendNote: widget.onAppendNote == null
+          ? null
+          : () => widget.onAppendNote!(recording.id),
+      onAppendUpload: widget.onAppendUpload == null
+          ? null
+          : (CaptureType type) => widget.onAppendUpload!(recording.id, type),
       // Resolved here rather than handed to the editor as a repository: the
       // editor's `CostSection` stays a pure widget over a plain list, the same
       // rule `revisions` already follows for `RevisionHistorySection`. Null

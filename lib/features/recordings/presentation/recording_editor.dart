@@ -8,6 +8,8 @@ import '../../costs/domain/price_book.dart';
 import '../../costs/domain/usage_event.dart';
 import '../../costs/presentation/cost_section.dart';
 import '../../projects/domain/project.dart';
+import '../domain/capture_segment.dart';
+import '../domain/capture_type.dart';
 import '../domain/capture_category.dart';
 import '../domain/recording.dart';
 import '../domain/recording_revision.dart';
@@ -55,6 +57,9 @@ class RecordingEditor extends StatefulWidget {
     this.onProjectChanged,
     this.usageEvents = const <UsageEvent>[],
     this.storagePrice = StoragePrice.defaults,
+    this.onAppendRecording,
+    this.onAppendNote,
+    this.onAppendUpload,
   });
 
   /// Public so a test asserts on the same string the widget renders.
@@ -84,6 +89,18 @@ class RecordingEditor extends StatefulWidget {
   /// Null hides it entirely, so a host that has no deletion to offer renders
   /// the editor exactly as before.
   final VoidCallback? onDelete;
+
+  /// Add a further source artifact to this capture. All three are nullable
+  /// together with the control they drive, so a host with no append path —
+  /// a sheet, a test mounting the editor bare — renders exactly as before.
+  final VoidCallback? onAppendRecording;
+  final VoidCallback? onAppendNote;
+  final ValueChanged<CaptureType>? onAppendUpload;
+
+  bool get canAppend =>
+      onAppendRecording != null ||
+      onAppendNote != null ||
+      onAppendUpload != null;
 
   /// Assignable projects. Empty hides the row entirely — an install that never
   /// defined one should not be shown a control with a single `—` in it.
@@ -365,6 +382,15 @@ class _RecordingEditorState extends State<RecordingEditor> {
                   onChanged: (String _) => setState(() {}),
                 ),
               ),
+              if (recording.segments.length > 1 || widget.canAppend) ...<Widget>[
+                const SizedBox(height: 4),
+                _FragmentsSection(
+                  recording: recording,
+                  onAppendRecording: widget.onAppendRecording,
+                  onAppendNote: widget.onAppendNote,
+                  onAppendUpload: widget.onAppendUpload,
+                ),
+              ],
               if (widget.revisions.isNotEmpty) ...<Widget>[
                 const SizedBox(height: 4),
                 RevisionHistorySection(revisions: widget.revisions),
@@ -638,4 +664,228 @@ double? _totalCostUsd(List<UsageEvent> events) {
     total += cost;
   }
   return total;
+}
+
+/// What this capture is made of, and how to add to it.
+///
+/// The list is drawn only once there is more than one artifact: a capture with
+/// a single source is what every capture used to be, and printing a
+/// one-row "FRAGMENTS" list under it would be noise on the common case. The
+/// `+ FRAGMENT` control appears whenever the host offers any append callback,
+/// including on that single-source capture — it is how a capture gains its
+/// second artifact in the first place.
+class _FragmentsSection extends StatelessWidget {
+  // Not `const`: this paints palette colours. See the theme rule in CLAUDE.md.
+  _FragmentsSection({
+    required this.recording,
+    this.onAppendRecording,
+    this.onAppendNote,
+    this.onAppendUpload,
+  });
+
+  final Recording recording;
+  final VoidCallback? onAppendRecording;
+  final VoidCallback? onAppendNote;
+  final ValueChanged<CaptureType>? onAppendUpload;
+
+  bool get _canAppend =>
+      onAppendRecording != null ||
+      onAppendNote != null ||
+      onAppendUpload != null;
+
+  Future<void> _openMenu(BuildContext context) async {
+    final _AppendAction? action = await showModalBottomSheet<_AppendAction>(
+      context: context,
+      builder: (BuildContext context) => ConsolePaletteScope(
+        builder: (BuildContext context) => _AppendMenuSheet(
+          canRecord: onAppendRecording != null,
+          canWrite: onAppendNote != null,
+          canUpload: onAppendUpload != null,
+        ),
+      ),
+    );
+    if (action == null || !context.mounted) return;
+    switch (action) {
+      case _AppendAction.recording:
+        onAppendRecording?.call();
+      case _AppendAction.note:
+        onAppendNote?.call();
+      case _AppendAction.audio:
+        onAppendUpload?.call(CaptureType.audioUpload);
+      case _AppendAction.image:
+        onAppendUpload?.call(CaptureType.image);
+      case _AppendAction.video:
+        onAppendUpload?.call(CaptureType.video);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final List<CaptureSegment> segments = recording.segments;
+    final bool listed = segments.length > 1;
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      mainAxisSize: MainAxisSize.min,
+      children: <Widget>[
+        Row(
+          children: <Widget>[
+            Expanded(
+              child: SectionHeader(
+                title: 'FRAGMENTS',
+                trailing: listed ? '${segments.length} sources' : null,
+              ),
+            ),
+            if (_canAppend) ...<Widget>[
+              const SizedBox(width: 8),
+              ConsoleChip(
+                label: '+ FRAGMENT',
+                selected: false,
+                onSelected: () => _openMenu(context),
+              ),
+            ],
+          ],
+        ),
+        if (listed) ...<Widget>[
+          const SizedBox(height: 6),
+          for (final CaptureSegment segment in segments) ...<Widget>[
+            _FragmentTile(segment: segment),
+            const SizedBox(height: 6),
+          ],
+        ],
+      ],
+    );
+  }
+}
+
+class _FragmentTile extends StatelessWidget {
+  // Not `const`: paints palette colours.
+  _FragmentTile({required this.segment});
+
+  final CaptureSegment segment;
+
+  @override
+  Widget build(BuildContext context) {
+    final String? size = formatBytes(segment.sizeBytes);
+    final String meta = <String>[
+      segment.type.name,
+      if (segment.type.hasDuration && segment.durationMs > 0)
+        formatDuration(Duration(milliseconds: segment.durationMs)),
+      ?size,
+      // A fragment that failed says so here rather than only in the capture's
+      // single error line, which reports whichever one failed most recently.
+      if (segment.error != null) 'failed',
+      if (segment.isPending && segment.error == null) 'pending',
+    ].join(' · ');
+
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: <Widget>[
+        Text(
+          '${segment.index + 1}',
+          style: ConsoleText.micro.copyWith(color: Console.muted),
+        ),
+        const SizedBox(width: 8),
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: <Widget>[
+              Text(
+                meta,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: ConsoleText.micro,
+              ),
+              if ((segment.text ?? '').trim().isNotEmpty)
+                Text(
+                  segment.text!.trim(),
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                  style: ConsoleText.micro.copyWith(color: Console.muted),
+                ),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+enum _AppendAction { recording, note, audio, image, video }
+
+class _AppendMenuSheet extends StatelessWidget {
+  // Not `const`: paints palette colours.
+  _AppendMenuSheet({
+    required this.canRecord,
+    required this.canWrite,
+    required this.canUpload,
+  });
+
+  final bool canRecord;
+  final bool canWrite;
+  final bool canUpload;
+
+  @override
+  Widget build(BuildContext context) {
+    return SafeArea(
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: <Widget>[
+          const SizedBox(height: 8),
+          if (canWrite)
+            _AppendMenuItem(
+              icon: Icons.notes_rounded,
+              label: 'NOTE',
+              onTap: () => Navigator.of(context).pop(_AppendAction.note),
+            ),
+          if (canRecord)
+            _AppendMenuItem(
+              icon: Icons.mic_rounded,
+              label: 'RECORDING',
+              onTap: () => Navigator.of(context).pop(_AppendAction.recording),
+            ),
+          if (canUpload) ...<Widget>[
+            _AppendMenuItem(
+              icon: Icons.audio_file_outlined,
+              label: 'AUDIO FILE',
+              onTap: () => Navigator.of(context).pop(_AppendAction.audio),
+            ),
+            _AppendMenuItem(
+              icon: Icons.image_outlined,
+              label: 'IMAGE',
+              onTap: () => Navigator.of(context).pop(_AppendAction.image),
+            ),
+            _AppendMenuItem(
+              icon: Icons.movie_outlined,
+              label: 'VIDEO',
+              onTap: () => Navigator.of(context).pop(_AppendAction.video),
+            ),
+          ],
+          const SizedBox(height: 8),
+        ],
+      ),
+    );
+  }
+}
+
+class _AppendMenuItem extends StatelessWidget {
+  // Not `const`: paints palette colours.
+  _AppendMenuItem({
+    required this.icon,
+    required this.label,
+    required this.onTap,
+  });
+
+  final IconData icon;
+  final String label;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return ListTile(
+      leading: Icon(icon, size: 18, color: Console.accent),
+      title: Text(label, style: ConsoleText.chip),
+      onTap: onTap,
+    );
+  }
 }
