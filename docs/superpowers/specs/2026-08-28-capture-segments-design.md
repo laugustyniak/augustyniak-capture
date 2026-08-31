@@ -1,6 +1,6 @@
 # Capture segments: adding a fragment to a note that already exists
 
-Status: **proposed** · Owner: laugustyniak · Scope: a capture may gain further
+Status: **shipped** · Owner: laugustyniak · Scope: a capture may gain further
 source artifacts after it has been accepted — a second recording, a typed
 addition, a picked file — without becoming a second capture and without
 disturbing the ordering guarantee that governs the first one.
