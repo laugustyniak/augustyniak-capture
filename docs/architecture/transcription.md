@@ -28,3 +28,16 @@ The local-engine seam and model store, and the three limits a single provider re
 - **Unknown platforms cap the recording instead.** Where `AudioSplitter.isAvailable` is false, `TranscriptionLimits.forRequest` computes the binding ceiling from the active profile's model and bitrate. The shell sets `controller.recordingLimit` only there; null everywhere else means no cap.
   - Enforced in `RecordingsController._onTick`, not in `RecordingView`: it is an invariant of the capture, so it has to hold for a hotkey-started recording and must not depend on a widget being mounted. Reaching it calls the **same `stopRecording` the SAVE button calls** — the capture is saved, never discarded. `RecordingView` draws the countdown and the reason, so the automatic save is something the user watched approach.
   - `stopRecording`'s teardown lives in `finally` for the same reason. It used to sit after the `stop()` await inside the `try`, so a recorder that threw there left `_isRecording` true with the 250 ms timer alive: the capture screen never closed, and once a cap existed the tick called straight back into `stopRecording` four times a second for the rest of the session.
+
+
+## On-device
+
+**On-device transcription** (`features/transcription/`) — a third `TranscriptionService` implementation behind `ProfileKind.localWhisper`, reached from the drain loop like any other. `UnavailableLocalEngine` is the default: the seam ships, the inference does not. `WhisperModelStore` keeps model files in Application Support, never in documents, or `recoverOrphans()` adopts them as captures. See `docs/architecture/transcription.md`.
+
+## Remote
+
+**Transcription** (`features/transcription/data/transcription_service.dart`): `TranscriptionService` interface with two remote impls. `DisabledTranscriptionService` throws `TranscriptionNotConfiguredException`; it is the fallback whenever no provider profile is active. `HttpWhisperTranscriptionService` POSTs `multipart/form-data` field `file` to a configurable endpoint, optional bearer token, expects `{"text": ...}` (falls back to `transcript`).
+
+## Long audio
+
+**Long audio has three ceilings and only one of them tells you** — the 25 MB upload cap and the 1500 s duration limit answer 400, while the 2000-token output limit answers **HTTP 200 with a truncated transcript**. Every supported platform therefore splits before sending (`ChunkedTranscriptionService`); unknown platforms cap the recording instead. See `docs/architecture/transcription.md`.
