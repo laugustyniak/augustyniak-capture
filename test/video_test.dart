@@ -87,7 +87,7 @@ void main() {
           type: CaptureType.video,
         );
 
-        expect(await processor.process(item), 'VIDEO TRANSCRIPT');
+        expect(await processor.process(item.segments.first), 'VIDEO TRANSCRIPT');
         expect(tmp.existsSync(), isFalse); // derived temp cleaned up
       },
     );
@@ -105,7 +105,7 @@ void main() {
         status: RecordingStatus.pendingTranscription,
         type: CaptureType.video,
       );
-      await expectLater(processor.process(item), throwsException);
+      await expectLater(processor.process(item.segments.first), throwsException);
     });
   });
 

@@ -1,5 +1,6 @@
 import 'dart:io';
 
+import '../domain/capture_segment.dart';
 import '../domain/capture_type.dart';
 import '../domain/recording.dart';
 import 'recordings_repository.dart';
@@ -60,6 +61,57 @@ class MediaImporter {
       status: RecordingStatus.saved,
       type: type,
       sourceMimeType: mimeType,
+    );
+  }
+
+  /// Copy a picked file in as a further segment of an existing capture.
+  ///
+  /// Same verify-then-return contract as [importFile]: the caller only touches
+  /// the parent row after this returns, so a copy that fails costs nothing that
+  /// already existed.
+  Future<CaptureSegment> importSegment({
+    required String parentId,
+    required int index,
+    required CaptureType type,
+    required File source,
+    required DateTime createdAt,
+    String? mimeType,
+  }) async {
+    if (!await source.exists() || await source.length() == 0) {
+      throw FileSystemException(
+        'Picked file is missing or empty.',
+        source.path,
+      );
+    }
+
+    final String extension = RecordingsRepository.extensionFor(
+      type,
+      sourceMimeType: mimeType,
+    );
+    final File destination = await _repository.createSegmentFile(
+      parentId,
+      index,
+      extension,
+    );
+    await source.copy(destination.path);
+
+    final int sizeBytes = await destination.exists()
+        ? await destination.length()
+        : 0;
+    if (sizeBytes == 0) {
+      throw FileSystemException(
+        'Imported fragment was not persisted correctly.',
+        destination.path,
+      );
+    }
+
+    return CaptureSegment(
+      index: index,
+      filePath: destination.path,
+      type: type,
+      sourceMimeType: mimeType,
+      createdAt: createdAt,
+      sizeBytes: sizeBytes,
     );
   }
 }

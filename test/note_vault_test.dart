@@ -29,7 +29,7 @@ void main() {
     CaptureType type = CaptureType.audioRecording,
     String? projectId = 'project-1',
     int durationMs = 252000,
-    String? sourcePath,
+    List<String> sourcePaths = const <String>[],
   }) => VaultNote(
     id: id,
     title: title,
@@ -41,7 +41,7 @@ void main() {
     tags: tags,
     projectId: projectId,
     durationMs: durationMs,
-    sourcePath: sourcePath,
+    sourcePaths: sourcePaths,
   );
 
   Directory notesDir() => Directory(p.join(vault.path, VaultDefaults.folder));
@@ -149,7 +149,7 @@ void main() {
     final File source = File(p.join(vault.path, 'source.m4a'))
       ..writeAsBytesSync(<int>[1, 2, 3, 4]);
 
-    await build().mirror(note(sourcePath: source.path));
+    await build().mirror(note(sourcePaths: <String>[source.path]));
 
     final File copy = File(
       p.join(notesDir().path, VaultDefaults.attachments, 'source.m4a'),
@@ -168,7 +168,7 @@ void main() {
     final File source = File(p.join(vault.path, 'source.m4a'))
       ..writeAsBytesSync(<int>[1]);
 
-    await build().mirror(note(sourcePath: source.path));
+    await build().mirror(note(sourcePaths: <String>[source.path]));
 
     expect(
       Directory(
@@ -183,7 +183,7 @@ void main() {
     final File source = File(p.join(vault.path, 'note.txt'))
       ..writeAsStringSync('Treść.');
 
-    await build().mirror(note(type: CaptureType.text, sourcePath: source.path));
+    await build().mirror(note(type: CaptureType.text, sourcePaths: <String>[source.path]));
 
     expect(soleNote().readAsStringSync(), isNot(contains('![[')));
   });
@@ -234,5 +234,49 @@ void main() {
     await subject.mirror(note());
 
     expect(notesDir().existsSync(), isTrue);
+  });
+
+  test('every segment source is attached once', () async {
+    final File audio = File(p.join(vault.parent.path, 'abc.m4a'))
+      ..writeAsStringSync('audio bytes');
+    final File image = File(p.join(vault.parent.path, 'abc-1.png'))
+      ..writeAsStringSync('image bytes');
+
+    final MarkdownNoteVault mirror = build();
+    await mirror.mirror(note(sourcePaths: <String>[audio.path, image.path]));
+
+    final Directory attachments = Directory(
+      p.join(notesDir().path, VaultDefaults.attachments),
+    );
+    expect(File(p.join(attachments.path, 'abc.m4a')).existsSync(), isTrue);
+    expect(File(p.join(attachments.path, 'abc-1.png')).existsSync(), isTrue);
+
+    final String body = soleNote().readAsStringSync();
+    expect(
+      body.indexOf('![[${VaultDefaults.attachments}/abc.m4a]]'),
+      lessThan(body.indexOf('![[${VaultDefaults.attachments}/abc-1.png]]')),
+      reason: 'attachments follow segment order',
+    );
+
+    final VaultWrite again = await mirror.mirror(
+      note(sourcePaths: <String>[audio.path, image.path]),
+    );
+    expect(
+      again.outcome,
+      VaultOutcome.unchanged,
+      reason: 'a no-op write would bump the mtime on every pipeline tick',
+    );
+  });
+
+  test('a note with no sources attaches nothing', () async {
+    await build().mirror(note(type: CaptureType.text));
+
+    expect(
+      Directory(
+        p.join(notesDir().path, VaultDefaults.attachments),
+      ).existsSync(),
+      isFalse,
+      reason: 'a text segment is the body printed above, not an attachment',
+    );
   });
 }

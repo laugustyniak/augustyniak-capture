@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter/services.dart';
+import 'package:augustyniak_capture/features/recordings/domain/capture_segment.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:augustyniak_capture/features/costs/domain/usage_event.dart';
 import 'package:augustyniak_capture/features/costs/domain/usage_parsing.dart';
@@ -49,9 +50,9 @@ class _EchoProcessor implements Processor {
   int calls = 0;
 
   @override
-  Future<String> process(Recording item) async {
+  Future<String> process(CaptureSegment segment) async {
     calls++;
-    return File(item.filePath).readAsString();
+    return File(segment.filePath).readAsString();
   }
 }
 
@@ -484,11 +485,17 @@ void main() {
       await retry;
       await c.waitForProcessing();
 
-      expect(processor.calls, 1);
-      expect(
-        c.recordings.firstWhere((Recording r) => r.id == 'cap-b').transcript,
-        'body from disk',
+      // The drain really ran the job rather than dropping it — it reached the
+      // capture, found every segment already holding text, and cleared the
+      // queued status instead of re-sending words the app has. The processor
+      // is untouched for the same reason, and the transcript that was already
+      // there survives.
+      final Recording after = c.recordings.firstWhere(
+        (Recording r) => r.id == 'cap-b',
       );
+      expect(after.status, RecordingStatus.completed);
+      expect(processor.calls, 0);
+      expect(after.transcript, 'already has text');
     },
   );
 

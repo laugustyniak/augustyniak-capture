@@ -11,6 +11,7 @@ import 'package:augustyniak_capture/features/projects/data/projects_repository.d
 import 'package:augustyniak_capture/features/projects/domain/project.dart';
 import 'package:augustyniak_capture/features/recordings/data/recordings_repository.dart';
 import 'package:augustyniak_capture/features/recordings/domain/agent_artifact.dart';
+import 'package:augustyniak_capture/features/recordings/domain/capture_segment.dart';
 import 'package:augustyniak_capture/features/recordings/domain/capture_type.dart';
 import 'package:augustyniak_capture/features/recordings/domain/recording.dart';
 
@@ -67,6 +68,70 @@ void main() {
       ).writeAsString('audio-${item.id}');
     }
     await repositoryFor(directory).saveAll(recordings);
+  }
+
+  /// A capture holding two source artifacts, the way an appended fragment
+  /// leaves it: `<id>.m4a` plus `<id>-1.txt`.
+  Recording twoSegmentCapture(String id, {String? contentHash}) => Recording(
+    id: id,
+    filePath: p.join(source.path, '$id.m4a'),
+    createdAt: DateTime(2026, 8, 28, 12),
+    durationMs: 1000,
+    sizeBytes: 12,
+    contentHash: contentHash,
+    type: CaptureType.audioRecording,
+    status: RecordingStatus.completed,
+    transcript: 'first fragment\n\nsecond fragment',
+    title: 'Title $id',
+    segments: <CaptureSegment>[
+      CaptureSegment(
+        index: 0,
+        filePath: p.join(source.path, '$id.m4a'),
+        type: CaptureType.audioRecording,
+        createdAt: DateTime(2026, 8, 28, 12),
+        durationMs: 1000,
+        sizeBytes: 12,
+        contentHash: contentHash,
+        text: 'first fragment',
+      ),
+      CaptureSegment(
+        index: 1,
+        filePath: p.join(source.path, '$id-1.txt'),
+        type: CaptureType.text,
+        createdAt: DateTime(2026, 8, 28, 12, 5),
+        sizeBytes: 12,
+        text: 'second fragment',
+      ),
+    ],
+  );
+
+  /// Rewrite a zip without one member, dropping it from the manifest too.
+  ///
+  /// The manifest has to go with it: `_validateManifest` refuses the whole
+  /// archive when a listed member is missing, which is the right answer to a
+  /// truncated download but not the case under test here. What this builds is
+  /// an internally consistent archive whose *index row* names a segment the
+  /// archive does not carry — an archive written before segments existed, or
+  /// one edited by hand.
+  Future<void> stripMember(File zip, String name) async {
+    final Archive original = ZipDecoder().decodeBytes(await zip.readAsBytes());
+    final Archive stripped = Archive();
+    for (final ArchiveFile member in original) {
+      if (member.name == name) continue;
+      if (member.name == 'capture-archive.json') {
+        final Map<String, dynamic> manifest =
+            jsonDecode(utf8.decode(member.readBytes()!))
+                as Map<String, dynamic>;
+        manifest['files'] = (manifest['files'] as List<dynamic>)
+            .where((dynamic each) => (each as Map<String, dynamic>)['name'] != name)
+            .toList();
+        final List<int> bytes = utf8.encode(jsonEncode(manifest));
+        stripped.addFile(ArchiveFile('capture-archive.json', bytes.length, bytes));
+        continue;
+      }
+      stripped.addFile(member);
+    }
+    await zip.writeAsBytes(ZipEncoder().encode(stripped));
   }
 
   setUp(() {
@@ -802,6 +867,84 @@ void main() {
               10,
             ),
       ),
+    );
+  });
+
+  test('a two-segment capture survives an export and an import', () async {
+    await seed(source, <Recording>[twoSegmentCapture('abc')]);
+    // `seed` writes one file per row; the fragment needs writing too.
+    await File(p.join(source.path, 'abc-1.txt')).writeAsString('fragment-abc');
+
+    await archiveFor(source).exportTo(zipPath());
+    final RestoreSummary summary = await archiveFor(
+      target,
+    ).importFrom(zipPath());
+
+    expect(
+      await File(p.join(target.path, 'abc.m4a')).readAsString(),
+      'audio-abc',
+    );
+    expect(
+      await File(p.join(target.path, 'abc-1.txt')).readAsString(),
+      'fragment-abc',
+    );
+
+    final Recording restored = (await repositoryFor(target).loadAll()).single;
+    expect(restored.segments, hasLength(2));
+    for (final CaptureSegment segment in restored.segments) {
+      expect(
+        segment.filePath,
+        startsWith(target.path),
+        reason: 'an absolute path from another container points nowhere here',
+      );
+    }
+    expect(restored.transcript, 'first fragment\n\nsecond fragment');
+    expect(summary.filesRestored, 2);
+  });
+
+  test(
+    'a missing segment member refuses the row rather than half-importing it',
+    () async {
+      await seed(source, <Recording>[twoSegmentCapture('abc')]);
+      await File(
+        p.join(source.path, 'abc-1.txt'),
+      ).writeAsString('fragment-abc');
+
+      await archiveFor(source).exportTo(zipPath());
+      // Rebuild the archive without the fragment, leaving the manifest and the
+      // index describing a capture whose second source is not there.
+      await stripMember(zipPath(), 'abc-1.txt');
+
+      final RestoreSummary summary = await archiveFor(
+        target,
+      ).importFrom(zipPath());
+
+      expect(summary.unreadable, 1);
+      expect(
+        await File(p.join(target.path, 'abc.m4a')).exists(),
+        isFalse,
+        reason: 'a row with a missing source must not be half-applied',
+      );
+    },
+  );
+
+  test('re-importing the same archive counts it alreadyPresent', () async {
+    await seed(source, <Recording>[
+      twoSegmentCapture('abc', contentHash: 'd' * 64),
+    ]);
+    await File(p.join(source.path, 'abc-1.txt')).writeAsString('fragment-abc');
+
+    await archiveFor(source).exportTo(zipPath());
+    await archiveFor(target).importFrom(zipPath());
+    final RestoreSummary second = await archiveFor(
+      target,
+    ).importFrom(zipPath());
+
+    expect(second.alreadyPresent, 1);
+    expect(
+      second.matchedByIdAlone,
+      0,
+      reason: 'the row hash describes segment 0 and is stable across appends',
     );
   });
 }

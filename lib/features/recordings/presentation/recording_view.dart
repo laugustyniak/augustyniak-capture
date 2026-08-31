@@ -6,6 +6,8 @@ import '../../../app/ui_kit.dart';
 import '../../projects/domain/project.dart';
 import '../../settings/domain/audio_config.dart';
 import '../../transcription/domain/transcription_limits.dart';
+import '../domain/recording.dart';
+import 'card_parts.dart';
 import 'recordings_controller.dart';
 
 /// The capture screen, shown in place of the Queue while the mic is live.
@@ -33,6 +35,18 @@ class RecordingView extends StatelessWidget {
 
   final RecordingsController controller;
 
+  /// The capture this recording will be appended to, or null when it will
+  /// stand on its own. Resolved from the controller rather than passed in, so
+  /// the screen cannot claim a target the pipeline is not using.
+  Recording? get appendTarget {
+    final String? id = controller.appendTargetId;
+    if (id == null) return null;
+    for (final Recording item in controller.recordings) {
+      if (item.id == id) return item;
+    }
+    return null;
+  }
+
   /// Confirmed because it is unrecoverable: the partial `.m4a` is deleted and
   /// was never indexed, so unlike every other file in this app there is no
   /// orphan sweep that could bring it back.
@@ -56,6 +70,8 @@ class RecordingView extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final AudioConfig audio = controller.audioConfig;
+    // Read once: a getter cannot be promoted, and this is used twice below.
+    final Recording? target = appendTarget;
 
     return SafeArea(
       child: Padding(
@@ -66,7 +82,20 @@ class RecordingView extends StatelessWidget {
             Row(
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: <Widget>[
-                Text('AUGUSTYNIAK CAPTURE', style: ConsoleText.eyebrow),
+                Expanded(
+                  child: Text(
+                    // Named through `displayNameFor` so this screen and the
+                    // row it is adding to can never disagree about what the
+                    // capture is called.
+                    target == null
+                        ? 'AUGUSTYNIAK CAPTURE'
+                        : 'ADDING TO ${displayNameFor(target).toUpperCase()}',
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: ConsoleText.eyebrow,
+                  ),
+                ),
+                const SizedBox(width: 12),
                 Container(
                   padding: const EdgeInsets.symmetric(
                     horizontal: 12,

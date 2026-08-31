@@ -1,5 +1,6 @@
 import 'agent_artifact.dart';
 import 'capture_category.dart';
+import 'capture_segment.dart';
 import 'capture_type.dart';
 import 'route_record.dart';
 import 'recording_tag.dart';
@@ -44,7 +45,8 @@ class Recording {
     this.processedAt,
     this.routes = const <RouteRecord>[],
     this.artifacts = const <AgentArtifact>[],
-  });
+    List<CaptureSegment>? segments,
+  }) : _segments = segments;
 
   final String id;
   final String filePath;
@@ -133,6 +135,63 @@ class Recording {
   /// this capture. Empty on legacy rows and captures without agent results.
   final List<AgentArtifact> artifacts;
 
+  /// The capture's source artifacts, oldest first, or null on every row that
+  /// has never gained a fragment.
+  ///
+  /// Private and nullable for the same reason `AppSettings._shortcuts` is:
+  /// **absent** and **present** are different facts. Absent means the capture
+  /// is what it always was — one source — and the key stays out of
+  /// `recordings.json`, so such a row serialises byte for byte as it did
+  /// before this existed. Present is authoritative.
+  final List<CaptureSegment>? _segments;
+
+  /// Every source artifact, always at least one.
+  ///
+  /// A row with nothing stored synthesises its single segment from the
+  /// top-level fields, which is what keeps every legacy row and every existing
+  /// construction site of this class valid without a migration.
+  List<CaptureSegment> get segments =>
+      _segments ??
+      <CaptureSegment>[
+        CaptureSegment(
+          index: 0,
+          filePath: filePath,
+          type: type,
+          sourceMimeType: sourceMimeType,
+          createdAt: createdAt,
+          durationMs: durationMs,
+          sizeBytes: sizeBytes,
+          contentHash: contentHash,
+          text: transcript,
+        ),
+      ];
+
+  bool get hasStoredSegments => _segments != null;
+
+  /// Sum across segments. The persisted `durationMs` and `sizeBytes` keep
+  /// describing segment 0 — they are the archive's deduplication contract —
+  /// so the UI reads these instead.
+  int get totalDurationMs => segments.fold(
+    0,
+    (int sum, CaptureSegment segment) => sum + segment.durationMs,
+  );
+
+  int get totalSizeBytes => segments.fold(
+    0,
+    (int sum, CaptureSegment segment) => sum + segment.sizeBytes,
+  );
+
+  /// One past the highest index in use, never the list length: a segment
+  /// dropped by the sync path policy would otherwise hand the next append a
+  /// file name that is already taken.
+  int get nextSegmentIndex =>
+      segments.fold(
+        -1,
+        (int highest, CaptureSegment segment) =>
+            segment.index > highest ? segment.index : highest,
+      ) +
+      1;
+
   Recording copyWith({
     RecordingStatus? status,
     String? contentHash,
@@ -155,6 +214,7 @@ class Recording {
     bool clearProcessedAt = false,
     List<RouteRecord>? routes,
     List<AgentArtifact>? artifacts,
+    List<CaptureSegment>? segments,
   }) {
     return Recording(
       id: id,
@@ -178,6 +238,7 @@ class Recording {
       processedAt: clearProcessedAt ? null : (processedAt ?? this.processedAt),
       routes: routes ?? this.routes,
       artifacts: artifacts ?? this.artifacts,
+      segments: segments ?? _segments,
     );
   }
 
@@ -203,6 +264,8 @@ class Recording {
     'processedAt': processedAt?.toIso8601String(),
     'routes': routes.map((RouteRecord route) => route.toJson()).toList(),
     'artifacts': artifacts.map((AgentArtifact a) => a.toJson()).toList(),
+    if (_segments != null)
+      'segments': _segments.map((CaptureSegment s) => s.toJson()).toList(),
   };
 
   factory Recording.fromJson(Map<String, dynamic> json) {
@@ -260,6 +323,13 @@ class Recording {
       // the same rule `tags` and `category` follow.
       routes: RouteRecord.listFromJson(json['routes']),
       artifacts: AgentArtifact.listFromJson(json['artifacts']),
+      // An empty parsed list means every segment row was unreadable, which is
+      // the same information as no list at all — fall back to synthesis rather
+      // than to a capture with no sources.
+      segments: switch (CaptureSegment.listFromJson(json['segments'])) {
+        final List<CaptureSegment> parsed when parsed.isNotEmpty => parsed,
+        _ => null,
+      },
     );
   }
 }

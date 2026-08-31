@@ -155,7 +155,7 @@ void main() {
         type: CaptureType.image,
       );
       await expectLater(
-        build().forType(CaptureType.image).process(item),
+        build().forType(CaptureType.image).process(item.segments.first),
         throwsA(isA<ProcessorNotConfiguredException>()),
       );
     });
@@ -172,7 +172,7 @@ void main() {
           type: CaptureType.video,
         );
         await expectLater(
-          build().forType(CaptureType.video).process(item),
+          build().forType(CaptureType.video).process(item.segments.first),
           throwsA(isA<ProcessorNotConfiguredException>()),
         );
       },

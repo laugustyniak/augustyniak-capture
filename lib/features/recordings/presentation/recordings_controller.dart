@@ -39,6 +39,7 @@ import '../domain/agent_artifact.dart';
 import '../data/source_content_hasher.dart';
 import '../domain/agent_handoff.dart';
 import '../domain/capture_category.dart';
+import '../domain/capture_segment.dart';
 import '../domain/capture_type.dart';
 import '../domain/clipboard_sink.dart';
 import '../domain/capture_router.dart';
@@ -237,6 +238,16 @@ class RecordingsController extends ChangeNotifier {
   /// [startRecording], cleared when the recording ends.
   String? _recordingProjectId;
   String? get recordingProjectId => _recordingProjectId;
+
+  /// The capture a fragment in progress will be appended to, or null for a
+  /// capture that will stand on its own. Read by the capture screen so it can
+  /// name what it is adding to.
+  String? get appendTargetId => _appendTargetId;
+  String? _appendTargetId;
+
+  /// The index the fragment being recorded will occupy. Held rather than
+  /// parsed back out of the file name, for the same reason `_activeId` is.
+  int? _activeSegmentIndex;
 
   /// Re-file the recording that is running right now.
   ///
@@ -584,7 +595,12 @@ class RecordingsController extends ChangeNotifier {
       ]..sort((Recording a, Recording b) => b.createdAt.compareTo(a.createdAt));
       await _persistAll();
       unawaited(
-        _hashInBatch(orphans.map((Recording orphan) => orphan.id).toList()),
+        _hashInBatch(<({String id, int segmentIndex})>[
+          // A recovered orphan is always a single-segment capture — the row it
+          // lost is the only place a fragment list could have lived.
+          for (final Recording orphan in orphans)
+            (id: orphan.id, segmentIndex: 0),
+        ]),
       );
       _logSink.log(
         'Recovered ${orphans.length} capture(s) with no index entry — '
@@ -620,12 +636,17 @@ class RecordingsController extends ChangeNotifier {
 
   /// Give legacy and recovered captures a content fingerprint without holding
   /// up startup. Each row remains usable if its source cannot be read.
-  Future<void> _backfillContentHashes() async => _hashInBatch(
-    _recordings
-        .where((Recording item) => item.contentHash == null)
-        .map((Recording item) => item.id)
-        .toList(),
-  );
+  Future<void> _backfillContentHashes() async =>
+      _hashInBatch(<({String id, int segmentIndex})>[
+        // Every segment, not every row: a capture whose first fragment was
+        // hashed long ago still has an unhashed one after an append, and a row
+        // that has never gained a fragment yields exactly the single
+        // synthesised segment it always did.
+        for (final Recording item in _recordings)
+          for (final CaptureSegment segment in item.segments)
+            if (segment.contentHash == null)
+              (id: item.id, segmentIndex: segment.index),
+      ]);
 
   /// Hash a whole set of sources, then persist them in **one** write.
   ///
@@ -641,23 +662,67 @@ class RecordingsController extends ChangeNotifier {
   /// Best-effort under the [_copyToClipboard] contract: a source that cannot be
   /// read costs its own fingerprint and nothing else, and a disposal mid-sweep
   /// drops the rows not yet hashed rather than writing a partial result.
-  Future<void> _hashInBatch(List<String> ids) async {
-    if (ids.isEmpty) return;
+  Future<void> _hashInBatch(
+    List<({String id, int segmentIndex})> targets,
+  ) async {
+    if (targets.isEmpty) return;
     final Map<String, String> hashed = <String, String>{};
-    for (final String id in ids) {
+    for (final ({String id, int segmentIndex}) target in targets) {
       if (_disposed) return;
-      final String? hash = await _hashSource(id);
-      if (hash != null) hashed[id] = hash;
+      final String? hash = await _hashSource(
+        target.id,
+        segmentIndex: target.segmentIndex,
+      );
+      if (hash != null) hashed['${target.id}#${target.segmentIndex}'] = hash;
     }
     if (_disposed || hashed.isEmpty) return;
 
     bool changed = false;
-    _recordings = _recordings.map((Recording item) {
-      final String? hash = hashed[item.id];
-      if (hash == null || item.contentHash != null) return item;
+    final List<Recording> updated = <Recording>[];
+    for (final Recording item in _recordings) {
+      // The row-level field describes segment 0 and nothing else — it is what
+      // the archive deduplicates on, so it is never recomputed across the list.
+      final String? rowHash = hashed['${item.id}#0'];
+      final bool setsRow = rowHash != null && item.contentHash == null;
+
+      // Left without a `segments` key on purpose: the synthesised segment of a
+      // capture that never gained a fragment reads the row-level hash, so
+      // materialising the list here would cost the byte-for-byte
+      // serialisation and buy nothing.
+      if (!item.hasStoredSegments) {
+        if (!setsRow) {
+          updated.add(item);
+          continue;
+        }
+        changed = true;
+        updated.add(item.copyWith(contentHash: rowHash));
+        continue;
+      }
+
+      bool touched = false;
+      final List<CaptureSegment> segments = <CaptureSegment>[];
+      for (final CaptureSegment segment in item.segments) {
+        final String? hash = hashed['${item.id}#${segment.index}'];
+        if (hash == null || segment.contentHash != null) {
+          segments.add(segment);
+          continue;
+        }
+        touched = true;
+        segments.add(segment.copyWith(contentHash: hash));
+      }
+      if (!touched && !setsRow) {
+        updated.add(item);
+        continue;
+      }
       changed = true;
-      return item.copyWith(contentHash: hash);
-    }).toList();
+      updated.add(
+        item.copyWith(
+          segments: touched ? segments : null,
+          contentHash: setsRow ? rowHash : null,
+        ),
+      );
+    }
+    _recordings = updated;
     if (!changed) return;
 
     await _persistAll();
@@ -676,27 +741,56 @@ class RecordingsController extends ChangeNotifier {
   /// operation between capture-time scheduling and startup backfill. Errors
   /// are evidence in Logs, not status changes: a capture without a hash is
   /// still a complete capture and can be retried on the next launch.
-  Future<void> _computeContentHash(String id) async {
-    final String? hash = await _hashSource(id);
+  Future<void> _computeContentHash(String id, {int segmentIndex = 0}) async {
+    final String? hash = await _hashSource(id, segmentIndex: segmentIndex);
     if (hash == null || _disposed) return;
-    await _update(
-      id,
-      (Recording current) => current.contentHash == null
-          ? current.copyWith(contentHash: hash)
-          : current,
-    );
+    // One mutation, not two. `_update` rewrites the whole index, and a second
+    // pass would also widen the window in which a delete can land between the
+    // two writes.
+    await _update(id, (Recording current) {
+      // A row that has never gained a fragment is left without a `segments`
+      // key: its synthesised segment reads the row-level hash, so writing the
+      // list here would cost the byte-for-byte serialisation for nothing.
+      if (!current.hasStoredSegments) {
+        return segmentIndex == 0 && current.contentHash == null
+            ? current.copyWith(contentHash: hash)
+            : current;
+      }
+      return current.copyWith(
+        segments: <CaptureSegment>[
+          for (final CaptureSegment segment in current.segments)
+            if (segment.index == segmentIndex && segment.contentHash == null)
+              segment.copyWith(contentHash: hash)
+            else
+              segment,
+        ],
+        // The row-level field describes segment 0 exactly — it is the
+        // archive's deduplication contract, so it is written from that
+        // segment and never computed across the list.
+        contentHash: segmentIndex == 0 && current.contentHash == null
+            ? hash
+            : null,
+      );
+    });
     _logSink.log('Source fingerprint stored.', recordingId: id);
   }
 
   /// The fingerprint alone — no write, so a caller sweeping many rows can
   /// persist them together. Null means "no fingerprint for this one", never a
   /// failed capture.
-  Future<String?> _hashSource(String id) async {
+  Future<String?> _hashSource(String id, {int segmentIndex = 0}) async {
     final int index = _recordings.indexWhere((Recording item) => item.id == id);
-    if (index < 0 || _recordings[index].contentHash != null) return null;
-    if (!_hashesInFlight.add(id)) return null;
+    if (index < 0) return null;
+    final CaptureSegment? segment = _recordings[index].segments
+        .where((CaptureSegment each) => each.index == segmentIndex)
+        .firstOrNull;
+    if (segment == null || segment.contentHash != null) return null;
+    // Keyed per segment: two fragments of one capture are two distinct files
+    // and must not exclude each other from the sweep.
+    final String key = '$id#$segmentIndex';
+    if (!_hashesInFlight.add(key)) return null;
     try {
-      return await _contentHasher.hash(File(_recordings[index].filePath));
+      return await _contentHasher.hash(File(segment.filePath));
     } catch (exception) {
       _logSink.log(
         'Source fingerprint unavailable: $exception',
@@ -705,11 +799,11 @@ class RecordingsController extends ChangeNotifier {
       );
       return null;
     } finally {
-      _hashesInFlight.remove(id);
+      _hashesInFlight.remove(key);
     }
   }
 
-  Future<void> startRecording() async {
+  Future<void> startRecording({String? appendTo}) async {
     if (_isRecording || _isBusy) return;
     _error = null;
 
@@ -721,8 +815,25 @@ class RecordingsController extends ChangeNotifier {
       return;
     }
 
+    // An append writes `<parent>-<n>.m4a` beside the capture it belongs to; a
+    // standalone capture keeps its own uuid. Resolved before the mic opens, so
+    // a parent deleted mid-capture is caught at attach time rather than
+    // silently producing a file no row will ever claim.
+    final int? appendIndex = appendTo == null
+        ? null
+        : _nextSegmentIndexFor(appendTo);
+    if (appendTo != null && appendIndex == null) {
+      _error = 'The capture this fragment belongs to is gone.';
+      notifyListeners();
+      return;
+    }
+    _appendTargetId = appendTo;
+    _activeSegmentIndex = appendIndex;
+
     final String id = const Uuid().v4();
-    final File audioFile = await _repository.createAudioFile(id);
+    final File audioFile = appendTo == null
+        ? await _repository.createAudioFile(id)
+        : await _repository.createSegmentFile(appendTo, appendIndex!, 'm4a');
     _activeFilePath = audioFile.path;
     _activeId = id;
     // Seeded from the active project, then editable for the duration of this
@@ -903,6 +1014,26 @@ class RecordingsController extends ChangeNotifier {
         );
       }
 
+      // The append branch, after the very check that proves there is audio to
+      // keep: the parent row is not touched until the fragment's file is
+      // verified, so a capture that fails here is left byte for byte as it was.
+      final String? parentId = _appendTargetId;
+      final int? segmentIndex = _activeSegmentIndex;
+      if (parentId != null && segmentIndex != null) {
+        await _attachSegment(
+          parentId,
+          CaptureSegment(
+            index: segmentIndex,
+            filePath: path,
+            type: CaptureType.audioRecording,
+            createdAt: DateTime.now(),
+            durationMs: _stopwatch.elapsedMilliseconds,
+            sizeBytes: sizeBytes,
+          ),
+        );
+        return;
+      }
+
       // Use the id generated at record start rather than parsing it back out of
       // the filename: extensions vary per capture type, and the round-trip
       // through the path was the only thing coupling id to `.m4a`.
@@ -963,6 +1094,8 @@ class RecordingsController extends ChangeNotifier {
       // Cleared with the rest of the per-capture state: the next recording
       // seeds its own from the active project.
       _recordingProjectId = null;
+      _appendTargetId = null;
+      _activeSegmentIndex = null;
       // Here rather than after the try, so a save that threw still takes the
       // "recording" notification down. One left standing over a capture that
       // has ended claims the microphone is open when it is not.
@@ -1042,6 +1175,10 @@ class RecordingsController extends ChangeNotifier {
       _activeFilePath = null;
       _activeId = null;
       _recordingProjectId = null;
+      // Cleared here too: a discarded fragment must not leave its target
+      // behind for the next capture to attach itself to.
+      _appendTargetId = null;
+      _activeSegmentIndex = null;
       // A discard ends the capture as surely as a save does, and the hold has
       // to come off on both — this is the path where forgetting it would leave
       // a "recording" notification over nothing at all.
@@ -1126,7 +1263,7 @@ class RecordingsController extends ChangeNotifier {
   /// text processor is a passthrough, so the item lands `completed` — but it
   /// travels the same persist-then-process path as every other capture, and a
   /// failure never deletes the source.
-  Future<void> addTextNote(String body) async {
+  Future<void> addTextNote(String body, {String? appendTo}) async {
     if (_isRecording || _isBusy) return;
     final String trimmed = body.trim();
     if (trimmed.isEmpty) return;
@@ -1136,6 +1273,40 @@ class RecordingsController extends ChangeNotifier {
     notifyListeners();
 
     try {
+      if (appendTo != null) {
+        final int? next = _nextSegmentIndexFor(appendTo);
+        if (next == null) {
+          throw StateError('The capture this note belongs to is gone.');
+        }
+        final File fragment = await _repository.createSegmentFile(
+          appendTo,
+          next,
+          'txt',
+        );
+        await fragment.writeAsString(trimmed, flush: true);
+        final int fragmentBytes = await fragment.exists()
+            ? await fragment.length()
+            : 0;
+        if (fragmentBytes == 0) {
+          throw FileSystemException(
+            'Note fragment was not persisted correctly.',
+            fragment.path,
+          );
+        }
+        await _attachSegment(
+          appendTo,
+          CaptureSegment(
+            index: next,
+            filePath: fragment.path,
+            type: CaptureType.text,
+            sourceMimeType: 'text/plain',
+            createdAt: DateTime.now(),
+            sizeBytes: fragmentBytes,
+          ),
+        );
+        return;
+      }
+
       final String id = const Uuid().v4();
       final File file = await _repository.createSourceFile(id, 'txt');
       await file.writeAsString(trimmed, flush: true);
@@ -1183,7 +1354,7 @@ class RecordingsController extends ChangeNotifier {
   /// and verify it (via [MediaImporter]), index with status `saved`, and only
   /// then process. A cancelled pick is a no-op; a copy or processing failure
   /// never deletes the source.
-  Future<void> addUpload(CaptureType type) async {
+  Future<void> addUpload(CaptureType type, {String? appendTo}) async {
     if (_isRecording || _isBusy) return;
     _isBusy = true;
     _error = null;
@@ -1192,6 +1363,25 @@ class RecordingsController extends ChangeNotifier {
     try {
       final PickedMedia? picked = await _mediaPicker.pick(type);
       if (picked == null) return; // user cancelled
+
+      if (appendTo != null) {
+        final int? next = _nextSegmentIndexFor(appendTo);
+        if (next == null) {
+          throw StateError('The capture this file belongs to is gone.');
+        }
+        await _attachSegment(
+          appendTo,
+          await _importer.importSegment(
+            parentId: appendTo,
+            index: next,
+            type: type,
+            source: picked.file,
+            mimeType: picked.mimeType,
+            createdAt: DateTime.now(),
+          ),
+        );
+        return;
+      }
 
       final String id = const Uuid().v4();
       final Recording imported = await _importer.importFile(
@@ -1226,13 +1416,35 @@ class RecordingsController extends ChangeNotifier {
   }
 
   /// Direct file import (e.g. from clipboard image or system drop).
-  Future<void> addImportedFile(File file, CaptureType type) async {
+  Future<void> addImportedFile(
+    File file,
+    CaptureType type, {
+    String? appendTo,
+  }) async {
     if (_isRecording || _isBusy) return;
     _isBusy = true;
     _error = null;
     notifyListeners();
 
     try {
+      if (appendTo != null) {
+        final int? next = _nextSegmentIndexFor(appendTo);
+        if (next == null) {
+          throw StateError('The capture this file belongs to is gone.');
+        }
+        await _attachSegment(
+          appendTo,
+          await _importer.importSegment(
+            parentId: appendTo,
+            index: next,
+            type: type,
+            source: file,
+            createdAt: DateTime.now(),
+          ),
+        );
+        return;
+      }
+
       final String id = const Uuid().v4();
       final Recording imported = await _importer.importFile(
         id: id,
@@ -1950,11 +2162,8 @@ class RecordingsController extends ChangeNotifier {
       );
       if (index < 0) return;
       final Recording recording = _recordings[index];
-      // Pin the processor for this job: a runtime swap (Models tab) during the
-      // await gaps above must not redirect a job that already started.
-      final Processor processor = _registry.forType(recording.type);
 
-      // Deliberately outside the try below, and before the processor runs. A
+      // Deliberately outside the try below, and before any processor runs. A
       // video whose transcription fails — no active profile, an audio codec
       // ffmpeg cannot read — is exactly the item the user most needs to
       // recognise in the queue, so the poster must not be collateral damage of
@@ -1963,35 +2172,113 @@ class RecordingsController extends ChangeNotifier {
       await _extractPoster(recording.id);
 
       try {
-        // Scope the events this job produces to this capture. The pair is
-        // safe here and only here: the drain is single-flight, so exactly one
-        // job is ever open. `durationMs` is 0 on uploads, which the sink reads
-        // as "no fallback" rather than as zero-length audio.
-        _beginUsageJob(
-          id,
-          _stageFor(recording.type),
-          audioSeconds: recording.durationMs > 0
-              ? recording.durationMs / 1000
-              : null,
-        );
-        final String transcript;
-        try {
-          transcript = await processor.process(recording);
-        } finally {
-          _endUsageJob();
+        final List<CaptureSegment> pending = recording.segments
+            .where((CaptureSegment segment) => segment.isPending)
+            .toList();
+        if (pending.isEmpty) {
+          // Every segment already has text. Reached by a retry of a capture
+          // that is not failed; re-sending would spend a provider call on text
+          // the app already holds.
+          _logSink.log('Nothing left to process.', recordingId: id);
+          await _update(
+            id,
+            (Recording item) => item.copyWith(
+              status: RecordingStatus.completed,
+              clearError: true,
+            ),
+          );
+          return;
         }
+
+        String? failure;
+        for (final CaptureSegment segment in pending) {
+          if (_disposed) return;
+          // Re-read at every step: the list is rewritten inside this loop, and
+          // the capture can be deleted between two segments.
+          if (!_recordings.any((Recording item) => item.id == id)) return;
+
+          // Pinned per segment: a runtime swap (Models tab) during an await
+          // must not redirect a job that already started, and two segments of
+          // one capture can resolve to different processors.
+          final Processor processor = _registry.forType(segment.type);
+          // Scope the events this segment produces to this capture. The pair
+          // is safe here and only here: the drain is single-flight, so exactly
+          // one job is ever open. `durationMs` is 0 on uploads, which the sink
+          // reads as "no fallback" rather than as zero-length audio.
+          _beginUsageJob(
+            id,
+            _stageFor(segment.type),
+            audioSeconds: segment.durationMs > 0
+                ? segment.durationMs / 1000
+                : null,
+          );
+          String? text;
+          try {
+            text = await processor.process(segment);
+          } catch (exception) {
+            failure = exception.toString();
+            await _updateSegment(
+              id,
+              segment.index,
+              (CaptureSegment current) =>
+                  current.copyWith(error: exception.toString()),
+            );
+            _logSink.log(
+              'Segment ${segment.index} failed: $exception',
+              level: LogLevel.error,
+              recordingId: id,
+            );
+          } finally {
+            _endUsageJob();
+          }
+          if (text == null) continue;
+
+          final String captured = text;
+          await _update(
+            id,
+            (Recording item) => item.copyWith(
+              segments: <CaptureSegment>[
+                for (final CaptureSegment current in item.segments)
+                  if (current.index == segment.index)
+                    current.copyWith(text: captured, clearError: true)
+                  else
+                    current,
+              ],
+              // Accumulated, never recomputed from the segments: a rebuild
+              // would undo a hand-edited transcript.
+              transcript: appendSegmentText(item.transcript, captured),
+            ),
+          );
+          _logSink.log(
+            'Segment ${segment.index} processed · ${captured.length} characters',
+            recordingId: id,
+          );
+        }
+
+        if (failure != null) {
+          await _update(
+            id,
+            (Recording item) =>
+                item.copyWith(status: RecordingStatus.failed, error: failure),
+          );
+          return;
+        }
+
         await _update(
           id,
-          (Recording item) => item.copyWith(
-            status: RecordingStatus.completed,
-            transcript: transcript,
-            clearError: true,
-          ),
+          (Recording item) =>
+              item.copyWith(status: RecordingStatus.completed, clearError: true),
         );
-        _logSink.log(
-          'Processing finished · ${transcript.length} characters',
-          recordingId: id,
+        // Re-read *after* the write, never across it: `_update` awaits the
+        // persist, and a delete landing in that window shrinks the list — an
+        // index taken beforehand then points past the end. The same rule the
+        // rest of this method follows, and the reason none of it uses
+        // `firstWhere`.
+        final int done = _recordings.indexWhere(
+          (Recording item) => item.id == id,
         );
+        if (done < 0) return;
+        final String transcript = _recordings[done].transcript ?? '';
         // Deliberately last: the item is already `completed` and persisted, so a
         // refusing clipboard cannot undo a successful capture.
         await _copyToClipboard(recording.type, transcript, id);
@@ -2120,7 +2407,12 @@ class RecordingsController extends ChangeNotifier {
     final int index = _recordings.indexWhere((Recording item) => item.id == id);
     if (index < 0) return;
     final Recording item = _recordings[index];
-    if (item.type != CaptureType.video) return;
+    // The video need not be segment 0 — a clip appended to an audio note is
+    // still what the card has to show.
+    final CaptureSegment? video = item.segments
+        .where((CaptureSegment segment) => segment.type == CaptureType.video)
+        .firstOrNull;
+    if (video == null) return;
 
     final String? existing = item.thumbPath;
     if (existing != null && await File(existing).exists()) return;
@@ -2135,7 +2427,7 @@ class RecordingsController extends ChangeNotifier {
         'thumb.jpg',
       );
       final File poster = await _videoPosterExtractor.extractPoster(
-        File(item.filePath),
+        File(video.filePath),
         destination,
       );
       if (_disposed) return;
@@ -2261,7 +2553,13 @@ class RecordingsController extends ChangeNotifier {
         tags: item.tags,
         projectId: item.projectId,
         durationMs: item.durationMs,
-        sourcePath: item.filePath,
+        // Every segment, in order. A text segment attaches nothing — it is the
+        // body printed above it, so attaching it puts the same words in the
+        // vault twice.
+        sourcePaths: <String>[
+          for (final CaptureSegment segment in item.segments)
+            if (segment.type != CaptureType.text) segment.filePath,
+        ],
       ),
     );
 
@@ -2513,6 +2811,76 @@ class RecordingsController extends ChangeNotifier {
   /// in-memory repository fake cannot stand in for, and running it from
   /// `initialize` would make every widget test reach the developer's real disk.
   Future<void> loadClosures() => _history.loadClosures();
+
+  /// Attach an already-written, already-verified file to an existing capture.
+  ///
+  /// **The one rule this path adds to the capture lifecycle:** the parent row
+  /// is not touched until the fragment's file has been verified, so a failed
+  /// append leaves the capture byte for byte as it was. Everything after that
+  /// is the familiar order — persist, then enqueue.
+  Future<void> _attachSegment(String parentId, CaptureSegment segment) async {
+    final int index = _recordings.indexWhere(
+      (Recording item) => item.id == parentId,
+    );
+    if (index < 0) {
+      // The capture was deleted while the fragment was being captured. There
+      // is nothing to attach to, and inventing a row would file the fragment
+      // somewhere the user never asked for.
+      throw StateError('The capture this fragment belongs to is gone.');
+    }
+
+    await _update(
+      parentId,
+      (Recording item) => item.copyWith(
+        segments: <CaptureSegment>[...item.segments, segment],
+        // Back on the desk: the text that may already have been routed is now
+        // incomplete, so the decision to send it again belongs to the user.
+        // `routes` is deliberately untouched — the delivery happened.
+        isProcessedByUser: false,
+        clearProcessedAt: true,
+      ),
+      // The append is the user's action, not the pipeline's. No tracked field
+      // changes here today, so nothing is recorded either way — the
+      // attribution is stated so it stays right if `segments` ever becomes
+      // one of the fields the history diffs.
+      source: RevisionSource.user,
+    );
+    _logSink.log(
+      'Fragment ${segment.index} added · ${segment.type.name} · '
+      '${segment.sizeBytes} B',
+      recordingId: parentId,
+    );
+    unawaited(_computeContentHash(parentId, segmentIndex: segment.index));
+    await _enqueueProcessing(parentId);
+  }
+
+  /// The index the next fragment of [parentId] should take, or null when that
+  /// capture is gone.
+  int? _nextSegmentIndexFor(String parentId) {
+    final int index = _recordings.indexWhere(
+      (Recording item) => item.id == parentId,
+    );
+    return index < 0 ? null : _recordings[index].nextSegmentIndex;
+  }
+
+  /// Rewrite one segment of one capture, through the same funnel every other
+  /// mutation uses — which is what keeps the change history impossible to
+  /// bypass by adding a new setter.
+  Future<void> _updateSegment(
+    String id,
+    int index,
+    CaptureSegment Function(CaptureSegment) transform,
+  ) {
+    return _update(
+      id,
+      (Recording item) => item.copyWith(
+        segments: <CaptureSegment>[
+          for (final CaptureSegment segment in item.segments)
+            if (segment.index == index) transform(segment) else segment,
+        ],
+      ),
+    );
+  }
 
   Future<void> _update(
     String id,

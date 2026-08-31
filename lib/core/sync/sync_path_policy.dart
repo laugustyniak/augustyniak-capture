@@ -61,6 +61,26 @@ class SyncPathPolicy {
         ? null
         : p.join(recordingsDirectory, poster);
 
+    // The payload is the half `loadAll` prefers, and every segment path is
+    // acted on exactly as `filePath` is: deleted, opened, copied into the
+    // vault. A segment whose name cannot be trusted is dropped, like a poster;
+    // the row itself only falls when segment 0 is unusable, which the `source`
+    // check above already covers.
+    final Object? rawSegments = payload['segments'];
+    if (rawSegments is List) {
+      final List<Map<String, dynamic>> segments = <Map<String, dynamic>>[];
+      for (final Object? entry in rawSegments) {
+        if (entry is! Map<String, dynamic>) continue;
+        final String? name = localFileName(entry['filePath']);
+        if (name == null) continue;
+        segments.add(<String, dynamic>{
+          ...entry,
+          'filePath': p.join(recordingsDirectory, name),
+        });
+      }
+      clean['segments'] = segments;
+    }
+
     // Artifacts name files in a project repository *on the machine that ran the
     // agent*, and `AgentArtifactViewerModal` passes one to `open`. Nothing here
     // can re-root them into something meaningful, so they do not travel.

@@ -94,8 +94,10 @@ class MarkdownNoteVault implements NoteVault {
     await dir.create(recursive: true);
 
     final File? existing = await _locate(dir, note.id);
-    final String? attachment = _copySources() ? _attachmentNameFor(note) : null;
-    final String body = _renderBody(note, attachment);
+    final List<String> attachments = _copySources()
+        ? _attachmentPathsFor(note)
+        : const <String>[];
+    final String body = _renderBody(note, attachments);
     final String hash = await _hash(body);
 
     if (existing != null) {
@@ -110,13 +112,13 @@ class MarkdownNoteVault implements NoteVault {
           path: existing.path,
         );
       }
-      if (attachment != null) await _copyAttachment(dir, note, attachment);
+      await _copyAttachments(dir, attachments);
       await _write(existing, next);
       return VaultWrite(outcome: VaultOutcome.updated, path: existing.path);
     }
 
     final File file = File(p.join(dir.path, _fileNameFor(note)));
-    if (attachment != null) await _copyAttachment(dir, note, attachment);
+    await _copyAttachments(dir, attachments);
     await _write(file, _render(note, hash, body));
     return VaultWrite(outcome: VaultOutcome.created, path: file.path);
   }
@@ -208,8 +210,11 @@ class MarkdownNoteVault implements NoteVault {
     if (note.type.hasDuration && note.durationMs > 0) {
       buffer.writeln('duration: ${_formatDuration(note.durationMs)}');
     }
-    if (note.sourcePath != null) {
-      buffer.writeln('source: ${_yaml(p.basename(note.sourcePath!))}');
+    // Segment 0 alone, as before: the key names the capture's own source, and
+    // a list here would change the shape of every note already in a vault.
+    final String? primary = note.sourcePaths.firstOrNull;
+    if (primary != null) {
+      buffer.writeln('source: ${_yaml(p.basename(primary))}');
     }
 
     buffer
@@ -231,7 +236,7 @@ class MarkdownNoteVault implements NoteVault {
     return (name == null || name.isEmpty) ? null : name;
   }
 
-  String _renderBody(VaultNote note, String? attachment) {
+  String _renderBody(VaultNote note, List<String> attachments) {
     final StringBuffer buffer = StringBuffer()
       ..writeln()
       ..writeln('# ${sanitizeUntrustedMarkdown(note.title)}')
@@ -243,9 +248,9 @@ class MarkdownNoteVault implements NoteVault {
         ..writeln('> $summary')
         ..writeln();
     }
-    if (attachment != null) {
+    for (final String attachment in attachments) {
       buffer
-        ..writeln('![[${VaultDefaults.attachments}/$attachment]]')
+        ..writeln('![[${VaultDefaults.attachments}/${p.basename(attachment)}]]')
         ..writeln();
     }
 
@@ -261,23 +266,26 @@ class MarkdownNoteVault implements NoteVault {
   /// Only types whose source is worth opening from the note. A text capture's
   /// `.txt` is the body already printed above it, so attaching it would put the
   /// same words in the vault twice.
-  String? _attachmentNameFor(VaultNote note) {
-    final String? source = note.sourcePath;
-    if (source == null || note.type == CaptureType.text) return null;
-    return p.basename(source);
+  List<String> _attachmentPathsFor(VaultNote note) {
+    if (note.type == CaptureType.text) return const <String>[];
+    return note.sourcePaths;
   }
 
-  Future<void> _copyAttachment(
-    Directory dir,
-    VaultNote note,
-    String name,
-  ) async {
-    final File source = File(note.sourcePath!);
+  Future<void> _copyAttachments(Directory dir, List<String> paths) async {
+    for (final String path in paths) {
+      await _copyAttachment(dir, path);
+    }
+  }
+
+  Future<void> _copyAttachment(Directory dir, String path) async {
+    final File source = File(path);
     if (!await source.exists()) return;
 
-    final Directory target = Directory(p.join(dir.path, VaultDefaults.attachments));
+    final Directory target = Directory(
+      p.join(dir.path, VaultDefaults.attachments),
+    );
     await target.create(recursive: true);
-    final File destination = File(p.join(target.path, name));
+    final File destination = File(p.join(target.path, p.basename(path)));
 
     // Sources are immutable once captured, so a copy that is already there with
     // the right length is the same file — worth checking, because re-copying a

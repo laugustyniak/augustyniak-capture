@@ -19,7 +19,7 @@ class VaultNote {
     this.tags = const <String>[],
     this.projectId,
     this.durationMs = 0,
-    this.sourcePath,
+    this.sourcePaths = const <String>[],
   });
 
   /// The capture id. It is what identifies the note's file on disk forever
@@ -46,9 +46,13 @@ class VaultNote {
 
   final int durationMs;
 
-  /// Absolute path of the source artifact, when there is one worth attaching.
-  /// Null leaves the note text-only.
-  final String? sourcePath;
+  /// Absolute paths of the source artifacts worth attaching, in segment order.
+  ///
+  /// A list rather than one path because a capture can hold several: the
+  /// mirror is a *second copy* of the capture, so a note carrying only the
+  /// first fragment's audio is a copy of half of it. Empty leaves the note
+  /// text-only.
+  final List<String> sourcePaths;
 }
 
 /// What happened to one note, so the caller can report a skip rather than

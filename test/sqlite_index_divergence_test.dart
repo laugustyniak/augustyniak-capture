@@ -2,6 +2,8 @@ import 'dart:io';
 
 import 'package:augustyniak_capture/core/database/app_database.dart';
 import 'package:augustyniak_capture/features/recordings/data/recordings_repository.dart';
+import 'package:augustyniak_capture/features/recordings/domain/capture_segment.dart';
+import 'package:augustyniak_capture/features/recordings/domain/capture_type.dart';
 import 'package:augustyniak_capture/features/recordings/domain/recording.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:sqlite3/sqlite3.dart';
@@ -144,5 +146,45 @@ void main() {
       'the words that were captured',
       reason: 'the JSON index still holds what the columns cannot express',
     );
+  });
+
+  /// `segments` has no column either — it rides inside `json_payload` exactly
+  /// as `transcript` does, so the same loader behaviour has to cover it. A row
+  /// rebuilt from the columns would otherwise come back as a one-source
+  /// capture, and the next save would write that over an index that still
+  /// knows about the fragment.
+  test('a row rebuilt from the columns does not lose its segments', () async {
+    final DateTime at = DateTime.parse('2026-08-04T12:00:00');
+    final TempRepository repository = TempRepository(root);
+    await repository.saveAll(<Recording>[
+      _item('a', transcript: 'first fragment\n\nsecond fragment').copyWith(
+        segments: <CaptureSegment>[
+          CaptureSegment(
+            index: 0,
+            filePath: '/tmp/a.m4a',
+            type: CaptureType.audioRecording,
+            createdAt: at,
+            durationMs: 1000,
+            sizeBytes: 1234,
+            text: 'first fragment',
+          ),
+          CaptureSegment(
+            index: 1,
+            filePath: '/tmp/a-1.txt',
+            type: CaptureType.text,
+            createdAt: at,
+            sizeBytes: 15,
+            text: 'second fragment',
+          ),
+        ],
+      ),
+    ]);
+
+    db.execute("UPDATE recordings SET json_payload = '{oops' WHERE id = 'a';");
+
+    final List<Recording> loaded = await TempRepository(root).loadAll();
+
+    expect(loaded.single.segments, hasLength(2));
+    expect(loaded.single.transcript, 'first fragment\n\nsecond fragment');
   });
 }

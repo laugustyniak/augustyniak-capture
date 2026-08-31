@@ -124,4 +124,49 @@ void main() {
       expect(clean['tags'], <String>['a', 'b']);
     });
   });
+
+  test('every segment path is re-rooted, not just the first', () {
+    final Map<String, dynamic>? clean = SyncPathPolicy.sanitizePayload(
+      <String, dynamic>{
+        'filePath': '/other/device/recordings/abc.m4a',
+        'thumbPath': null,
+        'segments': <dynamic>[
+          <String, dynamic>{
+            'index': 0,
+            'filePath': '/other/device/recordings/abc.m4a',
+          },
+          <String, dynamic>{
+            'index': 1,
+            'filePath': '/other/device/recordings/abc-1.m4a',
+          },
+        ],
+      },
+      recordingsDirectory: '/local/recordings',
+    );
+
+    final List<dynamic> segments = clean!['segments'] as List<dynamic>;
+    expect(
+      (segments[0] as Map<String, dynamic>)['filePath'],
+      '/local/recordings/abc.m4a',
+    );
+    expect(
+      (segments[1] as Map<String, dynamic>)['filePath'],
+      '/local/recordings/abc-1.m4a',
+    );
+  });
+
+  test('a segment with an unusable name is dropped, not kept', () {
+    final Map<String, dynamic>? clean = SyncPathPolicy.sanitizePayload(
+      <String, dynamic>{
+        'filePath': '/other/abc.m4a',
+        'segments': <dynamic>[
+          <String, dynamic>{'index': 0, 'filePath': '/other/abc.m4a'},
+          <String, dynamic>{'index': 1, 'filePath': '..'},
+        ],
+      },
+      recordingsDirectory: '/local/recordings',
+    );
+
+    expect(clean!['segments'] as List<dynamic>, hasLength(1));
+  });
 }

@@ -131,7 +131,10 @@ class VerificationLine extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final String? size = formatBytes(recording.sizeBytes);
+    // Across every segment, not just the first: a capture that gained a
+    // fragment holds more bytes than its row-level field describes, and the
+    // footer reports what is actually on disk.
+    final String? size = formatBytes(recording.totalSizeBytes);
     final String text = <String>[
       'file verified',
       ?size,
@@ -216,8 +219,10 @@ String metaLineFor(Recording recording, String filename) {
       ? filename.split('.').last.toLowerCase()
       : recording.type.name;
   return <String>[
-    if (recording.type.hasDuration && recording.durationMs > 0)
-      formatDuration(Duration(milliseconds: recording.durationMs)),
+    // Summed across segments for the same reason the size is: two recordings
+    // appended to one capture are one capture's worth of listening.
+    if (recording.type.hasDuration && recording.totalDurationMs > 0)
+      formatDuration(Duration(milliseconds: recording.totalDurationMs)),
     extension,
     formatDateTime(recording.createdAt),
   ].join(' · ');

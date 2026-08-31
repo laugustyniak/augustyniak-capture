@@ -1,6 +1,6 @@
 import 'dart:io';
 
-import '../../recordings/domain/recording.dart';
+import '../../recordings/domain/capture_segment.dart';
 import '../../transcription/data/transcription_service.dart';
 import '../domain/processor.dart';
 import 'video_audio_extractor.dart';
@@ -20,8 +20,10 @@ class VideoTranscriptionProcessor implements Processor {
   final VideoAudioExtractor Function() _extractor;
 
   @override
-  Future<String> process(Recording item) async {
-    final File audio = await _extractor().extractAudio(File(item.filePath));
+  Future<String> process(CaptureSegment segment) async {
+    final File audio = await _extractor().extractAudio(
+      File(segment.filePath),
+    );
     try {
       return await _transcriptionService().transcribe(audio);
     } finally {

@@ -8,6 +8,7 @@ import 'package:sqlite3/sqlite3.dart';
 
 import '../../../core/database/app_database.dart';
 import '../domain/capture_category.dart';
+import '../domain/capture_segment.dart';
 import '../domain/capture_type.dart';
 import '../domain/capture_type.dart' as policy;
 import '../domain/recording.dart';
@@ -52,11 +53,12 @@ class RecordingsRepository {
   void expectRowCount(int count) => _knownCount = count;
 
   Future<void> deleteArtifacts(Recording recording) async {
-    for (final String? path in <String?>[
-      recording.filePath,
+    final List<String?> paths = <String?>[
+      for (final CaptureSegment segment in recording.segments) segment.filePath,
       recording.thumbPath,
       p.join(p.dirname(recording.filePath), '${recording.id}.thumb.jpg'),
-    ]) {
+    ];
+    for (final String? path in paths) {
       if (path == null || path.isEmpty) continue;
       final File file = File(path);
       if (await file.exists()) await file.delete();
@@ -69,6 +71,14 @@ class RecordingsRepository {
       await directory.create(recursive: true);
     }
     return directory;
+  }
+
+  /// `<id>.<ext>` for the first segment, `<id>-<n>.<ext>` for every later one.
+  ///
+  /// Segment 0 keeps the plain name deliberately: it is what every row already
+  /// on disk points at, and what `findOrphans` recovers a capture by.
+  Future<File> createSegmentFile(String id, int index, String extension) {
+    return createSourceFile(index == 0 ? id : '$id-$index', extension);
   }
 
   Future<File> createSourceFile(String id, String extension) async {
@@ -380,26 +390,32 @@ class RecordingsRepository {
 
   Future<List<Recording>> findOrphans(List<Recording> indexed) async {
     final Directory directory = await recordingsDirectory();
-    final Set<String> known = indexed.map((Recording item) => item.id).toSet();
+    // Matched by file name, not by id. `basenameWithoutExtension` of an
+    // appended fragment is `<id>-1`, which no row is ever keyed on, so an
+    // id-based comparison re-adopts every fragment as a separate capture on
+    // the next launch — silently, and one launch after the append.
+    final Set<String> claimed = <String>{
+      for (final Recording item in indexed)
+        for (final CaptureSegment segment in item.segments)
+          p.basename(segment.filePath),
+    };
 
     final List<Recording> orphans = <Recording>[];
     await for (final FileSystemEntity entity in directory.list()) {
       if (entity is! File) continue;
       final String name = p.basename(entity.path);
       if (name.endsWith('.thumb.jpg')) continue;
+      if (claimed.contains(name)) continue;
 
       final CaptureType? type = typeForExtension(p.extension(name));
       if (type == null) continue;
-
-      final String id = p.basenameWithoutExtension(name);
-      if (known.contains(id)) continue;
 
       final FileStat stat = await entity.stat();
       if (stat.size == 0) continue;
 
       orphans.add(
         Recording(
-          id: id,
+          id: p.basenameWithoutExtension(name),
           filePath: entity.path,
           createdAt: stat.modified,
           durationMs: 0,
