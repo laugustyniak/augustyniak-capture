@@ -9,6 +9,7 @@ import '../../projects/data/projects_repository.dart';
 import '../../projects/domain/project.dart';
 import '../../recordings/data/recordings_repository.dart';
 import '../../recordings/data/source_content_hasher.dart';
+import '../../recordings/domain/capture_segment.dart';
 import '../../recordings/domain/recording.dart';
 import '../domain/capture_archive.dart';
 
@@ -411,18 +412,30 @@ class ZipCaptureArchive implements CaptureArchive {
         plan.unreadable++;
         continue;
       }
-      final String sourceName = p.basename(incoming.filePath);
-      final ArchiveFile? source = archive.findFile(sourceName);
-      final bool conventionalName =
-          p.basenameWithoutExtension(sourceName) == incoming.id &&
-          _isPayload(sourceName) &&
-          !indexFiles.contains(sourceName) &&
-          !journalFiles.contains(sourceName);
-      if (!conventionalName ||
-          source == null ||
-          !source.isFile ||
-          source.isSymbolicLink ||
-          source.size <= 0) {
+      // Every segment, not just segment 0. A row whose fragment is missing is
+      // refused whole rather than restored pointing at a file that is not
+      // there — the same all-or-nothing rule the extraction below follows.
+      bool everyMemberPresent = true;
+      for (final CaptureSegment segment in incoming.segments) {
+        final String name = p.basename(segment.filePath);
+        final ArchiveFile? member = archive.findFile(name);
+        final String stem = p.basenameWithoutExtension(name);
+        final bool conventionalName =
+            (stem == incoming.id ||
+                stem == '${incoming.id}-${segment.index}') &&
+            _isPayload(name) &&
+            !indexFiles.contains(name) &&
+            !journalFiles.contains(name);
+        if (!conventionalName ||
+            member == null ||
+            !member.isFile ||
+            member.isSymbolicLink ||
+            member.size <= 0) {
+          everyMemberPresent = false;
+          break;
+        }
+      }
+      if (!everyMemberPresent) {
         plan.unreadable++;
         continue;
       }
@@ -441,53 +454,62 @@ class ZipCaptureArchive implements CaptureArchive {
   ) async {
     final List<Recording> restored = <Recording>[];
     for (final Recording item in plan.additions) {
-      final String name = p.basename(item.filePath);
-      final ArchiveFile entry = archive.findFile(name)!;
-      final File target = File(p.join(directory.path, name));
-      if (await target.exists()) {
-        // **An import that failed part-way must stay retryable.** Nothing is
-        // committed unless every file lands, so a throw on the tenth capture
-        // leaves the first nine extracted and no rows written. Refusing every
-        // pre-existing file on the retry would then drop those nine rows for
-        // good — their sources survive as orphans `recoverOrphans()` re-adopts,
-        // but the transcripts, which only ever lived in the index, do not.
-        //
-        // So a file that *is* the archived one counts as already extracted and
-        // keeps its row. Anything else is still refused: a source with no index
-        // row may be the user's own and is never overwritten, and an imported
-        // row must never be pointed at unknown bytes.
-        if (await _isSameSource(target, entry, item)) {
-          restored.add(item);
-          continue;
+      // A row counts as restored only when every one of its members landed.
+      // Half a capture is worse than none: the index would claim text the
+      // missing fragment produced, pointing at a file nothing can read.
+      bool everyMemberLanded = true;
+      for (final CaptureSegment segment in item.segments) {
+        final String name = p.basename(segment.filePath);
+        final ArchiveFile entry = archive.findFile(name)!;
+        final File target = File(p.join(directory.path, name));
+        if (await target.exists()) {
+          // **An import that failed part-way must stay retryable.** Nothing is
+          // committed unless every file lands, so a throw on the tenth capture
+          // leaves the first nine extracted and no rows written. Refusing every
+          // pre-existing file on the retry would then drop those nine rows for
+          // good — their sources survive as orphans `recoverOrphans()` re-adopts,
+          // but the transcripts, which only ever lived in the index, do not.
+          //
+          // So a file that *is* the archived one counts as already extracted and
+          // keeps its row. Anything else is still refused: a source with no index
+          // row may be the user's own and is never overwritten, and an imported
+          // row must never be pointed at unknown bytes.
+          if (await _isSameSource(target, entry, segment.contentHash)) {
+            continue;
+          }
+          everyMemberLanded = false;
+          break;
         }
-        plan.unreadable++;
-        continue;
-      }
-      final File temporary = File('${target.path}.importing');
-      try {
-        final OutputFileStream output = OutputFileStream(temporary.path);
+        final File temporary = File('${target.path}.importing');
         try {
-          entry.writeContent(output);
-        } finally {
-          output.closeSync();
+          final OutputFileStream output = OutputFileStream(temporary.path);
+          try {
+            entry.writeContent(output);
+          } finally {
+            output.closeSync();
+          }
+          if (!await temporary.exists() ||
+              await temporary.length() != entry.size) {
+            throw ArchiveUnreadableException(
+              name,
+              'extracted size did not match ${entry.size} bytes',
+            );
+          }
+        } catch (_) {
+          // Every failure path clears the staging file, not just the size
+          // mismatch. A leftover `.importing` is a payload member `_isPayload`
+          // would otherwise ship in the next export.
+          if (await temporary.exists()) await temporary.delete();
+          rethrow;
         }
-        if (!await temporary.exists() ||
-            await temporary.length() != entry.size) {
-          throw ArchiveUnreadableException(
-            name,
-            'extracted size did not match ${entry.size} bytes',
-          );
-        }
-      } catch (_) {
-        // Every failure path clears the staging file, not just the size
-        // mismatch. A leftover `.importing` is a payload member `_isPayload`
-        // would otherwise ship in the next export.
-        if (await temporary.exists()) await temporary.delete();
-        rethrow;
+        await temporary.rename(target.path);
+        plan.filesRestored++;
       }
-      await temporary.rename(target.path);
-      restored.add(item);
-      plan.filesRestored++;
+      if (everyMemberLanded) {
+        restored.add(item);
+      } else {
+        plan.unreadable++;
+      }
     }
     plan.additions
       ..clear()
@@ -505,11 +527,11 @@ class ZipCaptureArchive implements CaptureArchive {
   Future<bool> _isSameSource(
     File target,
     ArchiveFile entry,
-    Recording incoming,
+    String? expectedHash,
   ) async {
     try {
       if (await target.length() != entry.size) return false;
-      final String? expected = incoming.contentHash;
+      final String? expected = expectedHash;
       if (expected == null) return true;
       return await _hasher.hash(target) == expected;
     } catch (_) {
@@ -591,6 +613,28 @@ class ZipCaptureArchive implements CaptureArchive {
       processedAt: recording.processedAt,
       routes: recording.routes,
       artifacts: recording.artifacts,
+      // Left null for a row that never gained a fragment, so it keeps
+      // serialising without a `segments` key exactly as it arrived.
+      segments: recording.hasStoredSegments
+          ? <CaptureSegment>[
+              for (final CaptureSegment segment in recording.segments)
+                CaptureSegment(
+                  index: segment.index,
+                  filePath: p.join(
+                    directory.path,
+                    p.basename(segment.filePath),
+                  ),
+                  type: segment.type,
+                  sourceMimeType: segment.sourceMimeType,
+                  createdAt: segment.createdAt,
+                  durationMs: segment.durationMs,
+                  sizeBytes: segment.sizeBytes,
+                  contentHash: segment.contentHash,
+                  text: segment.text,
+                  error: segment.error,
+                ),
+            ]
+          : null,
     );
   }
 
