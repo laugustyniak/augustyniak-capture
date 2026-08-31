@@ -2839,6 +2839,11 @@ class RecordingsController extends ChangeNotifier {
         isProcessedByUser: false,
         clearProcessedAt: true,
       ),
+      // The append is the user's action, not the pipeline's. No tracked field
+      // changes here today, so nothing is recorded either way — the
+      // attribution is stated so it stays right if `segments` ever becomes
+      // one of the fields the history diffs.
+      source: RevisionSource.user,
     );
     _logSink.log(
       'Fragment ${segment.index} added · ${segment.type.name} · '
