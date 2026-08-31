@@ -293,7 +293,7 @@ void main() {
 
     final String id = c.recordings.single.id;
     await c.setTitle(id, 'Moja nazwa');
-    await c.retryTranscription(id);
+    await c.retryEnrichment(id);
     await c.waitForProcessing();
 
     expect(enrichment.calls, 2); // it ran again
@@ -316,7 +316,7 @@ void main() {
 
     final String id = c.recordings.single.id;
     await c.setCategory(id, CaptureCategory.idea);
-    await c.retryTranscription(id);
+    await c.retryEnrichment(id);
     await c.waitForProcessing();
 
     // The correction is what an export will read, so a re-run must not undo it.
@@ -342,7 +342,7 @@ void main() {
 
     final String id = c.recordings.single.id;
     await c.setTags(id, <String>[' Project:Acme ', 'LEGAL', 'legal', '']);
-    await c.retryTranscription(id);
+    await c.retryEnrichment(id);
     await c.waitForProcessing();
 
     // A tag set by hand is the whole list: `_enrich` fills `tags` only when
@@ -372,7 +372,7 @@ void main() {
       summary: 'New summary',
       tags: <String>['follow-up'],
     );
-    await c.retryTranscription(id);
+    await c.retryEnrichment(id);
     await c.waitForProcessing();
 
     expect(c.recordings.single.tags, <String>['legal']);
@@ -403,7 +403,7 @@ void main() {
       summary: 'New summary',
       tags: <String>['follow-up', 'Follow-Up', ' '],
     );
-    await c.retryTranscription(id);
+    await c.retryEnrichment(id);
     await c.waitForProcessing();
 
     // Clearing the field is how you ask for it to be filled again.
@@ -425,7 +425,7 @@ void main() {
     final String id = c.recordings.single.id;
     // Clearing is how the user asks for a re-classification.
     await c.setCategory(id, null);
-    await c.retryTranscription(id);
+    await c.retryEnrichment(id);
     await c.waitForProcessing();
 
     expect(c.recordings.single.category, CaptureCategory.meetingNote);

@@ -154,15 +154,30 @@ void main() {
 
       await controller.addUpload(CaptureType.image);
       await controller.waitForProcessing();
+      final String firstId = controller.recordings.single.id;
       expect(controller.recordings.single.transcript, 'first engine');
 
-      // Models-tab change: the resolver picks the new service up for the
-      // retry without rebuilding the registry.
+      // Models-tab change: the resolver picks the new service up for the next
+      // job without rebuilding the registry. Asserted with a second capture
+      // rather than a retry — a capture whose segments all hold text has
+      // nothing left to process, so a retry would spend a provider call on
+      // text the app already has.
       controller.ocrService = const _StubOcr('second engine');
-      await controller.retryTranscription(controller.recordings.single.id);
+      await controller.addUpload(CaptureType.image);
       await controller.waitForProcessing();
 
-      expect(controller.recordings.single.transcript, 'second engine');
+      final Recording first = controller.recordings.firstWhere(
+        (Recording item) => item.id == firstId,
+      );
+      final Recording second = controller.recordings.firstWhere(
+        (Recording item) => item.id != firstId,
+      );
+      expect(second.transcript, 'second engine');
+      expect(
+        first.transcript,
+        'first engine',
+        reason: 'a swap must never reach work that already finished',
+      );
     });
   });
 }

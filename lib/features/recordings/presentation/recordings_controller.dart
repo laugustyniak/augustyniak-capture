@@ -39,6 +39,7 @@ import '../domain/agent_artifact.dart';
 import '../data/source_content_hasher.dart';
 import '../domain/agent_handoff.dart';
 import '../domain/capture_category.dart';
+import '../domain/capture_segment.dart';
 import '../domain/capture_type.dart';
 import '../domain/clipboard_sink.dart';
 import '../domain/capture_router.dart';
@@ -1950,11 +1951,8 @@ class RecordingsController extends ChangeNotifier {
       );
       if (index < 0) return;
       final Recording recording = _recordings[index];
-      // Pin the processor for this job: a runtime swap (Models tab) during the
-      // await gaps above must not redirect a job that already started.
-      final Processor processor = _registry.forType(recording.type);
 
-      // Deliberately outside the try below, and before the processor runs. A
+      // Deliberately outside the try below, and before any processor runs. A
       // video whose transcription fails — no active profile, an audio codec
       // ffmpeg cannot read — is exactly the item the user most needs to
       // recognise in the queue, so the poster must not be collateral damage of
@@ -1963,35 +1961,108 @@ class RecordingsController extends ChangeNotifier {
       await _extractPoster(recording.id);
 
       try {
-        // Scope the events this job produces to this capture. The pair is
-        // safe here and only here: the drain is single-flight, so exactly one
-        // job is ever open. `durationMs` is 0 on uploads, which the sink reads
-        // as "no fallback" rather than as zero-length audio.
-        _beginUsageJob(
-          id,
-          _stageFor(recording.type),
-          audioSeconds: recording.durationMs > 0
-              ? recording.durationMs / 1000
-              : null,
-        );
-        final String transcript;
-        try {
-          transcript = await processor.process(recording.segments.first);
-        } finally {
-          _endUsageJob();
+        final List<CaptureSegment> pending = recording.segments
+            .where((CaptureSegment segment) => segment.isPending)
+            .toList();
+        if (pending.isEmpty) {
+          // Every segment already has text. Reached by a retry of a capture
+          // that is not failed; re-sending would spend a provider call on text
+          // the app already holds.
+          _logSink.log('Nothing left to process.', recordingId: id);
+          await _update(
+            id,
+            (Recording item) => item.copyWith(
+              status: RecordingStatus.completed,
+              clearError: true,
+            ),
+          );
+          return;
         }
+
+        String? failure;
+        for (final CaptureSegment segment in pending) {
+          if (_disposed) return;
+          // Re-read at every step: the list is rewritten inside this loop, and
+          // the capture can be deleted between two segments.
+          if (!_recordings.any((Recording item) => item.id == id)) return;
+
+          // Pinned per segment: a runtime swap (Models tab) during an await
+          // must not redirect a job that already started, and two segments of
+          // one capture can resolve to different processors.
+          final Processor processor = _registry.forType(segment.type);
+          // Scope the events this segment produces to this capture. The pair
+          // is safe here and only here: the drain is single-flight, so exactly
+          // one job is ever open. `durationMs` is 0 on uploads, which the sink
+          // reads as "no fallback" rather than as zero-length audio.
+          _beginUsageJob(
+            id,
+            _stageFor(segment.type),
+            audioSeconds: segment.durationMs > 0
+                ? segment.durationMs / 1000
+                : null,
+          );
+          String? text;
+          try {
+            text = await processor.process(segment);
+          } catch (exception) {
+            failure = exception.toString();
+            await _updateSegment(
+              id,
+              segment.index,
+              (CaptureSegment current) =>
+                  current.copyWith(error: exception.toString()),
+            );
+            _logSink.log(
+              'Segment ${segment.index} failed: $exception',
+              level: LogLevel.error,
+              recordingId: id,
+            );
+          } finally {
+            _endUsageJob();
+          }
+          if (text == null) continue;
+
+          final String captured = text;
+          await _update(
+            id,
+            (Recording item) => item.copyWith(
+              segments: <CaptureSegment>[
+                for (final CaptureSegment current in item.segments)
+                  if (current.index == segment.index)
+                    current.copyWith(text: captured, clearError: true)
+                  else
+                    current,
+              ],
+              // Accumulated, never recomputed from the segments: a rebuild
+              // would undo a hand-edited transcript.
+              transcript: appendSegmentText(item.transcript, captured),
+            ),
+          );
+          _logSink.log(
+            'Segment ${segment.index} processed · ${captured.length} characters',
+            recordingId: id,
+          );
+        }
+
+        if (failure != null) {
+          await _update(
+            id,
+            (Recording item) =>
+                item.copyWith(status: RecordingStatus.failed, error: failure),
+          );
+          return;
+        }
+
+        final int done = _recordings.indexWhere(
+          (Recording item) => item.id == id,
+        );
+        if (done < 0) return;
         await _update(
           id,
-          (Recording item) => item.copyWith(
-            status: RecordingStatus.completed,
-            transcript: transcript,
-            clearError: true,
-          ),
+          (Recording item) =>
+              item.copyWith(status: RecordingStatus.completed, clearError: true),
         );
-        _logSink.log(
-          'Processing finished · ${transcript.length} characters',
-          recordingId: id,
-        );
+        final String transcript = _recordings[done].transcript ?? '';
         // Deliberately last: the item is already `completed` and persisted, so a
         // refusing clipboard cannot undo a successful capture.
         await _copyToClipboard(recording.type, transcript, id);
@@ -2120,7 +2191,12 @@ class RecordingsController extends ChangeNotifier {
     final int index = _recordings.indexWhere((Recording item) => item.id == id);
     if (index < 0) return;
     final Recording item = _recordings[index];
-    if (item.type != CaptureType.video) return;
+    // The video need not be segment 0 — a clip appended to an audio note is
+    // still what the card has to show.
+    final CaptureSegment? video = item.segments
+        .where((CaptureSegment segment) => segment.type == CaptureType.video)
+        .firstOrNull;
+    if (video == null) return;
 
     final String? existing = item.thumbPath;
     if (existing != null && await File(existing).exists()) return;
@@ -2135,7 +2211,7 @@ class RecordingsController extends ChangeNotifier {
         'thumb.jpg',
       );
       final File poster = await _videoPosterExtractor.extractPoster(
-        File(item.filePath),
+        File(video.filePath),
         destination,
       );
       if (_disposed) return;
@@ -2513,6 +2589,25 @@ class RecordingsController extends ChangeNotifier {
   /// in-memory repository fake cannot stand in for, and running it from
   /// `initialize` would make every widget test reach the developer's real disk.
   Future<void> loadClosures() => _history.loadClosures();
+
+  /// Rewrite one segment of one capture, through the same funnel every other
+  /// mutation uses — which is what keeps the change history impossible to
+  /// bypass by adding a new setter.
+  Future<void> _updateSegment(
+    String id,
+    int index,
+    CaptureSegment Function(CaptureSegment) transform,
+  ) {
+    return _update(
+      id,
+      (Recording item) => item.copyWith(
+        segments: <CaptureSegment>[
+          for (final CaptureSegment segment in item.segments)
+            if (segment.index == index) transform(segment) else segment,
+        ],
+      ),
+    );
+  }
 
   Future<void> _update(
     String id,

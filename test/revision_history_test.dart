@@ -210,8 +210,11 @@ void main() {
           ),
         );
 
-        await c.retryTranscription('r1');
-        await c.waitForProcessing();
+        // The enrichment path, not the processing one: this capture already
+        // holds its text, so re-running the processor would spend a provider
+        // call on words the app has. ENRICH is the button that re-runs the
+        // model over an existing transcript.
+        await c.retryEnrichment('r1');
 
         final RecordingRevision summary = revisions.appended.firstWhere(
           (RecordingRevision r) => r.field == 'summary',
