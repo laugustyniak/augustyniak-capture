@@ -2553,7 +2553,13 @@ class RecordingsController extends ChangeNotifier {
         tags: item.tags,
         projectId: item.projectId,
         durationMs: item.durationMs,
-        sourcePath: item.filePath,
+        // Every segment, in order. A text segment attaches nothing — it is the
+        // body printed above it, so attaching it puts the same words in the
+        // vault twice.
+        sourcePaths: <String>[
+          for (final CaptureSegment segment in item.segments)
+            if (segment.type != CaptureType.text) segment.filePath,
+        ],
       ),
     );
 
