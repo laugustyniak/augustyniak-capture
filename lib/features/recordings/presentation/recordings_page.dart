@@ -64,7 +64,9 @@ import '../../timer/presentation/focus_timer_controller.dart';
 import '../../timer/presentation/timer_tab.dart';
 import '../../transcription/data/audio_splitter.dart';
 import '../../transcription/data/chunked_transcription_service.dart';
+import '../../transcription/data/audio_decoder.dart';
 import '../../transcription/data/transcription_service.dart';
+import '../../transcription/data/whisper_ffi_engine.dart';
 import '../../transcription/domain/transcription_limits.dart';
 import '../../gamification/presentation/celebration_overlay.dart';
 import '../../gamification/presentation/gamification_controller.dart';
@@ -235,6 +237,15 @@ class _RecordingsPageState extends State<RecordingsPage>
         ),
       ),
       usageSink: usageSink,
+      // On-device transcription, where a native build exists. The engine
+      // decides its own availability at construction and reports a reason
+      // otherwise, so every other platform keeps the honest "not built here"
+      // answer in the Models tab instead of failing once per capture.
+      //
+      // Handed the same ffmpeg decoder the rest of the media path uses: the
+      // model needs 16 kHz mono float PCM, and an engine with no decoder is an
+      // engine that would be fed the AAC container unchanged.
+      localEngine: WhisperFfiEngine(decoder: const FfmpegAudioDecoder()),
     );
     gamification = GamificationController();
     // One launcher, two entry points: the project card starts a session with no

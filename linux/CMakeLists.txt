@@ -100,6 +100,22 @@ install(FILES "${FLUTTER_ICU_DATA_FILE}" DESTINATION "${INSTALL_BUNDLE_DATA_DIR}
 install(FILES "${FLUTTER_LIBRARY}" DESTINATION "${INSTALL_BUNDLE_LIB_DIR}"
   COMPONENT Runtime)
 
+# The on-device speech engine, built from `native/` and installed beside the
+# Flutter libraries so `WhisperFfiEngine.defaultLibraryPath()` finds it next to
+# the executable rather than through the system loader path.
+#
+# Opt-out rather than opt-in: a build that silently omits it produces an app
+# whose Models tab says on-device transcription is unavailable, which is
+# indistinguishable from a build that meant to. Turning it off has to be a
+# choice someone typed.
+option(AUG_BUILD_WHISPER "Build the on-device speech engine" ON)
+if(AUG_BUILD_WHISPER)
+  add_subdirectory("${CMAKE_CURRENT_SOURCE_DIR}/../native" "${CMAKE_BINARY_DIR}/native")
+  install(TARGETS augustyniak_whisper
+    LIBRARY DESTINATION "${INSTALL_BUNDLE_LIB_DIR}"
+    COMPONENT Runtime)
+endif()
+
 foreach(bundled_library ${PLUGIN_BUNDLED_LIBRARIES})
   install(FILES "${bundled_library}"
     DESTINATION "${INSTALL_BUNDLE_LIB_DIR}"

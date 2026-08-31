@@ -33,6 +33,7 @@ dependencies:
   crypto: ^3.0.6
   # Zip reader/writer for the portable capture archive
   archive: ^4.0.9
+  ffi: ^2.2.0
 
 dev_dependencies:
   flutter_test:

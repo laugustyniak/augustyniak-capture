@@ -32,7 +32,35 @@ The local-engine seam and model store, and the three limits a single provider re
 
 ## On-device
 
-**On-device transcription** (`features/transcription/`) — a third `TranscriptionService` implementation behind `ProfileKind.localWhisper`, reached from the drain loop like any other. `UnavailableLocalEngine` is the default: the seam ships, the inference does not. `WhisperModelStore` keeps model files in Application Support, never in documents, or `recoverOrphans()` adopts them as captures. See `docs/architecture/transcription.md`.
+**On-device transcription** (`features/transcription/`) — a third `TranscriptionService` implementation behind `ProfileKind.localWhisper`, reached from the drain loop like any other. `WhisperModelStore` keeps model files in Application Support, never in documents, or `recoverOrphans()` adopts them as captures.
+
+**The inference ships on Linux and nowhere else yet.** `WhisperFfiEngine` decides its own availability once, at construction, and every other platform gets a reason instead — the Models tab says so once rather than the app failing once per capture. That asymmetry is the point of `LocalTranscriptionEngine.isAvailable` being synchronous.
+
+### The native build
+
+- **A thin C shim, not direct bindings.** `native/augustyniak_whisper.{h,c}` exposes exactly three functions. `whisper_full_params` is a large struct whose layout changes between whisper.cpp releases, and replicating it in `dart:ffi` would not fail to compile on a version bump — it would read the wrong fields. Everything version-sensitive is resolved in C, against the headers the library was actually built with.
+- **whisper.cpp is fetched and pinned, not vendored.** `native/CMakeLists.txt` pulls `AUG_WHISPER_TAG` through `FetchContent`. The first configure needs the network; nothing at runtime ever does, which is the whole point of the feature. `EXCLUDE_FROM_ALL` keeps whisper's own `install()` rules out of ours — without it the bundle ships `libwhisper.a`, a 6 MB build input nothing can load.
+- **`GGML_NATIVE` is off.** ggml defaults to `-march=native`, which bakes in whatever the build machine supports and then dies with SIGILL on an older CPU — at the first transcription, not at startup. A shipped artifact has to run on the machines it is copied to.
+- **`CMAKE_POSITION_INDEPENDENT_CODE` is on** for the whole dependency tree, or the static archives link into the shared library with a relocation error against `stderr` that names the symbol rather than the cause.
+- The shim silences whisper's log callback. `print_*` governs transcript output; the loader talking to stderr is separate, and inside an app that is the user's terminal.
+
+### Where it runs
+
+The FFI call is blocking and CPU-bound — a minute of audio is seconds of solid compute — so `WhisperFfiEngine` runs it through `Isolate.run`. On the main isolate the UI stops painting mid-capture, including the queue reporting the capture it is working on. The isolate re-opens the library because a `DynamicLibrary` cannot cross an isolate boundary; that costs a `dlopen` of something already mapped. Thread count is half the cores, so the machine stays usable.
+
+The library is located relative to the running executable, never by bare name: a bare `dlopen` searches the system loader path, and finding a stranger with the same file name is worse than finding nothing.
+
+### Verifying it
+
+`test/whisper_engine_native_test.dart` exercises the real engine and **skips unless the artifacts exist**, so a machine with no native build stays green rather than failing for a feature it never built:
+
+```bash
+flutter build linux --release
+AUG_WHISPER_LIB=build/linux/x64/release/bundle/lib/libaugustyniak_whisper.so \
+AUG_WHISPER_MODEL=/path/to/ggml-tiny-q5_1.bin \
+AUG_WHISPER_AUDIO=/path/to/a-capture.m4a \
+  flutter test test/whisper_engine_native_test.dart
+```
 
 ## Remote
 
