@@ -306,4 +306,45 @@ void main() {
     await _pump(12);
     expect(c.recordings.single.status, RecordingStatus.completed);
   });
+
+  test(
+    'waitForProcessing reports outstanding work instead of claiming success',
+    () async {
+      // The defect this pins was silent: the wait gave up after a fixed number
+      // of microtask turns and returned as though the queue had drained, so on
+      // a machine busy enough that the real IO had not landed yet, every
+      // assertion after the call read pre-completion state. That is what made
+      // `vault_mirror_test` report `Bad state: No element` on a CI runner and
+      // pass on every idle one — the note was not missing, it had simply not
+      // been written, and nothing said so.
+      //
+      // A backstop is still wanted so a genuine hang ends. It just has to be
+      // impossible to mistake for the work having finished.
+      final Directory dir = await _tmp();
+      addTearDown(() => dir.delete(recursive: true));
+      final _TestProcessor proc = _TestProcessor(gated: true);
+      final RecordingsController c = _controller(_FakeRepo(dir), proc);
+      addTearDown(c.dispose);
+
+      await c.addTextNote('held open');
+      await _pump();
+
+      await expectLater(
+        c.waitForProcessing(timeout: const Duration(milliseconds: 50)),
+        throwsA(
+          isA<StateError>().having(
+            (StateError e) => e.message,
+            'message',
+            allOf(contains('timed out'), contains('draining=true')),
+          ),
+        ),
+      );
+
+      // Released so the gated job does not outlive the test.
+      for (final Completer<void> gate in proc.gates) {
+        if (!gate.isCompleted) gate.complete();
+      }
+      await c.waitForProcessing();
+    },
+  );
 }
