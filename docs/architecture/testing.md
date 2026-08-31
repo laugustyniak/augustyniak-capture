@@ -23,6 +23,23 @@ Two corollaries this session paid for:
 
 **Widget tests have their own trap list — `docs/architecture/testing-widgets.md`, read it before writing or debugging a `testWidgets`.** The short version: never `pumpAndSettle` a screen holding a `PulseDot`, a `ScanLine`, a running `CountdownDial` or a focused `TextField` — all four animate forever, so "no frames scheduled" is a state the screen never reaches and the call hangs until the timeout. Pump explicit frames instead. Work started inside the fake-async zone needs `tester.runAsync`, and a file `Stream` never flows there at all.
 
+## A bound that is not a schedule
+
+`waitForProcessing()` is the seam every controller test uses to mean *the background
+work has settled*, and it was the cause of the `vault_mirror_test` flake (#77). It polled
+the right condition — `_isDraining`, the queue depth, the posters and hashes in flight —
+but bounded the poll by **iteration count**, and on expiry simply returned. So on a
+machine busy enough that the real IO had not landed within 10,000 microtask turns, the
+wait reported success with the work still outstanding, and every assertion after it read
+pre-completion state. The note was not missing; it had not been written yet, and nothing
+said so.
+
+The rule this generalises: **a backstop must be impossible to mistake for the thing it
+guards.** Waiting on the condition alone is right; a bound is still wanted so a genuine
+hang ends, but it has to *throw and name what was outstanding* rather than fall through
+into the success path. `waitForProcessing` now takes a `timeout` and reports
+`draining=…, queued=…, posters=…, hashes=…` when it expires.
+
 ## Never sleep for a timer
 
 **Never sleep a fixed span for something a real `Timer` drives — poll for it.** The recording cap (`_onTick`, every 250 ms) is the only wall-clock behaviour in the suite, and `test/recording_limit_test.dart` waited `900 ms` for it. That encodes an assumption about how busy the machine is: running the suite while a platform build was compiling in another terminal made the wait expire _before_ the tick that crosses the cap, and the test failed for being early rather than for being wrong. It passed in isolation every single time, which is the signature. `_until(condition)` in that file is the shape to copy — an idle run stays as fast as the sleep was.

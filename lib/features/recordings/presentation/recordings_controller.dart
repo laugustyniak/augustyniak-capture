@@ -2098,17 +2098,38 @@ class RecordingsController extends ChangeNotifier {
   /// is now asynchronous — capture returns before jobs finish — so tests that
   /// assert a `completed` status must await this first.
   @visibleForTesting
-  Future<void> waitForProcessing() async {
+  Future<void> waitForProcessing({
+    Duration timeout = const Duration(seconds: 30),
+  }) async {
     // Startup poster/hash backfills and capture-time hashing run unawaited, so
     // they are part of "the background work has settled" for test purposes.
     await _posterBackfill;
     await _hashBackfill;
-    int guard = 0;
-    while ((_isDraining ||
-            pendingProcessingCount > 0 ||
-            _postersInFlight.isNotEmpty ||
-            _hashesInFlight.isNotEmpty) &&
-        guard++ < 10000) {
+
+    // **The bound is a backstop, not a schedule, and it must be loud.** This
+    // used to give up after 10,000 microtask turns and return as though the
+    // work had finished — so on a machine busy enough that the real IO had not
+    // landed yet, every assertion after the call read pre-completion state.
+    // That is what made `vault_mirror_test` report `Bad state: No element` on
+    // a CI runner and pass on every idle one: the note was not missing, it had
+    // simply not been written yet, and nothing said so. A turn count measures
+    // how busy the machine is; it says nothing about whether the work is done.
+    //
+    // Now it waits on the condition alone and throws when the backstop
+    // expires, naming what was still outstanding. A hang is still bounded —
+    // it just can no longer be mistaken for success.
+    final DateTime deadline = DateTime.now().add(timeout);
+    while (_isDraining ||
+        pendingProcessingCount > 0 ||
+        _postersInFlight.isNotEmpty ||
+        _hashesInFlight.isNotEmpty) {
+      if (DateTime.now().isAfter(deadline)) {
+        throw StateError(
+          'waitForProcessing timed out after $timeout with work outstanding: '
+          'draining=$_isDraining, queued=$pendingProcessingCount, '
+          'posters=${_postersInFlight.length}, hashes=${_hashesInFlight.length}.',
+        );
+      }
       await Future<void>.delayed(Duration.zero);
     }
   }
