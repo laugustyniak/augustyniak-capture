@@ -14,6 +14,21 @@ project(augustyniak_whisper LANGUAGES C CXX)
 
 include(FetchContent)
 
+# **Flutter's Windows runner defines UNICODE; whisper.cpp is not written for
+# it.** `windows/CMakeLists.txt` does `add_definitions(-DUNICODE -D_UNICODE)`
+# at the top level, and a subdirectory added below it inherits that. ggml then
+# fails to compile: `ggml-cpu.cpp` calls `RegQueryValueExA` — the ANSI variant,
+# spelled with the A — while passing `TEXT("ProcessorNameString")`, which
+# expands to a *wide* literal once UNICODE is defined. Upstream never sees it
+# because a standalone whisper build does not define UNICODE.
+#
+# Removed for this directory and the fetched sources below it, which leaves the
+# runner's own definitions untouched — the fix belongs where the mismatch is,
+# not in Flutter's template. Revisit if a later tag fixes the call upstream.
+if(MSVC)
+  remove_definitions(-DUNICODE -D_UNICODE)
+endif()
+
 set(AUG_WHISPER_TAG "v1.7.4" CACHE STRING "whisper.cpp tag to build against")
 
 # Everything whisper.cpp offers beyond the library itself is cost we do not pay:
@@ -81,3 +96,11 @@ set_target_properties(augustyniak_whisper PROPERTIES
   C_VISIBILITY_PRESET hidden
   POSITION_INDEPENDENT_CODE ON
 )
+
+if(MSVC)
+  # `strcat` and friends are deprecated by MSVC's CRT rather than by C. The
+  # shim's uses are bounded by a length it measured itself one line earlier, so
+  # the warning has nothing to catch here and the "safe" variants are not
+  # portable to the compilers every other platform uses.
+  target_compile_definitions(augustyniak_whisper PRIVATE _CRT_SECURE_NO_WARNINGS)
+endif()

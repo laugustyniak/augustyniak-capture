@@ -60,7 +60,10 @@ class WhisperFfiEngine implements LocalTranscriptionEngine {
   /// `dlopen` on a platform that was never meant to have one reports a missing
   /// file instead.
   static bool get _platformHasNativeBuild =>
-      Platform.isLinux || Platform.isAndroid || Platform.isMacOS;
+      Platform.isLinux ||
+      Platform.isAndroid ||
+      Platform.isMacOS ||
+      Platform.isWindows;
 
   /// Where the bundle puts the shim on each platform that ships one.
   ///

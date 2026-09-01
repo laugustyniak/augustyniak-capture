@@ -81,6 +81,20 @@ install(FILES "${FLUTTER_ICU_DATA_FILE}" DESTINATION "${INSTALL_BUNDLE_DATA_DIR}
 install(FILES "${FLUTTER_LIBRARY}" DESTINATION "${INSTALL_BUNDLE_LIB_DIR}"
   COMPONENT Runtime)
 
+# The on-device speech engine, built from `native/` and installed next to the
+# executable — which on Windows is where `INSTALL_BUNDLE_LIB_DIR` points and
+# where `WhisperFfiEngine.defaultLibraryPath()` looks.
+#
+# Opt-out rather than opt-in, on the same rule as the Linux build: an artifact
+# that silently omits it is indistinguishable from one that meant to.
+option(AUG_BUILD_WHISPER "Build the on-device speech engine" ON)
+if(AUG_BUILD_WHISPER)
+  add_subdirectory("${CMAKE_CURRENT_SOURCE_DIR}/../native" "${CMAKE_BINARY_DIR}/native")
+  install(TARGETS augustyniak_whisper
+    RUNTIME DESTINATION "${INSTALL_BUNDLE_LIB_DIR}"
+    COMPONENT Runtime)
+endif()
+
 if(PLUGIN_BUNDLED_LIBRARIES)
   install(FILES "${PLUGIN_BUNDLED_LIBRARIES}"
     DESTINATION "${INSTALL_BUNDLE_LIB_DIR}"
