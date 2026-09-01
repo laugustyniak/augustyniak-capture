@@ -92,3 +92,20 @@ docs/security/
 # a file named anything else stays visible and the script's own warning is
 # what catches it.
 tool/deploy.defines.json
+
+# Local credential files. `~/.gitignore_global` covers `.env` on the machine
+# this was written on, but that is per-machine configuration: no clone, no CI
+# runner and no new contributor inherits it, and this repository is public.
+# The rule belongs to the repository for the same reason `tool/deploy.defines.json`
+# above does — a Turso JWT and an R2 secret access key were once committed as
+# literals here, and removing the commit did not retract them from `refs/pull/*`.
+# `.env` is simply the filename the next one is most likely to arrive under.
+#
+# `!.env.example` keeps a committed template possible, which is how the required
+# keys get documented without their values. A defines file passed to
+# `tool/deploy.sh --dart-define-from-file` from outside the tree is still the
+# preferred home for build credentials; this is the backstop for when one is
+# kept in the tree anyway.
+.env
+.env.*
+!.env.example
