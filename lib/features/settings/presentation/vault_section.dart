@@ -16,6 +16,8 @@ class VaultSection extends StatefulWidget {
     required this.controller,
     this.picker = const FilePickerDirectoryPicker(),
     this.onMirrorAll,
+    this.onFetchStats,
+    this.isDesktop = false,
   });
 
   final SettingsController controller;
@@ -29,6 +31,12 @@ class VaultSection extends StatefulWidget {
   /// controller to ask — every current Config test, and any host that renders
   /// this tab on its own.
   final Future<VaultMirrorSummary> Function()? onMirrorAll;
+
+  /// Fetches total and mirrored note counts for the vault.
+  final Future<VaultSyncStats> Function()? onFetchStats;
+
+  /// Whether running in a desktop environment.
+  final bool isDesktop;
 
   @override
   State<VaultSection> createState() => _VaultSectionState();
@@ -55,6 +63,7 @@ class _VaultSectionState extends State<VaultSection> {
   /// the tab.
   VaultMirrorSummary? _summary;
   bool _sweeping = false;
+  VaultSyncStats? _syncStats;
 
   /// A dialog that threw. Reported inline for the same reason the project
   /// editor reports it: a browse button that does nothing is indistinguishable
@@ -76,6 +85,9 @@ class _VaultSectionState extends State<VaultSection> {
     _folderFocus.addListener(() {
       if (!_folderFocus.hasFocus && _folderDirty) _commitFolder();
     });
+    if (widget.isDesktop) {
+      _refreshStats();
+    }
   }
 
   @override
@@ -85,10 +97,17 @@ class _VaultSectionState extends State<VaultSection> {
     if (_storedPath != _syncedPath && !_pathDirty) {
       _syncedPath = _storedPath;
       _path.text = _syncedPath;
+      if (widget.isDesktop) _refreshStats();
     }
     if (_storedFolder != _syncedFolder && !_folderDirty) {
       _syncedFolder = _storedFolder;
       _folder.text = _syncedFolder;
+      if (widget.isDesktop) _refreshStats();
+    }
+    if (widget.isDesktop &&
+        (!oldWidget.isDesktop ||
+            oldWidget.onFetchStats != widget.onFetchStats)) {
+      _refreshStats();
     }
   }
 
@@ -101,16 +120,31 @@ class _VaultSectionState extends State<VaultSection> {
     super.dispose();
   }
 
+  Future<void> _refreshStats() async {
+    final Future<VaultSyncStats> Function()? fetcher = widget.onFetchStats;
+    if (fetcher == null) return;
+    try {
+      final VaultSyncStats stats = await fetcher();
+      if (mounted) {
+        setState(() => _syncStats = stats);
+      }
+    } catch (_) {
+      // Best-effort stats lookup.
+    }
+  }
+
   Future<void> _commitPath() async {
     final String value = _path.text.trim();
     setState(() => _syncedPath = value);
     await widget.controller.setVaultPath(value);
+    if (widget.isDesktop) _refreshStats();
   }
 
   Future<void> _commitFolder() async {
     final String value = _folder.text.trim();
     setState(() => _syncedFolder = value);
     await widget.controller.setVaultFolder(value);
+    if (widget.isDesktop) _refreshStats();
   }
 
   Future<void> _browse() async {
@@ -138,6 +172,7 @@ class _VaultSectionState extends State<VaultSection> {
       final VaultMirrorSummary summary = await sweep();
       if (!mounted) return;
       setState(() => _summary = summary);
+      if (widget.isDesktop) _refreshStats();
     } finally {
       if (mounted) setState(() => _sweeping = false);
     }
@@ -311,6 +346,23 @@ class _VaultSectionState extends State<VaultSection> {
                     ? Console.text
                     : Console.dimText,
               ),
+              if (widget.isDesktop)
+                InfoRow(
+                  label: 'SYNCHRONIZED',
+                  value: configured
+                      ? (_syncStats != null
+                          ? '${_syncStats!.mirrored} / ${_syncStats!.total} notes'
+                          : 'calculating…')
+                      : '—',
+                  monospace: true,
+                  valueColor: configured
+                      ? (_syncStats != null &&
+                              _syncStats!.mirrored == _syncStats!.total &&
+                              _syncStats!.total > 0
+                          ? Console.green
+                          : Console.text)
+                      : Console.dimText,
+                ),
               const SizedBox(height: 10),
               Text(
                 'A note is found again by its capture id, so a title arriving '

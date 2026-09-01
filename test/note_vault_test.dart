@@ -279,4 +279,21 @@ void main() {
       reason: 'a text segment is the body printed above, not an attachment',
     );
   });
+
+  test('countMirrored accurately counts matching note files in vault', () async {
+    final MarkdownNoteVault subject = build();
+    const String id1 = '3f9a1c2e-0000-4000-8000-000000000001';
+    const String id2 = '7b8c9d0e-0000-4000-8000-000000000002';
+    const String id3 = '1a2b3c4d-0000-4000-8000-000000000003';
+
+    expect(await subject.countMirrored(<String>[id1, id2, id3]), 0);
+
+    await subject.mirror(note(id: id1, title: 'Note 1'));
+    expect(await subject.countMirrored(<String>[id1, id2, id3]), 1);
+
+    await subject.mirror(note(id: id2, title: 'Note 2'));
+    expect(await subject.countMirrored(<String>[id1, id2, id3]), 2);
+    expect(await subject.countMirrored(<String>[id1]), 1);
+    expect(await subject.countMirrored(<String>[id3]), 0);
+  });
 }

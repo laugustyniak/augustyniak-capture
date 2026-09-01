@@ -67,6 +67,9 @@ class _FailingVault implements NoteVault {
     attempts++;
     throw const FileSystemException('vault unavailable');
   }
+
+  @override
+  Future<int> countMirrored(Iterable<String> captureIds) async => 0;
 }
 
 /// Counts writes without touching a disk, for the questions that are about
@@ -81,6 +84,12 @@ class _CountingVault implements NoteVault {
   Future<VaultWrite> mirror(VaultNote note) async {
     notes.add(note);
     return const VaultWrite(outcome: VaultOutcome.created);
+  }
+
+  @override
+  Future<int> countMirrored(Iterable<String> captureIds) async {
+    final Set<String> known = notes.map((VaultNote n) => n.id).toSet();
+    return captureIds.where(known.contains).length;
   }
 }
 
@@ -282,5 +291,26 @@ void main() {
     expect(notes(), hasLength(1));
     expect(summary.unchanged, 1);
     expect(summary.created, 0);
+  });
+
+  test('vaultStats computes total and mirrored note count', () async {
+    final RecordingsController controller = build(
+      vault: realVault(),
+      transcription: _StubTranscription('Notatka testowa.'),
+    );
+
+    expect(await controller.vaultStats(), const VaultSyncStats(total: 0, mirrored: 0));
+
+    await controller.addTextNote('Pierwsza notatka');
+    await controller.waitForProcessing();
+
+    expect(await controller.vaultStats(), const VaultSyncStats(total: 1, mirrored: 1));
+
+    // Remove the note file behind the scenes to verify status detection
+    for (final File f in notes()) {
+      f.deleteSync();
+    }
+
+    expect(await controller.vaultStats(), const VaultSyncStats(total: 1, mirrored: 0));
   });
 }

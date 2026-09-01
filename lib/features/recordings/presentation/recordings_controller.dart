@@ -2016,6 +2016,20 @@ class RecordingsController extends ChangeNotifier {
     return summary;
   }
 
+  /// Computes how many recordings exist in the queue and how many of them
+  /// have been mirrored to the configured note vault.
+  Future<VaultSyncStats> vaultStats() async {
+    final List<Recording> list = List<Recording>.of(_recordings);
+    final int total = list.length;
+    if (!_noteVault.isConfigured || total == 0) {
+      return VaultSyncStats(total: total, mirrored: 0);
+    }
+    final int mirrored = await _noteVault.countMirrored(
+      list.map((Recording item) => item.id),
+    );
+    return VaultSyncStats(total: total, mirrored: mirrored);
+  }
+
   /// Re-queue a failed (or any) item for processing. Like capture, this only
   /// enqueues — it does not hold the `_isBusy` capture lock, so a retry never
   /// blocks starting a new recording.

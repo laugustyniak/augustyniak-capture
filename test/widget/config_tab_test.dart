@@ -6,6 +6,8 @@ import 'package:augustyniak_capture/features/settings/domain/audio_config.dart';
 import 'package:augustyniak_capture/features/settings/presentation/config_tab.dart';
 import 'package:augustyniak_capture/features/settings/presentation/settings_controller.dart';
 
+import 'package:augustyniak_capture/features/recordings/presentation/recordings_controller.dart';
+
 import '../support/harness.dart';
 
 /// Guards the Config form before its `ChoiceChip` styling and `InputDecoration`
@@ -22,6 +24,8 @@ void main() {
     WidgetTester tester,
     SettingsController controller, {
     List<Project> projects = const <Project>[],
+    bool showShortcuts = false,
+    RecordingsController? recordingsController,
   }) async {
     tester.view.physicalSize = const Size(1000, 3200);
     tester.view.devicePixelRatio = 1;
@@ -30,11 +34,13 @@ void main() {
       hostTab(
         () => ConfigTab(
           controller: controller,
+          recordingsController: recordingsController,
           storagePath: '/tmp/recordings',
           recordingsCount: 3,
           logCount: 7,
           onOpenModels: () {},
           projects: projects,
+          showShortcuts: showShortcuts,
         ),
         listenable: controller,
       ),
@@ -263,5 +269,31 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(controller.textScale, 1.0);
+  });
+
+  testWidgets('desktop displays synchronized note count in note vault section', (
+    WidgetTester tester,
+  ) async {
+    final SettingsController controller = buildSettingsController();
+    await controller.initialize();
+    await controller.setVaultPath('/Users/you/Obsidian/Vault');
+
+    // On mobile (showShortcuts: false)
+    await pumpConfig(tester, controller, showShortcuts: false);
+    await tester.scrollUntilVisible(
+      find.text('NOTE VAULT'),
+      300,
+      scrollable: find.byType(Scrollable).first,
+    );
+    expect(find.text('SYNCHRONIZED'), findsNothing);
+
+    // On desktop (showShortcuts: true)
+    await pumpConfig(tester, controller, showShortcuts: true);
+    await tester.scrollUntilVisible(
+      find.text('NOTE VAULT'),
+      300,
+      scrollable: find.byType(Scrollable).first,
+    );
+    expect(find.text('SYNCHRONIZED'), findsOneWidget);
   });
 }
