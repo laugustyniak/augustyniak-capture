@@ -14,6 +14,21 @@ project(augustyniak_whisper LANGUAGES C CXX)
 
 include(FetchContent)
 
+# **Flutter's Windows runner defines UNICODE; whisper.cpp is not written for
+# it.** `windows/CMakeLists.txt` does `add_definitions(-DUNICODE -D_UNICODE)`
+# at the top level, and a subdirectory added below it inherits that. ggml then
+# fails to compile: `ggml-cpu.cpp` calls `RegQueryValueExA` — the ANSI variant,
+# spelled with the A — while passing `TEXT("ProcessorNameString")`, which
+# expands to a *wide* literal once UNICODE is defined. Upstream never sees it
+# because a standalone whisper build does not define UNICODE.
+#
+# Removed for this directory and the fetched sources below it, which leaves the
+# runner's own definitions untouched — the fix belongs where the mismatch is,
+# not in Flutter's template. Revisit if a later tag fixes the call upstream.
+if(MSVC)
+  remove_definitions(-DUNICODE -D_UNICODE)
+endif()
+
 set(AUG_WHISPER_TAG "v1.7.4" CACHE STRING "whisper.cpp tag to build against")
 
 # Everything whisper.cpp offers beyond the library itself is cost we do not pay:
