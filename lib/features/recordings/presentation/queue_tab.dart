@@ -194,8 +194,8 @@ class _QueueTabState extends State<QueueTab> {
           SnackBar(
             content: Text(
               ok
-                  ? '⚡ Turso & R2 sync complete!'
-                  : '⚠️ Turso sync skipped or failed.',
+                  ? '⚡ Turso sync complete!'
+                  : '⚠️ ${controller.lastSyncFailure ?? 'Turso sync failed.'}',
             ),
             backgroundColor: ok ? Console.green : Console.amber,
           ),

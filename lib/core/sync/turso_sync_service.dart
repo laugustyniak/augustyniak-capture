@@ -18,10 +18,11 @@ class TursoSyncService {
     http.Client? httpClient,
     Future<String> Function()? recordingsDirectory,
     Duration requestTimeout = defaultRequestTimeout,
-  })  : _db = db,
-        _client = httpClient ?? http.Client(),
-        _recordingsDirectory = recordingsDirectory ?? _defaultRecordingsDirectory,
-        _requestTimeout = requestTimeout;
+  }) : _db = db,
+       _client = httpClient ?? http.Client(),
+       _recordingsDirectory =
+           recordingsDirectory ?? _defaultRecordingsDirectory,
+       _requestTimeout = requestTimeout;
 
   /// How long a pipeline call may take before it is abandoned.
   ///
@@ -42,6 +43,13 @@ class TursoSyncService {
   /// the pull can be tested without `path_provider`, and read through a
   /// callback because it is only needed once a row actually arrives.
   final Future<String> Function() _recordingsDirectory;
+
+  String? _failureReason;
+
+  /// A safe explanation for the most recent failed operation. This never
+  /// includes the bearer token or a response body, because both may contain
+  /// secrets or synced user content.
+  String? get failureReason => _failureReason;
 
   static Future<String> _defaultRecordingsDirectory() async {
     final Directory documents = await getApplicationDocumentsDirectory();
@@ -125,11 +133,14 @@ class TursoSyncService {
     required String dbUrl,
     required String authToken,
   }) async {
-    if (dbUrl.isEmpty || authToken.isEmpty || TokenCipher.isSealed(authToken)) return false;
+    if (dbUrl.isEmpty || authToken.isEmpty || TokenCipher.isSealed(authToken)) {
+      _fail('Turso credentials are missing or unavailable.');
+      return false;
+    }
 
     final String? endpoint = _getPipelineEndpoint(dbUrl);
     if (endpoint == null) {
-      debugPrint('Turso pull refused: not an https/libsql address.');
+      _fail('Turso database URL must be an https:// or libsql:// address.');
       return false;
     }
     // Resolved before the request, so a row can be re-rooted the moment it
@@ -163,34 +174,43 @@ class TursoSyncService {
         ],
       };
 
-      final http.Response response = await _client.post(
-        Uri.parse(endpoint),
-        headers: <String, String>{
-          'Authorization': 'Bearer $authToken',
-          'Content-Type': 'application/json',
-        },
-        body: jsonEncode(body),
-      ).timeout(_requestTimeout);
+      final http.Response response = await _client
+          .post(
+            Uri.parse(endpoint),
+            headers: <String, String>{
+              'Authorization': 'Bearer $authToken',
+              'Content-Type': 'application/json',
+            },
+            body: jsonEncode(body),
+          )
+          .timeout(_requestTimeout);
 
       if (response.statusCode != 200) {
         // The status code, never the body. A pipeline response *is* the
         // user's rows — titles, transcripts, clipboard text — and `debugPrint`
         // survives in release builds, so printing it copies the notes into the
         // system log where nothing this app owns can ever remove them.
-        _logFailure('pull', response.statusCode);
+        _fail(_statusReason('pull', response.statusCode));
         return false;
       }
 
       final dynamic resJson = jsonDecode(response.body);
-      if (resJson is! Map<String, dynamic>) return false;
+      if (resJson is! Map<String, dynamic>) {
+        _fail('Turso pull returned an invalid response.');
+        return false;
+      }
       final dynamic results = resJson['results'];
-      if (results is! List<dynamic> || results.length < 3) return false;
+      if (results is! List<dynamic> || results.length < 3) {
+        _fail('Turso pull returned an incomplete response.');
+        return false;
+      }
 
       // 1. Recordings
       final dynamic recResult = results[0];
       if (recResult is Map<String, dynamic> && recResult['type'] == 'ok') {
         final dynamic responseObj = recResult['response'];
-        if (responseObj is Map<String, dynamic> && responseObj['result'] is Map<String, dynamic>) {
+        if (responseObj is Map<String, dynamic> &&
+            responseObj['result'] is Map<String, dynamic>) {
           final dynamic resultObj = responseObj['result'];
           final dynamic rows = resultObj['rows'];
           if (rows is List<dynamic>) {
@@ -223,7 +243,10 @@ class TursoSyncService {
                   row[6]?['value'],
                   row[7]?['value'],
                   row[8]?['value'] ?? '[]',
-                  _parseInteger(row[9]?['value'], DateTime.now().millisecondsSinceEpoch),
+                  _parseInteger(
+                    row[9]?['value'],
+                    DateTime.now().millisecondsSinceEpoch,
+                  ),
                   _parseInteger(row[10]?['value'], 0),
                   row[11]?['value'],
                   row[12]?['value'],
@@ -240,7 +263,8 @@ class TursoSyncService {
       final dynamic clipResult = results[1];
       if (clipResult is Map<String, dynamic> && clipResult['type'] == 'ok') {
         final dynamic responseObj = clipResult['response'];
-        if (responseObj is Map<String, dynamic> && responseObj['result'] is Map<String, dynamic>) {
+        if (responseObj is Map<String, dynamic> &&
+            responseObj['result'] is Map<String, dynamic>) {
           final dynamic resultObj = responseObj['result'];
           final dynamic rows = resultObj['rows'];
           if (rows is List<dynamic>) {
@@ -260,7 +284,10 @@ class TursoSyncService {
                   // clipboard row leaves (delete, clear, eviction) delete
                   // whatever it names. The text and preview still travel.
                   null,
-                  _parseInteger(row[4]?['value'], DateTime.now().millisecondsSinceEpoch),
+                  _parseInteger(
+                    row[4]?['value'],
+                    DateTime.now().millisecondsSinceEpoch,
+                  ),
                   row[5]?['value'],
                   row[6]?['value'] ?? '[]',
                 ]);
@@ -275,7 +302,8 @@ class TursoSyncService {
       final dynamic projResult = results[2];
       if (projResult is Map<String, dynamic> && projResult['type'] == 'ok') {
         final dynamic responseObj = projResult['response'];
-        if (responseObj is Map<String, dynamic> && responseObj['result'] is Map<String, dynamic>) {
+        if (responseObj is Map<String, dynamic> &&
+            responseObj['result'] is Map<String, dynamic>) {
           final dynamic resultObj = responseObj['result'];
           final dynamic rows = resultObj['rows'];
           if (rows is List<dynamic>) {
@@ -304,7 +332,10 @@ class TursoSyncService {
                   row[0]?['value'],
                   row[1]?['value'],
                   row[2]?['value'] ?? '#000000',
-                  _parseInteger(row[4]?['value'], DateTime.now().millisecondsSinceEpoch),
+                  _parseInteger(
+                    row[4]?['value'],
+                    DateTime.now().millisecondsSinceEpoch,
+                  ),
                 ]);
               }
             }
@@ -318,7 +349,7 @@ class TursoSyncService {
     } catch (e) {
       // Type only. An exception thrown while decoding carries the offending
       // fragment of the response in its message, and that fragment is a row.
-      _logException('pull', e);
+      _fail(_exceptionReason('pull', e));
       return false;
     }
   }
@@ -330,23 +361,56 @@ class TursoSyncService {
   /// it lands in the OS log, outside everything this app can delete. A pipeline
   /// body is the user's captures; an exception message routinely quotes the
   /// input it choked on.
-  static void _logFailure(String phase, int statusCode) =>
-      debugPrint('Turso $phase failed: HTTP $statusCode.');
+  void _fail(String reason) {
+    _failureReason ??= reason;
+    debugPrint(reason);
+  }
 
-  static void _logException(String phase, Object error) =>
-      debugPrint('Turso $phase failed: ${error.runtimeType}.');
+  static String _statusReason(String phase, int statusCode) {
+    final String action = phase == 'pull' ? 'read from' : 'write to';
+    if (statusCode == 401 || statusCode == 403) {
+      return 'Turso rejected the auth token while trying to $action the database (HTTP $statusCode).';
+    }
+    if (statusCode == 404) {
+      return 'Turso database or pipeline endpoint was not found (HTTP 404). Check the database URL.';
+    }
+    if (statusCode == 408 || statusCode == 429) {
+      return 'Turso temporarily refused the request (HTTP $statusCode). Try again later.';
+    }
+    if (statusCode >= 500) {
+      return 'Turso is temporarily unavailable (HTTP $statusCode). Try again later.';
+    }
+    return 'Turso could not $action the database (HTTP $statusCode).';
+  }
+
+  static String _exceptionReason(String phase, Object error) {
+    final String action = phase == 'pull' ? 'read from' : 'write to';
+    if (error is TimeoutException) {
+      return 'Turso request timed out while trying to $action the database.';
+    }
+    if (error is SocketException || error is HttpException) {
+      return 'Could not reach Turso while trying to $action the database. Check your network and database URL.';
+    }
+    if (error is FormatException) {
+      return 'Turso returned an invalid response while trying to $action the database.';
+    }
+    return 'Turso sync failed while trying to $action the database (${error.runtimeType}).';
+  }
 
   Future<bool> pushToTurso({
     required String dbUrl,
     required String authToken,
   }) async {
-    if (dbUrl.isEmpty || authToken.isEmpty || TokenCipher.isSealed(authToken)) return false;
+    if (dbUrl.isEmpty || authToken.isEmpty || TokenCipher.isSealed(authToken)) {
+      _fail('Turso credentials are missing or unavailable.');
+      return false;
+    }
 
     final String? endpoint = _getPipelineEndpoint(dbUrl);
     if (endpoint == null) {
       // The push is the half that uploads every capture, so an address that
       // cannot be trusted with the token cannot be trusted with the notes.
-      debugPrint('Turso push refused: not an https/libsql address.');
+      _fail('Turso database URL must be an https:// or libsql:// address.');
       return false;
     }
 
@@ -378,7 +442,10 @@ class TursoSyncService {
               encodeArg(r['summary']),
               encodeArg(r['tags_json'] ?? '[]'),
               encodeArg(r['created_at'], integer: true),
-              encodeArg((r['is_processed_by_user'] == 1 ? 1 : 0), integer: true),
+              encodeArg(
+                (r['is_processed_by_user'] == 1 ? 1 : 0),
+                integer: true,
+              ),
               encodeArg(r['project_id']),
               encodeArg(r['failure_reason']),
               encodeArg(r['json_payload']),
@@ -439,22 +506,24 @@ class TursoSyncService {
 
       if (requests.isEmpty) return true;
 
-      final http.Response response = await _client.post(
-        Uri.parse(endpoint),
-        headers: <String, String>{
-          'Authorization': 'Bearer $authToken',
-          'Content-Type': 'application/json',
-        },
-        body: jsonEncode(<String, dynamic>{'requests': requests}),
-      ).timeout(_requestTimeout);
+      final http.Response response = await _client
+          .post(
+            Uri.parse(endpoint),
+            headers: <String, String>{
+              'Authorization': 'Bearer $authToken',
+              'Content-Type': 'application/json',
+            },
+            body: jsonEncode(<String, dynamic>{'requests': requests}),
+          )
+          .timeout(_requestTimeout);
 
       if (response.statusCode != 200) {
-        _logFailure('push', response.statusCode);
+        _fail(_statusReason('push', response.statusCode));
         return false;
       }
       return true;
     } catch (e) {
-      _logException('push', e);
+      _fail(_exceptionReason('push', e));
       return false;
     }
   }
@@ -463,6 +532,7 @@ class TursoSyncService {
     required String dbUrl,
     required String authToken,
   }) async {
+    _failureReason = null;
     final bool pulled = await pullFromTurso(dbUrl: dbUrl, authToken: authToken);
     final bool pushed = await pushToTurso(dbUrl: dbUrl, authToken: authToken);
     return pulled && pushed;

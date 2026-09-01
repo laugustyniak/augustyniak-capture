@@ -19,40 +19,41 @@ void main() {
       // "JSON parse error: invalid type: null, expected a string" for the
       // whole request — and pushToTurso reports that as a plain false, with
       // the pull half of syncTwoWay still printing its success line.
-      expect(TursoSyncService.encodeArg(null), <String, dynamic>{'type': 'null'});
-      expect(
-        TursoSyncService.encodeArg(null, integer: true),
-        <String, dynamic>{'type': 'null'},
-      );
+      expect(TursoSyncService.encodeArg(null), <String, dynamic>{
+        'type': 'null',
+      });
+      expect(TursoSyncService.encodeArg(null, integer: true), <String, dynamic>{
+        'type': 'null',
+      });
     });
 
     test('text is passed through as text', () {
-      expect(
-        TursoSyncService.encodeArg('abc'),
-        <String, dynamic>{'type': 'text', 'value': 'abc'},
-      );
+      expect(TursoSyncService.encodeArg('abc'), <String, dynamic>{
+        'type': 'text',
+        'value': 'abc',
+      });
     });
 
     test('integers are stringified, as the protocol requires', () {
-      expect(
-        TursoSyncService.encodeArg(42, integer: true),
-        <String, dynamic>{'type': 'integer', 'value': '42'},
-      );
+      expect(TursoSyncService.encodeArg(42, integer: true), <String, dynamic>{
+        'type': 'integer',
+        'value': '42',
+      });
     });
 
     test('an empty string is a value, not a null', () {
       // '' and null mean different things in a column that holds a title.
-      expect(
-        TursoSyncService.encodeArg(''),
-        <String, dynamic>{'type': 'text', 'value': ''},
-      );
+      expect(TursoSyncService.encodeArg(''), <String, dynamic>{
+        'type': 'text',
+        'value': '',
+      });
     });
 
     test('zero is a value, not a null', () {
-      expect(
-        TursoSyncService.encodeArg(0, integer: true),
-        <String, dynamic>{'type': 'integer', 'value': '0'},
-      );
+      expect(TursoSyncService.encodeArg(0, integer: true), <String, dynamic>{
+        'type': 'integer',
+        'value': '0',
+      });
     });
   });
 
@@ -73,8 +74,9 @@ void main() {
 
     tearDown(() => AppDatabase.resetForTesting());
 
-    Map<String, dynamic> cell(Object? value) =>
-        <String, dynamic>{'value': value};
+    Map<String, dynamic> cell(Object? value) => <String, dynamic>{
+      'value': value,
+    };
 
     Map<String, dynamic> ok(List<List<Map<String, dynamic>>> rows) =>
         <String, dynamic>{
@@ -86,9 +88,12 @@ void main() {
 
     /// One pipeline answer: recordings, clipboard items, projects.
     String answer({
-      List<List<Map<String, dynamic>>> recordings = const <List<Map<String, dynamic>>>[],
-      List<List<Map<String, dynamic>>> clipboard = const <List<Map<String, dynamic>>>[],
-      List<List<Map<String, dynamic>>> projects = const <List<Map<String, dynamic>>>[],
+      List<List<Map<String, dynamic>>> recordings =
+          const <List<Map<String, dynamic>>>[],
+      List<List<Map<String, dynamic>>> clipboard =
+          const <List<Map<String, dynamic>>>[],
+      List<List<Map<String, dynamic>>> projects =
+          const <List<Map<String, dynamic>>>[],
     }) => jsonEncode(<String, dynamic>{
       'results': <Map<String, dynamic>>[
         ok(recordings),
@@ -118,40 +123,43 @@ void main() {
       cell(jsonPayload),
     ];
 
-    test('a remote source path contributes its name, not its location', () async {
-      final AppDatabase database = await AppDatabase.getInstance();
-      final TursoSyncService service = TursoSyncService(
-        db: database,
-        httpClient: MockClient(
-          (http.Request request) async => http.Response(
-            answer(
-              recordings: <List<Map<String, dynamic>>>[
-                recordingRow(
-                  id: 'a',
-                  filePath: '/Users/attacker/Documents/recordings/a.m4a',
-                ),
-              ],
+    test(
+      'a remote source path contributes its name, not its location',
+      () async {
+        final AppDatabase database = await AppDatabase.getInstance();
+        final TursoSyncService service = TursoSyncService(
+          db: database,
+          httpClient: MockClient(
+            (http.Request request) async => http.Response(
+              answer(
+                recordings: <List<Map<String, dynamic>>>[
+                  recordingRow(
+                    id: 'a',
+                    filePath: '/Users/attacker/Documents/recordings/a.m4a',
+                  ),
+                ],
+              ),
+              200,
             ),
-            200,
           ),
-        ),
-        recordingsDirectory: () async => recordingsDir,
-      );
+          recordingsDirectory: () async => recordingsDir,
+        );
 
-      expect(
-        await service.pullFromTurso(
-          dbUrl: 'libsql://db-me.turso.io',
-          authToken: 'token',
-        ),
-        isTrue,
-      );
+        expect(
+          await service.pullFromTurso(
+            dbUrl: 'libsql://db-me.turso.io',
+            authToken: 'token',
+          ),
+          isTrue,
+        );
 
-      final ResultSet rows = database.rawDb.select(
-        'SELECT file_path FROM recordings WHERE id = ?',
-        <Object?>['a'],
-      );
-      expect(rows.single['file_path'], '$recordingsDir/a.m4a');
-    });
+        final ResultSet rows = database.rawDb.select(
+          'SELECT file_path FROM recordings WHERE id = ?',
+          <Object?>['a'],
+        );
+        expect(rows.single['file_path'], '$recordingsDir/a.m4a');
+      },
+    );
 
     test('the payload copy of the path is re-rooted too', () async {
       // `RecordingsRepository.loadAll` prefers `json_payload`, so this is the
@@ -276,52 +284,53 @@ void main() {
         authToken: 'token',
       );
 
-      final Row row = database.rawDb
-          .select('SELECT name, repository_path FROM projects WHERE id = ?', <Object?>[
-            'p1',
-          ])
-          .single;
+      final Row row = database.rawDb.select(
+        'SELECT name, repository_path FROM projects WHERE id = ?',
+        <Object?>['p1'],
+      ).single;
       // The name is shared data and updates; the path is a fact about this
       // machine and does not.
       expect(row['name'], 'Renamed');
       expect(row['repository_path'], '/Users/me/code/mine');
     });
 
-    test('a project arriving for the first time carries no repository path', () async {
-      final AppDatabase database = await AppDatabase.getInstance();
-      final TursoSyncService service = TursoSyncService(
-        db: database,
-        httpClient: MockClient(
-          (http.Request request) async => http.Response(
-            answer(
-              projects: <List<Map<String, dynamic>>>[
-                <Map<String, dynamic>>[
-                  cell('p2'),
-                  cell('Theirs'),
-                  cell('#222222'),
-                  cell('/Users/attacker/payload'),
-                  cell('2'),
+    test(
+      'a project arriving for the first time carries no repository path',
+      () async {
+        final AppDatabase database = await AppDatabase.getInstance();
+        final TursoSyncService service = TursoSyncService(
+          db: database,
+          httpClient: MockClient(
+            (http.Request request) async => http.Response(
+              answer(
+                projects: <List<Map<String, dynamic>>>[
+                  <Map<String, dynamic>>[
+                    cell('p2'),
+                    cell('Theirs'),
+                    cell('#222222'),
+                    cell('/Users/attacker/payload'),
+                    cell('2'),
+                  ],
                 ],
-              ],
+              ),
+              200,
             ),
-            200,
           ),
-        ),
-        recordingsDirectory: () async => recordingsDir,
-      );
+          recordingsDirectory: () async => recordingsDir,
+        );
 
-      await service.pullFromTurso(
-        dbUrl: 'libsql://db-me.turso.io',
-        authToken: 'token',
-      );
+        await service.pullFromTurso(
+          dbUrl: 'libsql://db-me.turso.io',
+          authToken: 'token',
+        );
 
-      final Row row = database.rawDb
-          .select('SELECT repository_path FROM projects WHERE id = ?', <Object?>[
-            'p2',
-          ])
-          .single;
-      expect(row['repository_path'], isNull);
-    });
+        final Row row = database.rawDb.select(
+          'SELECT repository_path FROM projects WHERE id = ?',
+          <Object?>['p2'],
+        ).single;
+        expect(row['repository_path'], isNull);
+      },
+    );
 
     test('a server that never answers does not hang the pull', () async {
       // Every other HTTP call in this app is bounded — `HttpVisionOcrService`
@@ -375,7 +384,33 @@ void main() {
       expect(printed.join('\n'), isNot(contains('a dictated secret')));
       // The status code is what a reader needs, and it names no content.
       expect(printed.join('\n'), contains('500'));
+      expect(service.failureReason, contains('temporarily unavailable'));
+      expect(service.failureReason, isNot(contains('dictated secret')));
     });
+
+    test(
+      'explains an authentication failure without exposing the token',
+      () async {
+        final AppDatabase database = await AppDatabase.getInstance();
+        final TursoSyncService service = TursoSyncService(
+          db: database,
+          httpClient: MockClient(
+            (http.Request request) async => http.Response('', 401),
+          ),
+          recordingsDirectory: () async => recordingsDir,
+        );
+
+        expect(
+          await service.pullFromTurso(
+            dbUrl: 'libsql://db-me.turso.io',
+            authToken: 'secret-token',
+          ),
+          isFalse,
+        );
+        expect(service.failureReason, contains('auth token'));
+        expect(service.failureReason, isNot(contains('secret-token')));
+      },
+    );
 
     test('an http address is refused before the token is sent', () async {
       final AppDatabase database = await AppDatabase.getInstance();
