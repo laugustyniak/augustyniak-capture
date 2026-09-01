@@ -143,3 +143,41 @@ jobs:
 
       - name: Build
         run: flutter build windows --debug
+
+      # The `windows/CMakeLists.txt` build already produced and installed the
+      # shim next to the executable, so this checks the artefact that actually
+      # ships rather than a copy built a second way. A bundle missing it is the
+      # failure the option defaults to ON to avoid.
+      - name: Check the engine shipped in the bundle
+        shell: bash
+        run: |
+          find build/windows -name augustyniak_whisper.dll -print
+          test -s "$(find build/windows -name augustyniak_whisper.dll | head -1)"
+
+      # The desktop decoder shells out to ffmpeg, as it does on Linux and macOS.
+      - name: Install ffmpeg
+        run: choco install ffmpeg -y --no-progress
+
+      - name: Fetch a speech model
+        shell: bash
+        run: |
+          mkdir -p build/engine
+          curl -sL --retry 3 -o build/engine/model.bin \
+            https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-tiny-q5_1.bin
+          test -s build/engine/model.bin
+
+      # Same loudness rule as the macOS job: the native test skips itself when
+      # its artifacts are absent, so a renamed path would report green forever.
+      - name: Check the engine artifacts are really there
+        shell: bash
+        run: |
+          find build/windows -path '*whisper_cpp-src/samples/jfk.wav' -print
+          test -s "$(find build/windows -path '*whisper_cpp-src/samples/jfk.wav' | head -1)"
+
+      - name: Transcribe a real capture on Windows
+        shell: bash
+        run: |
+          export AUG_WHISPER_LIB="$(find build/windows -name augustyniak_whisper.dll | head -1)"
+          export AUG_WHISPER_MODEL="build/engine/model.bin"
+          export AUG_WHISPER_AUDIO="$(find build/windows -path '*whisper_cpp-src/samples/jfk.wav' | head -1)"
+          flutter test test/whisper_engine_native_test.dart

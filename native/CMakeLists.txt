@@ -81,3 +81,11 @@ set_target_properties(augustyniak_whisper PROPERTIES
   C_VISIBILITY_PRESET hidden
   POSITION_INDEPENDENT_CODE ON
 )
+
+if(MSVC)
+  # `strcat` and friends are deprecated by MSVC's CRT rather than by C. The
+  # shim's uses are bounded by a length it measured itself one line earlier, so
+  # the warning has nothing to catch here and the "safe" variants are not
+  # portable to the compilers every other platform uses.
+  target_compile_definitions(augustyniak_whisper PRIVATE _CRT_SECURE_NO_WARNINGS)
+endif()
