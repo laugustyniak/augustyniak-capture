@@ -34,7 +34,7 @@ The local-engine seam and model store, and the three limits a single provider re
 
 **On-device transcription** (`features/transcription/`) — a third `TranscriptionService` implementation behind `ProfileKind.localWhisper`, reached from the drain loop like any other. `WhisperModelStore` keeps model files in Application Support, never in documents, or `recoverOrphans()` adopts them as captures.
 
-**The inference ships on Linux and nowhere else yet.** `WhisperFfiEngine` decides its own availability once, at construction, and every other platform gets a reason instead — the Models tab says so once rather than the app failing once per capture. That asymmetry is the point of `LocalTranscriptionEngine.isAvailable` being synchronous.
+**The inference ships on Linux and Android.** `WhisperFfiEngine` decides its own availability once, at construction, and every other platform gets a reason instead — the Models tab says so once rather than the app failing once per capture. That asymmetry is the point of `LocalTranscriptionEngine.isAvailable` being synchronous.
 
 ### The native build
 
@@ -43,6 +43,17 @@ The local-engine seam and model store, and the three limits a single provider re
 - **`GGML_NATIVE` is off.** ggml defaults to `-march=native`, which bakes in whatever the build machine supports and then dies with SIGILL on an older CPU — at the first transcription, not at startup. A shipped artifact has to run on the machines it is copied to.
 - **`CMAKE_POSITION_INDEPENDENT_CODE` is on** for the whole dependency tree, or the static archives link into the shared library with a relocation error against `stderr` that names the symbol rather than the cause.
 - The shim silences whisper's log callback. `print_*` governs transcript output; the loader talking to stderr is separate, and inside an app that is the user's terminal.
+
+### Android
+
+The NDK build runs the same `native/CMakeLists.txt` through `externalNativeBuild` in `android/app/build.gradle.kts`, and Gradle packages the `.so` under `lib/<abi>/` in the APK — the one platform where `DynamicLibrary.open` by bare name is right, because the APK's library path is the app's own rather than a shared system one.
+
+Two things had to exist before the engine could work there at all:
+
+- **`decodeAudioToPcm` on the Kotlin side.** Slice 3 wrote the Dart half of the mobile decoder, but `MainActivity` implemented `extractVideoAudio`, `extractVideoPoster` and `splitAudio` only — the channel method fell through to `notImplemented()`. A MediaExtractor/MediaCodec decode now produces headerless 16 kHz mono float32. The resample is nearest-sample, deliberately: whisper's own front end is a mel spectrogram over a 16 kHz signal, and the artefacts a windowed resampler would remove sit above what that representation keeps.
+- **`EXCLUDE_FROM_ALL` had to become version-guarded.** The NDK ships CMake 3.22 and that keyword arrived in 3.28, where an unknown keyword is a hard configure error. Android runs no `install()` step, so it takes the fallback and loses nothing.
+
+`abiFilters` is deliberately absent: Flutter owns the ABI set, an `abiFilters` list in `defaultConfig.ndk` does not override it (tried — the APK still carried `armeabi-v7a`), and narrowing it belongs to the release packaging rather than to that file.
 
 ### Where it runs
 
@@ -60,6 +71,25 @@ AUG_WHISPER_LIB=build/linux/x64/release/bundle/lib/libaugustyniak_whisper.so \
 AUG_WHISPER_MODEL=/path/to/ggml-tiny-q5_1.bin \
 AUG_WHISPER_AUDIO=/path/to/a-capture.m4a \
   flutter test test/whisper_engine_native_test.dart
+```
+
+On Android it is `integration_test/whisper_android_test.dart`, run through `am instrument` against an **already-installed** app. `flutter test -d <device>` cannot be used: it reinstalls on every run and the install clears the data directory, so a model staged beforehand is gone before the first line executes. The artifacts are piped in through `run-as` because neither end of a direct push works — a directory `adb` creates under `/sdcard/Android/data` belongs to `shell` with mode 770 and the app's uid cannot traverse it, while the app's uid cannot read `/data/local/tmp`.
+
+```bash
+export JAVA_HOME=/path/to/android-studio/jbr   # the JDK Flutter reports; a JRE has no javac
+cd android && ./gradlew app:assembleDebug app:assembleDebugAndroidTest \
+  -Ptarget=integration_test/whisper_android_test.dart && cd ..
+adb install -r build/app/outputs/apk/debug/app-debug.apk
+adb install -r build/app/outputs/apk/androidTest/debug/app-debug-androidTest.apk
+
+adb push ggml-tiny-q5_1.bin /data/local/tmp/model.bin
+adb push a-capture.m4a      /data/local/tmp/capture.m4a
+adb shell run-as ai.augustyniak.capture mkdir -p files
+adb shell 'cat /data/local/tmp/model.bin  | run-as ai.augustyniak.capture sh -c "cat > files/model.bin"'
+adb shell 'cat /data/local/tmp/capture.m4a | run-as ai.augustyniak.capture sh -c "cat > files/capture.m4a"'
+
+adb shell cmd connectivity airplane-mode enable    # the half of the acceptance that matters
+adb shell am instrument -w ai.augustyniak.capture.test/androidx.test.runner.AndroidJUnitRunner
 ```
 
 ## Remote

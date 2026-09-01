@@ -53,6 +53,15 @@ class WhisperFfiEngine implements LocalTranscriptionEngine {
 
   String? _reason;
 
+  /// The platforms whose build actually produces the shim today.
+  ///
+  /// Listed rather than inferred from "can I open it": a platform with no
+  /// native build should say so in the words a user can act on, and a failed
+  /// `dlopen` on a platform that was never meant to have one reports a missing
+  /// file instead.
+  static bool get _platformHasNativeBuild =>
+      Platform.isLinux || Platform.isAndroid;
+
   /// Where the bundle puts the shim on each platform that ships one.
   ///
   /// Resolved relative to the running executable rather than by bare name: a
@@ -67,15 +76,19 @@ class WhisperFfiEngine implements LocalTranscriptionEngine {
       return '$executable/../Frameworks/libaugustyniak_whisper.dylib';
     }
     if (Platform.isWindows) return '$executable\\augustyniak_whisper.dll';
-    // Android and iOS link the shim into the application itself.
+    // Android packages it under `lib/<abi>/` in the APK, where the loader
+    // finds it by bare name — the one platform where a bare name is right,
+    // because the APK's library path is the app's own and not a shared system
+    // one. iOS links it into the application binary instead and will need
+    // `DynamicLibrary.process()` rather than a path at all.
     return 'libaugustyniak_whisper.so';
   }
 
   void _probe() {
-    if (!Platform.isLinux) {
-      // Honest rather than optimistic: the other platforms have no native build
-      // in this slice, and claiming otherwise would fail once per capture
-      // instead of saying so once in the Models tab.
+    if (!_platformHasNativeBuild) {
+      // Honest rather than optimistic: the remaining platforms have no native
+      // build yet, and claiming otherwise would fail once per capture instead
+      // of saying so once in the Models tab.
       _reason =
           'On-device transcription is not built for '
           '${Platform.operatingSystem} yet. Use a remote profile here.';

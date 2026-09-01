@@ -52,6 +52,44 @@ android {
         targetSdk = flutter.targetSdkVersion
         versionCode = flutter.versionCode
         versionName = flutter.versionName
+        // Required for `am instrument`; see MainActivityTest for why the
+        // integration tests are run that way rather than through
+        // `flutter test -d`.
+        testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+
+        externalNativeBuild {
+            cmake {
+                // Release flags even in a debug build of the app: this is a
+                // speech model, and an -O0 ggml is slow enough on a phone to
+                // read as a hang rather than as a debug build.
+                cppFlags += listOf("-O3")
+                arguments += listOf(
+                    "-DCMAKE_BUILD_TYPE=Release",
+                    "-DAUG_BUILD_WHISPER=ON",
+                )
+            }
+        }
+
+        // No `abiFilters` here on purpose. Flutter owns the ABI set — a debug
+        // build is fat across all three, and `--target-platform` /
+        // `--split-per-abi` are how a release narrows it — and an `abiFilters`
+        // list in this block does not override that. It was tried: the APK
+        // still carried `armeabi-v7a`, so the restriction would have been a
+        // comment claiming something the build does not do.
+        //
+        // The consequence is that the shim is built for every ABI the app is,
+        // which costs roughly 1.5 MB per slice. Narrowing it is a packaging
+        // decision for the release build rather than something this file can
+        // assert.
+    }
+
+    externalNativeBuild {
+        cmake {
+            path = file("../../native/CMakeLists.txt")
+            // Newer than the NDK default of 3.22 where it is available; the
+            // CMakeLists degrades to a 3.22-compatible fetch when it is not.
+            version = "3.22.1"
+        }
     }
 
     signingConfigs {
@@ -87,6 +125,15 @@ android {
                 signingConfigs.getByName(if (hasReleaseKeystore) "release" else "debug")
         }
     }
+}
+
+dependencies {
+    // Instrumentation only — none of this reaches a release artifact.
+    // Pinned to match: the integration_test plugin resolves
+    // `androidx.test:runner` to strictly 1.3.0, and a newer rules artifact
+    // drags a newer runner in with it and fails resolution.
+    androidTestImplementation("androidx.test:runner:1.3.0")
+    androidTestImplementation("androidx.test:rules:1.2.0")
 }
 
 kotlin {
