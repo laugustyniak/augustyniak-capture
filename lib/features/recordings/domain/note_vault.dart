@@ -126,6 +126,30 @@ class VaultMirrorSummary {
   );
 }
 
+/// Counts for note synchronization with the vault.
+class VaultSyncStats {
+  const VaultSyncStats({required this.total, required this.mirrored});
+
+  final int total;
+  final int mirrored;
+
+  static const VaultSyncStats zero = VaultSyncStats(total: 0, mirrored: 0);
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is VaultSyncStats &&
+          runtimeType == other.runtimeType &&
+          total == other.total &&
+          mirrored == other.mirrored;
+
+  @override
+  int get hashCode => Object.hash(total, mirrored);
+
+  @override
+  String toString() => 'VaultSyncStats(total: $total, mirrored: $mirrored)';
+}
+
 /// Mirrors captures into a second location as markdown files.
 ///
 /// A seam under the same rules as `ClipboardSink` and `CaptureRouter`: the real
@@ -152,6 +176,10 @@ abstract interface class NoteVault {
   /// caller treats this as best-effort under the `ClipboardSink` contract — a
   /// vault that cannot be written costs a copy, never the capture.
   Future<VaultWrite> mirror(VaultNote note);
+
+  /// Returns how many of the given [captureIds] currently have a corresponding
+  /// file in the vault.
+  Future<int> countMirrored(Iterable<String> captureIds);
 }
 
 /// Layout constants, in the domain rather than beside the implementation
@@ -179,6 +207,9 @@ class DisabledNoteVault implements NoteVault {
   Future<VaultWrite> mirror(VaultNote note) async {
     throw const VaultNotConfiguredException();
   }
+
+  @override
+  Future<int> countMirrored(Iterable<String> captureIds) async => 0;
 }
 
 /// Thrown when a mirror is asked for with no vault directory set. Logged at

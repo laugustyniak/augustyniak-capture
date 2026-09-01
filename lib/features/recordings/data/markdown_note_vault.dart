@@ -123,6 +123,38 @@ class MarkdownNoteVault implements NoteVault {
     return VaultWrite(outcome: VaultOutcome.created, path: file.path);
   }
 
+  @override
+  Future<int> countMirrored(Iterable<String> captureIds) async {
+    final String? root = _root;
+    if (root == null) return 0;
+
+    final Directory vault = Directory(root);
+    if (!await vault.exists()) return 0;
+
+    final Directory dir = Directory(p.join(root, _folderName()));
+    if (!await dir.exists()) return 0;
+
+    final Set<String> targetShortIds = captureIds.map(_shortId).toSet();
+    if (targetShortIds.isEmpty) return 0;
+
+    int matched = 0;
+    final Set<String> foundShortIds = <String>{};
+    await for (final FileSystemEntity entity in dir.list()) {
+      if (entity is! File) continue;
+      final String name = p.basename(entity.path);
+      if (!name.endsWith('.md')) continue;
+      final String withoutExt = name.substring(0, name.length - 3);
+      final int dash = withoutExt.lastIndexOf('-');
+      if (dash >= 0 && dash + 1 < withoutExt.length) {
+        final String shortId = withoutExt.substring(dash + 1);
+        if (targetShortIds.contains(shortId) && foundShortIds.add(shortId)) {
+          matched++;
+        }
+      }
+    }
+    return matched;
+  }
+
   String _folderName() {
     final String raw = _folder().trim();
     if (raw.isEmpty) return VaultDefaults.folder;

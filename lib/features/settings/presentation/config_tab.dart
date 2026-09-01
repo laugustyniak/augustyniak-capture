@@ -359,7 +359,12 @@ class ConfigTab extends StatelessWidget {
           const SizedBox(height: 22),
           EnrichmentContextSection(controller: controller, projects: projects),
           const SizedBox(height: 22),
-          VaultSection(controller: controller, onMirrorAll: onMirrorAll),
+          VaultSection(
+            controller: controller,
+            onMirrorAll: onMirrorAll,
+            onFetchStats: recordingsController?.vaultStats,
+            isDesktop: showShortcuts,
+          ),
           const SizedBox(height: 22),
           // Above the sync sections and below the vault: it configures where
           // *work* goes, which belongs beside the other destinations rather
