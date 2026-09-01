@@ -79,6 +79,42 @@ jobs:
       - name: Build iOS (device)
         run: flutter build ios --debug --no-codesign
 
+      # The on-device speech engine, built and then actually *run* on this
+      # runner. macOS is the one remaining platform where CI can do both:
+      # a macOS runner executes macOS binaries, so this is real runtime
+      # evidence rather than a compile that nobody exercised — which is the
+      # failure mode the whole on-device slice was warned against.
+      #
+      # Metal is off here and only here. It is a large win on Apple Silicon and
+      # belongs in the shipped build, but a headless runner compiling shaders
+      # at first use is a variable this gate does not want; the CPU path is
+      # what makes the result deterministic.
+      - name: Build the whisper shim
+        run: |
+          cmake -S native -B build/native \
+            -DCMAKE_BUILD_TYPE=Release -DGGML_METAL=OFF
+          cmake --build build/native --target augustyniak_whisper -j 3
+
+      # The desktop decoder shells out to ffmpeg, exactly as it does on Linux.
+      - name: Install ffmpeg
+        run: brew install ffmpeg
+
+      - name: Fetch a speech model
+        run: |
+          curl -sL --retry 3 -o build/model.bin \
+            https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-tiny-q5_1.bin
+          test -s build/model.bin
+
+      # The sample ships inside the whisper.cpp checkout the build just fetched,
+      # so nothing extra is downloaded and the audio is real speech rather than
+      # a tone the assertion could not say anything about.
+      - name: Transcribe a real capture on macOS
+        env:
+          AUG_WHISPER_LIB: build/native/libaugustyniak_whisper.dylib
+          AUG_WHISPER_MODEL: build/model.bin
+          AUG_WHISPER_AUDIO: build/native/_deps/whisper_cpp-src/samples/jfk.wav
+        run: flutter test test/whisper_engine_native_test.dart
+
   # Windows-specific native gate for global hotkeys, OCR and media plugins.
   # Analyze alone would never catch a broken native registration.
   build-windows:

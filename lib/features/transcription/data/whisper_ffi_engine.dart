@@ -60,7 +60,7 @@ class WhisperFfiEngine implements LocalTranscriptionEngine {
   /// `dlopen` on a platform that was never meant to have one reports a missing
   /// file instead.
   static bool get _platformHasNativeBuild =>
-      Platform.isLinux || Platform.isAndroid;
+      Platform.isLinux || Platform.isAndroid || Platform.isMacOS;
 
   /// Where the bundle puts the shim on each platform that ships one.
   ///
@@ -114,9 +114,13 @@ class WhisperFfiEngine implements LocalTranscriptionEngine {
       version().toDartString();
       _reason = null;
     } catch (exception) {
+      // Two different situations reach here and the message has to serve
+      // both: a build that ships the library and cannot open it (a broken or
+      // unsigned artifact), and one whose packaging step has not been written
+      // yet. Naming the path is what separates them for whoever reads it.
       _reason =
           'The on-device speech library could not be loaded from '
-          '$_libraryPath: $exception';
+          '$_libraryPath. This build may not ship it yet. ($exception)';
     }
   }
 
