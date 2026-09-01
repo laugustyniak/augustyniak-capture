@@ -901,7 +901,7 @@ class _SyncNowButtonState extends State<_SyncNowButton> {
   Widget build(BuildContext context) {
     return ElevatedButton.icon(
       icon: SyncSpinIcon(isSyncing: _isSyncing, size: 14, color: Colors.black),
-      label: Text(_isSyncing ? 'SYNCING…' : 'SYNC NOW (TURSO & R2)'),
+      label: Text(_isSyncing ? 'SYNCING…' : 'SYNC NOW (TURSO)'),
       style: ElevatedButton.styleFrom(
         backgroundColor: Console.green,
         foregroundColor: Colors.black,
@@ -928,8 +928,8 @@ class _SyncNowButtonState extends State<_SyncNowButton> {
                       SnackBar(
                         content: Text(
                           ok
-                              ? '⚡ Bidirectional Turso & R2 sync complete!'
-                              : '⚠️ Turso sync failed. Check connection.',
+                              ? '⚡ Bidirectional Turso sync complete!'
+                              : '⚠️ ${syncService.failureReason ?? 'Turso sync failed.'}',
                         ),
                         backgroundColor: ok ? Console.green : Console.amber,
                       ),

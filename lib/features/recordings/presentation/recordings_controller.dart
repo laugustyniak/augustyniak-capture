@@ -151,6 +151,10 @@ class RecordingsController extends ChangeNotifier {
 
   final LogSink _logSink;
 
+  String? _lastSyncFailure;
+
+  String? get lastSyncFailure => _lastSyncFailure;
+
   /// Receives per-call usage. Ambient by design — see [UsageSink]. Defaults to
   /// a no-op so the pure-Dart suites need no database.
   final UsageSink _usageSink;
@@ -471,6 +475,11 @@ class RecordingsController extends ChangeNotifier {
             _logSink.log(
               'Synced ${_recordings.length} captures from Turso Cloud.',
             );
+          } else {
+            _logSink.log(
+              'Turso startup sync failed: ${syncService.failureReason ?? 'unknown error.'}',
+              level: LogLevel.warn,
+            );
           }
         }
       } catch (e) {
@@ -521,6 +530,7 @@ class RecordingsController extends ChangeNotifier {
 
   /// Triggers Turso sync and reloads local recordings into RAM.
   Future<bool> syncTurso() async {
+    _lastSyncFailure = null;
     try {
       final AppDatabase db = await AppDatabase.getInstance();
       final AppSettings settings =
@@ -540,10 +550,9 @@ class RecordingsController extends ChangeNotifier {
           : (SyncDefaults.tursoAuthToken ?? '');
 
       if (url.isEmpty || token.isEmpty) {
-        _logSink.log(
-          'Turso sync skipped: no credentials available.',
-          level: LogLevel.warn,
-        );
+        _lastSyncFailure =
+            'Turso credentials are missing or unavailable. Open Settings to configure them.';
+        _logSink.log(_lastSyncFailure!, level: LogLevel.warn);
         return false;
       }
 
@@ -552,13 +561,17 @@ class RecordingsController extends ChangeNotifier {
         dbUrl: url,
         authToken: token,
       );
+      _lastSyncFailure = syncService.failureReason;
       if (synced) {
         await reloadFromStorage();
         _logSink.log('Synced ${_recordings.length} captures from Turso Cloud.');
         return true;
       }
+      _lastSyncFailure ??= 'Turso sync failed.';
+      _logSink.log(_lastSyncFailure!, level: LogLevel.warn);
     } catch (e) {
-      _logSink.log('Turso sync skipped: $e', level: LogLevel.warn);
+      _lastSyncFailure = 'Turso sync failed (${e.runtimeType}).';
+      _logSink.log(_lastSyncFailure!, level: LogLevel.warn);
     }
     return false;
   }
@@ -2287,8 +2300,10 @@ class RecordingsController extends ChangeNotifier {
 
         await _update(
           id,
-          (Recording item) =>
-              item.copyWith(status: RecordingStatus.completed, clearError: true),
+          (Recording item) => item.copyWith(
+            status: RecordingStatus.completed,
+            clearError: true,
+          ),
         );
         // Re-read *after* the write, never across it: `_update` awaits the
         // persist, and a delete landing in that window shrinks the list — an
