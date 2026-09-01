@@ -31,22 +31,36 @@ set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 # has to run on the machines it is copied to.
 set(GGML_NATIVE OFF CACHE BOOL "" FORCE)
 
+# Not in the NDK sysroot, and worth nothing here anyway: the engine already
+# runs on a bounded thread pool chosen by the Dart side, and a second layer of
+# parallelism would fight it for the cores this deliberately leaves free.
+set(GGML_OPENMP OFF CACHE BOOL "" FORCE)
+
 set(WHISPER_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
 set(WHISPER_BUILD_TESTS    OFF CACHE BOOL "" FORCE)
 set(WHISPER_BUILD_SERVER   OFF CACHE BOOL "" FORCE)
 set(BUILD_SHARED_LIBS      OFF CACHE BOOL "" FORCE)
 
 # EXCLUDE_FROM_ALL keeps whisper.cpp's own `install()` rules out of ours.
-# Without it the bundle ships `libwhisper.a` beside the shim — a 6 MB static
-# archive that is a build input, not a runtime artifact, and that nothing in the
-# installed app can load.
-FetchContent_Declare(
-  whisper_cpp
+# Without it the desktop bundle ships `libwhisper.a` beside the shim — a 6 MB
+# static archive that is a build input, not a runtime artifact, and that
+# nothing in the installed app can load.
+#
+# **Guarded by version because the Android NDK ships CMake 3.22**, and the
+# keyword only exists from 3.28. An unknown keyword there is a hard configure
+# error, not a warning. Android does not run an `install()` step at all — Gradle
+# packages the `.so` straight out of the build tree — so the fallback costs
+# nothing on the one platform that takes it.
+set(AUG_FETCH_ARGS
   GIT_REPOSITORY https://github.com/ggerganov/whisper.cpp.git
   GIT_TAG        ${AUG_WHISPER_TAG}
   GIT_SHALLOW    TRUE
-  EXCLUDE_FROM_ALL
 )
+if(CMAKE_VERSION VERSION_GREATER_EQUAL 3.28)
+  list(APPEND AUG_FETCH_ARGS EXCLUDE_FROM_ALL)
+endif()
+
+FetchContent_Declare(whisper_cpp ${AUG_FETCH_ARGS})
 FetchContent_MakeAvailable(whisper_cpp)
 
 add_library(augustyniak_whisper SHARED augustyniak_whisper.c)

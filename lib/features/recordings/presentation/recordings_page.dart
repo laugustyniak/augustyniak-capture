@@ -245,7 +245,7 @@ class _RecordingsPageState extends State<RecordingsPage>
       // Handed the same ffmpeg decoder the rest of the media path uses: the
       // model needs 16 kHz mono float PCM, and an engine with no decoder is an
       // engine that would be fed the AAC container unchanged.
-      localEngine: WhisperFfiEngine(decoder: const FfmpegAudioDecoder()),
+      localEngine: WhisperFfiEngine(decoder: _buildAudioDecoder()),
     );
     gamification = GamificationController();
     // One launcher, two entry points: the project card starts a session with no
@@ -469,6 +469,20 @@ class _RecordingsPageState extends State<RecordingsPage>
 
   /// Mobile uses sandbox-safe platform codecs. Desktop retains its existing
   /// ffmpeg backend until each desktop shell gets an equivalent native adapter.
+  /// Which decoder turns a capture into the PCM a local model reads.
+  ///
+  /// The same split the video and splitter pickers already make, and for the
+  /// same reason: the phones own their codecs through one platform channel,
+  /// and the desktops shell out to ffmpeg. Handing Android the ffmpeg decoder
+  /// would report "install ffmpeg" on a device where that is not a thing a user
+  /// can do.
+  AudioDecoder _buildAudioDecoder() {
+    if (Platform.isAndroid || Platform.isIOS) {
+      return const NativeMobileMediaProcessor();
+    }
+    return const FfmpegAudioDecoder();
+  }
+
   static VideoAudioExtractor _buildVideoAudioExtractor() {
     if (Platform.isAndroid || Platform.isIOS) {
       return const NativeMobileMediaProcessor();
