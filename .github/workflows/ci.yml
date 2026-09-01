@@ -108,6 +108,17 @@ jobs:
       # The sample ships inside the whisper.cpp checkout the build just fetched,
       # so nothing extra is downloaded and the audio is real speech rather than
       # a tone the assertion could not say anything about.
+      # The native test skips itself when its artifacts are absent, which is
+      # right for a developer machine with no native build and wrong for a
+      # gate: a renamed path would skip silently and report green forever.
+      # Asserting the three inputs exist is what makes this step fail loudly
+      # instead — the same rule the processing wait had to learn in #77.
+      - name: Check the engine artifacts are really there
+        run: |
+          test -s build/native/libaugustyniak_whisper.dylib
+          test -s build/model.bin
+          test -s build/native/_deps/whisper_cpp-src/samples/jfk.wav
+
       - name: Transcribe a real capture on macOS
         env:
           AUG_WHISPER_LIB: build/native/libaugustyniak_whisper.dylib
