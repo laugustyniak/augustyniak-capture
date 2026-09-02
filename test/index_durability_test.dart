@@ -239,11 +239,15 @@ void main() {
       final Recording recovered = items.firstWhere(
         (Recording item) => item.id == 'orphan-1',
       );
-      expect(
-        recovered.status,
-        RecordingStatus.saved,
-        reason: 'recovered items must not auto-spend transcription calls',
-      );
+      // Reversed deliberately. Recovery used to stop at `saved` so it could
+      // not auto-spend transcription calls — but nothing else in the app ever
+      // picked such a row up, and RETRY was gated on `failed`, so the capture
+      // came back from the dead and then sat in the queue permanently
+      // untranscribed. That reads to a user exactly like losing it, which is
+      // the failure recovery exists to prevent. It costs one processing run per
+      // recovered capture; here the service is disabled, so the run fails and
+      // the row lands `failed` — which is at least a state with a button on it.
+      expect(recovered.status, RecordingStatus.failed);
       expect(recovered.type, CaptureType.audioRecording);
       expect(recovered.transcript, isNull);
       expect(

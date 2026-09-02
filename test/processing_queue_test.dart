@@ -241,6 +241,68 @@ void main() {
   );
 
   test(
+    'initialize processes a capture that has a source and no text',
+    () async {
+      // The state an orphan recovery and a salvaged timeout both leave behind:
+      // `saved`, no transcript, and nothing in the app that would ever pick it
+      // up. Before this sweep covered it, the take came back from the dead and
+      // then sat in the queue permanently untranscribed.
+      final Directory dir = await _tmp();
+      addTearDown(() => dir.delete(recursive: true));
+      final Recording recovered = Recording(
+        id: 'orphan',
+        filePath: '${dir.path}/orphan.txt',
+        createdAt: DateTime.utc(2026, 7, 25),
+        durationMs: 0,
+        status: RecordingStatus.saved,
+        type: CaptureType.text,
+      );
+      final RecordingsController c = _controller(
+        _SeededRepo(dir, <Recording>[recovered]),
+        _TestProcessor(),
+      );
+      addTearDown(c.dispose);
+
+      await c.initialize();
+      await c.waitForProcessing();
+
+      expect(c.recordings.single.status, RecordingStatus.completed);
+    },
+  );
+
+  test(
+    'initialize leaves a saved capture that already holds its text alone',
+    () async {
+      // The other half of `awaitsProcessing`: widening the sweep must not turn
+      // start-up into a re-run of work that is already done — the drain skips
+      // segments that hold text, and this is what pins that.
+      final Directory dir = await _tmp();
+      addTearDown(() => dir.delete(recursive: true));
+      final Recording done = Recording(
+        id: 'done',
+        filePath: '${dir.path}/done.txt',
+        createdAt: DateTime.utc(2026, 7, 25),
+        durationMs: 0,
+        status: RecordingStatus.saved,
+        type: CaptureType.text,
+        transcript: 'already read out',
+      );
+      final _TestProcessor processor = _TestProcessor();
+      final RecordingsController c = _controller(
+        _SeededRepo(dir, <Recording>[done]),
+        processor,
+      );
+      addTearDown(c.dispose);
+
+      await c.initialize();
+      await c.waitForProcessing();
+
+      expect(processor.processed, isEmpty);
+      expect(c.recordings.single.transcript, 'already read out');
+    },
+  );
+
+  test(
     'concurrent index writes are serialized (no shared-temp overlap)',
     () async {
       final Directory dir = await _tmp();

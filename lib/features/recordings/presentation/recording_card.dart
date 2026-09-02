@@ -165,6 +165,13 @@ class RecordingCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final bool failed = recording.status == RecordingStatus.failed;
+    // Deliberately wider than `failed`, and deliberately not folded into it:
+    // `failed` also drives the status pill and the red styling, and a capture
+    // that is merely unprocessed has not failed at anything. What it shares
+    // with a failure is that RETRY is the only thing that moves it — an
+    // orphan-recovered or salvaged row is `saved` with no text, and gating the
+    // button on `failed` alone left it with no control at all.
+    final bool canRetry = failed || recording.awaitsProcessing;
     final bool reviewed = recording.isProcessedByUser;
     // Enrichment cannot move the status — the item is already `completed` — but
     // the pill is the one place the user looks to find out what is going on, so
@@ -484,7 +491,7 @@ class RecordingCard extends StatelessWidget {
                 child: VerificationLine(recording: recording, costUsd: costUsd),
               ),
               const SizedBox(width: 8),
-              if (failed) ...<Widget>[
+              if (canRetry) ...<Widget>[
                 _GhostButton(
                   icon: Icons.refresh_rounded,
                   label: 'RETRY',

@@ -453,7 +453,11 @@ class _Actions extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final bool failed = recording.status == RecordingStatus.failed;
+    // Same rule as the card's: a capture with a source and no text has RETRY
+    // as its only move, whether the processor lost or never ran.
+    final bool canRetry =
+        recording.status == RecordingStatus.failed ||
+        recording.awaitsProcessing;
     final bool reviewed = recording.isProcessedByUser;
     final bool hasTranscript = (recording.transcript ?? '').trim().isNotEmpty;
     final bool isEnriching = controller.isEnriching(recording.id);
@@ -468,7 +472,7 @@ class _Actions extends StatelessWidget {
             runSpacing: 8,
             crossAxisAlignment: WrapCrossAlignment.center,
             children: <Widget>[
-              if (failed)
+              if (canRetry)
                 ConsoleIconButton(
                   icon: Icons.refresh_rounded,
                   onTap: () => controller.retryTranscription(recording.id),
