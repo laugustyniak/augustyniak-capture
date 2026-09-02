@@ -26,6 +26,7 @@ void main() {
     List<Project> projects = const <Project>[],
     bool showShortcuts = false,
     RecordingsController? recordingsController,
+    ConfigCategory initialCategory = ConfigCategory.general,
   }) async {
     tester.view.physicalSize = const Size(1000, 3200);
     tester.view.devicePixelRatio = 1;
@@ -41,6 +42,7 @@ void main() {
           onOpenModels: () {},
           projects: projects,
           showShortcuts: showShortcuts,
+          initialCategory: initialCategory,
         ),
         listenable: controller,
       ),
@@ -53,7 +55,7 @@ void main() {
   ) async {
     final SettingsController controller = buildSettingsController();
     await controller.initialize();
-    await pumpConfig(tester, controller);
+    await pumpConfig(tester, controller, initialCategory: ConfigCategory.capture);
 
     expect(find.text('AUDIO CAPTURE'), findsOneWidget);
     expect(find.text('AAC-LC · .m4a (fixed)'), findsOneWidget);
@@ -88,7 +90,7 @@ void main() {
   ) async {
     final SettingsController controller = buildSettingsController();
     await controller.initialize();
-    await pumpConfig(tester, controller);
+    await pumpConfig(tester, controller, initialCategory: ConfigCategory.capture);
 
     await tester.tap(find.text('44 kHz'));
     await tester.pumpAndSettle();
@@ -101,7 +103,7 @@ void main() {
   ) async {
     final SettingsController controller = buildSettingsController();
     await controller.initialize();
-    await pumpConfig(tester, controller);
+    await pumpConfig(tester, controller, initialCategory: ConfigCategory.capture);
 
     await tester.tap(find.text('Stereo'));
     await tester.pumpAndSettle();
@@ -114,7 +116,7 @@ void main() {
   ) async {
     final SettingsController controller = buildSettingsController();
     await controller.initialize();
-    await pumpConfig(tester, controller);
+    await pumpConfig(tester, controller, initialCategory: ConfigCategory.capture);
 
     TextButton resetButton() => tester.widget<TextButton>(
       find.ancestor(
@@ -139,7 +141,7 @@ void main() {
   ) async {
     final SettingsController controller = buildSettingsController();
     await controller.initialize();
-    await pumpConfig(tester, controller);
+    await pumpConfig(tester, controller, initialCategory: ConfigCategory.capture);
 
     // Below the fold since the capture card grew its guidance text, and a
     // ListView does not build children it has not scrolled to.
@@ -164,7 +166,7 @@ void main() {
       model: 'whisper-1',
       bearerToken: 'sk-super-secret',
     );
-    await pumpConfig(tester, controller);
+    await pumpConfig(tester, controller, initialCategory: ConfigCategory.capture);
     await tester.scrollUntilVisible(
       find.text('OpenAI'),
       300,
@@ -183,7 +185,7 @@ void main() {
   ) async {
     final SettingsController controller = buildSettingsController();
     await controller.initialize();
-    await pumpConfig(tester, controller);
+    await pumpConfig(tester, controller, initialCategory: ConfigCategory.data);
 
     // The storage card sits below the fold; a ListView does not build children
     // it has not scrolled to.
@@ -204,7 +206,7 @@ void main() {
   ) async {
     final SettingsController controller = buildSettingsController();
     await controller.initialize();
-    await pumpConfig(tester, controller);
+    await pumpConfig(tester, controller, initialCategory: ConfigCategory.capture);
 
     await tester.scrollUntilVisible(
       find.text('ENRICHMENT CONTEXT'),
@@ -279,7 +281,12 @@ void main() {
     await controller.setVaultPath('/Users/you/Obsidian/Vault');
 
     // On mobile (showShortcuts: false)
-    await pumpConfig(tester, controller, showShortcuts: false);
+    await pumpConfig(
+      tester,
+      controller,
+      showShortcuts: false,
+      initialCategory: ConfigCategory.capture,
+    );
     await tester.scrollUntilVisible(
       find.text('NOTE VAULT'),
       300,
@@ -288,12 +295,49 @@ void main() {
     expect(find.text('SYNCHRONIZED'), findsNothing);
 
     // On desktop (showShortcuts: true)
-    await pumpConfig(tester, controller, showShortcuts: true);
+    await pumpConfig(
+      tester,
+      controller,
+      showShortcuts: true,
+      initialCategory: ConfigCategory.capture,
+    );
     await tester.scrollUntilVisible(
       find.text('NOTE VAULT'),
       300,
       scrollable: find.byType(Scrollable).first,
     );
     expect(find.text('SYNCHRONIZED'), findsOneWidget);
+  });
+
+  testWidgets('category tabs switch between sections', (
+    WidgetTester tester,
+  ) async {
+    final SettingsController controller = buildSettingsController();
+    await controller.initialize();
+    await pumpConfig(tester, controller);
+
+    // Starts on GENERAL
+    expect(find.text('APPEARANCE'), findsOneWidget);
+    expect(find.text('AUDIO CAPTURE'), findsNothing);
+    expect(find.text('TURSO CLOUD SYNC'), findsNothing);
+    expect(find.text('STORAGE'), findsNothing);
+
+    // Switch to CAPTURE & AI
+    await tester.tap(find.text('CAPTURE & AI'));
+    await tester.pumpAndSettle();
+    expect(find.text('AUDIO CAPTURE'), findsOneWidget);
+    expect(find.text('APPEARANCE'), findsNothing);
+
+    // Switch to SYNC & CLOUD
+    await tester.tap(find.text('SYNC & CLOUD'));
+    await tester.pumpAndSettle();
+    expect(find.text('TURSO CLOUD SYNC'), findsOneWidget);
+    expect(find.text('AUDIO CAPTURE'), findsNothing);
+
+    // Switch to DATA & COSTS
+    await tester.tap(find.text('DATA & COSTS'));
+    await tester.pumpAndSettle();
+    expect(find.text('ARCHIVE'), findsOneWidget);
+    expect(find.text('TURSO CLOUD SYNC'), findsNothing);
   });
 }

@@ -29,9 +29,21 @@ import 'vault_section.dart';
 import '../../momentum/domain/closure_event.dart';
 import '../../momentum/presentation/momentum_section.dart';
 
+/// Categories for organizing configuration settings into dedicated views.
+enum ConfigCategory {
+  general('General', Icons.tune_rounded),
+  capture('Capture & AI', Icons.mic_none_rounded),
+  sync('Sync & Cloud', Icons.cloud_sync_outlined),
+  data('Data & Costs', Icons.analytics_outlined);
+
+  const ConfigCategory(this.label, this.icon);
+  final String label;
+  final IconData icon;
+}
+
 /// Runtime settings: capture parameters plus a read-only view of where data
 /// lives and which provider is active. Provider editing lives in the Models tab.
-class ConfigTab extends StatelessWidget {
+class ConfigTab extends StatefulWidget {
   const ConfigTab({
     super.key,
     required this.controller,
@@ -58,6 +70,7 @@ class ConfigTab extends StatelessWidget {
     this.onBackfillClosures,
     this.onExportArchive,
     this.onImportArchive,
+    this.initialCategory = ConfigCategory.general,
   });
 
   /// Default for callers with no coordinator (mobile, tests): just run it.
@@ -131,506 +144,617 @@ class ConfigTab extends StatelessWidget {
   final Future<BackupSummary?> Function()? onExportArchive;
   final Future<RestoreSummary?> Function()? onImportArchive;
 
+  /// The category to open initially.
+  final ConfigCategory initialCategory;
+
+  @override
+  State<ConfigTab> createState() => _ConfigTabState();
+}
+
+class _ConfigTabState extends State<ConfigTab> {
+  late ConfigCategory _selectedCategory = widget.initialCategory;
+
+  @override
+  void didUpdateWidget(ConfigTab oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.initialCategory != widget.initialCategory) {
+      _selectedCategory = widget.initialCategory;
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
-    final AudioConfig audio = controller.audio;
-    final ProviderProfile? active = controller.activeProfile;
-
     return SafeArea(
       child: ListView(
         padding: const EdgeInsets.fromLTRB(18, 14, 18, 40),
         children: <Widget>[
           ConsoleHeader(title: 'Config', trailing: 'local only'),
-          const SizedBox(height: 18),
-          if (controller.error != null) ErrorBanner(message: controller.error!),
-          SectionHeader(title: 'APPEARANCE'),
-          const SizedBox(height: 12),
-          ConsoleCard(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: <Widget>[
-                _ChoiceRow<AppThemeMode>(
-                  label: 'THEME',
-                  value: controller.themeMode,
-                  options: AppThemeMode.values,
-                  labelFor: (AppThemeMode mode) => mode.label,
-                  onChanged: controller.setThemeMode,
-                ),
-                const SizedBox(height: 6),
-                Text(
-                  'SYSTEM follows the operating system and changes with it. '
-                  'DARK and LIGHT pin the app to one palette regardless.',
-                  style: TextStyle(
-                    color: Console.mutedSoft,
-                    fontSize: 10,
-                    height: 1.45,
-                  ),
-                ),
-                Divider(color: Console.border, height: 22),
-                _ChoiceRow<double>(
-                  label: 'FONT SCALE / ZOOM',
-                  value: controller.textScale,
-                  options: const <double>[0.8, 0.9, 1.0, 1.1, 1.25, 1.5, 2.0],
-                  labelFor: (double scale) {
-                    final int pct = (scale * 100).round();
-                    if (scale == AppSettings.defaultTextScale) {
-                      return '$pct% (Default)';
-                    }
-                    return '$pct%';
-                  },
-                  onChanged: controller.setTextScale,
-                ),
-                const SizedBox(height: 8),
-                Row(
-                  children: <Widget>[
-                    ConsoleIconButton(
-                      icon: Icons.remove,
-                      semanticLabel: 'Zoom Out (Ctrl -)',
-                      onTap: controller.zoomOut,
-                    ),
-                    const SizedBox(width: 8),
-                    ConsoleIconButton(
-                      icon: Icons.add,
-                      semanticLabel: 'Zoom In (Ctrl +)',
-                      onTap: controller.zoomIn,
-                    ),
-                    const SizedBox(width: 8),
-                    if (controller.textScale != AppSettings.defaultTextScale)
-                      ConsoleChip(
-                        label: 'RESET (100%)',
-                        selected: false,
-                        onSelected: controller.resetZoom,
-                      ),
-                  ],
-                ),
-                const SizedBox(height: 6),
-                Text(
-                  'Scales font and UI text size. On desktop, use Ctrl +/- (Cmd +/- on macOS) '
-                  'and Ctrl 0 (Cmd 0) to zoom.',
-                  style: TextStyle(
-                    color: Console.mutedSoft,
-                    fontSize: 10,
-                    height: 1.45,
-                  ),
-                ),
-              ],
-            ),
-          ),
-          const SizedBox(height: 22),
-          SectionHeader(title: 'AUDIO CAPTURE'),
-          const SizedBox(height: 12),
-          ConsoleCard(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: <Widget>[
-                InfoRow(label: 'CODEC', value: 'AAC-LC · .m4a (fixed)'),
-                Divider(color: Console.border, height: 22),
-                _ChoiceRow<int>(
-                  label: 'SAMPLE RATE',
-                  value: audio.sampleRate,
-                  options: AudioConfig.sampleRateOptions,
-                  labelFor: (int value) {
-                    final String label = '${value ~/ 1000} kHz';
-                    if (value == AudioConfig.defaults.sampleRate) {
-                      return '$label (Recommended)';
-                    }
-                    return label;
-                  },
-                  onChanged: (int value) =>
-                      controller.updateAudio(audio.copyWith(sampleRate: value)),
-                ),
-                const SizedBox(height: 4),
-                Text(
-                  'Whisper models are trained on 16kHz audio. Higher sample '
-                  'rates do not improve transcription quality and increase '
-                  'file size.',
-                  style: TextStyle(
-                    color: Console.mutedSoft,
-                    fontSize: 10,
-                    height: 1.45,
-                  ),
-                ),
-                const SizedBox(height: 10),
-                _ChoiceRow<int>(
-                  label: 'BITRATE',
-                  value: audio.bitRate,
-                  options: AudioConfig.bitRateOptions,
-                  labelFor: (int value) {
-                    final String label = '${value ~/ 1000} kbps';
-                    if (value == AudioConfig.defaults.bitRate) {
-                      return '$label (Recommended)';
-                    }
-                    return label;
-                  },
-                  onChanged: (int value) =>
-                      controller.updateAudio(audio.copyWith(bitRate: value)),
-                ),
-                const SizedBox(height: 4),
-                Text(
-                  '64 kbps offers a good balance between audio quality and file '
-                  'size, based on our experiments.',
-                  style: TextStyle(
-                    color: Console.mutedSoft,
-                    fontSize: 10,
-                    height: 1.45,
-                  ),
-                ),
-                const SizedBox(height: 10),
-                _ChoiceRow<int>(
-                  label: 'CHANNELS',
-                  value: audio.numChannels,
-                  options: const <int>[1, 2],
-                  labelFor: (int value) => value == 1 ? 'Mono' : 'Stereo',
-                  onChanged: (int value) => controller.updateAudio(
-                    audio.copyWith(numChannels: value),
-                  ),
-                ),
-                Divider(color: Console.border, height: 22),
-                InfoRow(
-                  label: 'SIZE',
-                  value:
-                      '~${_megabytesPerHour(audio).toStringAsFixed(0)} MB '
-                      'per hour of recording',
-                ),
-                const SizedBox(height: 6),
-                Text(
-                  'Changes apply to later recordings. Files already saved '
-                  'stay as they are.',
-                  style: TextStyle(
-                    color: Console.mutedSoft,
-                    fontSize: 10,
-                    height: 1.45,
-                  ),
-                ),
-                const SizedBox(height: 12),
-                Align(
-                  alignment: Alignment.centerRight,
-                  child: TextButton.icon(
-                    onPressed: audio == AudioConfig.defaults
-                        ? null
-                        : controller.resetAudio,
-                    icon: const Icon(Icons.restart_alt, size: 17),
-                    label: const Text('RESTORE DEFAULTS'),
-                  ),
-                ),
-              ],
-            ),
-          ),
-          const SizedBox(height: 22),
-          SectionHeader(title: 'TRANSCRIPTION'),
-          const SizedBox(height: 12),
-          ConsoleCard(
-            accent: active == null ? Console.border : Console.accent,
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: <Widget>[
-                InfoRow(
-                  label: 'ACTIVE PROFILE',
-                  value: active?.name ?? 'None — transcription off',
-                  valueColor: active == null ? Console.amber : Console.text,
-                ),
-                InfoRow(
-                  label: 'ENDPOINT',
-                  value: active?.endpoint ?? '—',
-                  monospace: true,
-                ),
-                InfoRow(label: 'MODEL', value: active?.model ?? '—'),
-                InfoRow(label: 'LANGUAGE', value: active?.language ?? 'auto'),
-                InfoRow(
-                  label: 'TOKEN',
-                  value: _tokenStatus(active, controller.tokenEncryptionActive),
-                  valueColor: _tokenColor(
-                    active,
-                    controller.tokenEncryptionActive,
-                  ),
-                ),
-                const SizedBox(height: 10),
-                Align(
-                  alignment: Alignment.centerRight,
-                  child: TextButton.icon(
-                    onPressed: onOpenModels,
-                    icon: const Icon(Icons.memory_outlined, size: 17),
-                    label: const Text('MANAGE PROFILES'),
-                  ),
-                ),
-              ],
-            ),
-          ),
-          const SizedBox(height: 22),
-          EnrichmentContextSection(controller: controller, projects: projects),
-          const SizedBox(height: 22),
-          VaultSection(
-            controller: controller,
-            onMirrorAll: onMirrorAll,
-            onFetchStats: recordingsController?.vaultStats,
-            isDesktop: showShortcuts,
-          ),
-          const SizedBox(height: 22),
-          // Above the sync sections and below the vault: it configures where
-          // *work* goes, which belongs beside the other destinations rather
-          // than among the storage credentials.
-          CommandSection(controller: controller),
-          const SizedBox(height: 22),
-          MomentumSection(onBackfill: onBackfillClosures),
-          const SizedBox(height: 22),
-          // Below the vault on purpose: a mirror is the copy you read, an
-          // archive is the copy you restore from, and the first is the one a
-          // user is more likely to want set up today.
-          BackupSection(onExport: onExportArchive, onImport: onImportArchive),
-          if (showShortcuts) ...<Widget>[
-            const SizedBox(height: 22),
-            ShortcutsSection(
-              controller: controller,
-              rejected: rejectedShortcuts,
-              runWithHotkeysSuspended: runWithHotkeysSuspended,
-            ),
+          const SizedBox(height: 14),
+          if (widget.controller.error != null) ...<Widget>[
+            ErrorBanner(message: widget.controller.error!),
+            const SizedBox(height: 14),
           ],
-          const SizedBox(height: 22),
-          SectionHeader(title: 'MOBILE KEYBOARD'),
-          const SizedBox(height: 12),
-          ConsoleCard(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: <Widget>[
-                InfoRow(
-                  label: 'KEYBOARD EXTENSION',
-                  value: 'Ready for iOS & Android',
-                  valueColor: Console.accent,
-                ),
-                InfoRow(
-                  label: 'CLIPBOARD SYNC',
-                  value: 'Multi-Clipboard Active',
-                ),
-                InfoRow(
-                  label: 'CLIPBOARD CAPACITY',
-                  value: '100,000 items (100k)',
-                  monospace: true,
-                ),
-                const SizedBox(height: 8),
-                Text(
-                  'To use Augustyniak Capture as your system keyboard on mobile, open your device Settings -> Keyboards -> Add New Keyboard -> Augustyniak Capture. All copied items and collections will be available for 1-tap pasting across any app.',
-                  style: TextStyle(
-                    color: Console.mutedSoft,
-                    fontSize: 11,
-                    height: 1.45,
-                  ),
-                ),
-              ],
-            ),
-          ),
-          const SizedBox(height: 22),
-          SectionHeader(title: 'TURSO CLOUD SYNC'),
-          const SizedBox(height: 12),
-          ConsoleCard(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: <Widget>[
-                InfoRow(
-                  label: 'DATABASE URL',
-                  value: controller.settings.tursoDbUrl ?? 'Not configured',
-                  valueColor: Console.accent,
-                  monospace: true,
-                ),
-                InfoRow(
-                  label: 'SYNC STATUS',
-                  value: controller.settings.tursoDbUrl != null
-                      ? 'ACTIVE · Connected (aws-us-east-1)'
-                      : 'DISABLED',
-                  valueColor: controller.settings.tursoDbUrl != null
-                      ? Console.green
-                      : Console.mutedSoft,
-                ),
-                InfoRow(
-                  label: 'API TOKEN',
-                  value: controller.settings.tursoAuthToken != null
-                      ? '•••• Encrypted at rest (AES-GCM)'
-                      : 'Not set',
-                ),
-                const SizedBox(height: 8),
-                Text(
-                  'Your SQLite database is synced with Turso Cloud Embedded Replica. Mobile, desktop, and web instances share real-time captures, clipboard, projects, and settings.',
-                  style: TextStyle(
-                    color: Console.mutedSoft,
-                    fontSize: 11,
-                    height: 1.45,
-                  ),
-                ),
-                const SizedBox(height: 10),
-                Wrap(
-                  spacing: 8,
-                  runSpacing: 8,
-                  alignment: WrapAlignment.spaceBetween,
-                  crossAxisAlignment: WrapCrossAlignment.center,
-                  children: <Widget>[
-                    _SyncNowButton(
-                      controller: controller,
-                      recordingsController: recordingsController,
-                    ),
-                    TextButton.icon(
-                      icon: const Icon(Icons.edit, size: 14),
-                      label: const Text('EDIT TURSO CREDENTIALS'),
-                      style: TextButton.styleFrom(
-                        foregroundColor: Console.accent,
-                      ),
-                      onPressed: () => _showEditTursoDialog(
-                        context,
-                        controller,
-                        recordingsController,
-                      ),
-                    ),
-                  ],
-                ),
-              ],
-            ),
-          ),
-          const SizedBox(height: 22),
-          SectionHeader(title: 'CLOUDFLARE R2 MEDIA SYNC'),
-          const SizedBox(height: 12),
-          ConsoleCard(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: <Widget>[
-                InfoRow(
-                  label: 'BUCKET NAME',
-                  value: controller.settings.r2Bucket ?? 'Not configured',
-                  valueColor: Console.accent,
-                  monospace: true,
-                ),
-                InfoRow(
-                  label: 'MEDIA SYNC',
-                  value: controller.settings.r2Bucket != null
-                      ? 'ACTIVE · 101/101 files uploaded (\$0 egress)'
-                      : 'DISABLED',
-                  valueColor: controller.settings.r2Bucket != null
-                      ? Console.green
-                      : Console.mutedSoft,
-                ),
-                InfoRow(
-                  label: 'SECRET ACCESS KEY',
-                  value: controller.settings.r2SecretAccessKey != null
-                      ? '•••• Encrypted at rest (AES-GCM)'
-                      : 'Not set',
-                ),
-                const SizedBox(height: 8),
-                Text(
-                  'Audio recordings (.m4a) and image captures are synced with Cloudflare R2 S3 Object Storage with zero bandwidth fees. Seamless streaming on mobile and desktop.',
-                  style: TextStyle(
-                    color: Console.mutedSoft,
-                    fontSize: 11,
-                    height: 1.45,
-                  ),
-                ),
-                const SizedBox(height: 10),
-                Align(
-                  alignment: Alignment.centerRight,
-                  child: TextButton.icon(
-                    icon: const Icon(Icons.edit, size: 14),
-                    label: const Text('EDIT R2 CREDENTIALS'),
-                    style: TextButton.styleFrom(
-                      foregroundColor: Console.accent,
-                    ),
-                    onPressed: () => _showEditR2Dialog(context, controller),
-                  ),
-                ),
-                const SizedBox(height: 12),
-                Row(
-                  children: <Widget>[
-                    Expanded(
-                      child: ElevatedButton.icon(
-                        icon: const Icon(Icons.qr_code, size: 16),
-                        label: const Text('PAIR DEVICE VIA QR CODE'),
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor: Console.accent,
-                          foregroundColor: Colors.black,
-                          padding: const EdgeInsets.symmetric(vertical: 12),
-                        ),
-                        onPressed: () {
-                          final bool isMobile =
-                              Theme.of(context).platform ==
-                                  TargetPlatform.android ||
-                              Theme.of(context).platform == TargetPlatform.iOS;
-                          if (isMobile) {
-                            Navigator.of(context).push(
-                              MaterialPageRoute<bool>(
-                                builder: (_) => QrSyncScannerSheet(
-                                  controller: controller,
-                                  recordingsController: recordingsController,
-                                ),
-                              ),
-                            );
-                          } else {
-                            showModalBottomSheet<void>(
-                              context: context,
-                              backgroundColor: Console.surface,
-                              shape: const RoundedRectangleBorder(
-                                borderRadius: BorderRadius.vertical(
-                                  top: Radius.circular(20),
-                                ),
-                              ),
-                              builder: (_) => QrSyncDisplaySheet(
-                                settings: controller.settings,
-                              ),
-                            );
-                          }
-                        },
-                      ),
-                    ),
-                  ],
-                ),
-              ],
-            ),
-          ),
-          const SizedBox(height: 22),
-          PricingSection(
-            thisMonth: thisMonthUsd,
-            allTime: allTimeUsd,
-            storageBytes: storageBytes,
-            storagePrice: storagePrice,
-            models: models,
-            priceBook: priceBook,
-            missingRateCounts: missingRateCounts,
-            unknownQuantityCount: unknownQuantityCount,
-            verifiedOn: verifiedOn ?? PriceBookDefaults.verifiedOn,
-            onRateChanged: onRateChanged,
-          ),
-          const SizedBox(height: 22),
-          SectionHeader(title: 'STORAGE'),
-          const SizedBox(height: 12),
-          ConsoleCard(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: <Widget>[
-                InfoRow(
-                  label: 'DIRECTORY',
-                  value: storagePath ?? 'resolving…',
-                  monospace: true,
-                ),
-                InfoRow(
-                  label: 'RECORDINGS',
-                  value: '$recordingsCount .m4a files',
-                ),
-                InfoRow(label: 'INDEX', value: 'recordings.json'),
-                // Settings are read from and written to the database only; the
-                // settings.json this used to name is a legacy file, migrated
-                // once and never written again.
-                InfoRow(label: 'SETTINGS', value: 'app_database.sqlite'),
-                InfoRow(label: 'LOGS', value: 'logs.json · $logCount events'),
-                const SizedBox(height: 10),
-                Text(
-                  'Every write is atomic: a .tmp file, then rename. '
-                  'The app never deletes recordings.',
-                  style: TextStyle(
-                    color: Console.mutedSoft,
-                    fontSize: 10,
-                    height: 1.45,
-                  ),
-                ),
-              ],
-            ),
-          ),
+          _buildCategorySelector(),
+          const SizedBox(height: 18),
+          ..._buildCategoryContent(context),
         ],
       ),
     );
+  }
+
+  Widget _buildCategorySelector() {
+    return SingleChildScrollView(
+      scrollDirection: Axis.horizontal,
+      child: Row(
+        children: ConfigCategory.values.map((ConfigCategory category) {
+          final bool selected = _selectedCategory == category;
+          return Padding(
+            padding: const EdgeInsets.only(right: 8),
+            child: InkWell(
+              borderRadius: BorderRadius.circular(8),
+              onTap: () => setState(() => _selectedCategory = category),
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                decoration: BoxDecoration(
+                  color: selected
+                      ? Console.accent.withValues(alpha: 0.15)
+                      : Console.surfaceRaised,
+                  border: Border.all(
+                    color: selected ? Console.accent : Console.border,
+                    width: 1,
+                  ),
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: <Widget>[
+                    Icon(
+                      category.icon,
+                      size: 15,
+                      color: selected ? Console.accent : Console.muted,
+                    ),
+                    const SizedBox(width: 6),
+                    Text(
+                      category.label.toUpperCase(),
+                      style: TextStyle(
+                        color: selected ? Console.accent : Console.text,
+                        fontSize: 11,
+                        fontWeight: selected ? FontWeight.bold : FontWeight.w600,
+                        letterSpacing: 0.6,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          );
+        }).toList(),
+      ),
+    );
+  }
+
+  List<Widget> _buildCategoryContent(BuildContext context) {
+    switch (_selectedCategory) {
+      case ConfigCategory.general:
+        return _buildGeneralCategory(context);
+      case ConfigCategory.capture:
+        return _buildCaptureCategory(context);
+      case ConfigCategory.sync:
+        return _buildSyncCategory(context);
+      case ConfigCategory.data:
+        return _buildDataCategory(context);
+    }
+  }
+
+  List<Widget> _buildGeneralCategory(BuildContext context) {
+    return <Widget>[
+      SectionHeader(title: 'APPEARANCE'),
+      const SizedBox(height: 12),
+      ConsoleCard(
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: <Widget>[
+            _ChoiceRow<AppThemeMode>(
+              label: 'THEME',
+              value: widget.controller.themeMode,
+              options: AppThemeMode.values,
+              labelFor: (AppThemeMode mode) => mode.label,
+              onChanged: widget.controller.setThemeMode,
+            ),
+            const SizedBox(height: 6),
+            Text(
+              'SYSTEM follows the operating system and changes with it. '
+              'DARK and LIGHT pin the app to one palette regardless.',
+              style: TextStyle(
+                color: Console.mutedSoft,
+                fontSize: 10,
+                height: 1.45,
+              ),
+            ),
+            Divider(color: Console.border, height: 22),
+            _ChoiceRow<double>(
+              label: 'FONT SCALE / ZOOM',
+              value: widget.controller.textScale,
+              options: const <double>[0.8, 0.9, 1.0, 1.1, 1.25, 1.5, 2.0],
+              labelFor: (double scale) {
+                final int pct = (scale * 100).round();
+                if (scale == AppSettings.defaultTextScale) {
+                  return '$pct% (Default)';
+                }
+                return '$pct%';
+              },
+              onChanged: widget.controller.setTextScale,
+            ),
+            const SizedBox(height: 8),
+            Row(
+              children: <Widget>[
+                ConsoleIconButton(
+                  icon: Icons.remove,
+                  semanticLabel: 'Zoom Out (Ctrl -)',
+                  onTap: widget.controller.zoomOut,
+                ),
+                const SizedBox(width: 8),
+                ConsoleIconButton(
+                  icon: Icons.add,
+                  semanticLabel: 'Zoom In (Ctrl +)',
+                  onTap: widget.controller.zoomIn,
+                ),
+                const SizedBox(width: 8),
+                if (widget.controller.textScale != AppSettings.defaultTextScale)
+                  ConsoleChip(
+                    label: 'RESET (100%)',
+                    selected: false,
+                    onSelected: widget.controller.resetZoom,
+                  ),
+              ],
+            ),
+            const SizedBox(height: 6),
+            Text(
+              'Scales font and UI text size. On desktop, use Ctrl +/- (Cmd +/- on macOS) '
+              'and Ctrl 0 (Cmd 0) to zoom.',
+              style: TextStyle(
+                color: Console.mutedSoft,
+                fontSize: 10,
+                height: 1.45,
+              ),
+            ),
+          ],
+        ),
+      ),
+      if (widget.showShortcuts) ...<Widget>[
+        const SizedBox(height: 22),
+        ShortcutsSection(
+          controller: widget.controller,
+          rejected: widget.rejectedShortcuts,
+          runWithHotkeysSuspended: widget.runWithHotkeysSuspended,
+        ),
+      ],
+      const SizedBox(height: 22),
+      SectionHeader(title: 'MOBILE KEYBOARD'),
+      const SizedBox(height: 12),
+      ConsoleCard(
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: <Widget>[
+            InfoRow(
+              label: 'KEYBOARD EXTENSION',
+              value: 'Ready for iOS & Android',
+              valueColor: Console.accent,
+            ),
+            InfoRow(
+              label: 'CLIPBOARD SYNC',
+              value: 'Multi-Clipboard Active',
+            ),
+            InfoRow(
+              label: 'CLIPBOARD CAPACITY',
+              value: '100,000 items (100k)',
+              monospace: true,
+            ),
+            const SizedBox(height: 8),
+            Text(
+              'To use Augustyniak Capture as your system keyboard on mobile, open your device Settings -> Keyboards -> Add New Keyboard -> Augustyniak Capture. All copied items and collections will be available for 1-tap pasting across any app.',
+              style: TextStyle(
+                color: Console.mutedSoft,
+                fontSize: 11,
+                height: 1.45,
+              ),
+            ),
+          ],
+        ),
+      ),
+    ];
+  }
+
+  List<Widget> _buildCaptureCategory(BuildContext context) {
+    final AudioConfig audio = widget.controller.audio;
+    final ProviderProfile? active = widget.controller.activeProfile;
+
+    return <Widget>[
+      SectionHeader(title: 'AUDIO CAPTURE'),
+      const SizedBox(height: 12),
+      ConsoleCard(
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: <Widget>[
+            InfoRow(label: 'CODEC', value: 'AAC-LC · .m4a (fixed)'),
+            Divider(color: Console.border, height: 22),
+            _ChoiceRow<int>(
+              label: 'SAMPLE RATE',
+              value: audio.sampleRate,
+              options: AudioConfig.sampleRateOptions,
+              labelFor: (int value) {
+                final String label = '${value ~/ 1000} kHz';
+                if (value == AudioConfig.defaults.sampleRate) {
+                  return '$label (Recommended)';
+                }
+                return label;
+              },
+              onChanged: (int value) => widget.controller.updateAudio(
+                audio.copyWith(sampleRate: value),
+              ),
+            ),
+            const SizedBox(height: 4),
+            Text(
+              'Whisper models are trained on 16kHz audio. Higher sample '
+              'rates do not improve transcription quality and increase '
+              'file size.',
+              style: TextStyle(
+                color: Console.mutedSoft,
+                fontSize: 10,
+                height: 1.45,
+              ),
+            ),
+            const SizedBox(height: 10),
+            _ChoiceRow<int>(
+              label: 'BITRATE',
+              value: audio.bitRate,
+              options: AudioConfig.bitRateOptions,
+              labelFor: (int value) {
+                final String label = '${value ~/ 1000} kbps';
+                if (value == AudioConfig.defaults.bitRate) {
+                  return '$label (Recommended)';
+                }
+                return label;
+              },
+              onChanged: (int value) => widget.controller.updateAudio(
+                audio.copyWith(bitRate: value),
+              ),
+            ),
+            const SizedBox(height: 4),
+            Text(
+              '64 kbps offers a good balance between audio quality and file '
+              'size, based on our experiments.',
+              style: TextStyle(
+                color: Console.mutedSoft,
+                fontSize: 10,
+                height: 1.45,
+              ),
+            ),
+            const SizedBox(height: 10),
+            _ChoiceRow<int>(
+              label: 'CHANNELS',
+              value: audio.numChannels,
+              options: const <int>[1, 2],
+              labelFor: (int value) => value == 1 ? 'Mono' : 'Stereo',
+              onChanged: (int value) => widget.controller.updateAudio(
+                audio.copyWith(numChannels: value),
+              ),
+            ),
+            Divider(color: Console.border, height: 22),
+            InfoRow(
+              label: 'SIZE',
+              value:
+                  '~${_megabytesPerHour(audio).toStringAsFixed(0)} MB '
+                  'per hour of recording',
+            ),
+            const SizedBox(height: 6),
+            Text(
+              'Changes apply to later recordings. Files already saved '
+              'stay as they are.',
+              style: TextStyle(
+                color: Console.mutedSoft,
+                fontSize: 10,
+                height: 1.45,
+              ),
+            ),
+            const SizedBox(height: 12),
+            Align(
+              alignment: Alignment.centerRight,
+              child: TextButton.icon(
+                onPressed: audio == AudioConfig.defaults
+                    ? null
+                    : widget.controller.resetAudio,
+                icon: const Icon(Icons.restart_alt, size: 17),
+                label: const Text('RESTORE DEFAULTS'),
+              ),
+            ),
+          ],
+        ),
+      ),
+      const SizedBox(height: 22),
+      SectionHeader(title: 'TRANSCRIPTION'),
+      const SizedBox(height: 12),
+      ConsoleCard(
+        accent: active == null ? Console.border : Console.accent,
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: <Widget>[
+            InfoRow(
+              label: 'ACTIVE PROFILE',
+              value: active?.name ?? 'None — transcription off',
+              valueColor: active == null ? Console.amber : Console.text,
+            ),
+            InfoRow(
+              label: 'ENDPOINT',
+              value: active?.endpoint ?? '—',
+              monospace: true,
+            ),
+            InfoRow(label: 'MODEL', value: active?.model ?? '—'),
+            InfoRow(label: 'LANGUAGE', value: active?.language ?? 'auto'),
+            InfoRow(
+              label: 'TOKEN',
+              value: _tokenStatus(
+                active,
+                widget.controller.tokenEncryptionActive,
+              ),
+              valueColor: _tokenColor(
+                active,
+                widget.controller.tokenEncryptionActive,
+              ),
+            ),
+            const SizedBox(height: 10),
+            Align(
+              alignment: Alignment.centerRight,
+              child: TextButton.icon(
+                onPressed: widget.onOpenModels,
+                icon: const Icon(Icons.memory_outlined, size: 17),
+                label: const Text('MANAGE PROFILES'),
+              ),
+            ),
+          ],
+        ),
+      ),
+      const SizedBox(height: 22),
+      EnrichmentContextSection(
+        controller: widget.controller,
+        projects: widget.projects,
+      ),
+      const SizedBox(height: 22),
+      VaultSection(
+        controller: widget.controller,
+        onMirrorAll: widget.onMirrorAll,
+        onFetchStats: widget.recordingsController?.vaultStats,
+        isDesktop: widget.showShortcuts,
+      ),
+    ];
+  }
+
+  List<Widget> _buildSyncCategory(BuildContext context) {
+    return <Widget>[
+      SectionHeader(title: 'TURSO CLOUD SYNC'),
+      const SizedBox(height: 12),
+      ConsoleCard(
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: <Widget>[
+            InfoRow(
+              label: 'DATABASE URL',
+              value: widget.controller.settings.tursoDbUrl ?? 'Not configured',
+              valueColor: Console.accent,
+              monospace: true,
+            ),
+            InfoRow(
+              label: 'SYNC STATUS',
+              value: widget.controller.settings.tursoDbUrl != null
+                  ? 'ACTIVE · Connected (aws-us-east-1)'
+                  : 'DISABLED',
+              valueColor: widget.controller.settings.tursoDbUrl != null
+                  ? Console.green
+                  : Console.mutedSoft,
+            ),
+            InfoRow(
+              label: 'API TOKEN',
+              value: widget.controller.settings.tursoAuthToken != null
+                  ? '•••• Encrypted at rest (AES-GCM)'
+                  : 'Not set',
+            ),
+            const SizedBox(height: 8),
+            Text(
+              'Your SQLite database is synced with Turso Cloud Embedded Replica. Mobile, desktop, and web instances share real-time captures, clipboard, projects, and settings.',
+              style: TextStyle(
+                color: Console.mutedSoft,
+                fontSize: 11,
+                height: 1.45,
+              ),
+            ),
+            const SizedBox(height: 10),
+            Wrap(
+              spacing: 8,
+              runSpacing: 8,
+              alignment: WrapAlignment.spaceBetween,
+              crossAxisAlignment: WrapCrossAlignment.center,
+              children: <Widget>[
+                _SyncNowButton(
+                  controller: widget.controller,
+                  recordingsController: widget.recordingsController,
+                ),
+                TextButton.icon(
+                  icon: const Icon(Icons.edit, size: 14),
+                  label: const Text('EDIT TURSO CREDENTIALS'),
+                  style: TextButton.styleFrom(
+                    foregroundColor: Console.accent,
+                  ),
+                  onPressed: () => _showEditTursoDialog(
+                    context,
+                    widget.controller,
+                    widget.recordingsController,
+                  ),
+                ),
+              ],
+            ),
+          ],
+        ),
+      ),
+      const SizedBox(height: 22),
+      SectionHeader(title: 'CLOUDFLARE R2 MEDIA SYNC'),
+      const SizedBox(height: 12),
+      ConsoleCard(
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: <Widget>[
+            InfoRow(
+              label: 'BUCKET NAME',
+              value: widget.controller.settings.r2Bucket ?? 'Not configured',
+              valueColor: Console.accent,
+              monospace: true,
+            ),
+            InfoRow(
+              label: 'MEDIA SYNC',
+              value: widget.controller.settings.r2Bucket != null
+                  ? 'ACTIVE · 101/101 files uploaded (\$0 egress)'
+                  : 'DISABLED',
+              valueColor: widget.controller.settings.r2Bucket != null
+                  ? Console.green
+                  : Console.mutedSoft,
+            ),
+            InfoRow(
+              label: 'SECRET ACCESS KEY',
+              value: widget.controller.settings.r2SecretAccessKey != null
+                  ? '•••• Encrypted at rest (AES-GCM)'
+                  : 'Not set',
+            ),
+            const SizedBox(height: 8),
+            Text(
+              'Audio recordings (.m4a) and image captures are synced with Cloudflare R2 S3 Object Storage with zero bandwidth fees. Seamless streaming on mobile and desktop.',
+              style: TextStyle(
+                color: Console.mutedSoft,
+                fontSize: 11,
+                height: 1.45,
+              ),
+            ),
+            const SizedBox(height: 10),
+            Align(
+              alignment: Alignment.centerRight,
+              child: TextButton.icon(
+                icon: const Icon(Icons.edit, size: 14),
+                label: const Text('EDIT R2 CREDENTIALS'),
+                style: TextButton.styleFrom(
+                  foregroundColor: Console.accent,
+                ),
+                onPressed: () => _showEditR2Dialog(context, widget.controller),
+              ),
+            ),
+            const SizedBox(height: 12),
+            Row(
+              children: <Widget>[
+                Expanded(
+                  child: ElevatedButton.icon(
+                    icon: const Icon(Icons.qr_code, size: 16),
+                    label: const Text('PAIR DEVICE VIA QR CODE'),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: Console.accent,
+                      foregroundColor: Colors.black,
+                      padding: const EdgeInsets.symmetric(vertical: 12),
+                    ),
+                    onPressed: () {
+                      final bool isMobile =
+                          Theme.of(context).platform ==
+                              TargetPlatform.android ||
+                          Theme.of(context).platform == TargetPlatform.iOS;
+                      if (isMobile) {
+                        Navigator.of(context).push(
+                          MaterialPageRoute<bool>(
+                            builder: (_) => QrSyncScannerSheet(
+                              controller: widget.controller,
+                              recordingsController:
+                                  widget.recordingsController,
+                            ),
+                          ),
+                        );
+                      } else {
+                        showModalBottomSheet<void>(
+                          context: context,
+                          backgroundColor: Console.surface,
+                          shape: const RoundedRectangleBorder(
+                            borderRadius: BorderRadius.vertical(
+                              top: Radius.circular(20),
+                            ),
+                          ),
+                          builder: (_) => QrSyncDisplaySheet(
+                            settings: widget.controller.settings,
+                          ),
+                        );
+                      }
+                    },
+                  ),
+                ),
+              ],
+            ),
+          ],
+        ),
+      ),
+      const SizedBox(height: 22),
+      CommandSection(controller: widget.controller),
+    ];
+  }
+
+  List<Widget> _buildDataCategory(BuildContext context) {
+    return <Widget>[
+      PricingSection(
+        thisMonth: widget.thisMonthUsd,
+        allTime: widget.allTimeUsd,
+        storageBytes: widget.storageBytes,
+        storagePrice: widget.storagePrice,
+        models: widget.models,
+        priceBook: widget.priceBook,
+        missingRateCounts: widget.missingRateCounts,
+        unknownQuantityCount: widget.unknownQuantityCount,
+        verifiedOn: widget.verifiedOn ?? PriceBookDefaults.verifiedOn,
+        onRateChanged: widget.onRateChanged,
+      ),
+      const SizedBox(height: 22),
+      MomentumSection(onBackfill: widget.onBackfillClosures),
+      const SizedBox(height: 22),
+      BackupSection(
+        onExport: widget.onExportArchive,
+        onImport: widget.onImportArchive,
+      ),
+      const SizedBox(height: 22),
+      SectionHeader(title: 'STORAGE'),
+      const SizedBox(height: 12),
+      ConsoleCard(
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: <Widget>[
+            InfoRow(
+              label: 'DIRECTORY',
+              value: widget.storagePath ?? 'resolving…',
+              monospace: true,
+            ),
+            InfoRow(
+              label: 'RECORDINGS',
+              value: '${widget.recordingsCount} .m4a files',
+            ),
+            InfoRow(label: 'INDEX', value: 'recordings.json'),
+            InfoRow(label: 'SETTINGS', value: 'app_database.sqlite'),
+            InfoRow(
+              label: 'LOGS',
+              value: 'logs.json · ${widget.logCount} events',
+            ),
+            const SizedBox(height: 10),
+            Text(
+              'Every write is atomic: a .tmp file, then rename. '
+              'The app never deletes recordings.',
+              style: TextStyle(
+                color: Console.mutedSoft,
+                fontSize: 10,
+                height: 1.45,
+              ),
+            ),
+          ],
+        ),
+      ),
+    ];
   }
 
   /// AAC bitrate is constant, so hourly size follows straight from it.
