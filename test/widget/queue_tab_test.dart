@@ -216,12 +216,19 @@ void main() {
   ) async {
     final RecordingsController controller = await buildRecordingsController(
       appDir,
-      // Only terminal statuses: `initialize()` resumes anything left
-      // non-terminal by a previous session, so a seeded `pendingTranscription`
-      // would be drained out of the queue bucket before the first frame.
+      // Only statuses `initialize()` leaves alone: it resumes anything
+      // non-terminal, so a seeded `pendingTranscription` would be drained out
+      // of the queue bucket before the first frame. `saved` joined that list
+      // when the sweep widened to cover recovered captures — a `saved` row
+      // survives it only by already holding its text, which is what `raw`
+      // carries here.
       seed: <Recording>[
         makeRecording(id: 'done', status: RecordingStatus.completed),
-        makeRecording(id: 'raw', status: RecordingStatus.saved),
+        makeRecording(
+          id: 'raw',
+          status: RecordingStatus.saved,
+          transcript: 'read out already',
+        ),
         makeRecording(id: 'bad', status: RecordingStatus.failed),
       ],
     );
@@ -501,6 +508,45 @@ void main() {
     expect(find.text('RETRY'), findsOneWidget);
     expect(find.text('FAILED'), findsOneWidget);
     expect(find.textContaining('endpoint is not responding'), findsOneWidget);
+  });
+
+  testWidgets('a capture with a source and no text offers retry', (
+    WidgetTester tester,
+  ) async {
+    // What an orphan recovery or a salvaged timeout leaves on screen: a row
+    // holding real audio, no transcript, and — while RETRY was gated on
+    // `failed` alone — no control anywhere that would process it. The capture
+    // survived and was unreachable, which reads to a user exactly like losing
+    // it.
+    //
+    // Pumped straight at the card rather than through `buildRecordingsController`,
+    // because that harness runs `initialize()`, whose sweep now claims exactly
+    // this row: by the first frame it would be `failed`, and the test would be
+    // asserting the old gate all over again.
+    await tester.pumpWidget(
+      hostTab(
+        () => RecordingCard(
+          recording: makeRecording(
+            id: 'recovered',
+            status: RecordingStatus.saved,
+          ),
+          isPlaying: false,
+          onTogglePlay: () {},
+          onOpen: () {},
+          onRetry: () {},
+          onEnrich: () {},
+          onEdit: () {},
+          onToggleProcessed: () {},
+          onRoute: () {},
+          onHandoff: () {},
+        ),
+      ),
+    );
+
+    expect(find.text('RETRY'), findsOneWidget);
+    // A capture that has not been processed has not failed at anything.
+    expect(find.text('FAILED'), findsNothing);
+    expect(find.text('RAW'), findsOneWidget);
   });
 
   testWidgets('a completed item offers LLM enrichment, not processing retry', (

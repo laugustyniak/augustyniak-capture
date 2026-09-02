@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
@@ -30,6 +31,9 @@ void main() {
       transcriptionService: const DisabledTranscriptionService(),
       recorder: recorder,
       player: FakePlayer(),
+      // Short enough to keep the suite fast; the production default is what
+      // decides how long a user stares at a frozen capture screen.
+      recorderTimeout: const Duration(milliseconds: 50),
     );
     addTearDown(controller.dispose);
     return controller;
@@ -75,6 +79,55 @@ void main() {
     expect(File(path).existsSync(), isFalse);
   });
 
+  test('a recorder that never returns from stop still indexes the bytes', () async {
+    // The incident this fixes: `stop()` neither returns nor throws, so the
+    // salvage path built for a throwing recorder never runs, `finally` never
+    // runs either, and a complete take sits on disk with no row pointing at it
+    // until the next launch re-adopts it as an orphan.
+    final RecordingsController controller = build(
+      _StoppingRecorder(_StopBehaviour.hangs),
+    );
+    await controller.startRecording();
+    await controller.stopRecording();
+    await controller.waitForProcessing();
+
+    expect(controller.recordings, hasLength(1));
+    final Recording saved = controller.recordings.single;
+    expect(File(saved.filePath).existsSync(), isTrue);
+    expect(saved.sizeBytes, greaterThan(0));
+  });
+
+  test('a hung stop still closes the capture screen', () async {
+    // `_isBusy` is what the capture screen and DISCARD both read. Left true it
+    // takes the screen hostage *and* silently disables the one control the user
+    // has left, which is what made the freeze unrecoverable without a kill.
+    final RecordingsController controller = build(
+      _StoppingRecorder(_StopBehaviour.hangs),
+    );
+    await controller.startRecording();
+    await controller.stopRecording();
+
+    expect(controller.isBusy, isFalse);
+    expect(controller.isRecording, isFalse);
+  });
+
+  test('a recorder wedged by a hung stop reports instead of hanging', () async {
+    // After a timed-out stop the platform recorder is wedged — `record_linux`
+    // never nulls its controller and never kills `parecord`, and its `start()`
+    // begins by awaiting that same `stop()`. Without a bound here the next
+    // capture hangs with no spinner and no error: a dead RECORD button.
+    final RecordingsController controller = build(
+      _StoppingRecorder(_StopBehaviour.hangs),
+    );
+    await controller.startRecording();
+    await controller.stopRecording();
+
+    await controller.startRecording();
+
+    expect(controller.isRecording, isFalse);
+    expect(controller.error, isNotNull);
+  });
+
   test('every RECORD button reveals the queue before it starts', () {
     // A source guard rather than a widget test, on the same rule as
     // `theme_test.dart`'s scope group: `RecordingsPage` builds its own
@@ -100,7 +153,7 @@ void main() {
   });
 }
 
-enum _StopBehaviour { throws, emptyFile }
+enum _StopBehaviour { throws, emptyFile, hangs }
 
 /// Writes what the behaviour under test needs on `start`, so `stopRecording`
 /// meets a real file rather than a fake's opinion of one.
@@ -116,8 +169,14 @@ class _StoppingRecorder implements AudioRecorder {
   @override
   Future<bool> hasPermission({bool request = true}) async => true;
 
+  /// Set once `stop()` has been asked to hang, so `start` can model what the
+  /// platform plugin does next: its own `start()` opens by awaiting that same
+  /// unfinished `stop()`, so the wedge outlives the capture that caused it.
+  bool _wedged = false;
+
   @override
   Future<void> start(RecordConfig config, {required String path}) async {
+    if (_wedged) return Completer<void>().future;
     this.path = path;
     await File(path).writeAsString(
       behaviour == _StopBehaviour.emptyFile ? '' : 'audio',
@@ -125,11 +184,17 @@ class _StoppingRecorder implements AudioRecorder {
   }
 
   @override
-  Future<String?> stop() async {
+  Future<String?> stop() {
     if (behaviour == _StopBehaviour.throws) {
       throw const FileSystemException('input disconnected');
     }
-    return path;
+    // Never completes, and never throws either — what `record_linux` does when
+    // the encoder stops draining the pipe its `stop()` awaits.
+    if (behaviour == _StopBehaviour.hangs) {
+      _wedged = true;
+      return Completer<String?>().future;
+    }
+    return Future<String?>.value(path);
   }
 
   @override

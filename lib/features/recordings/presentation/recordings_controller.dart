@@ -91,7 +91,9 @@ class RecordingsController extends ChangeNotifier {
     ClosureLog closureLog = const NoopClosureLog(),
     CommandClient commandClient = const DisabledCommandClient(),
     String? Function()? commandBaseUrl,
-  }) : _repository = repository,
+    Duration recorderTimeout = const Duration(seconds: 8),
+  }) : _recorderTimeout = recorderTimeout,
+       _repository = repository,
        _commandClient = commandClient,
        _commandBaseUrl = commandBaseUrl,
        _history = CaptureHistory(
@@ -214,6 +216,18 @@ class RecordingsController extends ChangeNotifier {
   AudioConfig _audioConfig;
 
   final AudioRecorder _recorder;
+
+  /// How long a single call into the platform recorder may take before the app
+  /// stops waiting for it.
+  ///
+  /// A bound rather than a preference. `record` has no native Linux backend: it
+  /// runs `parecord` and `ffmpeg` as processes and its `stop()` opens by
+  /// awaiting `_inputPcmController.close()`, which completes only once `done`
+  /// has travelled through `stream.pipe(ffmpeg.stdin)`. An encoder that stops
+  /// draining that pipe leaves the future pending forever — no throw, no
+  /// return — and the capture screen with it. Injectable so the suite can
+  /// exercise the timeout without spending it.
+  final Duration _recorderTimeout;
   final AudioPlayer _player;
   StreamSubscription<void>? _playerCompleteSub;
 
@@ -502,11 +516,19 @@ class RecordingsController extends ChangeNotifier {
     // Resume jobs left non-terminal by a previous session (the app was killed
     // mid-processing). Their source is already on disk, so re-enqueuing is safe
     // and idempotent — the same persist-then-process invariant.
+    //
+    // `awaitsProcessing` belongs in the same sweep: a capture that never got
+    // as far as `pendingTranscription` — one `recoverOrphans()` re-adopted, or
+    // one salvaged from a recorder that timed out — is `saved` with no text,
+    // and nothing else in the app would ever pick it up. The drain only runs
+    // segments that hold no text, so a row that already has its transcript
+    // costs nothing here.
     final List<String> stuck = _recordings
         .where(
           (Recording item) =>
               item.status == RecordingStatus.pendingTranscription ||
-              item.status == RecordingStatus.transcribing,
+              item.status == RecordingStatus.transcribing ||
+              item.awaitsProcessing,
         )
         .map((Recording item) => item.id)
         .toList();
@@ -617,9 +639,16 @@ class RecordingsController extends ChangeNotifier {
       );
       _logSink.log(
         'Recovered ${orphans.length} capture(s) with no index entry — '
-        'restored as raw, re-run processing to get their text back.',
+        'restored as raw and queued for processing.',
         level: LogLevel.warn,
       );
+      // Queued here rather than left to the start-up sweep, because this runs
+      // *after* `initialize()` — the shell reads the real recordings directory,
+      // so it cannot live inside loading. Without this the row a user just lost
+      // and got back sits `saved` until the launch after next.
+      for (final Recording orphan in orphans) {
+        await _enqueueProcessing(orphan.id);
+      }
     } catch (exception) {
       _logSink.log('Orphan recovery failed: $exception', level: LogLevel.warn);
     }
@@ -871,15 +900,43 @@ class RecordingsController extends ChangeNotifier {
       );
     }
 
-    await _recorder.start(
-      RecordConfig(
-        encoder: AudioEncoder.aacLc,
-        sampleRate: _audioConfig.sampleRate,
-        numChannels: _audioConfig.numChannels,
-        bitRate: _audioConfig.bitRate,
-      ),
-      path: audioFile.path,
-    );
+    // Bounded on the same reasoning as the stop below it, and for the failure
+    // that follows one: a recorder left wedged by a `stop()` that timed out
+    // opens its own `start()` by awaiting that same unfinished call, so without
+    // a bound here the next capture hangs before `_isRecording` is ever set —
+    // no capture screen, no spinner, no error, a RECORD button that does
+    // nothing. The mic is unrecoverable in-process either way; saying so is the
+    // part that is fixable.
+    try {
+      await _recorder
+          .start(
+            RecordConfig(
+              encoder: AudioEncoder.aacLc,
+              sampleRate: _audioConfig.sampleRate,
+              numChannels: _audioConfig.numChannels,
+              bitRate: _audioConfig.bitRate,
+            ),
+            path: audioFile.path,
+          )
+          .timeout(_recorderTimeout);
+    } catch (exception) {
+      _error =
+          'The recorder did not start — restart the app to record again. '
+          '$exception';
+      _logSink.log(
+        'Recorder failed to start: $exception',
+        level: LogLevel.error,
+        recordingId: id,
+      );
+      _activeFilePath = null;
+      _activeId = null;
+      _recordingProjectId = null;
+      _appendTargetId = null;
+      _activeSegmentIndex = null;
+      _endCaptureSession();
+      notifyListeners();
+      return;
+    }
     _logSink.log(
       'Recording started · ${_audioConfig.sampleRate} Hz · '
       '${_audioConfig.numChannels} channel(s) · ${_audioConfig.bitRate ~/ 1000} kbps',
@@ -970,6 +1027,15 @@ class RecordingsController extends ChangeNotifier {
       // an empty file is empty while the disconnected input it came from is
       // only in the Logs tab.
       Object? stopFailure;
+      // Bounded, because the failure that actually cost a take was not a throw:
+      // `stop()` returned neither. A pending future never reaches this `catch`,
+      // never reaches the `finally` either, and so holds `_isBusy` true for the
+      // rest of the session — the capture screen stays open, `discardRecording`
+      // shares the same guard and goes silently dead, and the finished audio
+      // sits on disk with no row pointing at it until the next launch adopts it
+      // as an orphan. The timeout converts that into the throw the salvage
+      // below was already written for.
+      //
       // Caught rather than allowed to reach the outer `catch`, because a throw
       // here says nothing about whether there is audio to keep: the encoder has
       // been writing to `_activeFilePath` for the whole capture, and the file is
@@ -985,7 +1051,7 @@ class RecordingsController extends ChangeNotifier {
       // have adopted anyway. The emptiness check below is what separates this
       // from the case where nothing was written at all.
       try {
-        stoppedPath = await _recorder.stop();
+        stoppedPath = await _recorder.stop().timeout(_recorderTimeout);
       } catch (exception) {
         stopFailure = exception;
         _logSink.log(

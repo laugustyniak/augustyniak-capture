@@ -168,6 +168,16 @@ class Recording {
 
   bool get hasStoredSegments => _segments != null;
 
+  /// A capture whose source is on disk with nothing read out of it yet.
+  ///
+  /// Distinct from `status == failed`, which says the processor ran and lost.
+  /// This is the quieter case: an orphan `recoverOrphans()` re-adopted, or a
+  /// take salvaged from a recorder that never returned from `stop()`. Either
+  /// way the row is `saved` and no drain will ever pick it up on its own, so
+  /// it is what both the startup sweep and the card's RETRY key on.
+  bool get awaitsProcessing =>
+      status == RecordingStatus.saved && (transcript ?? '').trim().isEmpty;
+
   /// Sum across segments. The persisted `durationMs` and `sizeBytes` keep
   /// describing segment 0 — they are the archive's deduplication contract —
   /// so the UI reads these instead.
