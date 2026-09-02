@@ -4,6 +4,7 @@ import 'package:flutter/services.dart';
 import 'package:uuid/uuid.dart';
 
 import '../data/clipboard_repository.dart';
+import 'auto_paste.dart';
 import 'clipboard_item.dart';
 
 abstract interface class ClipboardGateway {
@@ -46,11 +47,14 @@ class ClipboardWatcherService extends ChangeNotifier {
     required ClipboardRepository repository,
     this.pollInterval = const Duration(milliseconds: 750),
     ClipboardGateway? gateway,
+    AutoPaste autoPaste = const ChannelAutoPaste(),
   }) : _repository = repository,
-       _gateway = gateway ?? SystemClipboardGateway();
+       _gateway = gateway ?? SystemClipboardGateway(),
+       _autoPaste = autoPaste;
 
   final ClipboardRepository _repository;
   final ClipboardGateway _gateway;
+  final AutoPaste _autoPaste;
   final Duration pollInterval;
   final Uuid _uuid = const Uuid();
 
@@ -147,19 +151,32 @@ class ClipboardWatcherService extends ChangeNotifier {
     }
   }
 
-  /// Ask the platform to type ⌘V into whatever had focus before the sheet
-  /// opened. Implemented on macOS only; everywhere else the channel has no
-  /// handler and the entry is merely left on the clipboard.
+  /// Write down the window that currently has focus, so [pasteToActiveApp] can
+  /// give it back.
+  ///
+  /// **Call this before anything raises the app's own window**, including the
+  /// compact overlay the hotkey opens — X11 keeps no focus history, so asked
+  /// afterwards the platform answers with our own window. Errors are swallowed
+  /// on the same rule as the paste itself: failing to record a target costs the
+  /// convenience, never the entry.
+  Future<void> rememberPasteTarget() async {
+    try {
+      await _autoPaste.rememberTarget();
+    } catch (_) {}
+  }
+
+  /// Ask the platform to type the paste keystroke into whatever had focus
+  /// before the sheet opened — ⌘V through the channel on macOS, Ctrl+V through
+  /// `xdotool` on Linux. Where neither is available the entry is merely left on
+  /// the clipboard.
   ///
   /// **The `await` is what makes the `catch` reachable.** Without it the call
   /// returns a future nobody holds, so `MissingPluginException` — the ordinary
-  /// answer on Android, iOS and Linux — escaped as an unhandled async error
-  /// instead of being swallowed here as intended.
+  /// answer on Android and iOS — escaped as an unhandled async error instead of
+  /// being swallowed here as intended.
   Future<void> pasteToActiveApp() async {
     try {
-      await const MethodChannel(
-        'ai.augustyniak.capture/clipboard',
-      ).invokeMethod<void>('autoPaste');
+      await _autoPaste.pasteToTarget();
     } catch (_) {}
   }
 

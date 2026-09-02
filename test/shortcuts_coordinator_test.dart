@@ -119,6 +119,7 @@ class _FakeRegistrar implements HotkeyRegistrar {
 
 class _CountingPresenter implements WindowPresenter {
   int presents = 0;
+  int overlays = 0;
 
   @override
   Future<void> present() async {
@@ -126,6 +127,17 @@ class _CountingPresenter implements WindowPresenter {
     // that only holds when this completes synchronously is a false pass.
     await Future<void>.delayed(Duration.zero);
     presents++;
+  }
+
+  @override
+  Future<void> enterOverlay(Size size) async {
+    await Future<void>.delayed(Duration.zero);
+    overlays++;
+  }
+
+  @override
+  Future<void> exitOverlay() async {
+    await Future<void>.delayed(Duration.zero);
   }
 }
 
@@ -316,13 +328,49 @@ void main() {
       expect(noteCalls, 1);
     });
 
-    test('toggleClipboardHistory raises window and executes callback', () async {
+    test('toggleClipboardHistory runs the callback without raising the app', () async {
       final ShortcutsCoordinator coordinator = build();
 
       await coordinator.handle(ShortcutAction.toggleClipboardHistory);
 
-      expect(presenter.presents, 1);
       expect(clipboardHistoryCalls, 1);
+      // The callback opens a compact overlay itself and, before that, writes
+      // down the window it will paste back into. A `present()` here would take
+      // that focus first — the palette would be the whole application and the
+      // paste target would be us.
+      expect(presenter.presents, 0);
+    });
+
+    test('a second clipboard press while the palette is open is dropped', () async {
+      // Not merely a duplicate sheet. The callback records the window to paste
+      // into on its way in, and a second press does that while the palette
+      // itself holds the focus — so the recorded target becomes this window and
+      // the entry is typed back into the palette the user is standing in.
+      final Completer<void> open = Completer<void>();
+      final ShortcutsCoordinator coordinator = ShortcutsCoordinator(
+        recordings: recordings,
+        composeTextNote: () async {},
+        onToggleClipboardHistory: () async {
+          clipboardHistoryCalls++;
+          await open.future;
+        },
+        registrar: registrar,
+        windowPresenter: presenter,
+      );
+
+      final Future<void> first = coordinator.handle(
+        ShortcutAction.toggleClipboardHistory,
+      );
+      await Future<void>.delayed(Duration.zero);
+      await coordinator.handle(ShortcutAction.toggleClipboardHistory);
+
+      expect(clipboardHistoryCalls, 1);
+
+      // And the lock is released, so the next press after it closes works.
+      open.complete();
+      await first;
+      await coordinator.handle(ShortcutAction.toggleClipboardHistory);
+      expect(clipboardHistoryCalls, 2);
     });
 
     test('upload shortcuts route to the matching capture type', () async {

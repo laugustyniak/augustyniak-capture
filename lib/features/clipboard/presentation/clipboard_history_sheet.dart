@@ -41,6 +41,7 @@ class ClipboardHistorySheet extends StatefulWidget {
     this.recordingsController,
     this.onConvertText,
     this.onConvertImage,
+    this.onBeforePaste,
     this.isModal = true,
   });
 
@@ -48,6 +49,15 @@ class ClipboardHistorySheet extends StatefulWidget {
   final RecordingsController? recordingsController;
   final Future<void> Function(String text)? onConvertText;
   final Future<void> Function(File image)? onConvertImage;
+
+  /// Run after the route pops and before the paste keystroke is synthesised.
+  ///
+  /// The hotkey shell uses it to take the window back out of overlay mode. It
+  /// is a hook rather than a `WindowPresenter` because a sheet has no business
+  /// knowing about windows — and because the ordering is the point: the paste
+  /// aims at whatever holds focus at the instant it fires, so the app has to be
+  /// finished getting out of the way *before* it does, not concurrently with it.
+  final Future<void> Function()? onBeforePaste;
 
   /// Whether this is the hotkey-invoked sheet rather than the Clipboard tab.
   ///
@@ -258,12 +268,19 @@ class _ClipboardHistorySheetState extends State<ClipboardHistorySheet> {
 
   // ------------------------------------------------------------------ actions
 
+  /// Copy, close, get out of the way, then paste — in that order.
+  ///
+  /// `onBeforePaste` sits between the pop and the keystroke on purpose. Awaiting
+  /// it here rather than leaving the shell's `finally` to race the paste is what
+  /// makes the target deterministic: the window has finished shrinking back and
+  /// dropping always-on-top before anything is typed.
   Future<void> _paste(BuildContext context, ClipboardItem item) async {
     await widget.watcherService.copyToClipboard(item);
     if (!context.mounted) return;
     if (Navigator.of(context).canPop()) {
       Navigator.of(context).pop();
     }
+    await widget.onBeforePaste?.call();
     await widget.watcherService.pasteToActiveApp();
   }
 
