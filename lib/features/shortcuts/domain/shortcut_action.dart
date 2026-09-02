@@ -63,7 +63,16 @@ enum ShortcutAction {
   /// ran, and leaves it alone when they stop or pause — that half is deliberate
   /// too: the state is already recorded, and pulling the window forward would
   /// interrupt whatever they went back to.
+  ///
+  /// [toggleClipboardHistory] is excluded for a third reason: it does show a
+  /// window, but not this one. The shell opens it as a compact always-on-top
+  /// palette (`WindowPresenter.enterOverlay`) and, before doing so, writes down
+  /// the window that had focus so the chosen entry can be pasted back into it.
+  /// A generic `present()` here would raise the whole application first and
+  /// destroy both — the palette would already be the full app, and the paste
+  /// target would already be us.
   bool get needsWindow =>
       this != ShortcutAction.toggleRecording &&
-      this != ShortcutAction.toggleTimer;
+      this != ShortcutAction.toggleTimer &&
+      this != ShortcutAction.toggleClipboardHistory;
 }

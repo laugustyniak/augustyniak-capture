@@ -60,6 +60,7 @@ class ShortcutsCoordinator {
   Map<ShortcutAction, HotkeyBinding>? _applied;
   Set<ShortcutAction> _rejected = const <ShortcutAction>{};
   bool _composingNote = false;
+  bool _showingClipboard = false;
   bool _suspended = false;
   bool _disposed = false;
 
@@ -160,16 +161,26 @@ class ShortcutsCoordinator {
     // rather than reach a disposed controller.
     if (_disposed) return;
 
-    // Only the note sheet needs a re-entrancy guard: the controller's `_isBusy`
-    // flag already serialises recording and uploads, but the compose sheet is
-    // pure UI and a second press would stack a second sheet on top of it.
+    // The two sheet actions need a re-entrancy guard: the controller's `_isBusy`
+    // flag already serialises recording and uploads, but a sheet is pure UI and
+    // a second press would stack a second one on top of the first.
+    //
+    // For the clipboard palette it costs more than a duplicate sheet. The
+    // second press would re-run `rememberPasteTarget` while the palette itself
+    // holds the focus, so the recorded paste target becomes *this* window and
+    // the chosen entry is typed back into the palette the user is standing in.
     //
     // Claimed here, before the first `await` — checking it after raising the
     // window would leave a gap wide enough for a second press to slip through.
     final bool isNote = action == ShortcutAction.newTextNote;
+    final bool isClipboard = action == ShortcutAction.toggleClipboardHistory;
     if (isNote) {
       if (_composingNote) return;
       _composingNote = true;
+    }
+    if (isClipboard) {
+      if (_showingClipboard) return;
+      _showingClipboard = true;
     }
 
     // Logged before dispatch, not after: a cancelled file dialog and a capture
@@ -223,6 +234,10 @@ class ShortcutsCoordinator {
             await _revealTimer?.call();
           }
         case ShortcutAction.toggleClipboardHistory:
+          // No `present()` above this one — `needsWindow` is false for it. The
+          // callback opens the compact overlay itself, after recording the
+          // window it will paste back into; raising the app here would take
+          // that focus before anything could write it down.
           await _onToggleClipboardHistory?.call();
       }
     } catch (exception) {
@@ -231,9 +246,10 @@ class ShortcutsCoordinator {
         level: LogLevel.error,
       );
     } finally {
-      // Scoped to the note action so an upload finishing mid-sheet cannot
-      // release a lock it never took.
+      // Scoped to the action that took it, so an upload finishing mid-sheet
+      // cannot release a lock it never took.
       if (isNote) _composingNote = false;
+      if (isClipboard) _showingClipboard = false;
     }
   }
 

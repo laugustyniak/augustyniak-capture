@@ -14,6 +14,8 @@ import '../../backup/data/file_picker_archive_location.dart';
 import '../../backup/data/zip_capture_archive.dart';
 import '../../backup/domain/capture_archive.dart';
 import '../../backup/presentation/backup_coordinator.dart';
+import '../../clipboard/data/xdotool_auto_paste.dart';
+import '../../clipboard/domain/auto_paste.dart';
 import '../../clipboard/domain/clipboard_watcher_service.dart';
 import '../../clipboard/presentation/clipboard_history_sheet.dart';
 import '../../clipboard/presentation/clipboard_tab.dart';
@@ -162,6 +164,12 @@ class _RecordingsPageState extends State<RecordingsPage>
   late final MomentumController momentum;
   late final ShortcutsCoordinator shortcuts;
   late final ClipboardWatcherService clipboardWatcher;
+
+  /// Held rather than passed straight into the coordinator: the clipboard
+  /// palette drives the same window through `enterOverlay`/`exitOverlay`, and
+  /// both callers have to share one instance or the saved bounds live in an
+  /// object nobody else can see.
+  late final WindowPresenter windowPresenter = _buildWindowPresenter();
   late final BackupCoordinator backup;
   late final Listenable listenable;
 
@@ -412,6 +420,7 @@ class _RecordingsPageState extends State<RecordingsPage>
     );
     clipboardWatcher = ClipboardWatcherService(
       repository: SqliteClipboardRepository(),
+      autoPaste: _buildAutoPaste(),
     );
     shortcuts = ShortcutsCoordinator(
       recordings: controller,
@@ -447,7 +456,7 @@ class _RecordingsPageState extends State<RecordingsPage>
         setState(() => navigationIndex = timerIndex);
       },
       registrar: _buildHotkeyRegistrar(),
-      windowPresenter: _buildWindowPresenter(),
+      windowPresenter: windowPresenter,
       logSink: logs,
     );
 
@@ -538,7 +547,18 @@ class _RecordingsPageState extends State<RecordingsPage>
   }
 
   static WindowPresenter _buildWindowPresenter() =>
-      _isDesktop ? const SystemWindowPresenter() : const NoopWindowPresenter();
+      _isDesktop ? SystemWindowPresenter() : const NoopWindowPresenter();
+
+  /// Auto-paste is per-window-server, not per-desktop. macOS answers the
+  /// `autoPaste` channel; Linux has no handler and is driven from Dart through
+  /// `xdotool` instead. Windows has neither yet, and mobile has no window to
+  /// give focus back to — both get the seam's disabled default, which leaves
+  /// the entry on the clipboard.
+  static AutoPaste _buildAutoPaste() {
+    if (Platform.isLinux) return XdotoolAutoPaste();
+    if (Platform.isMacOS) return const ChannelAutoPaste();
+    return const DisabledAutoPaste();
+  }
 
   /// Import, then re-read what the import wrote.
   ///
@@ -757,18 +777,43 @@ class _RecordingsPageState extends State<RecordingsPage>
     }
   }
 
+  /// The clipboard palette, and the only caller of the window's overlay mode.
+  ///
+  /// The first line has to stay first. `rememberPasteTarget` asks the window
+  /// server what currently has focus, and every line after it takes that focus
+  /// away — after `enterOverlay` the honest answer is "this app", which is
+  /// exactly the wrong thing to paste into.
   Future<void> _showClipboardHistory(BuildContext context) async {
-    await showModalBottomSheet<void>(
-      context: context,
-      isScrollControlled: true,
-      builder: (BuildContext context) => ConsolePaletteScope(
-        builder: (BuildContext context) => ClipboardHistorySheet(
-          watcherService: clipboardWatcher,
-          recordingsController: controller,
+    await clipboardWatcher.rememberPasteTarget();
+    await windowPresenter.enterOverlay(_clipboardOverlaySize);
+    try {
+      // Two awaits have passed since the hotkey fired, and both of them talk to
+      // the window manager. Bailing here still runs the `finally`, so a page
+      // disposed mid-raise cannot leave the window stuck as a palette.
+      if (!context.mounted) return;
+      await showModalBottomSheet<void>(
+        context: context,
+        isScrollControlled: true,
+        builder: (BuildContext context) => ConsolePaletteScope(
+          builder: (BuildContext context) => ClipboardHistorySheet(
+            watcherService: clipboardWatcher,
+            recordingsController: controller,
+            onBeforePaste: windowPresenter.exitOverlay,
+          ),
         ),
-      ),
-    );
+      );
+    } finally {
+      // Idempotent, and reached by every other way out of the sheet: the
+      // barrier, Escape, or an exception. A paste has already called it, and
+      // the second call is the no-op that makes this safe.
+      await windowPresenter.exitOverlay();
+    }
   }
+
+  /// Wide enough to stay clear of [Console.compactBreakpoint], so the palette
+  /// keeps the list-beside-preview layout instead of collapsing into the phone
+  /// arrangement, and short enough to read as a palette rather than a window.
+  static const Size _clipboardOverlaySize = Size(880, 560);
 
   Future<void> _openCaptureMenu(BuildContext context) async {
     final _CaptureAction? action = await showModalBottomSheet<_CaptureAction>(

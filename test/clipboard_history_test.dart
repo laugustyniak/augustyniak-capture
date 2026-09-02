@@ -2,12 +2,25 @@ import 'dart:async';
 import 'dart:io';
 
 import 'package:augustyniak_capture/features/clipboard/data/clipboard_repository.dart';
+import 'package:augustyniak_capture/features/clipboard/domain/auto_paste.dart';
 import 'package:augustyniak_capture/features/clipboard/domain/clipboard_item.dart';
 import 'package:augustyniak_capture/features/clipboard/domain/clipboard_watcher_service.dart';
 import 'package:augustyniak_capture/features/clipboard/presentation/clipboard_history_sheet.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
+
+/// Records when the paste actually reaches the platform, so the window release
+/// and the keystroke can be ordered against each other.
+class _OrderedAutoPaste implements AutoPaste {
+  final List<String> events = <String>[];
+
+  @override
+  Future<void> rememberTarget() async => events.add('remember');
+
+  @override
+  Future<void> pasteToTarget() async => events.add('paste');
+}
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
@@ -466,6 +479,78 @@ void main() {
       expect(convertedText, 'Convert me');
       service.dispose();
     });
+
+    testWidgets(
+      'the window is released before the paste keystroke is sent',
+      (WidgetTester tester) async {
+        // The ordering is the bug this pins. The paste aims at whatever holds
+        // focus at the instant it fires, so the app has to have finished
+        // getting out of the way first. Leaving the shell's `finally` to race
+        // the paste made the target depend on which future won.
+        final _MemoryClipboardRepository repository =
+            _MemoryClipboardRepository();
+        await repository.addItem(_textItem('1', 'Paste me'));
+        final _OrderedAutoPaste paster = _OrderedAutoPaste();
+        final ClipboardWatcherService service = ClipboardWatcherService(
+          repository: repository,
+          gateway: _FakeClipboardGateway(),
+          autoPaste: paster,
+        );
+
+        await tester.pumpWidget(
+          MaterialApp(
+            home: Scaffold(
+              body: ClipboardHistorySheet(
+                watcherService: service,
+                onBeforePaste: () async {
+                  await Future<void>.delayed(Duration.zero);
+                  paster.events.add('released');
+                },
+              ),
+            ),
+          ),
+        );
+        await tester.pump();
+
+        await tester.tap(find.text('PASTE ⏎'));
+        await tester.pumpAndSettle();
+
+        expect(paster.events, <String>['released', 'paste']);
+        service.dispose();
+      },
+    );
+
+    testWidgets(
+      'a sheet with no release hook still pastes',
+      (WidgetTester tester) async {
+        // The Clipboard tab passes no hook, and neither does any host that is
+        // not driving overlay mode. A null hook must not swallow the paste.
+        final _MemoryClipboardRepository repository =
+            _MemoryClipboardRepository();
+        await repository.addItem(_textItem('1', 'Paste me'));
+        final _OrderedAutoPaste paster = _OrderedAutoPaste();
+        final ClipboardWatcherService service = ClipboardWatcherService(
+          repository: repository,
+          gateway: _FakeClipboardGateway(),
+          autoPaste: paster,
+        );
+
+        await tester.pumpWidget(
+          MaterialApp(
+            home: Scaffold(
+              body: ClipboardHistorySheet(watcherService: service),
+            ),
+          ),
+        );
+        await tester.pump();
+
+        await tester.tap(find.text('PASTE ⏎'));
+        await tester.pumpAndSettle();
+
+        expect(paster.events, <String>['paste']);
+        service.dispose();
+      },
+    );
 
     test('pasting on a platform with no autoPaste handler stays quiet', () async {
       // Android, iOS and Linux register no handler for this channel, so

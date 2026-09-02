@@ -1,4 +1,5 @@
 import 'dart:io';
+import 'dart:ui' show Rect, Size;
 
 import 'package:window_manager/window_manager.dart';
 
@@ -10,7 +11,13 @@ import '../domain/window_presenter.dart';
 /// leaves a minimised window minimised, and a shown window still sits behind
 /// whatever the user was typing in until `focus()` pulls it forward.
 class SystemWindowPresenter implements WindowPresenter {
-  const SystemWindowPresenter();
+  SystemWindowPresenter();
+
+  /// The bounds the window had before it became a palette, and the only record
+  /// of them. Non-null exactly while an overlay is open, which is also what
+  /// makes [enterOverlay] idempotent — a second press while the sheet is up
+  /// must not save the palette's own bounds as the thing to restore.
+  Rect? _restoreBounds;
 
   @override
   Future<void> present() async {
@@ -24,6 +31,43 @@ class SystemWindowPresenter implements WindowPresenter {
     await windowManager.show();
     await windowManager.focus();
     await _forceToFront();
+  }
+
+  @override
+  Future<void> enterOverlay(Size size) async {
+    if (_restoreBounds != null) return;
+    _restoreBounds = await windowManager.getBounds();
+    // Flags before geometry: a taskbar entry that appears for a fraction of a
+    // second and then vanishes is more distracting than one that never shows.
+    await windowManager.setSkipTaskbar(true);
+    await windowManager.setAlwaysOnTop(true);
+    await windowManager.setSize(size);
+    // Centred rather than placed at the pointer. Reading the cursor position
+    // needs `screen_retriever`, which is only a transitive dependency here, and
+    // a palette that lands in the same place every time is easier to aim at
+    // than one that chases the mouse.
+    await windowManager.center();
+    await present();
+  }
+
+  @override
+  Future<void> exitOverlay() async {
+    final Rect? previous = _restoreBounds;
+    if (previous == null) return;
+    // Geometry before flags, the mirror of `enterOverlay`: dropping
+    // always-on-top first would let the full-size window be reordered behind
+    // something while it is still the wrong size.
+    await windowManager.setBounds(previous);
+    await windowManager.setAlwaysOnTop(false);
+    await windowManager.setSkipTaskbar(false);
+    // Cleared **last, and only on success**. It is the sole record of the
+    // window's real size, and clearing it up front meant a failing `setBounds`
+    // threw with the record already gone: the window stayed a palette, and the
+    // next `enterOverlay` saved *those* bounds as the thing to go back to,
+    // trapping it at 880x560 and always-on-top for the rest of the session.
+    // Left set, the failure is recoverable instead — the shell's `finally`
+    // retries, and until one succeeds `enterOverlay` refuses to overwrite it.
+    _restoreBounds = null;
   }
 
   /// GNOME under X11 refuses a raise that carries no user-interaction
