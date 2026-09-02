@@ -920,9 +920,15 @@ class RecordingsController extends ChangeNotifier {
           )
           .timeout(_recorderTimeout);
     } catch (exception) {
-      _error =
-          'The recorder did not start — restart the app to record again. '
-          '$exception';
+      // Two different failures, and "restart the app" is only right for one of
+      // them: a timeout here means the platform recorder is still wedged by the
+      // previous capture, while a plain throw is a mic already in use or an
+      // encoder the device refuses — neither of which a restart fixes, and both
+      // of which the user can only act on if they see what was actually said.
+      _error = exception is TimeoutException
+          ? 'The recorder did not start — it is still held by the previous '
+                'capture. Restart the app to record again.'
+          : 'The recorder could not start: $exception';
       _logSink.log(
         'Recorder failed to start: $exception',
         level: LogLevel.error,
@@ -1060,6 +1066,18 @@ class RecordingsController extends ChangeNotifier {
           level: LogLevel.warn,
           recordingId: _activeId,
         );
+        // A timeout is not the same failure as a throw, and only one of them
+        // needs saying out loud. A throw is the platform reporting a stop that
+        // finished unhappily; a timeout means the call is *still pending*, so
+        // the mic stays held for the rest of the session and the next RECORD
+        // press fails too. The salvage below keeps the take either way — this
+        // reports the part the take cannot. Overwritten by the outer `catch` if
+        // the salvage then fails, which is the more urgent news.
+        if (exception is TimeoutException) {
+          _error =
+              'The recorder did not release the microphone — the take is being '
+              'saved, but restart the app before recording again.';
+        }
       }
       // Stopped here rather than in the teardown below so `durationMs` is the
       // length of the audio, not of the audio plus the two `stat` calls that

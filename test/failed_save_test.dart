@@ -95,6 +95,13 @@ void main() {
     final Recording saved = controller.recordings.single;
     expect(File(saved.filePath).existsSync(), isTrue);
     expect(saved.sizeBytes, greaterThan(0));
+    // Unlike a throw, a hang leaves the call pending and the mic held, so the
+    // next capture will fail too. The take being safe is not the whole story.
+    expect(
+      controller.error,
+      contains('restart the app'),
+      reason: 'a wedged recorder is the one thing a restart does fix',
+    );
   });
 
   test('a hung stop still closes the capture screen', () async {
