@@ -95,6 +95,11 @@ void main() {
     final Recording saved = controller.recordings.single;
     expect(File(saved.filePath).existsSync(), isTrue);
     expect(saved.sizeBytes, greaterThan(0));
+    // Salvaged *and* handed on. A row stuck at `saved` would pass every
+    // assertion above while being exactly the stranded capture this branch
+    // exists to end — `failed` here is `DisabledTranscriptionService` doing its
+    // job, and proves the drain saw the row at all.
+    expect(saved.status, RecordingStatus.failed);
     // Unlike a throw, a hang leaves the call pending and the mic held, so the
     // next capture will fail too. The take being safe is not the whole story.
     expect(
