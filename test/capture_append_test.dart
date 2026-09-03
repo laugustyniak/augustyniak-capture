@@ -16,6 +16,7 @@ import 'package:augustyniak_capture/features/recordings/domain/recording.dart';
 import 'package:augustyniak_capture/features/recordings/domain/route_record.dart';
 import 'package:augustyniak_capture/features/recordings/presentation/recordings_controller.dart';
 import 'package:augustyniak_capture/features/transcription/data/transcription_service.dart';
+import 'package:record/record.dart';
 
 class _MemoryRepo extends RecordingsRepository {
   _MemoryRepo(this._dir, this.seed);
@@ -37,6 +38,29 @@ class _RefusingRepo extends _MemoryRepo {
   Future<File> createSegmentFile(String id, int index, String extension) async {
     throw const FileSystemException('disk full');
   }
+}
+
+/// Grants the mic and writes [take] to whatever path the controller hands it,
+/// so the file the append verifies is the one the recorder "captured".
+class _GrantingRecorder implements AudioRecorder {
+  _GrantingRecorder({this.take = 'second take'});
+  final String take;
+  String? path;
+
+  @override
+  Future<bool> hasPermission({bool request = true}) async => true;
+
+  @override
+  Future<void> start(RecordConfig config, {required String path}) async {
+    File(path).writeAsStringSync(take, flush: true);
+    this.path = path;
+  }
+
+  @override
+  Future<String?> stop() async => path;
+
+  @override
+  dynamic noSuchMethod(Invocation invocation) async => null;
 }
 
 class _EchoProcessor implements Processor {
@@ -116,12 +140,17 @@ void main() {
     );
   }
 
-  RecordingsController build(RecordingsRepository repository) {
+  RecordingsController build(
+    RecordingsRepository repository, {
+    AudioRecorder? recorder,
+  }) {
     return RecordingsController(
       repository: repository,
       transcriptionService: const DisabledTranscriptionService(),
+      recorder: recorder,
       processorRegistry: ProcessorRegistry(<CaptureType, Processor>{
         CaptureType.text: _EchoProcessor(),
+        CaptureType.audioRecording: _EchoProcessor(),
       }),
     );
   }
@@ -261,6 +290,95 @@ void main() {
     expect(item.segments.map((CaptureSegment s) => s.index), <int>[0, 1, 2]);
     expect(p.basename(item.segments[2].filePath), 'abc-2.txt');
     expect(item.transcript, 'first fragment\n\nsecond\n\nthird');
+    controller.dispose();
+  });
+  test('a mic take appended to a capture lands beside it as a segment',
+      () async {
+    final _GrantingRecorder recorder = _GrantingRecorder();
+    final RecordingsController controller = build(
+      _MemoryRepo(dir, <Recording>[await seedNote()]),
+      recorder: recorder,
+    );
+    await controller.initialize();
+
+    await controller.startRecording(appendTo: 'abc');
+    expect(controller.isRecording, isTrue);
+    expect(
+      p.basename(recorder.path!),
+      'abc-1.m4a',
+      reason: 'the recorder is pointed at the fragment path before it opens',
+    );
+    await controller.stopRecording();
+    await controller.waitForProcessing();
+
+    expect(controller.isRecording, isFalse);
+    expect(controller.error, isNull);
+    expect(
+      controller.recordings,
+      hasLength(1),
+      reason: 'an append must not create a second row',
+    );
+    final Recording item = controller.recordings.single;
+    expect(item.segments, hasLength(2));
+    final CaptureSegment take = item.segments[1];
+    expect(take.index, 1);
+    expect(p.basename(take.filePath), 'abc-1.m4a');
+    expect(take.type, CaptureType.audioRecording);
+    expect(
+      take.sizeBytes,
+      'second take'.length,
+      reason: 'the size is the length() that proved the file non-empty',
+    );
+    expect(item.transcript, 'first fragment\n\nsecond take');
+    expect(item.status, RecordingStatus.completed);
+    expect(
+      item.isProcessedByUser,
+      isFalse,
+      reason: 'the text that may already have been routed is now incomplete',
+    );
+    expect(
+      item.filePath,
+      endsWith('abc.txt'),
+      reason: 'top-level fields still describe segment 0',
+    );
+    expect(
+      item.type,
+      CaptureType.text,
+      reason: 'the parent keeps its own type; the fragment carries its own',
+    );
+    expect(item.title, 'Plan Q3', reason: 'field ownership is unchanged');
+    expect(item.tags, contains('budget'), reason: 'a hand tag survives');
+    expect(
+      item.routes.map((RouteRecord r) => r.target),
+      <String>['inbox.md'],
+      reason: 'the delivery happened; a fuller text does not un-send it',
+    );
+    controller.dispose();
+  });
+
+  test('an empty mic take leaves the parent untouched', () async {
+    final RecordingsController controller = build(
+      _MemoryRepo(dir, <Recording>[await seedNote()]),
+      recorder: _GrantingRecorder(take: ''),
+    );
+    await controller.initialize();
+
+    await controller.startRecording(appendTo: 'abc');
+    await controller.stopRecording();
+    await controller.waitForProcessing();
+
+    expect(controller.isRecording, isFalse);
+    expect(controller.error, contains('not persisted'));
+    final Recording item = controller.recordings.single;
+    expect(item.hasStoredSegments, isFalse);
+    expect(item.transcript, 'first fragment');
+    expect(item.status, RecordingStatus.completed);
+    expect(item.isProcessedByUser, isTrue);
+    expect(
+      File(p.join(dir.path, 'abc-1.m4a')).existsSync(),
+      isFalse,
+      reason: 'an empty take is litter no row will ever claim',
+    );
     controller.dispose();
   });
 }
