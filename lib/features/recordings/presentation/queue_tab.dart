@@ -701,6 +701,7 @@ class _QueueTabState extends State<QueueTab> {
       onEdit: () => setState(() => editingId = recording.id),
       onToggleProcessed: () => _toggleProcessed(recording),
       onOpenFocus: () => _openFocus(recording),
+      onConfigureModels: widget.onConfigureModels,
       costUsd: _costTotals[recording.id],
     );
   }
@@ -717,6 +718,7 @@ class _QueueTabState extends State<QueueTab> {
       recordingId: recording.id,
       projectName: _projectName(recording.projectId),
       onEdit: () => setState(() => editingId = recording.id),
+      onConfigureModels: widget.onConfigureModels,
       costUsd: _costTotals[recording.id],
     );
   }

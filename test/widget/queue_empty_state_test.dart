@@ -136,5 +136,69 @@ void main() {
       expect(find.text('No transcription model configured.'), findsNothing);
       expect(find.textContaining('Desk clear'), findsOneWidget);
     });
+
+    testWidgets(
+      'an unconfigured failed capture offers SET UP MODEL on the card',
+      (WidgetTester tester) async {
+        final RecordingsController controller = await buildRecordingsController(
+          appDir,
+          seed: <Recording>[
+            makeRecording(
+              id: 'unconfigured_1',
+              status: RecordingStatus.failed,
+              error: 'Transcription endpoint is not configured.',
+            ),
+          ],
+        );
+        int configureTaps = 0;
+        await pumpQueue(
+          tester,
+          controller,
+          hasTranscriptionProfile: false,
+          onConfigureModels: () => configureTaps++,
+        );
+
+        expect(find.text('SET UP MODEL'), findsOneWidget);
+        await tester.tap(find.text('SET UP MODEL'));
+        await tester.pump();
+        expect(configureTaps, 1);
+      },
+    );
+
+    testWidgets(
+      'an unconfigured failed capture in focus view offers SET UP A MODEL button',
+      (WidgetTester tester) async {
+        final RecordingsController controller = await buildRecordingsController(
+          appDir,
+          seed: <Recording>[
+            makeRecording(
+              id: 'unconfigured_focus',
+              status: RecordingStatus.failed,
+              error: 'Transcription endpoint is not configured.',
+            ),
+          ],
+        );
+        int configureTaps = 0;
+        await pumpQueue(
+          tester,
+          controller,
+          hasTranscriptionProfile: false,
+          onConfigureModels: () => configureTaps++,
+        );
+
+        // Tap the card body to open focus view
+        await tester.tap(find.byType(RecordingCard));
+        await tester.pumpAndSettle();
+
+        expect(find.byType(Dialog), findsOneWidget);
+        expect(find.text('SET UP A MODEL'), findsOneWidget);
+
+        await tester.tap(find.text('SET UP A MODEL'));
+        await tester.pumpAndSettle();
+
+        expect(find.byType(Dialog), findsNothing);
+        expect(configureTaps, 1);
+      },
+    );
   });
 }

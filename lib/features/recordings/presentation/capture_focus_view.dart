@@ -32,6 +32,7 @@ Future<void> showCaptureFocusView(
   required String recordingId,
   String? projectName,
   VoidCallback? onEdit,
+  VoidCallback? onConfigureModels,
   double? costUsd,
 }) async {
   await showDialog<void>(
@@ -42,6 +43,7 @@ Future<void> showCaptureFocusView(
       recordingId: recordingId,
       projectName: projectName,
       onEdit: onEdit,
+      onConfigureModels: onConfigureModels,
       costUsd: costUsd,
     ),
   );
@@ -53,6 +55,7 @@ class _CaptureFocusDialog extends StatelessWidget {
     required this.recordingId,
     required this.projectName,
     required this.onEdit,
+    this.onConfigureModels,
     required this.costUsd,
   });
 
@@ -60,6 +63,7 @@ class _CaptureFocusDialog extends StatelessWidget {
   final String recordingId;
   final String? projectName;
   final VoidCallback? onEdit;
+  final VoidCallback? onConfigureModels;
   final double? costUsd;
 
   Recording? _resolve() {
@@ -105,6 +109,7 @@ class _CaptureFocusDialog extends StatelessWidget {
               recording: recording,
               projectName: projectName,
               onEdit: onEdit,
+              onConfigureModels: onConfigureModels,
               costUsd: costUsd,
               compact: compact,
             ),
@@ -121,6 +126,7 @@ class _FocusBody extends StatelessWidget {
     required this.recording,
     required this.projectName,
     required this.onEdit,
+    this.onConfigureModels,
     required this.costUsd,
     required this.compact,
   });
@@ -129,6 +135,7 @@ class _FocusBody extends StatelessWidget {
   final Recording recording;
   final String? projectName;
   final VoidCallback? onEdit;
+  final VoidCallback? onConfigureModels;
   final double? costUsd;
   final bool compact;
 
@@ -230,11 +237,42 @@ class _FocusBody extends StatelessWidget {
                           color: Console.red.withValues(alpha: .35),
                         ),
                       ),
-                      child: Text(
-                        recording.error!,
-                        style: ConsoleText.micro.copyWith(
-                          color: Console.redSoft,
-                        ),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: <Widget>[
+                          Text(
+                            recording.error!,
+                            style: ConsoleText.micro.copyWith(
+                              color: Console.redSoft,
+                            ),
+                          ),
+                          if (onConfigureModels != null &&
+                              recording.error!
+                                  .toLowerCase()
+                                  .contains('not configured')) ...<Widget>[
+                            const SizedBox(height: 8),
+                            TextButton.icon(
+                              onPressed: () {
+                                Navigator.of(context).pop();
+                                onConfigureModels!();
+                              },
+                              style: TextButton.styleFrom(
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 10,
+                                  vertical: 6,
+                                ),
+                                minimumSize: Size.zero,
+                                tapTargetSize:
+                                    MaterialTapTargetSize.shrinkWrap,
+                              ),
+                              icon: const Icon(Icons.tune, size: 15),
+                              label: const Text(
+                                'SET UP A MODEL',
+                                style: TextStyle(fontSize: 12),
+                              ),
+                            ),
+                          ],
+                        ],
                       ),
                     ),
                     const SizedBox(height: 14),
