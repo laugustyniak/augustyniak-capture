@@ -16,14 +16,12 @@ import '../domain/capture_type.dart';
 import '../domain/recording.dart';
 import '../domain/route_record.dart';
 import 'agent_artifact_viewer_modal.dart';
-import 'capture_focus_view.dart';
 import 'card_parts.dart';
 import 'compact_queue_header.dart';
 import 'handoff_sheet.dart';
 import 'queue_toolbar.dart';
 import 'recording_card.dart';
 import 'recording_editor.dart';
-import 'recording_row.dart';
 import 'recordings_controller.dart';
 
 /// The five buckets from the design. They **partition** the queue: every item
@@ -514,8 +512,6 @@ class _QueueTabState extends State<QueueTab> {
                                       alignment: Alignment.topCenter,
                                       child: recording.id == editingId
                                           ? _buildEditor(recording)
-                                          : compact
-                                          ? _buildMobileRow(recording)
                                           : _buildCard(recording),
                                     ),
                                   );
@@ -706,21 +702,12 @@ class _QueueTabState extends State<QueueTab> {
     );
   }
 
-  /// Opens the capture's reading view. The one destination for "show me this
-  /// note": the card body, the card's focus button, the compact row and the
-  /// keyboard's Enter all land here, so there is a single answer to what
-  /// opening a capture does.
+  /// Opens the capture in expanded inline edit mode.
   void _openFocus(Recording recording) {
-    setState(() => focusedId = recording.id);
-    showCaptureFocusView(
-      context,
-      controller: widget.controller,
-      recordingId: recording.id,
-      projectName: _projectName(recording.projectId),
-      onEdit: () => setState(() => editingId = recording.id),
-      onConfigureModels: widget.onConfigureModels,
-      costUsd: _costTotals[recording.id],
-    );
+    setState(() {
+      focusedId = recording.id;
+      editingId = recording.id;
+    });
   }
 
   Future<void> _toggleProcessed(Recording recording) async {
@@ -784,24 +771,6 @@ class _QueueTabState extends State<QueueTab> {
     });
   }
 
-  /// Narrow layouts use a one-line row; tapping it opens the same focus view
-  /// the desktop card opens, which is where the capture's content and every
-  /// action on it now live.
-  Widget _buildMobileRow(Recording recording) {
-    final RecordingsController controller = widget.controller;
-    return RecordingRow(
-      key: ValueKey<String>('row-${recording.id}'),
-      recording: recording,
-      focused: recording.id == focusedId,
-      isEnriching: controller.isEnriching(recording.id),
-      onTap: () => _openFocus(recording),
-      onToggleProcessed: () async {
-        unawaited(HapticFeedback.selectionClick());
-        await controller.toggleProcessed(recording.id);
-      },
-    );
-  }
-
   /// The handoff is the one queue action that asks a question before it acts —
   /// which agent, and with what opening line — so it opens a sheet where every
   /// other control here fires on the tap.
@@ -832,6 +801,8 @@ class _QueueTabState extends State<QueueTab> {
       projects: widget.projects?.projects ?? const <Project>[],
       onTitleChanged: (String value) =>
           controller.setTitle(recording.id, value),
+      onSummaryChanged: (String value) =>
+          controller.setSummary(recording.id, value),
       onTextChanged: (String value) =>
           controller.editTranscript(recording.id, value),
       onCategoryChanged: (CaptureCategory? value) =>

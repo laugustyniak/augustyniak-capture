@@ -3,6 +3,7 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:augustyniak_capture/features/recordings/domain/recording.dart';
+import 'package:augustyniak_capture/features/recordings/presentation/capture_focus_view.dart';
 import 'package:augustyniak_capture/features/recordings/presentation/queue_tab.dart';
 import 'package:augustyniak_capture/features/recordings/presentation/recording_card.dart';
 import 'package:augustyniak_capture/features/recordings/presentation/recordings_controller.dart';
@@ -179,15 +180,26 @@ void main() {
           ],
         );
         int configureTaps = 0;
-        await pumpQueue(
-          tester,
-          controller,
-          hasTranscriptionProfile: false,
-          onConfigureModels: () => configureTaps++,
+        await tester.pumpWidget(
+          hostTab(
+            () => Builder(
+              builder: (BuildContext context) => ElevatedButton(
+                onPressed: () => showCaptureFocusView(
+                  context,
+                  controller: controller,
+                  recordingId: 'unconfigured_focus',
+                  onConfigureModels: () => configureTaps++,
+                ),
+                child: const Text('OPEN'),
+              ),
+            ),
+            listenable: controller,
+          ),
         );
+        await tester.pump();
 
-        // Tap the card body to open focus view
-        await tester.tap(find.byType(RecordingCard));
+        // Open the dialog
+        await tester.tap(find.text('OPEN'));
         await tester.pumpAndSettle();
 
         expect(find.byType(Dialog), findsOneWidget);
