@@ -1,10 +1,10 @@
 import 'package:flutter/material.dart';
 
 import '../../../app/ui_kit.dart';
-import '../../../core/database/app_database.dart';
+import '../../../core/sync/cloud_sync_coordinator.dart';
+import '../../../core/sync/r2_media_sync_service.dart';
 import '../../../core/sync/sync_defaults.dart';
 import '../../../core/sync/sync_endpoint.dart';
-import '../../../core/sync/turso_sync_service.dart';
 import '../../costs/domain/model_price.dart';
 import '../../costs/domain/price_book.dart';
 import '../../costs/domain/usage_event.dart';
@@ -530,7 +530,60 @@ class _ConfigTabState extends State<ConfigTab> {
   }
 
   List<Widget> _buildSyncCategory(BuildContext context) {
+    final CloudSyncReport? candidate =
+        widget.recordingsController?.lastCloudSyncReport;
+    final CloudSyncReport? report =
+        candidate?.matchesConfiguration(
+              RecordingsController.cloudSyncConfigurationFingerprint(
+                widget.controller.settings,
+              ),
+            ) ==
+            true
+        ? candidate
+        : null;
+    final bool hasTurso = _hasTurso(widget.controller.settings);
+    final bool hasR2 = _hasR2(widget.controller.settings);
     return <Widget>[
+      SectionHeader(title: 'CLOUD SYNC'),
+      const SizedBox(height: 12),
+      ConsoleCard(
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: <Widget>[
+            Text(
+              'Synchronize metadata with Turso and capture files with '
+              'Cloudflare R2 in one pass.',
+              style: ConsoleText.body.copyWith(color: Console.mutedSoft),
+            ),
+            if (report != null) ...<Widget>[
+              const SizedBox(height: 10),
+              Text(
+                report.message,
+                style: ConsoleText.body.copyWith(
+                  color: report.success
+                      ? Console.green
+                      : report.partialSuccess
+                      ? Console.amber
+                      : Console.red,
+                  height: 1.45,
+                ),
+              ),
+              const SizedBox(height: 4),
+              Text(
+                'Last attempt · ${_formatSyncTime(report.completedAt)}',
+                style: ConsoleText.micro.copyWith(color: Console.mutedSoft),
+              ),
+            ],
+            const SizedBox(height: 12),
+            _SyncNowButton(
+              recordingsController: widget.recordingsController,
+              hasTurso: hasTurso,
+              hasR2: hasR2,
+            ),
+          ],
+        ),
+      ),
+      const SizedBox(height: 22),
       SectionHeader(title: 'TURSO CLOUD SYNC'),
       const SizedBox(height: 12),
       ConsoleCard(
@@ -545,12 +598,20 @@ class _ConfigTabState extends State<ConfigTab> {
             ),
             InfoRow(
               label: 'SYNC STATUS',
-              value: widget.controller.settings.tursoDbUrl != null
-                  ? 'ACTIVE · Connected (aws-us-east-1)'
-                  : 'DISABLED',
-              valueColor: widget.controller.settings.tursoDbUrl != null
+              value: !hasTurso
+                  ? 'DISABLED'
+                  : report?.turso?.success == true
+                  ? 'CONNECTED · Last sync succeeded'
+                  : report?.turso?.success == false
+                  ? 'ERROR · See sync result above'
+                  : 'CONFIGURED · Not tested',
+              valueColor: !hasTurso
+                  ? Console.mutedSoft
+                  : report?.turso?.success == true
                   ? Console.green
-                  : Console.mutedSoft,
+                  : report?.turso?.success == false
+                  ? Console.red
+                  : Console.amber,
             ),
             InfoRow(
               label: 'API TOKEN',
@@ -568,29 +629,17 @@ class _ConfigTabState extends State<ConfigTab> {
               ),
             ),
             const SizedBox(height: 10),
-            Wrap(
-              spacing: 8,
-              runSpacing: 8,
-              alignment: WrapAlignment.spaceBetween,
-              crossAxisAlignment: WrapCrossAlignment.center,
-              children: <Widget>[
-                _SyncNowButton(
-                  controller: widget.controller,
-                  recordingsController: widget.recordingsController,
+            Align(
+              alignment: Alignment.centerRight,
+              child: TextButton.icon(
+                icon: const Icon(Icons.edit, size: 14),
+                label: const Text('EDIT TURSO CREDENTIALS'),
+                style: TextButton.styleFrom(
+                  foregroundColor: Console.accent,
                 ),
-                TextButton.icon(
-                  icon: const Icon(Icons.edit, size: 14),
-                  label: const Text('EDIT TURSO CREDENTIALS'),
-                  style: TextButton.styleFrom(
-                    foregroundColor: Console.accent,
-                  ),
-                  onPressed: () => _showEditTursoDialog(
-                    context,
-                    widget.controller,
-                    widget.recordingsController,
-                  ),
-                ),
-              ],
+                onPressed: () =>
+                    _showEditTursoDialog(context, widget.controller),
+              ),
             ),
           ],
         ),
@@ -610,12 +659,20 @@ class _ConfigTabState extends State<ConfigTab> {
             ),
             InfoRow(
               label: 'MEDIA SYNC',
-              value: widget.controller.settings.r2Bucket != null
-                  ? 'ACTIVE · 101/101 files uploaded (\$0 egress)'
-                  : 'DISABLED',
-              valueColor: widget.controller.settings.r2Bucket != null
+              value: !hasR2
+                  ? 'DISABLED'
+                  : report?.r2?.success == true
+                  ? 'CONNECTED · ${_r2Counts(report!.r2!)}'
+                  : report?.r2?.success == false
+                  ? 'ERROR · See sync result above'
+                  : 'CONFIGURED · Not tested',
+              valueColor: !hasR2
+                  ? Console.mutedSoft
+                  : report?.r2?.success == true
                   ? Console.green
-                  : Console.mutedSoft,
+                  : report?.r2?.success == false
+                  ? Console.red
+                  : Console.amber,
             ),
             InfoRow(
               label: 'SECRET ACCESS KEY',
@@ -830,7 +887,6 @@ class _ChoiceRow<T> extends StatelessWidget {
 Future<void> _showEditTursoDialog(
   BuildContext context,
   SettingsController controller,
-  RecordingsController? recordingsController,
 ) async {
   final TextEditingController urlCtrl = TextEditingController(
     text: controller.settings.tursoDbUrl ?? SyncDefaults.tursoDbUrl ?? '',
@@ -903,16 +959,9 @@ Future<void> _showEditTursoDialog(
                 enabled: url.isNotEmpty && token.isNotEmpty,
               );
 
-              if (url.isNotEmpty && token.isNotEmpty) {
-                final AppDatabase db = await AppDatabase.getInstance();
-                final TursoSyncService syncService = TursoSyncService(db: db);
-                await syncService.pullFromTurso(dbUrl: url, authToken: token);
-                await recordingsController?.reloadFromStorage();
-              }
-
               if (ctx.mounted) Navigator.of(ctx).pop();
             },
-            child: const Text('Save & Sync'),
+            child: const Text('Save'),
           ),
         ],
         ),
@@ -1012,12 +1061,14 @@ Future<void> _showEditR2Dialog(
 
 class _SyncNowButton extends StatefulWidget {
   const _SyncNowButton({
-    required this.controller,
     required this.recordingsController,
+    required this.hasTurso,
+    required this.hasR2,
   });
 
-  final SettingsController controller;
   final RecordingsController? recordingsController;
+  final bool hasTurso;
+  final bool hasR2;
 
   @override
   State<_SyncNowButton> createState() => _SyncNowButtonState();
@@ -1028,53 +1079,72 @@ class _SyncNowButtonState extends State<_SyncNowButton> {
 
   @override
   Widget build(BuildContext context) {
+    final String label = switch ((widget.hasTurso, widget.hasR2)) {
+      (true, true) => 'SYNC NOW',
+      (true, false) => 'SYNC TURSO',
+      (false, true) => 'SYNC MEDIA',
+      (false, false) => 'CONFIGURE SYNC',
+    };
+    final bool canSync =
+        widget.recordingsController != null &&
+        (widget.hasTurso || widget.hasR2);
     return ElevatedButton.icon(
       icon: SyncSpinIcon(isSyncing: _isSyncing, size: 14, color: Colors.black),
-      label: Text(_isSyncing ? 'SYNCING…' : 'SYNC NOW (TURSO)'),
+      label: Text(_isSyncing ? 'SYNCING…' : label),
       style: ElevatedButton.styleFrom(
         backgroundColor: Console.green,
         foregroundColor: Colors.black,
         disabledBackgroundColor: Console.green.withValues(alpha: 0.8),
         disabledForegroundColor: Colors.black,
       ),
-      onPressed: _isSyncing
+      onPressed: _isSyncing || !canSync
           ? null
           : () async {
-              final String? url = widget.controller.settings.tursoDbUrl;
-              final String? token = widget.controller.settings.tursoAuthToken;
-              if (url != null && token != null) {
-                setState(() => _isSyncing = true);
-                try {
-                  final AppDatabase db = await AppDatabase.getInstance();
-                  final TursoSyncService syncService = TursoSyncService(db: db);
-                  final bool ok = await syncService.syncTwoWay(
-                    dbUrl: url,
-                    authToken: token,
+              setState(() => _isSyncing = true);
+              try {
+                final CloudSyncReport report = await widget
+                    .recordingsController!
+                    .syncCloud();
+                if (context.mounted) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(
+                      content: Text(report.message),
+                      backgroundColor: report.success
+                          ? Console.green
+                          : report.partialSuccess
+                          ? Console.amber
+                          : Console.red,
+                    ),
                   );
-                  await widget.recordingsController?.reloadFromStorage();
-                  if (context.mounted) {
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      SnackBar(
-                        content: Text(
-                          ok
-                              ? '⚡ Bidirectional Turso sync complete!'
-                              : '⚠️ ${syncService.failureReason ?? 'Turso sync failed.'}',
-                        ),
-                        backgroundColor: ok ? Console.green : Console.amber,
-                      ),
-                    );
-                  }
-                } finally {
-                  if (mounted) setState(() => _isSyncing = false);
                 }
-              } else {
-                await _showEditTursoDialog(
-                  context,
-                  widget.controller,
-                  widget.recordingsController,
-                );
+              } finally {
+                if (mounted) setState(() => _isSyncing = false);
               }
             },
     );
   }
+}
+
+bool _hasTurso(AppSettings settings) =>
+    (settings.tursoDbUrl ?? '').trim().isNotEmpty &&
+    (settings.tursoAuthToken ?? '').trim().isNotEmpty &&
+    !TokenCipher.isSealed(settings.tursoAuthToken!);
+
+bool _hasR2(AppSettings settings) =>
+    SyncEndpoint.normalizeHttps(settings.r2Endpoint) != null &&
+    (settings.r2Bucket ?? '').trim().isNotEmpty &&
+    (settings.r2AccessKeyId ?? '').trim().isNotEmpty &&
+    (settings.r2SecretAccessKey ?? '').trim().isNotEmpty &&
+    !TokenCipher.isSealed(settings.r2SecretAccessKey!);
+
+String _r2Counts(R2SyncResult result) {
+  final int total = result.uploaded + result.downloaded + result.unchanged;
+  return '$total files reconciled';
+}
+
+String _formatSyncTime(DateTime value) {
+  String two(int number) => number.toString().padLeft(2, '0');
+  final DateTime local = value.toLocal();
+  return '${local.year}-${two(local.month)}-${two(local.day)} '
+      '${two(local.hour)}:${two(local.minute)}';
 }

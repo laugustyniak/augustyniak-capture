@@ -1,7 +1,9 @@
 import 'dart:async';
+import 'dart:convert';
 import 'dart:io';
 
 import 'package:audioplayers/audioplayers.dart';
+import 'package:crypto/crypto.dart';
 import 'package:flutter/foundation.dart';
 import 'package:path/path.dart' as p;
 import 'package:record/record.dart';
@@ -20,7 +22,11 @@ import '../../processing/data/video_poster_extractor.dart';
 import '../../processing/domain/processor.dart';
 import '../../processing/domain/processor_registry.dart';
 import '../../../core/database/app_database.dart';
+import '../../../core/sync/cloud_sync_coordinator.dart';
+import '../../../core/sync/r2_media_sync_service.dart';
+import '../../../core/sync/signed_r2_object_store.dart';
 import '../../../core/sync/sync_defaults.dart';
+import '../../../core/sync/sync_endpoint.dart';
 import '../../../core/sync/turso_sync_service.dart';
 import '../../settings/data/settings_repository.dart';
 import '../../settings/domain/app_settings.dart';
@@ -156,6 +162,23 @@ class RecordingsController extends ChangeNotifier {
   String? _lastSyncFailure;
 
   String? get lastSyncFailure => _lastSyncFailure;
+
+  CloudSyncReport? _lastCloudSyncReport;
+  Future<CloudSyncReport>? _cloudSyncInFlight;
+
+  CloudSyncReport? get lastCloudSyncReport => _lastCloudSyncReport;
+
+  static String cloudSyncConfigurationFingerprint(AppSettings settings) {
+    final List<Object?> values = <Object?>[
+      settings.tursoDbUrl ?? SyncDefaults.tursoDbUrl,
+      settings.tursoAuthToken ?? SyncDefaults.tursoAuthToken,
+      settings.r2Endpoint ?? SyncDefaults.r2Endpoint,
+      settings.r2Bucket ?? SyncDefaults.r2Bucket,
+      settings.r2AccessKeyId ?? SyncDefaults.r2AccessKeyId,
+      settings.r2SecretAccessKey ?? SyncDefaults.r2SecretAccessKey,
+    ];
+    return sha256.convert(utf8.encode(jsonEncode(values))).toString();
+  }
 
   /// Receives per-call usage. Ambient by design — see [UsageSink]. Defaults to
   /// a no-op so the pure-Dart suites need no database.
@@ -596,6 +619,90 @@ class RecordingsController extends ChangeNotifier {
       _logSink.log(_lastSyncFailure!, level: LogLevel.warn);
     }
     return false;
+  }
+
+  /// Runs every configured cloud backend and keeps each outcome visible.
+  ///
+  /// Turso goes first because its pull may add rows whose source files this
+  /// device does not have yet; R2 can then materialize those files locally.
+  Future<CloudSyncReport> syncCloud() {
+    final Future<CloudSyncReport>? active = _cloudSyncInFlight;
+    if (active != null) return active;
+
+    late final Future<CloudSyncReport> guarded;
+    guarded = _performCloudSync().whenComplete(() {
+      if (identical(_cloudSyncInFlight, guarded)) _cloudSyncInFlight = null;
+    });
+    _cloudSyncInFlight = guarded;
+    return guarded;
+  }
+
+  Future<CloudSyncReport> _performCloudSync() async {
+    final AppDatabase db = await AppDatabase.getInstance();
+    final AppSettings settings =
+        await SettingsRepository().load() ?? AppSettings.empty;
+
+    final String tursoUrl =
+        (settings.tursoDbUrl ?? SyncDefaults.tursoDbUrl ?? '').trim();
+    final String tursoToken =
+        (settings.tursoAuthToken ?? SyncDefaults.tursoAuthToken ?? '').trim();
+    final bool hasTurso =
+        tursoUrl.isNotEmpty &&
+        tursoToken.isNotEmpty &&
+        !TokenCipher.isSealed(tursoToken);
+
+    final String r2Endpoint =
+        (settings.r2Endpoint ?? SyncDefaults.r2Endpoint ?? '').trim();
+    final String r2Bucket = (settings.r2Bucket ?? SyncDefaults.r2Bucket ?? '')
+        .trim();
+    final String r2AccessKey =
+        (settings.r2AccessKeyId ?? SyncDefaults.r2AccessKeyId ?? '').trim();
+    final String r2Secret =
+        (settings.r2SecretAccessKey ?? SyncDefaults.r2SecretAccessKey ?? '')
+            .trim();
+    final bool hasR2 =
+        SyncEndpoint.normalizeHttps(r2Endpoint) != null &&
+        r2Bucket.isNotEmpty &&
+        r2AccessKey.isNotEmpty &&
+        r2Secret.isNotEmpty &&
+        !TokenCipher.isSealed(r2Secret);
+
+    final CloudSyncCoordinator coordinator = CloudSyncCoordinator(
+      configurationFingerprint: cloudSyncConfigurationFingerprint(settings),
+      syncTurso: hasTurso
+          ? () async {
+              final TursoSyncService service = TursoSyncService(db: db);
+              final bool success = await service.syncTwoWay(
+                dbUrl: tursoUrl,
+                authToken: tursoToken,
+              );
+              return TursoSyncResult(
+                success: success,
+                failureReason: service.failureReason,
+              );
+            }
+          : null,
+      syncR2: hasR2
+          ? () => R2MediaSyncService(
+              db: db,
+              store: SignedR2ObjectStore(
+                endpoint: r2Endpoint,
+                bucket: r2Bucket,
+                accessKeyId: r2AccessKey,
+                secretAccessKey: r2Secret,
+              ),
+            ).sync()
+          : null,
+    );
+
+    _lastCloudSyncReport = await coordinator.sync();
+    await reloadFromStorage();
+    _logSink.log(
+      _lastCloudSyncReport!.message,
+      level: _lastCloudSyncReport!.success ? LogLevel.info : LogLevel.warn,
+    );
+    if (!_disposed) notifyListeners();
+    return _lastCloudSyncReport!;
   }
 
   /// Bring source files with no index row back into the queue.
