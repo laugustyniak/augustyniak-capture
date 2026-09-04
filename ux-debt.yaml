@@ -86,9 +86,9 @@
   evidence:
     - "docs/architecture/clipboard.md:13: ChannelAutoPaste synthesizes Cmd+V; without Accessibility keystroke is silently dropped"
   workaround: "user manually presses Cmd+V after opening clipboard history"
-  state: accepted
+  state: fixed
   owner: clipboard-team
-  issue: null
+  issue: 115
   first_seen: 2026-09-03
   review_by: 2026-12-03
 
