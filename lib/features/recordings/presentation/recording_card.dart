@@ -186,6 +186,33 @@ class RecordingCard extends StatelessWidget {
     final bool hasTranscript = transcript.trim().isNotEmpty;
     final bool openable = recording.type == CaptureType.video;
 
+    final List<Widget> pillWidgets = <Widget>[
+      if (projectName != null)
+        StatusPill(
+          label: projectName!,
+          color: Console.mutedSoft,
+          outlined: true,
+        ),
+      if (recording.category != null)
+        StatusPill(
+          label: recording.category!.label,
+          color: categoryColorFor(recording.category),
+          outlined: true,
+        ),
+      AnimatedSwitcher(
+        duration: const Duration(milliseconds: 260),
+        child: visual == null
+            ? const SizedBox.shrink()
+            : StatusPill(
+                key: ValueKey<String>(visual.label),
+                label: visual.label,
+                color: visual.color,
+                pulse: visual.pulse,
+              ),
+      ),
+    ];
+    final bool hasPills = pillWidgets.isNotEmpty;
+
     final Widget card = RecordingCardShell(
       borderColor: focused
           ? Console.accent
@@ -194,110 +221,162 @@ class RecordingCard extends StatelessWidget {
           : reviewed
           ? Console.accent.withValues(alpha: .35)
           : Console.border,
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: <Widget>[
-          Row(
+      child: LayoutBuilder(
+        builder: (BuildContext context, BoxConstraints constraints) {
+          final bool isNarrow = constraints.maxWidth < 480;
+          final Widget actionButtons = Row(
+            mainAxisSize: MainAxisSize.min,
             children: <Widget>[
-              RecordingLeadingTile(
-                recording: recording,
-                failed: failed,
-                onOpen: openable ? onOpen : null,
-                semanticLabel: RecordingCard.openVideoLabel,
+              if (canRetry) ...<Widget>[
+                _GhostButton(
+                  icon: Icons.refresh_rounded,
+                  label: 'RETRY',
+                  onTap: onRetry,
+                ),
+                const SizedBox(width: 8),
+              ],
+              if (hasTranscript) ...<Widget>[
+                _GhostButton(
+                  icon: Icons.auto_awesome_outlined,
+                  label: 'ENRICH',
+                  onTap: isEnriching ? null : onEnrich,
+                  semanticLabel: isEnriching
+                      ? 'LLM enrichment in progress'
+                      : 'Run LLM enrichment',
+                ),
+                const SizedBox(width: 8),
+              ],
+              // In-app playback is audio-only; text and image items have no
+              // track at all.
+              if (recording.type.isPlayableAudio) ...<Widget>[
+                ConsoleIconButton(
+                  icon: isPlaying
+                      ? Icons.stop_rounded
+                      : Icons.play_arrow_rounded,
+                  onTap: onTogglePlay,
+                  semanticLabel: isPlaying ? 'Stop playback' : 'Play recording',
+                  active: isPlaying,
+                  size: 30,
+                  iconSize: 18,
+                ),
+                const SizedBox(width: 7),
+              ]
+              // A video leaves the app to play: there is no in-process video
+              // widget on the desktop targets, so this hands the file to
+              // whatever the user already has. Nothing to stop afterwards,
+              // hence no `active` state and a fixed icon.
+              else if (openable) ...<Widget>[
+                ConsoleIconButton(
+                  icon: Icons.play_arrow_rounded,
+                  onTap: onOpen,
+                  semanticLabel: RecordingCard.openVideoLabel,
+                  size: 30,
+                  iconSize: 18,
+                ),
+                const SizedBox(width: 7),
+              ],
+              if (canHandoff && !reviewed) ...<Widget>[
+                ConsoleIconButton(
+                  icon: Icons.smart_toy_outlined,
+                  onTap: onHandoff,
+                  semanticLabel: RecordingCard.handoffLabel,
+                  size: 30,
+                  iconSize: 17,
+                ),
+                const SizedBox(width: 7),
+              ],
+              if (canRoute && !reviewed) ...<Widget>[
+                ConsoleIconButton(
+                  icon: Icons.outbound_outlined,
+                  onTap: onRoute,
+                  semanticLabel: RecordingCard.routeLabel,
+                  size: 30,
+                  iconSize: 17,
+                ),
+                const SizedBox(width: 7),
+              ],
+              ConsoleIconButton(
+                icon: Icons.edit_outlined,
+                onTap: onEdit,
+                semanticLabel: 'Edit title and text',
+                size: 30,
+                iconSize: 16,
               ),
-              const SizedBox(width: 12),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: <Widget>[
-                    Row(
+              const SizedBox(width: 7),
+              _ReviewToggle(
+                reviewed: reviewed,
+                busy: isMarkingDone,
+                onTap: onToggleProcessed,
+              ),
+            ],
+          );
+          return Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: <Widget>[
+              Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: <Widget>[
+                  RecordingLeadingTile(
+                    recording: recording,
+                    failed: failed,
+                    onOpen: openable ? onOpen : null,
+                    semanticLabel: RecordingCard.openVideoLabel,
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
                       children: <Widget>[
-                        Flexible(
-                          child: Text(
-                            displayName,
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                            style: ConsoleText.cardTitle,
-                          ),
+                        Row(
+                          children: <Widget>[
+                            Flexible(
+                              child: Text(
+                                displayName,
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: ConsoleText.cardTitle,
+                              ),
+                            ),
+                            if (reviewed) ...<Widget>[
+                              const SizedBox(width: 7),
+                              Icon(
+                                Icons.check_circle_outline_rounded,
+                                size: 14,
+                                color: Console.accent,
+                              ),
+                            ],
+                          ],
                         ),
-                        if (reviewed) ...<Widget>[
-                          const SizedBox(width: 7),
-                          Icon(
-                            Icons.check_circle_outline_rounded,
-                            size: 14,
-                            color: Console.accent,
+                        const SizedBox(height: 3),
+                        Text(
+                          metaLineFor(recording, filename),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: ConsoleText.cardMeta,
+                        ),
+                        if (isNarrow && hasPills) ...<Widget>[
+                          const SizedBox(height: 6),
+                          Wrap(
+                            spacing: 6,
+                            runSpacing: 6,
+                            crossAxisAlignment: WrapCrossAlignment.center,
+                            children: pillWidgets,
                           ),
                         ],
                       ],
                     ),
-                    const SizedBox(height: 3),
-                    Text(
-                      metaLineFor(recording, filename),
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: ConsoleText.cardMeta,
+                  ),
+                  if (!isNarrow && hasPills) ...<Widget>[
+                    const SizedBox(width: 8),
+                    Wrap(
+                      spacing: 6,
+                      runSpacing: 6,
+                      crossAxisAlignment: WrapCrossAlignment.center,
+                      children: pillWidgets,
                     ),
                   ],
-                ),
-              ),
-              const SizedBox(width: 8),
-              // Three facts of two different kinds. Project and category are
-              // *labels* — they describe the item and do not change on their
-              // own — so they are outlined; the pipeline status is the only
-              // state here, and keeps the fill. Given the same form all three
-              // had the same weight, and colour alone had to carry the
-              // difference at 10 px.
-              Wrap(
-                spacing: 6,
-                runSpacing: 6,
-                crossAxisAlignment: WrapCrossAlignment.center,
-                children: <Widget>[
-                  if (projectName != null)
-                    StatusPill(
-                      label: projectName!,
-                      // Neutral, and it has to be: violet is now `agentTask`,
-                      // and the two pills sit side by side in this very Wrap —
-                      // a violet outline would be read as a category by anyone
-                      // scanning colour rather than text. Project is context
-                      // anyway; the category is the thing to act on.
-                      color: Console.mutedSoft,
-                      outlined: true,
-                    ),
-                  if (recording.category != null)
-                    StatusPill(
-                      label: recording.category!.label,
-                      // Raised off `mutedSoft`, which made the one field that
-                      // says what to *do* with a capture the dimmest thing on
-                      // the row. Category is a routing destination — and each
-                      // destination now has its own colour, so the row is
-                      // sortable by eye and not only by reading.
-                      color: categoryColorFor(recording.category),
-                      outlined: true,
-                    ),
-                  // Cross-faded rather than swapped: READY → ANALYZING →
-                  // READY happens twice within a couple of seconds, and a
-                  // hard cut at that rate reads as the card glitching.
-                  AnimatedSwitcher(
-                    duration: const Duration(milliseconds: 260),
-                    // The resting state draws nothing. A badge is a claim that
-                    // something is different, and READY was on twenty-seven of
-                    // twenty-eight rows — so the one row that was queued or had
-                    // failed had to compete with a wall of green saying that
-                    // everything was fine. The reviewed border and the queue's
-                    // own chips already report "finished".
-                    child: visual == null
-                        ? const SizedBox.shrink()
-                        : StatusPill(
-                            key: ValueKey<String>(visual.label),
-                            label: visual.label,
-                            color: visual.color,
-                            pulse: visual.pulse,
-                          ),
-                  ),
                 ],
               ),
-            ],
-          ),
           // The model's own output, and the second thing worth lifting out of
           // the app after the transcript itself: a summary is what gets pasted
           // into a standup note or a ticket. It copies in full even though the
@@ -485,98 +564,42 @@ class RecordingCard extends StatelessWidget {
             ),
           ],
           const SizedBox(height: 11),
-          Row(
-            children: <Widget>[
-              Expanded(
-                child: VerificationLine(recording: recording, costUsd: costUsd),
-              ),
-              const SizedBox(width: 8),
-              if (canRetry) ...<Widget>[
-                _GhostButton(
-                  icon: Icons.refresh_rounded,
-                  label: 'RETRY',
-                  onTap: onRetry,
+          if (constraints.maxWidth < 540)
+            Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: <Widget>[
+                VerificationLine(
+                  recording: recording,
+                  costUsd: costUsd,
+                ),
+                const SizedBox(height: 8),
+                Row(
+                  children: <Widget>[
+                    const Spacer(),
+                    actionButtons,
+                  ],
+                ),
+              ],
+            )
+          else
+            Row(
+              children: <Widget>[
+                Expanded(
+                  child: VerificationLine(
+                    recording: recording,
+                    costUsd: costUsd,
+                  ),
                 ),
                 const SizedBox(width: 8),
+                actionButtons,
               ],
-              if (hasTranscript) ...<Widget>[
-                _GhostButton(
-                  icon: Icons.auto_awesome_outlined,
-                  label: 'ENRICH',
-                  onTap: isEnriching ? null : onEnrich,
-                  semanticLabel: isEnriching
-                      ? 'LLM enrichment in progress'
-                      : 'Run LLM enrichment',
-                ),
-                const SizedBox(width: 8),
-              ],
-              // In-app playback is audio-only; text and image items have no
-              // track at all.
-              if (recording.type.isPlayableAudio) ...<Widget>[
-                ConsoleIconButton(
-                  icon: isPlaying
-                      ? Icons.stop_rounded
-                      : Icons.play_arrow_rounded,
-                  onTap: onTogglePlay,
-                  semanticLabel: isPlaying ? 'Stop playback' : 'Play recording',
-                  active: isPlaying,
-                  size: 30,
-                  iconSize: 18,
-                ),
-                const SizedBox(width: 7),
-              ]
-              // A video leaves the app to play: there is no in-process video
-              // widget on the desktop targets, so this hands the file to
-              // whatever the user already has. Nothing to stop afterwards,
-              // hence no `active` state and a fixed icon.
-              else if (openable) ...<Widget>[
-                ConsoleIconButton(
-                  icon: Icons.play_arrow_rounded,
-                  onTap: onOpen,
-                  semanticLabel: RecordingCard.openVideoLabel,
-                  size: 30,
-                  iconSize: 18,
-                ),
-                const SizedBox(width: 7),
-              ],
-              if (canHandoff && !reviewed) ...<Widget>[
-                ConsoleIconButton(
-                  icon: Icons.smart_toy_outlined,
-                  onTap: onHandoff,
-                  semanticLabel: RecordingCard.handoffLabel,
-                  size: 30,
-                  iconSize: 17,
-                ),
-                const SizedBox(width: 7),
-              ],
-              if (canRoute && !reviewed) ...<Widget>[
-                ConsoleIconButton(
-                  icon: Icons.outbound_outlined,
-                  onTap: onRoute,
-                  semanticLabel: RecordingCard.routeLabel,
-                  size: 30,
-                  iconSize: 17,
-                ),
-                const SizedBox(width: 7),
-              ],
-              ConsoleIconButton(
-                icon: Icons.edit_outlined,
-                onTap: onEdit,
-                semanticLabel: 'Edit title and text',
-                size: 30,
-                iconSize: 16,
-              ),
-              const SizedBox(width: 7),
-              _ReviewToggle(
-                reviewed: reviewed,
-                busy: isMarkingDone,
-                onTap: onToggleProcessed,
-              ),
-            ],
-          ),
+            ),
         ],
-      ),
-    );
+      );
+    },
+  ),
+);
+
     if (onOpenFocus == null) return card;
     // Opaque rather than deferToChild: the padding and the gaps between the
     // card's controls are part of "the note", and a tap that lands in one of

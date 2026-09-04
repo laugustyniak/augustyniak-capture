@@ -212,6 +212,11 @@ class _ProjectCapturesSheetState extends State<ProjectCapturesSheet> {
                                       recording.id,
                                       title,
                                     ),
+                                    onSummaryChanged: (String summary) =>
+                                        widget.recordingsController.setSummary(
+                                      recording.id,
+                                      summary,
+                                    ),
                                     onTextChanged: (String text) =>
                                         widget.recordingsController.editTranscript(
                                       recording.id,
@@ -270,6 +275,9 @@ class _ProjectCapturesSheetState extends State<ProjectCapturesSheet> {
                                     onEnrich: () => widget.recordingsController
                                         .retryEnrichment(recording.id),
                                     onEdit: () => setState(
+                                      () => _editingId = recording.id,
+                                    ),
+                                    onOpenFocus: () => setState(
                                       () => _editingId = recording.id,
                                     ),
                                     onToggleProcessed: () async {
