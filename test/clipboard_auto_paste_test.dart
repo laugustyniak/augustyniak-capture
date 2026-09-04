@@ -1,6 +1,8 @@
 import 'dart:io';
 
 import 'package:augustyniak_capture/features/clipboard/data/xdotool_auto_paste.dart';
+import 'package:augustyniak_capture/features/clipboard/domain/auto_paste.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 /// Records every `xdotool` invocation and answers with scripted results.
@@ -148,6 +150,42 @@ void main() {
       xdotool.throwOnRun = true;
 
       await expectLater(paster.pasteToTarget(), completes);
+    });
+  });
+
+  group('DisabledAutoPaste', () {
+    test('rememberTarget and pasteToTarget complete silently', () async {
+      const DisabledAutoPaste paster = DisabledAutoPaste();
+      await expectLater(paster.rememberTarget(), completes);
+      await expectLater(paster.pasteToTarget(), completes);
+    });
+  });
+
+  group('ChannelAutoPaste', () {
+    TestWidgetsFlutterBinding.ensureInitialized();
+    const MethodChannel channel = MethodChannel(
+      'ai.augustyniak.capture/clipboard',
+    );
+
+    test('invokes autoPaste method on channel', () async {
+      const ChannelAutoPaste paster = ChannelAutoPaste();
+      final List<MethodCall> calls = <MethodCall>[];
+      TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+          .setMockMethodCallHandler(channel, (MethodCall call) async {
+            calls.add(call);
+            return true;
+          });
+      addTearDown(() {
+        TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+            .setMockMethodCallHandler(channel, null);
+      });
+
+      await paster.rememberTarget();
+      expect(calls, isEmpty);
+
+      await paster.pasteToTarget();
+      expect(calls, hasLength(1));
+      expect(calls.first.method, 'autoPaste');
     });
   });
 }
