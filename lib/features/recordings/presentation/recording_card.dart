@@ -44,6 +44,7 @@ class RecordingCard extends StatelessWidget {
     this.focused = false,
     this.costUsd,
     this.onOpenFocus,
+    this.onConfigureModels,
   });
 
   /// Said in both places the action is offered — the poster and the button —
@@ -161,6 +162,7 @@ class RecordingCard extends StatelessWidget {
   /// the excerpt, the durability line. What it buys is the thing the phone had
   /// no other route to, now that the row's accordion is gone.
   final VoidCallback? onOpenFocus;
+  final VoidCallback? onConfigureModels;
 
   @override
   Widget build(BuildContext context) {
@@ -228,6 +230,17 @@ class RecordingCard extends StatelessWidget {
             mainAxisSize: MainAxisSize.min,
             children: <Widget>[
               if (canRetry) ...<Widget>[
+                if (failed &&
+                    onConfigureModels != null &&
+                    (recording.error?.toLowerCase().contains('not configured') ?? false)) ...<Widget>[
+                  _GhostButton(
+                    icon: Icons.tune,
+                    label: 'SET UP MODEL',
+                    onTap: onConfigureModels,
+                    semanticLabel: 'Set up a model in the Models tab',
+                  ),
+                  const SizedBox(width: 8),
+                ],
                 _GhostButton(
                   icon: Icons.refresh_rounded,
                   label: 'RETRY',
