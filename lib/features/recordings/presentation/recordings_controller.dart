@@ -1643,6 +1643,23 @@ class RecordingsController extends ChangeNotifier {
     );
   }
 
+  /// Set or clear an item's summary. An empty value clears it.
+  Future<void> setSummary(String id, String? summary) async {
+    final String trimmed = (summary ?? '').trim();
+    await _update(
+      id,
+      (Recording item) => item.copyWith(
+        summary: trimmed.isEmpty ? null : trimmed,
+        clearSummary: trimmed.isEmpty,
+      ),
+      source: RevisionSource.user,
+    );
+    _logSink.log(
+      trimmed.isEmpty ? 'Summary cleared.' : 'Summary updated.',
+      recordingId: id,
+    );
+  }
+
   /// Overwrite the model's verdict. Null clears it back to "unclassified" — a
   /// wrong category is worse than none, because an export will read this field.
   Future<void> setCategory(String id, CaptureCategory? category) async {

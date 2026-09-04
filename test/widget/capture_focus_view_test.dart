@@ -5,19 +5,15 @@ import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:augustyniak_capture/app/ui_kit.dart';
 import 'package:augustyniak_capture/features/recordings/domain/recording.dart';
+import 'package:augustyniak_capture/features/recordings/presentation/capture_focus_view.dart';
 import 'package:augustyniak_capture/features/recordings/presentation/queue_tab.dart';
 import 'package:augustyniak_capture/features/recordings/presentation/recording_card.dart';
-import 'package:augustyniak_capture/features/recordings/presentation/recording_row.dart';
+import 'package:augustyniak_capture/features/recordings/presentation/recording_editor.dart';
 import 'package:augustyniak_capture/features/recordings/presentation/recordings_controller.dart';
 
 import '../support/harness.dart';
 
-/// The queue's one way into a capture: tapping it.
-///
-/// Both forms are asserted here rather than in the card's and the row's own
-/// suites, because the claim is that they agree — the desktop card body and the
-/// compact row open the same view, and the phone has no second surface (the
-/// accordion) that could drift from it.
+/// The queue's direct inline editing and focus reading view tests.
 void main() {
   late Directory appDir;
 
@@ -50,7 +46,37 @@ void main() {
     await tester.pump();
   }
 
-  testWidgets('tapping the card body opens the focus view', (
+  Future<void> pumpFocusView(
+    WidgetTester tester,
+    RecordingsController controller,
+    String recordingId, {
+    Size surface = const Size(1200, 900),
+  }) async {
+    tester.view.physicalSize = surface;
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    await tester.pumpWidget(
+      hostTab(
+        () => Builder(
+          builder: (BuildContext context) => ElevatedButton(
+            onPressed: () => showCaptureFocusView(
+              context,
+              controller: controller,
+              recordingId: recordingId,
+            ),
+            child: const Text('OPEN'),
+          ),
+        ),
+        listenable: controller,
+      ),
+    );
+    await tester.pump();
+    await tester.tap(find.text('OPEN'));
+    await tester.pumpAndSettle();
+  }
+
+  testWidgets('tapping the card body opens inline editing directly', (
     WidgetTester tester,
   ) async {
     final RecordingsController controller = await buildRecordingsController(
@@ -65,15 +91,13 @@ void main() {
     );
     await pumpQueue(tester, controller);
 
-    expect(find.byType(Dialog), findsNothing);
-    // The title, not a button: the point is that dead space on the card is
-    // now the tap target.
+    expect(find.byType(RecordingEditor), findsNothing);
+    // The title, not a button: tapping the card directly enters inline edit mode.
     await tester.tap(find.text('Kitchen rebuild'));
     await tester.pumpAndSettle();
 
-    expect(find.byType(Dialog), findsOneWidget);
-    expect(find.bySemanticsLabel('Close focus view'), findsOneWidget);
-    expect(find.byTooltip('Copy full text'), findsOneWidget);
+    expect(find.byType(RecordingEditor), findsOneWidget);
+    expect(find.byType(Dialog), findsNothing);
   });
 
   testWidgets('a control on the card still wins the tap', (
@@ -95,12 +119,12 @@ void main() {
     await tester.pumpAndSettle();
 
     // The copy button consumed it; the body gesture underneath did not also
-    // fire and open a dialog over the queue.
-    expect(find.byType(Dialog), findsNothing);
+    // fire and enter edit mode.
+    expect(find.byType(RecordingEditor), findsNothing);
   });
 
   testWidgets(
-    'tapping a compact row opens the focus view rather than expanding',
+    'tapping a compact card shows full summary and opens inline editing',
     (WidgetTester tester) async {
       final RecordingsController controller = await buildRecordingsController(
         appDir,
@@ -115,17 +139,14 @@ void main() {
       );
       await pumpQueue(tester, controller, surface: const Size(393, 852));
 
-      expect(find.byType(RecordingRow), findsOneWidget);
-      // Collapsed: the row is one line, so the summary is not on screen until
-      // the capture is opened.
-      expect(find.text('Chase the worktop.'), findsNothing);
+      expect(find.byType(RecordingCard), findsOneWidget);
+      // The compact card displays the summary concisely.
+      expect(find.text('Chase the worktop.'), findsOneWidget);
 
       await tester.tap(find.text('Kitchen rebuild'));
       await tester.pumpAndSettle();
 
-      expect(find.byType(Dialog), findsOneWidget);
-      expect(find.text('Chase the worktop.'), findsOneWidget);
-      expect(find.text('Ring the joiner about the worktop.'), findsOneWidget);
+      expect(find.byType(RecordingEditor), findsOneWidget);
     },
   );
 
@@ -145,10 +166,7 @@ void main() {
         ),
       ],
     );
-    await pumpQueue(tester, controller);
-
-    await tester.tap(find.text('Standup'));
-    await tester.pumpAndSettle();
+    await pumpFocusView(tester, controller, 'markdown');
 
     // The markers are consumed rather than printed: a heading is a heading and
     // a bullet is a bullet.
@@ -171,10 +189,7 @@ void main() {
         ),
       ],
     );
-    await pumpQueue(tester, controller);
-
-    await tester.tap(find.text('Standup'));
-    await tester.pumpAndSettle();
+    await pumpFocusView(tester, controller, 'live');
     expect(inFocusView(find.text('Ring the joiner.')), findsOneWidget);
 
     // A snapshot-based modal would still be showing the old text here.
@@ -266,9 +281,7 @@ void main() {
           makeRecording(id: 'theme', title: 'Standup', transcript: 'Body.'),
         ],
       );
-      await pumpQueue(tester, controller);
-      await tester.tap(find.text('Standup'));
-      await tester.pumpAndSettle();
+      await pumpFocusView(tester, controller, 'theme');
       expect(find.byType(Dialog), findsOneWidget);
       await tester.tap(find.text('CLOSE'));
       await tester.pumpAndSettle();
@@ -312,23 +325,21 @@ void main() {
     // ask for would make the first key press act on a guessed capture.
     await tester.sendKeyEvent(LogicalKeyboardKey.enter);
     await tester.pump();
-    expect(find.byType(Dialog), findsNothing);
+    expect(find.byType(RecordingEditor), findsNothing);
 
     await tester.sendKeyEvent(LogicalKeyboardKey.arrowDown);
     await tester.pump();
     await tester.sendKeyEvent(LogicalKeyboardKey.enter);
     await tester.pumpAndSettle();
-    expect(find.byType(Dialog), findsOneWidget);
+    expect(find.byType(RecordingEditor), findsOneWidget);
 
-    await tester.tap(find.text('CLOSE'));
+    await tester.tap(find.text('DONE'));
     await tester.pumpAndSettle();
-    expect(find.byType(Dialog), findsNothing);
+    expect(find.byType(RecordingEditor), findsNothing);
 
     // The row is still selected, so this is the same key that just opened it —
     // only the focus has moved into the search box, which is what has to
-    // swallow it. A real key event, not `receiveAction`: the soft-keyboard
-    // action never reaches the shortcut layer, so asserting on that would
-    // pass against a binding that does fire on the hardware key.
+    // swallow it.
     await tester.tap(find.byType(TextField));
     await tester.pump();
     await tester.enterText(find.byType(TextField), 'stand');
@@ -336,6 +347,6 @@ void main() {
     await tester.sendKeyEvent(LogicalKeyboardKey.enter);
     await tester.pump();
 
-    expect(find.byType(Dialog), findsNothing);
+    expect(find.byType(RecordingEditor), findsNothing);
   });
 }
