@@ -3,6 +3,7 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:augustyniak_capture/features/recordings/domain/recording.dart';
+import 'package:augustyniak_capture/features/recordings/presentation/capture_focus_view.dart';
 import 'package:augustyniak_capture/features/recordings/presentation/queue_tab.dart';
 import 'package:augustyniak_capture/features/recordings/presentation/recording_card.dart';
 import 'package:augustyniak_capture/features/recordings/presentation/recordings_controller.dart';
@@ -136,5 +137,80 @@ void main() {
       expect(find.text('No transcription model configured.'), findsNothing);
       expect(find.textContaining('Desk clear'), findsOneWidget);
     });
+
+    testWidgets(
+      'an unconfigured failed capture offers SET UP MODEL on the card',
+      (WidgetTester tester) async {
+        final RecordingsController controller = await buildRecordingsController(
+          appDir,
+          seed: <Recording>[
+            makeRecording(
+              id: 'unconfigured_1',
+              status: RecordingStatus.failed,
+              error: 'Transcription endpoint is not configured.',
+            ),
+          ],
+        );
+        int configureTaps = 0;
+        await pumpQueue(
+          tester,
+          controller,
+          hasTranscriptionProfile: false,
+          onConfigureModels: () => configureTaps++,
+        );
+
+        expect(find.text('SET UP MODEL'), findsOneWidget);
+        await tester.tap(find.text('SET UP MODEL'));
+        await tester.pump();
+        expect(configureTaps, 1);
+      },
+    );
+
+    testWidgets(
+      'an unconfigured failed capture in focus view offers SET UP A MODEL button',
+      (WidgetTester tester) async {
+        final RecordingsController controller = await buildRecordingsController(
+          appDir,
+          seed: <Recording>[
+            makeRecording(
+              id: 'unconfigured_focus',
+              status: RecordingStatus.failed,
+              error: 'Transcription endpoint is not configured.',
+            ),
+          ],
+        );
+        int configureTaps = 0;
+        await tester.pumpWidget(
+          hostTab(
+            () => Builder(
+              builder: (BuildContext context) => ElevatedButton(
+                onPressed: () => showCaptureFocusView(
+                  context,
+                  controller: controller,
+                  recordingId: 'unconfigured_focus',
+                  onConfigureModels: () => configureTaps++,
+                ),
+                child: const Text('OPEN'),
+              ),
+            ),
+            listenable: controller,
+          ),
+        );
+        await tester.pump();
+
+        // Open the dialog
+        await tester.tap(find.text('OPEN'));
+        await tester.pumpAndSettle();
+
+        expect(find.byType(Dialog), findsOneWidget);
+        expect(find.text('SET UP A MODEL'), findsOneWidget);
+
+        await tester.tap(find.text('SET UP A MODEL'));
+        await tester.pumpAndSettle();
+
+        expect(find.byType(Dialog), findsNothing);
+        expect(configureTaps, 1);
+      },
+    );
   });
 }

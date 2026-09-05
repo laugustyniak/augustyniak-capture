@@ -1,0 +1,147 @@
+- id: UXD-001
+  title: First-run audio capture fails without guided provider setup
+  source: architecture-audit-2026-09
+  area: onboarding
+  type: onboarding
+  severity: 3
+  reach: 0.90
+  frequency: low
+  effort: 2
+  evidence:
+    - "docs/architecture/ui.md:49: fresh install has no provider profile, audio lands in failed state"
+    - "lib/features/recordings/presentation/queue_tab.dart: amber badge on Models tab is sole setup cue"
+  workaround: "user manually notices amber badge on Models tab and navigates there to configure API key"
+  state: fixed
+  owner: onboarding-team
+  issue: 111
+  first_seen: 2026-09-03
+  review_by: 2026-12-03
+
+- id: UXD-002
+  title: Background transcription queue lost on mobile OS app suspension
+  source: issues-backlog-2026-09
+  area: mobile
+  type: error-recovery
+  severity: 3
+  reach: 0.40
+  frequency: medium
+  effort: 5
+  evidence:
+    - "ISSUES.md:21-25: queue is memory-only; jobs do not survive app killed/suspended"
+    - "docs/architecture/capture-pipeline.md: background drain loop lacks WorkManager/BGTaskScheduler hooks"
+  workaround: "user must keep app active in foreground or wait for re-enqueue on next app launch"
+  state: accepted
+  owner: mobile-team
+  issue: null
+  first_seen: 2026-09-03
+  review_by: 2026-12-03
+
+- id: UXD-003
+  title: Plaintext token warning shown in UI when OS keyring unavailable
+  source: architecture-audit-2026-09
+  area: settings
+  type: feedback
+  severity: 2
+  reach: 0.50
+  frequency: medium
+  effort: 3
+  evidence:
+    - "ISSUES.md:38-41: settings.json plaintext token warning in Models tab"
+    - "docs/architecture/settings-security.md:7-12: headless Linux or unsigned builds drop to plaintext fallback"
+  workaround: "user relies on filesystem permissions or passes credentials via ephemeral CLI defines"
+  state: accepted
+  owner: settings-team
+  issue: null
+  first_seen: 2026-09-03
+  review_by: 2026-12-03
+
+- id: UXD-004
+  title: Video playback opens external OS player instead of inline player
+  source: issues-backlog-2026-09
+  area: queue
+  type: navigation
+  severity: 2
+  reach: 0.30
+  frequency: high
+  effort: 3
+  evidence:
+    - "ISSUES.md:7-11: playback opens platform player via SystemMediaOpener shelling out to xdg-open/open"
+    - "docs/architecture/ui.md:24: video_player rejected for Linux desktop support, causing window focus loss"
+  workaround: "user switches between external media player and app manually"
+  state: accepted
+  owner: ui-team
+  issue: null
+  first_seen: 2026-09-03
+  review_by: 2026-12-03
+
+- id: UXD-005
+  title: Clipboard auto-paste drops keystroke without Accessibility permission on macOS
+  source: architecture-audit-2026-09
+  area: clipboard
+  type: error-recovery
+  severity: 2
+  reach: 0.35
+  frequency: high
+  effort: 2
+  evidence:
+    - "docs/architecture/clipboard.md:13: ChannelAutoPaste synthesizes Cmd+V; without Accessibility keystroke is silently dropped"
+  workaround: "user manually presses Cmd+V after opening clipboard history"
+  state: accepted
+  owner: clipboard-team
+  issue: null
+  first_seen: 2026-09-03
+  review_by: 2026-12-03
+
+- id: UXD-006
+  title: Groq enrichment preset fails silently on image capture OCR
+  source: architecture-audit-2026-09
+  area: settings
+  type: feedback
+  severity: 2
+  reach: 0.25
+  frequency: medium
+  effort: 2
+  evidence:
+    - "docs/architecture/settings-security.md:13: Groq production lineup has no vision model, landing image captures in failed state"
+  workaround: "user must manually switch active enrichment profile to OpenAI/Anthropic/Gemini for OCR"
+  state: accepted
+  owner: settings-team
+  issue: null
+  first_seen: 2026-09-03
+  review_by: 2026-12-03
+
+- id: UXD-007
+  title: Local offline transcription model catalog and downloader missing
+  source: issues-backlog-2026-09
+  area: settings
+  type: onboarding
+  severity: 2
+  reach: 0.70
+  frequency: low
+  effort: 5
+  evidence:
+    - "ISSUES.md:27-36: Models tab only manages remote endpoints; local whisper.cpp model catalog missing"
+  workaround: "user must configure paid cloud provider API keys on initial setup"
+  state: accepted
+  owner: transcription-team
+  issue: null
+  first_seen: 2026-09-03
+  review_by: 2026-12-03
+
+- id: UXD-008
+  title: Legacy Polish preview string in persisted clipboard history
+  source: architecture-audit-2026-09
+  area: clipboard
+  type: copy
+  severity: 1
+  reach: 0.15
+  frequency: low
+  effort: 1
+  evidence:
+    - "docs/architecture/clipboard.md:18: ClipboardItem.preview holds '[Obrazek]' on legacy rows"
+  workaround: "none needed (cosmetic preview string only)"
+  state: accepted
+  owner: clipboard-team
+  issue: null
+  first_seen: 2026-09-03
+  review_by: 2026-12-03

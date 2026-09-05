@@ -39,19 +39,17 @@ void main() {
     return controller;
   }
 
-  testWidgets('queue switches from rows to cards exactly at 600 pixels', (
+  testWidgets('queue renders recording cards in both compact and wide modes', (
     WidgetTester tester,
   ) async {
     addTearDown(tester.view.reset);
     await pumpQueueAtWidth(tester, 599);
 
-    expect(find.byType(RecordingRow), findsOneWidget);
-    expect(find.byType(RecordingCard), findsNothing);
+    expect(find.byType(RecordingCard), findsOneWidget);
 
     tester.view.physicalSize = const Size(600, 900);
     await tester.pump();
 
-    expect(find.byType(RecordingRow), findsNothing);
     expect(find.byType(RecordingCard), findsOneWidget);
   });
 

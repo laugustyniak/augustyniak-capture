@@ -48,6 +48,7 @@ class RecordingEditor extends StatefulWidget {
     required this.revisions,
     required this.tagSuggestions,
     required this.onTitleChanged,
+    this.onSummaryChanged,
     required this.onTextChanged,
     required this.onCategoryChanged,
     required this.onTagsChanged,
@@ -66,6 +67,7 @@ class RecordingEditor extends StatefulWidget {
   static const String doneLabel = 'Finish editing';
   static const String deleteLabel = 'Delete this capture and its source file';
   static const String revertTitleLabel = 'Revert title to the saved value';
+  static const String revertSummaryLabel = 'Revert summary to the saved value';
   static const String revertTextLabel = 'Revert text to the saved value';
 
   final Recording recording;
@@ -75,6 +77,7 @@ class RecordingEditor extends StatefulWidget {
   final List<String> tagSuggestions;
 
   final ValueChanged<String> onTitleChanged;
+  final ValueChanged<String>? onSummaryChanged;
   final ValueChanged<String> onTextChanged;
   final ValueChanged<CaptureCategory?> onCategoryChanged;
   final ValueChanged<List<String>> onTagsChanged;
@@ -128,10 +131,14 @@ class _RecordingEditorState extends State<RecordingEditor> {
   late final TextEditingController _title = TextEditingController(
     text: _modelTitle,
   );
+  late final TextEditingController _summary = TextEditingController(
+    text: _modelSummary,
+  );
   late final TextEditingController _text = TextEditingController(
     text: _modelText,
   );
   final FocusNode _titleFocus = FocusNode();
+  final FocusNode _summaryFocus = FocusNode();
   final FocusNode _textFocus = FocusNode();
 
   /// The last value this editor took *from* the item. Everything hangs off it:
@@ -139,12 +146,15 @@ class _RecordingEditorState extends State<RecordingEditor> {
   /// skipped when the field already equals it. It is not the same as
   /// `recording.title` — while the user is mid-edit the two deliberately differ.
   late String _syncedTitle = _modelTitle;
+  late String _syncedSummary = _modelSummary;
   late String _syncedText = _modelText;
 
   String get _modelTitle => widget.recording.title ?? '';
+  String get _modelSummary => widget.recording.summary ?? '';
   String get _modelText => widget.recording.transcript ?? '';
 
   bool get _titleDirty => _title.text.trim() != _syncedTitle.trim();
+  bool get _summaryDirty => _summary.text.trim() != _syncedSummary.trim();
   bool get _textDirty => _text.text.trim() != _syncedText.trim();
 
   @override
@@ -152,6 +162,9 @@ class _RecordingEditorState extends State<RecordingEditor> {
     super.initState();
     _titleFocus.addListener(() {
       if (!_titleFocus.hasFocus) _commitTitle();
+    });
+    _summaryFocus.addListener(() {
+      if (!_summaryFocus.hasFocus) _commitSummary();
     });
     _textFocus.addListener(() {
       if (!_textFocus.hasFocus) _commitText();
@@ -169,6 +182,10 @@ class _RecordingEditorState extends State<RecordingEditor> {
       _syncedTitle = _modelTitle;
       _title.text = _modelTitle;
     }
+    if (_modelSummary != _syncedSummary && !_summaryDirty) {
+      _syncedSummary = _modelSummary;
+      _summary.text = _modelSummary;
+    }
     if (_modelText != _syncedText && !_textDirty) {
       _syncedText = _modelText;
       _text.text = _modelText;
@@ -181,8 +198,10 @@ class _RecordingEditorState extends State<RecordingEditor> {
     // do not control, and a write from there would be invisible. DONE and blur
     // are the two commit points, and both are things the user did.
     _title.dispose();
+    _summary.dispose();
     _text.dispose();
     _titleFocus.dispose();
+    _summaryFocus.dispose();
     _textFocus.dispose();
     super.dispose();
   }
@@ -192,6 +211,13 @@ class _RecordingEditorState extends State<RecordingEditor> {
     final String value = _title.text.trim();
     setState(() => _syncedTitle = value);
     widget.onTitleChanged(value);
+  }
+
+  void _commitSummary() {
+    if (!_summaryDirty) return;
+    final String value = _summary.text.trim();
+    setState(() => _syncedSummary = value);
+    widget.onSummaryChanged?.call(value);
   }
 
   void _commitText() {
@@ -214,6 +240,11 @@ class _RecordingEditorState extends State<RecordingEditor> {
     setState(() {});
   }
 
+  void _revertSummary() {
+    _summary.text = _syncedSummary;
+    setState(() {});
+  }
+
   void _revertText() {
     _text.text = _syncedText;
     setState(() {});
@@ -223,6 +254,7 @@ class _RecordingEditorState extends State<RecordingEditor> {
   /// DONE button and by Escape.
   void _finish() {
     _commitTitle();
+    _commitSummary();
     _commitText();
     widget.onDone();
   }
@@ -366,6 +398,20 @@ class _RecordingEditorState extends State<RecordingEditor> {
                   tags: recording.tags,
                   suggestions: widget.tagSuggestions,
                   onChanged: widget.onTagsChanged,
+                ),
+              ),
+              _Field(
+                label: 'SUMMARY',
+                dirty: _summaryDirty,
+                onRevert: _revertSummary,
+                revertSemanticLabel: RecordingEditor.revertSummaryLabel,
+                child: ConsoleField(
+                  controller: _summary,
+                  focusNode: _summaryFocus,
+                  minLines: 2,
+                  maxLines: 5,
+                  hintText: 'Summary / paraphrase',
+                  onChanged: (String _) => setState(() {}),
                 ),
               ),
               _Field(

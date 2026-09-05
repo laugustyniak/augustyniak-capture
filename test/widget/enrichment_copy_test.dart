@@ -2,9 +2,9 @@ import 'dart:io';
 
 import 'package:augustyniak_capture/app/ui_kit.dart';
 import 'package:augustyniak_capture/features/recordings/domain/recording.dart';
+import 'package:augustyniak_capture/features/recordings/presentation/capture_focus_view.dart';
 import 'package:augustyniak_capture/features/recordings/presentation/card_parts.dart';
 import 'package:augustyniak_capture/features/recordings/presentation/recording_card.dart';
-import 'package:augustyniak_capture/features/recordings/presentation/queue_tab.dart';
 import 'package:augustyniak_capture/features/recordings/presentation/recordings_controller.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -145,9 +145,6 @@ void main() {
   });
 
   group('the focus view', () {
-    /// The compact row carries neither of these any more — it is one line, and
-    /// tapping it opens the capture instead. The buttons the accordion used to
-    /// reveal are asserted where they now live.
     late Directory appDir;
 
     setUp(
@@ -155,30 +152,35 @@ void main() {
     );
     tearDown(() => appDir.deleteSync(recursive: true));
 
-    Future<void> openCapture(WidgetTester tester) async {
-      tester.view.physicalSize = const Size(393, 852);
-      tester.view.devicePixelRatio = 1;
-      addTearDown(tester.view.reset);
+    Future<void> openFocusView(WidgetTester tester) async {
       final RecordingsController controller = await buildRecordingsController(
         appDir,
         seed: <Recording>[enriched],
       );
       await tester.pumpWidget(
-        hostTab(() => QueueTab(controller: controller), listenable: controller),
+        hostTab(
+          () => Builder(
+            builder: (BuildContext context) => ElevatedButton(
+              onPressed: () => showCaptureFocusView(
+                context,
+                controller: controller,
+                recordingId: enriched.id,
+              ),
+              child: const Text('OPEN'),
+            ),
+          ),
+          listenable: controller,
+        ),
       );
       await tester.pump();
-
-      expect(copyButton('Copy summary'), findsNothing);
-      expect(copyButton('Copy tags'), findsNothing);
-
-      await tester.tap(find.text('Client call'));
+      await tester.tap(find.text('OPEN'));
       await tester.pumpAndSettle();
     }
 
     testWidgets('carries both buttons once the capture is open', (
       WidgetTester tester,
     ) async {
-      await openCapture(tester);
+      await openFocusView(tester);
 
       await tapCopy(tester, copyButton('Copy summary'));
       expect(copiedText(), enriched.summary);
