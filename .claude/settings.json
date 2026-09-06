@@ -1,0 +1,13 @@
+{
+  "enabledPlugins": {
+    "dart-flutter@dart-flutter": true
+  },
+  "extraKnownMarketplaces": {
+    "dart-flutter": {
+      "source": {
+        "source": "github",
+        "repo": "flutter/agent-plugins"
+      }
+    }
+  }
+}
