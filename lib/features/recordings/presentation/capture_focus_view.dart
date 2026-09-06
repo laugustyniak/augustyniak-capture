@@ -694,7 +694,7 @@ class _SourceImagePreview extends StatelessWidget {
   }
 }
 
-class _AudioPlaybackBar extends StatelessWidget {
+class _AudioPlaybackBar extends StatefulWidget {
   const _AudioPlaybackBar({
     required this.controller,
     required this.recording,
@@ -703,23 +703,32 @@ class _AudioPlaybackBar extends StatelessWidget {
   final RecordingsController controller;
   final Recording recording;
 
+  @override
+  State<_AudioPlaybackBar> createState() => _AudioPlaybackBarState();
+}
+
+class _AudioPlaybackBarState extends State<_AudioPlaybackBar> {
+  double? _dragSeconds;
   static const List<double> _speeds = <double>[1.0, 1.25, 1.5, 2.0];
 
   @override
   Widget build(BuildContext context) {
+    final RecordingsController controller = widget.controller;
+    final Recording recording = widget.recording;
     final bool isPlaying = controller.playingId == recording.id;
     final Duration totalDuration = recording.totalDurationMs > 0
         ? Duration(milliseconds: recording.totalDurationMs)
         : (controller.playbackDuration > Duration.zero
             ? controller.playbackDuration
             : Duration.zero);
-    final Duration currentPosition =
-        isPlaying ? controller.playbackPosition : Duration.zero;
+    final Duration currentPosition = _dragSeconds != null
+        ? Duration(milliseconds: (_dragSeconds! * 1000).round())
+        : (isPlaying ? controller.playbackPosition : Duration.zero);
 
     final double maxSeconds = totalDuration.inMilliseconds > 0
         ? totalDuration.inMilliseconds / 1000.0
         : 1.0;
-    final double currentSeconds =
+    final double currentSeconds = _dragSeconds ??
         (currentPosition.inMilliseconds / 1000.0).clamp(0.0, maxSeconds);
 
     final double currentSpeed = controller.playbackSpeed;
@@ -765,9 +774,13 @@ class _AudioPlaybackBar extends StatelessWidget {
                 ),
               ),
               child: Slider(
-                value: currentSeconds,
+                value: currentSeconds.clamp(0.0, maxSeconds),
                 max: maxSeconds,
                 onChanged: (double val) {
+                  setState(() => _dragSeconds = val);
+                },
+                onChangeEnd: (double val) {
+                  setState(() => _dragSeconds = null);
                   controller.seekPlayback(
                     Duration(milliseconds: (val * 1000).round()),
                   );
@@ -807,5 +820,6 @@ class _AudioPlaybackBar extends StatelessWidget {
     );
   }
 }
+
 
 

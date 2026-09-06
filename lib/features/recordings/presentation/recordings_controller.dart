@@ -143,18 +143,21 @@ class RecordingsController extends ChangeNotifier {
         );
     // Reset the "now playing" marker when a clip finishes on its own.
     _playerCompleteSub = _player.onPlayerComplete.listen((_) {
+      if (_disposed) return;
       _playingId = null;
       _playbackPosition = Duration.zero;
       notifyListeners();
     });
     try {
       _playerPositionSub = _player.onPositionChanged.listen((Duration position) {
+        if (_disposed) return;
         _playbackPosition = position;
         notifyListeners();
       });
     } catch (_) {}
     try {
       _playerDurationSub = _player.onDurationChanged.listen((Duration duration) {
+        if (_disposed) return;
         _playbackDuration = duration;
         notifyListeners();
       });
