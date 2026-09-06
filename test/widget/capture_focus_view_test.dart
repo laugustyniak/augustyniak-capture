@@ -394,4 +394,42 @@ void main() {
     expect(inFocusView(find.text('SOURCE IMAGE')), findsNothing);
     expect(inFocusView(find.byType(Image)), findsNothing);
   });
+
+  testWidgets(
+    'the focus view renders audio playback bar with scrub slider and speed toggle for audio captures',
+    (WidgetTester tester) async {
+      final File audioFile = File('${appDir.path}/test_audio.m4a')
+        ..writeAsBytesSync(<int>[1, 2, 3]);
+      final RecordingsController controller = await buildRecordingsController(
+        appDir,
+        seed: <Recording>[
+          makeRecording(
+            id: 'audio_playback_test',
+            title: 'Voice memo',
+            transcript: 'Audio transcript',
+            type: CaptureType.audioRecording,
+            filePath: audioFile.path,
+            durationMs: 45000,
+          ),
+        ],
+      );
+      await pumpFocusView(tester, controller, 'audio_playback_test');
+
+      expect(inFocusView(find.text('AUDIO PLAYBACK')), findsOneWidget);
+      expect(inFocusView(find.byType(Slider)), findsOneWidget);
+      expect(inFocusView(find.text('00:00 / 00:45')), findsOneWidget);
+      expect(inFocusView(find.text('1x')), findsOneWidget);
+
+      // Tap speed toggle to cycle speed
+      await tester.tap(inFocusView(find.text('1x')));
+      await tester.pump();
+      expect(inFocusView(find.text('1.25x')), findsOneWidget);
+      expect(controller.playbackSpeed, 1.25);
+
+      await tester.tap(inFocusView(find.text('1.25x')));
+      await tester.pump();
+      expect(inFocusView(find.text('1.5x')), findsOneWidget);
+      expect(controller.playbackSpeed, 1.5);
+    },
+  );
 }

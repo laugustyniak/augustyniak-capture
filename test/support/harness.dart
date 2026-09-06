@@ -87,6 +87,10 @@ class FakePlayer implements AudioPlayer {
   @override
   Stream<void> get onPlayerComplete => const Stream<void>.empty();
   @override
+  Stream<Duration> get onPositionChanged => const Stream<Duration>.empty();
+  @override
+  Stream<Duration> get onDurationChanged => const Stream<Duration>.empty();
+  @override
   dynamic noSuchMethod(Invocation invocation) async => null;
 }
 
