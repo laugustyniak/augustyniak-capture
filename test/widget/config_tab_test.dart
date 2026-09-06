@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:augustyniak_capture/core/sync/cloud_sync_coordinator.dart';
 import 'package:augustyniak_capture/features/projects/domain/project.dart';
+import 'package:augustyniak_capture/features/settings/domain/app_settings.dart';
 import 'package:augustyniak_capture/features/settings/domain/app_theme_mode.dart';
 import 'package:augustyniak_capture/features/settings/domain/audio_config.dart';
 import 'package:augustyniak_capture/features/settings/presentation/config_tab.dart';
@@ -339,5 +341,77 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.text('ARCHIVE'), findsOneWidget);
     expect(find.text('TURSO CLOUD SYNC'), findsNothing);
+  });
+
+  testWidgets('one sync action covers configured Turso and R2', (
+    WidgetTester tester,
+  ) async {
+    final SettingsController controller = buildSettingsController();
+    await controller.initialize();
+    await controller.setTursoConfig(
+      url: 'libsql://capture.turso.io',
+      token: 'turso-token',
+      enabled: true,
+    );
+    await controller.setR2Config(
+      endpoint: 'https://account.r2.cloudflarestorage.com',
+      bucket: 'captures',
+      accessKeyId: 'access-key',
+      secretAccessKey: 'secret-key',
+      enabled: true,
+    );
+
+    await pumpConfig(tester, controller, initialCategory: ConfigCategory.sync);
+
+    expect(find.text('SYNC NOW'), findsOneWidget);
+    expect(find.text('CONFIGURED · Not tested'), findsNWidgets(2));
+    expect(find.textContaining('101/101'), findsNothing);
+    expect(find.textContaining('aws-us-east-1'), findsNothing);
+  });
+
+  testWidgets('the same action labels an R2-only sync accurately', (
+    WidgetTester tester,
+  ) async {
+    final SettingsController controller = buildSettingsController();
+    await controller.initialize();
+    await controller.setR2Config(
+      endpoint: 'https://account.r2.cloudflarestorage.com',
+      bucket: 'captures',
+      accessKeyId: 'access-key',
+      secretAccessKey: 'secret-key',
+      enabled: true,
+    );
+
+    await pumpConfig(tester, controller, initialCategory: ConfigCategory.sync);
+
+    expect(find.text('SYNC MEDIA'), findsOneWidget);
+    expect(find.text('SYNC NOW (TURSO)'), findsNothing);
+  });
+
+  test('a credential change invalidates the last sync report', () {
+    const AppSettings synced = AppSettings(
+      r2Endpoint: 'https://account.r2.cloudflarestorage.com',
+      r2Bucket: 'captures',
+      r2AccessKeyId: 'access-key',
+      r2SecretAccessKey: 'old-secret',
+    );
+    const AppSettings changed = AppSettings(
+      r2Endpoint: 'https://account.r2.cloudflarestorage.com',
+      r2Bucket: 'captures',
+      r2AccessKeyId: 'access-key',
+      r2SecretAccessKey: 'new-secret',
+    );
+    final CloudSyncReport report = CloudSyncReport(
+      completedAt: DateTime(2026),
+      configurationFingerprint:
+          RecordingsController.cloudSyncConfigurationFingerprint(synced),
+    );
+
+    expect(
+      report.matchesConfiguration(
+        RecordingsController.cloudSyncConfigurationFingerprint(changed),
+      ),
+      isFalse,
+    );
   });
 }

@@ -96,7 +96,7 @@ class CompactQueueHeader extends StatelessWidget {
                 _HeaderToggle(
                   active: isSyncing,
                   onTap: () async => onSync!(),
-                  semanticLabel: 'Sync Turso Cloud',
+                  semanticLabel: 'Sync cloud',
                   child: SyncSpinIcon(isSyncing: isSyncing, size: 17),
                 ),
                 const SizedBox(width: 6),

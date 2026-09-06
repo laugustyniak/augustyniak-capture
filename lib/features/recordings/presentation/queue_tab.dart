@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import '../../../app/ui_kit.dart';
+import '../../../core/sync/cloud_sync_coordinator.dart';
 import '../../costs/data/usage_repository.dart';
 import '../../costs/domain/price_book.dart';
 import '../../costs/domain/usage_event.dart';
@@ -186,16 +187,16 @@ class _QueueTabState extends State<QueueTab> {
       // nothing here is worth a wake-up, and a phone polling a homelab on a
       // schedule spends battery with nobody waiting on the answer.
       unawaited(controller.refreshCommandOutcomes());
-      final bool ok = await controller.syncTurso();
+      final CloudSyncReport report = await controller.syncCloud();
       if (context.mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text(
-              ok
-                  ? '⚡ Turso sync complete!'
-                  : '⚠️ ${controller.lastSyncFailure ?? 'Turso sync failed.'}',
-            ),
-            backgroundColor: ok ? Console.green : Console.amber,
+            content: Text(report.message),
+            backgroundColor: report.success
+                ? Console.green
+                : report.partialSuccess
+                ? Console.amber
+                : Console.red,
           ),
         );
       }
@@ -349,7 +350,7 @@ class _QueueTabState extends State<QueueTab> {
                               size: 14,
                               color: Colors.black,
                             ),
-                            label: Text(_isSyncing ? 'SYNCING…' : 'SYNC TURSO'),
+                            label: Text(_isSyncing ? 'SYNCING…' : 'SYNC CLOUD'),
                             style: ElevatedButton.styleFrom(
                               backgroundColor: Console.green,
                               foregroundColor: Colors.black,
