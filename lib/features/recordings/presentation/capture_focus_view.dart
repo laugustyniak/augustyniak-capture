@@ -179,6 +179,22 @@ class _FocusBody extends StatelessWidget {
               child: ListView(
                 padding: const EdgeInsets.only(top: 14),
                 children: <Widget>[
+                  if (recording.type == CaptureType.image &&
+                      recording.filePath.isNotEmpty) ...<Widget>[
+                    _SectionLabel(
+                      label: 'SOURCE IMAGE',
+                      trailing: CopyButton(
+                        text: recording.filePath,
+                        tooltip: 'Copy image path',
+                        semanticLabel: 'Copy image path to clipboard',
+                        size: 26,
+                        iconSize: 13,
+                      ),
+                    ),
+                    const SizedBox(height: 6),
+                    _SourceImagePreview(file: File(recording.filePath)),
+                    const SizedBox(height: 14),
+                  ],
                   if (summary.isNotEmpty) ...<Widget>[
                     _SectionLabel(
                       label: 'SUMMARY',
@@ -587,3 +603,54 @@ class _Actions extends StatelessWidget {
     );
   }
 }
+
+class _SourceImagePreview extends StatelessWidget {
+  const _SourceImagePreview({required this.file});
+
+  final File file;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: double.infinity,
+      constraints: const BoxConstraints(maxHeight: 320),
+      decoration: BoxDecoration(
+        color: Console.surfaceRaised,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: Console.border),
+      ),
+      clipBehavior: Clip.antiAlias,
+      child: Image.file(
+        file,
+        fit: BoxFit.contain,
+        filterQuality: FilterQuality.medium,
+        gaplessPlayback: true,
+        errorBuilder: (
+          BuildContext context,
+          Object error,
+          StackTrace? stackTrace,
+        ) {
+          return Padding(
+            padding: const EdgeInsets.all(20),
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: <Widget>[
+                Icon(
+                  Icons.broken_image_outlined,
+                  size: 20,
+                  color: Console.muted,
+                ),
+                const SizedBox(width: 8),
+                Text(
+                  'Source image not available',
+                  style: ConsoleText.cardMeta.copyWith(color: Console.muted),
+                ),
+              ],
+            ),
+          );
+        },
+      ),
+    );
+  }
+}
+
