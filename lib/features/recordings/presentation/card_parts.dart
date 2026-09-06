@@ -80,7 +80,10 @@ class RecordingLeadingTile extends StatelessWidget {
     final Color background = failed
         ? Console.red.withValues(alpha: .1)
         : Console.iconTile;
-    final String? poster = recording.thumbPath;
+    final String? poster = recording.thumbPath ??
+        (recording.type == CaptureType.image && recording.filePath.isNotEmpty
+            ? recording.filePath
+            : null);
 
     final Widget tile = poster == null
         ? ConsoleIconTile(

@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:augustyniak_capture/app/ui_kit.dart';
+import 'package:augustyniak_capture/features/recordings/domain/capture_type.dart';
 import 'package:augustyniak_capture/features/recordings/domain/recording.dart';
 import 'package:augustyniak_capture/features/recordings/presentation/capture_focus_view.dart';
 import 'package:augustyniak_capture/features/recordings/presentation/queue_tab.dart';
@@ -348,5 +349,49 @@ void main() {
     await tester.pump();
 
     expect(find.byType(RecordingEditor), findsNothing);
+  });
+
+  testWidgets('the focus view renders source image preview for image captures', (
+    WidgetTester tester,
+  ) async {
+    final File imageFile = File('${appDir.path}/test_image.png')
+      ..writeAsBytesSync(<int>[1, 2, 3]);
+    final RecordingsController controller = await buildRecordingsController(
+      appDir,
+      seed: <Recording>[
+        makeRecording(
+          id: 'img_test',
+          title: 'Whiteboard sketch',
+          transcript: 'OCR extracted text from image.',
+          type: CaptureType.image,
+          filePath: imageFile.path,
+        ),
+      ],
+    );
+    await pumpFocusView(tester, controller, 'img_test');
+
+    expect(inFocusView(find.text('SOURCE IMAGE')), findsOneWidget);
+    // 2 images in dialog: 38px header thumbnail + full body preview
+    expect(inFocusView(find.byType(Image)), findsNWidgets(2));
+  });
+
+  testWidgets('the focus view does not render source image section for audio captures', (
+    WidgetTester tester,
+  ) async {
+    final RecordingsController controller = await buildRecordingsController(
+      appDir,
+      seed: <Recording>[
+        makeRecording(
+          id: 'audio_test',
+          title: 'Voice memo',
+          transcript: 'Spoken thought transcribed.',
+          type: CaptureType.audioRecording,
+        ),
+      ],
+    );
+    await pumpFocusView(tester, controller, 'audio_test');
+
+    expect(inFocusView(find.text('SOURCE IMAGE')), findsNothing);
+    expect(inFocusView(find.byType(Image)), findsNothing);
   });
 }
