@@ -35,14 +35,16 @@ needs a native dependency that is not in `pubspec.yaml` today.
 source→verify→persist→process ordering that `RecordingsController.stopRecording()`
 and `addTextNote()` both implement.
 
-### Token encryption
-
-`settings.json` stores bearer tokens in plaintext in the app documents
-directory. The Models tab warns about this. Move to platform secure storage.
-
 ### Transcript editing
 
 No way to fix a bad transcript or set a title. Read-only today.
+
+## Done — token encryption (#118)
+
+- **Platform secure storage migration:** migrated provider bearer tokens, Turso auth tokens, R2 secret access keys, and Command tokens from plaintext storage to AES-256-GCM encryption with master key storage via `FlutterSecureStorage` (`SecureStorageMasterKeyStore`).
+- **Migration and fallback path:** `MigratingMasterKeyStore` migrates legacy file-based master keys to secure storage and safely retires fallback on confirmed read-back.
+- **Plaintext auto-migration:** `SettingsRepository.load()` transparently seals existing plaintext tokens and persists ciphertext with `enc:v1:` prefix.
+- **Fail-safe token handling:** unreadable sealed tokens are preserved without overwriting and filtered from request headers via `usableBearerToken` and `usableCommandToken`.
 
 ## Done — multi-modal slices 0–1 (`3e3edae`)
 
