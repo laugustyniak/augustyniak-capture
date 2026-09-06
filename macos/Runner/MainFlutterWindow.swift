@@ -103,7 +103,15 @@ class MainFlutterWindow: NSWindow {
   }
 
   private func autoPaste() {
+    let trusted = AXIsProcessTrusted()
+    if !trusted {
+      let options = [kAXTrustedCheckOptionPrompt.takeUnretainedValue() as String: true] as CFDictionary
+      _ = AXIsProcessTrustedWithOptions(options)
+    }
     NSApp.hide(nil)
+    if !trusted {
+      return
+    }
 
     DispatchQueue.main.asyncAfter(deadline: .now() + 0.12) {
       let source = CGEventSource(stateID: .combinedSessionState)
