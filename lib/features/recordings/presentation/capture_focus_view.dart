@@ -8,6 +8,7 @@ import '../domain/capture_type.dart';
 import '../domain/recording.dart';
 import 'card_parts.dart';
 import 'handoff_sheet.dart';
+import 'inline_video_player.dart';
 import 'recording_card.dart';
 import 'recordings_controller.dart';
 
@@ -193,6 +194,26 @@ class _FocusBody extends StatelessWidget {
                     ),
                     const SizedBox(height: 6),
                     _SourceImagePreview(file: File(recording.filePath)),
+                    const SizedBox(height: 14),
+                  ],
+                  if (recording.type == CaptureType.video &&
+                      recording.filePath.isNotEmpty) ...<Widget>[
+                    _SectionLabel(
+                      label: 'VIDEO PLAYBACK',
+                      trailing: CopyButton(
+                        text: recording.filePath,
+                        tooltip: 'Copy video path',
+                        semanticLabel: 'Copy video path to clipboard',
+                        size: 26,
+                        iconSize: 13,
+                      ),
+                    ),
+                    const SizedBox(height: 6),
+                    InlineVideoPlayer.forRecording(
+                      recording: recording,
+                      onOpenExternal: () => controller.openSource(recording.id),
+                      compact: compact,
+                    ),
                     const SizedBox(height: 14),
                   ],
                   if (summary.isNotEmpty) ...<Widget>[
