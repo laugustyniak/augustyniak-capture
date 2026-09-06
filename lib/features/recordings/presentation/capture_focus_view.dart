@@ -216,6 +216,25 @@ class _FocusBody extends StatelessWidget {
                     ),
                     const SizedBox(height: 14),
                   ],
+                  if (recording.type.isPlayableAudio &&
+                      recording.filePath.isNotEmpty) ...<Widget>[
+                    _SectionLabel(
+                      label: 'AUDIO PLAYBACK',
+                      trailing: CopyButton(
+                        text: recording.filePath,
+                        tooltip: 'Copy audio path',
+                        semanticLabel: 'Copy audio path to clipboard',
+                        size: 26,
+                        iconSize: 13,
+                      ),
+                    ),
+                    const SizedBox(height: 6),
+                    _AudioPlaybackBar(
+                      controller: controller,
+                      recording: recording,
+                    ),
+                    const SizedBox(height: 14),
+                  ],
                   if (summary.isNotEmpty) ...<Widget>[
                     _SectionLabel(
                       label: 'SUMMARY',
@@ -674,4 +693,119 @@ class _SourceImagePreview extends StatelessWidget {
     );
   }
 }
+
+class _AudioPlaybackBar extends StatelessWidget {
+  const _AudioPlaybackBar({
+    required this.controller,
+    required this.recording,
+  });
+
+  final RecordingsController controller;
+  final Recording recording;
+
+  static const List<double> _speeds = <double>[1.0, 1.25, 1.5, 2.0];
+
+  @override
+  Widget build(BuildContext context) {
+    final bool isPlaying = controller.playingId == recording.id;
+    final Duration totalDuration = recording.totalDurationMs > 0
+        ? Duration(milliseconds: recording.totalDurationMs)
+        : (controller.playbackDuration > Duration.zero
+            ? controller.playbackDuration
+            : Duration.zero);
+    final Duration currentPosition =
+        isPlaying ? controller.playbackPosition : Duration.zero;
+
+    final double maxSeconds = totalDuration.inMilliseconds > 0
+        ? totalDuration.inMilliseconds / 1000.0
+        : 1.0;
+    final double currentSeconds =
+        (currentPosition.inMilliseconds / 1000.0).clamp(0.0, maxSeconds);
+
+    final double currentSpeed = controller.playbackSpeed;
+
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+      decoration: BoxDecoration(
+        color: Console.surfaceRaised,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: Console.border),
+      ),
+      child: Row(
+        children: <Widget>[
+          ConsoleIconButton(
+            icon: isPlaying ? Icons.stop_rounded : Icons.play_arrow_rounded,
+            onTap: () => controller.togglePlayback(recording.id),
+            semanticLabel: isPlaying ? 'Stop playback' : 'Play audio',
+            active: isPlaying,
+            size: 30,
+            iconSize: 18,
+          ),
+          const SizedBox(width: 8),
+          Text(
+            '${formatDuration(currentPosition)} / ${formatDuration(totalDuration)}',
+            style: ConsoleText.micro.copyWith(color: Console.textSoft),
+          ),
+          const SizedBox(width: 8),
+          Expanded(
+            child: SliderTheme(
+              data: SliderThemeData(
+                trackHeight: 3,
+                activeTrackColor: Console.accent,
+                inactiveTrackColor: Console.track,
+                thumbColor: Console.accent,
+                overlayColor: Console.accent.withValues(alpha: .15),
+                thumbShape: const RoundSliderThumbShape(
+                  enabledThumbRadius: 6,
+                  elevation: 0,
+                ),
+                overlayShape: const RoundSliderOverlayShape(
+                  overlayRadius: 12,
+                ),
+              ),
+              child: Slider(
+                value: currentSeconds,
+                max: maxSeconds,
+                onChanged: (double val) {
+                  controller.seekPlayback(
+                    Duration(milliseconds: (val * 1000).round()),
+                  );
+                },
+                semanticFormatterCallback: (double val) =>
+                    '${formatDuration(Duration(seconds: val.round()))} of ${formatDuration(totalDuration)}',
+              ),
+            ),
+          ),
+          const SizedBox(width: 6),
+          InkWell(
+            borderRadius: BorderRadius.circular(8),
+            onTap: () {
+              final int currentIndex = _speeds.indexOf(currentSpeed);
+              final double nextSpeed =
+                  _speeds[(currentIndex + 1) % _speeds.length];
+              controller.setPlaybackSpeed(nextSpeed);
+            },
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+              decoration: BoxDecoration(
+                color: Console.surface,
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(color: Console.border),
+              ),
+              child: Text(
+                '${currentSpeed == 1.0 ? '1' : currentSpeed.toString()}x',
+                style: ConsoleText.micro.copyWith(
+                  color: currentSpeed > 1.0 ? Console.accent : Console.textSoft,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
 

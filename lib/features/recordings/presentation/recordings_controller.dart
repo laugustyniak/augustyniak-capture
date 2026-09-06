@@ -144,8 +144,21 @@ class RecordingsController extends ChangeNotifier {
     // Reset the "now playing" marker when a clip finishes on its own.
     _playerCompleteSub = _player.onPlayerComplete.listen((_) {
       _playingId = null;
+      _playbackPosition = Duration.zero;
       notifyListeners();
     });
+    try {
+      _playerPositionSub = _player.onPositionChanged.listen((Duration position) {
+        _playbackPosition = position;
+        notifyListeners();
+      });
+    } catch (_) {}
+    try {
+      _playerDurationSub = _player.onDurationChanged.listen((Duration duration) {
+        _playbackDuration = duration;
+        notifyListeners();
+      });
+    } catch (_) {}
   }
 
   final RecordingsRepository _repository;
@@ -253,6 +266,11 @@ class RecordingsController extends ChangeNotifier {
   final Duration _recorderTimeout;
   final AudioPlayer _player;
   StreamSubscription<void>? _playerCompleteSub;
+  StreamSubscription<Duration>? _playerPositionSub;
+  StreamSubscription<Duration>? _playerDurationSub;
+  Duration _playbackPosition = Duration.zero;
+  Duration _playbackDuration = Duration.zero;
+  double _playbackSpeed = 1.0;
 
   final Stopwatch _stopwatch = Stopwatch();
   final ValueNotifier<Duration> _elapsedTicker = ValueNotifier<Duration>(
@@ -1677,6 +1695,26 @@ class RecordingsController extends ChangeNotifier {
     }
   }
 
+  Duration get playbackPosition => _playbackPosition;
+  Duration get playbackDuration => _playbackDuration;
+  double get playbackSpeed => _playbackSpeed;
+
+  Future<void> seekPlayback(Duration position) async {
+    _playbackPosition = position;
+    notifyListeners();
+    try {
+      await _player.seek(position);
+    } catch (_) {}
+  }
+
+  Future<void> setPlaybackSpeed(double speed) async {
+    _playbackSpeed = speed;
+    notifyListeners();
+    try {
+      await _player.setPlaybackRate(speed);
+    } catch (_) {}
+  }
+
   /// Play the recording's audio, or stop it if it is already playing.
   /// Independent of the transcription pipeline and the `_isBusy` lock.
   Future<void> togglePlayback(String id) async {
@@ -1685,6 +1723,7 @@ class RecordingsController extends ChangeNotifier {
       if (_playingId == id) {
         await _player.stop();
         _playingId = null;
+        _playbackPosition = Duration.zero;
         notifyListeners();
         return;
       }
@@ -1702,10 +1741,20 @@ class RecordingsController extends ChangeNotifier {
 
       await _player.stop();
       _playingId = id;
+      _playbackPosition = Duration.zero;
+      if (recording.totalDurationMs > 0) {
+        _playbackDuration = Duration(milliseconds: recording.totalDurationMs);
+      }
       notifyListeners();
       await _player.play(DeviceFileSource(recording.filePath));
+      if (_playbackSpeed != 1.0) {
+        try {
+          await _player.setPlaybackRate(_playbackSpeed);
+        } catch (_) {}
+      }
     } catch (exception) {
       _playingId = null;
+      _playbackPosition = Duration.zero;
       _error = exception.toString();
       _logSink.log(
         'Playback failed: $exception',
@@ -3269,6 +3318,8 @@ class RecordingsController extends ChangeNotifier {
     _elapsedTicker.dispose();
     _levelTicker.dispose();
     _playerCompleteSub?.cancel();
+    _playerPositionSub?.cancel();
+    _playerDurationSub?.cancel();
     _player.dispose();
     _recorder.dispose();
     // A controller disposed mid-capture — a hot restart, the activity being
