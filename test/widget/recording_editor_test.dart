@@ -272,6 +272,10 @@ void main() {
     await settleIo(tester);
 
     expect(controller.recordings.single.transcript, 'Cannot be emptied');
+    expect(
+      find.text('Captures cannot be empty. Use delete to remove the capture.'),
+      findsOneWidget,
+    );
   });
 
   testWidgets('Escape key commits pending edits and exits edit mode', (

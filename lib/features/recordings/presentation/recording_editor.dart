@@ -229,6 +229,17 @@ class _RecordingEditorState extends State<RecordingEditor> {
     if (value.isEmpty) {
       _text.text = _syncedText;
       setState(() {});
+      if (mounted) {
+        ScaffoldMessenger.maybeOf(context)?.showSnackBar(
+          SnackBar(
+            content: const Text(
+              'Captures cannot be empty. Use delete to remove the capture.',
+            ),
+            backgroundColor: Console.amber,
+            duration: const Duration(seconds: 3),
+          ),
+        );
+      }
       return;
     }
     setState(() => _syncedText = value);
