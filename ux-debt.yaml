@@ -145,3 +145,76 @@
   issue: null
   first_seen: 2026-09-03
   review_by: 2026-12-03
+
+- id: UXD-009
+  title: Missing source image preview in focus and edit views for OCR captures
+  source: heuristic-audit-2026-09
+  area: queue
+  type: feedback
+  severity: 3
+  reach: 0.35
+  frequency: high
+  effort: 2
+  evidence:
+    - "lib/features/recordings/presentation/capture_focus_view.dart: image captures displayed OCR transcript without showing the source image"
+  workaround: "user must locate image file on disk to verify OCR fidelity"
+  state: fixed
+  owner: ui-team
+  issue: 121
+  first_seen: 2026-09-06
+  review_by: 2026-12-06
+
+- id: UXD-010
+  title: Silent rejection on clearing transcript in recording editor
+  source: heuristic-audit-2026-09
+  area: queue
+  type: error-recovery
+  severity: 2
+  reach: 0.40
+  frequency: medium
+  effort: 1
+  evidence:
+    - "lib/features/recordings/presentation/recording_editor.dart: _commitText() silently reverts empty text without user feedback"
+  workaround: "user realizes text was restored upon blur"
+  state: accepted
+  owner: ui-team
+  issue: 127
+  first_seen: 2026-09-06
+  review_by: 2026-12-06
+
+- id: UXD-011
+  title: Audio playback lacks scrubbing timeline, position tracker, and speed toggles
+  source: heuristic-audit-2026-09
+  area: queue
+  type: navigation
+  severity: 3
+  reach: 0.80
+  frequency: high
+  effort: 3
+  evidence:
+    - "lib/features/recordings/presentation/capture_focus_view.dart: audio playback is binary play/stop without seek or speed adjustment"
+  workaround: "user must listen from 00:00 at 1x speed"
+  state: accepted
+  owner: ui-team
+  issue: 128
+  first_seen: 2026-09-06
+  review_by: 2026-12-06
+
+- id: UXD-012
+  title: Indeterminate progress and missing cancel option on long OCR requests
+  source: heuristic-audit-2026-09
+  area: queue
+  type: feedback
+  severity: 2
+  reach: 0.30
+  frequency: low
+  effort: 2
+  evidence:
+    - "lib/features/processing/data/http_vision_ocr_service.dart: 2-minute request timeout with static pulsing status pill"
+  workaround: "user waits for timeout or restarts app"
+  state: accepted
+  owner: processing-team
+  issue: null
+  first_seen: 2026-09-06
+  review_by: 2026-12-06
+
