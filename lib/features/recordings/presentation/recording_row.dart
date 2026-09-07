@@ -20,6 +20,8 @@ class RecordingRow extends StatelessWidget {
     required this.recording,
     required this.focused,
     required this.isEnriching,
+    this.processingElapsed,
+    this.onCancelProcessing,
     required this.onTap,
     required this.onToggleProcessed,
   });
@@ -27,6 +29,8 @@ class RecordingRow extends StatelessWidget {
   final Recording recording;
   final bool focused;
   final bool isEnriching;
+  final Duration? processingElapsed;
+  final VoidCallback? onCancelProcessing;
 
   /// Opens the capture. Not a toggle any more — see the class doc.
   final VoidCallback onTap;
@@ -44,6 +48,10 @@ class RecordingRow extends StatelessWidget {
     // not moving, and animating it would claim work that has not started.
     final bool processing =
         isEnriching || recording.status == RecordingStatus.transcribing;
+    final bool canCancel =
+        onCancelProcessing != null &&
+        (recording.status == RecordingStatus.transcribing ||
+            recording.status == RecordingStatus.pendingTranscription);
 
     return Semantics(
       button: true,
@@ -107,9 +115,22 @@ class RecordingRow extends StatelessWidget {
                   // The strip wins because it carries the animation as well as
                   // the word, and the badge has nothing to add to it.
                   if (!processing)
-                    _CollapsedBadge(recording: recording)
+                    _CollapsedBadge(
+                      recording: recording,
+                      processingElapsed: processingElapsed,
+                    )
                   else
                     const SizedBox.shrink(),
+                  if (canCancel) ...<Widget>[
+                    const SizedBox(width: 4),
+                    ConsoleIconButton(
+                      icon: Icons.close_rounded,
+                      onTap: onCancelProcessing!,
+                      semanticLabel: 'Cancel processing',
+                      size: 28,
+                      iconSize: 14,
+                    ),
+                  ],
                   const SizedBox(width: 2),
                   _ReviewToggle(reviewed: reviewed, onTap: onToggleProcessed),
                 ],
@@ -121,7 +142,10 @@ class RecordingRow extends StatelessWidget {
               if (processing)
                 Padding(
                   padding: const EdgeInsets.fromLTRB(_indent, 9, 4, 2),
-                  child: ProcessingStrip(enriching: isEnriching),
+                  child: ProcessingStrip(
+                    enriching: isEnriching,
+                    elapsed: processingElapsed,
+                  ),
                 ),
               Padding(
                 padding: const EdgeInsets.only(left: _indent, top: 5, right: 4),
@@ -166,9 +190,10 @@ class _StatusDot extends StatelessWidget {
 /// ready. The two running stages are drawn by [ProcessingStrip] instead — see
 /// the call site.
 class _CollapsedBadge extends StatelessWidget {
-  const _CollapsedBadge({required this.recording});
+  const _CollapsedBadge({required this.recording, this.processingElapsed});
 
   final Recording recording;
+  final Duration? processingElapsed;
 
   @override
   Widget build(BuildContext context) {
@@ -176,11 +201,20 @@ class _CollapsedBadge extends StatelessWidget {
       final (String label, Color color) = switch (recording.status) {
         RecordingStatus.saved => ('RAW', Console.muted),
         RecordingStatus.pendingTranscription => ('QUEUED', Console.amber),
-        RecordingStatus.transcribing => ('TRANSCRIBING', Console.accent),
+        RecordingStatus.transcribing => (
+          processingElapsed != null
+              ? 'TRANSCRIBING · ${formatDuration(processingElapsed!)}'
+              : 'TRANSCRIBING',
+          Console.accent,
+        ),
         RecordingStatus.failed => ('FAILED', Console.red),
         RecordingStatus.completed => ('READY', Console.green),
       };
-      return StatusPill(label: label, color: color);
+      return StatusPill(
+        label: label,
+        color: color,
+        pulse: recording.status == RecordingStatus.transcribing,
+      );
     }
     if (recording.category != null) {
       return StatusPill(

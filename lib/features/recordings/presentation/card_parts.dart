@@ -248,12 +248,19 @@ String metaLineFor(Recording recording, String filename) {
 /// Both animations repeat forever: a test pumping a screen with one of these on
 /// it must pump explicit frames, never `pumpAndSettle`.
 class ProcessingStrip extends StatelessWidget {
-  ProcessingStrip({super.key, required this.enriching});
+  ProcessingStrip({
+    super.key,
+    required this.enriching,
+    this.elapsed,
+  });
 
   /// True while the model reads the text; false while the audio is being
   /// transcribed. Only these two stages animate — everything else in the
   /// pipeline is either instant or waiting for its turn.
   final bool enriching;
+
+  /// Elapsed duration for currently running transcription or OCR processing.
+  final Duration? elapsed;
 
   /// Public so a widget test asserts the string that is actually rendered
   /// rather than a copy of it, the same rule `RecordingCard.analyzingLabel`
@@ -282,7 +289,11 @@ class ProcessingStrip extends StatelessWidget {
             ),
             const SizedBox(width: 8),
             Text(
-              enriching ? analyzingLabel : transcribingLabel,
+              enriching
+                  ? analyzingLabel
+                  : (elapsed != null
+                      ? '$transcribingLabel · ${formatDuration(elapsed!)}'
+                      : transcribingLabel),
               style: ConsoleText.micro.copyWith(color: Console.accent),
             ),
             const SizedBox(width: 8),

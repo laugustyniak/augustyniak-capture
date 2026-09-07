@@ -274,6 +274,12 @@ class _ProjectCapturesSheetState extends State<ProjectCapturesSheet> {
                                         .retryTranscription(recording.id),
                                     onEnrich: () => widget.recordingsController
                                         .retryEnrichment(recording.id),
+                                    onCancelProcessing: () => widget
+                                        .recordingsController
+                                        .cancelProcessing(recording.id),
+                                    processingElapsed: widget
+                                        .recordingsController
+                                        .processingElapsedFor(recording.id),
                                     onEdit: () => setState(
                                       () => _editingId = recording.id,
                                     ),

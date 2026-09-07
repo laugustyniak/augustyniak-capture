@@ -347,6 +347,9 @@ class RecordingsController extends ChangeNotifier {
   bool _isDraining = false;
   bool _disposed = false;
   String? _processingId; // the id the drain loop is running, if any
+  DateTime? _processingStartTime;
+  Timer? _processingTickerTimer;
+  final Set<String> _cancelledProcessingIds = <String>{};
   Future<void>? _saveInFlight; // serializes saveAll (shared temp file)
 
   /// Tail of the queue waiting for the ambient usage scope, or null when it is
@@ -2298,6 +2301,52 @@ class RecordingsController extends ChangeNotifier {
     await _enqueueProcessing(id);
   }
 
+  /// How long the currently in-flight processing job has been running, or null
+  /// if [id] is not currently processing or has not started.
+  Duration? processingElapsedFor(String id) {
+    if (_processingId == id && _processingStartTime != null) {
+      return DateTime.now().difference(_processingStartTime!);
+    }
+    return null;
+  }
+
+  /// Cancel an in-flight or queued processing job for [id].
+  ///
+  /// Marks the capture as `failed` with error "Cancelled by user" and stops
+  /// in-flight timers or queues. The source file remains intact on disk and
+  /// retryable via [retryTranscription].
+  Future<void> cancelProcessing(String id) async {
+    _logSink.log('Cancelling processing.', level: LogLevel.warn, recordingId: id);
+    if (_processingQueue.contains(id)) {
+      _processingQueue.remove(id);
+      await _update(
+        id,
+        (Recording item) => item.copyWith(
+          status: RecordingStatus.failed,
+          error: 'Cancelled by user',
+        ),
+      );
+      _logSink.log('Queued processing cancelled by user.', recordingId: id);
+      if (!_disposed) notifyListeners();
+      return;
+    }
+    if (_processingId == id) {
+      _cancelledProcessingIds.add(id);
+      _processingTickerTimer?.cancel();
+      _processingTickerTimer = null;
+      _processingStartTime = null;
+      await _update(
+        id,
+        (Recording item) => item.copyWith(
+          status: RecordingStatus.failed,
+          error: 'Cancelled by user',
+        ),
+      );
+      _logSink.log('Processing cancelled by user.', recordingId: id);
+      if (!_disposed) notifyListeners();
+    }
+  }
+
   /// Re-run only the optional LLM stage against the text already on disk.
   ///
   /// This is intentionally separate from [retryTranscription]: enrichment can
@@ -2449,13 +2498,23 @@ class RecordingsController extends ChangeNotifier {
     // `_processingQueue`, so a `retryTranscription` landing in that gap would
     // otherwise queue it a second time and process it twice.
     _processingId = id; // marks this id in-flight so it can't be re-enqueued
+    _processingStartTime = DateTime.now();
+    _processingTickerTimer?.cancel();
+    _processingTickerTimer = Timer.periodic(
+      const Duration(milliseconds: 500),
+      (_) {
+        if (!_disposed && _processingId != null) {
+          notifyListeners();
+        }
+      },
+    );
     // Waits out an enrichment retry that is already holding the ambient usage
     // scope open. Taken here rather than around the `beginJob` pairs below so
     // the whole job owns the scope: the ordering inside is fixed (see the
     // comments there) and must not gain an await point in the middle of it.
     final void Function() releaseUsageScope = await _acquireUsageScope();
     try {
-      if (_disposed) return;
+      if (_disposed || _cancelledProcessingIds.contains(id)) return;
       await _update(
         id,
         (Recording item) => item.copyWith(status: RecordingStatus.transcribing),
@@ -2468,7 +2527,7 @@ class RecordingsController extends ChangeNotifier {
       final int index = _recordings.indexWhere(
         (Recording item) => item.id == id,
       );
-      if (index < 0) return;
+      if (index < 0 || _cancelledProcessingIds.contains(id)) return;
       final Recording recording = _recordings[index];
 
       // Deliberately outside the try below, and before any processor runs. A
@@ -2478,6 +2537,8 @@ class RecordingsController extends ChangeNotifier {
       // that failure. The reverse holds too: `_extractPoster` swallows
       // everything, so a missing ffmpeg costs a thumbnail and never a status.
       await _extractPoster(recording.id);
+
+      if (_cancelledProcessingIds.contains(id)) return;
 
       try {
         final List<CaptureSegment> pending = recording.segments
@@ -2500,7 +2561,7 @@ class RecordingsController extends ChangeNotifier {
 
         String? failure;
         for (final CaptureSegment segment in pending) {
-          if (_disposed) return;
+          if (_disposed || _cancelledProcessingIds.contains(id)) return;
           // Re-read at every step: the list is rewritten inside this loop, and
           // the capture can be deleted between two segments.
           if (!_recordings.any((Recording item) => item.id == id)) return;
@@ -2524,6 +2585,7 @@ class RecordingsController extends ChangeNotifier {
           try {
             text = await processor.process(segment);
           } catch (exception) {
+            if (_cancelledProcessingIds.contains(id)) return;
             failure = exception.toString();
             await _updateSegment(
               id,
@@ -2539,6 +2601,7 @@ class RecordingsController extends ChangeNotifier {
           } finally {
             _endUsageJob();
           }
+          if (_cancelledProcessingIds.contains(id)) return;
           if (text == null) continue;
 
           final String captured = text;
@@ -2562,6 +2625,8 @@ class RecordingsController extends ChangeNotifier {
             recordingId: id,
           );
         }
+
+        if (_cancelledProcessingIds.contains(id)) return;
 
         if (failure != null) {
           await _update(
@@ -2587,11 +2652,12 @@ class RecordingsController extends ChangeNotifier {
         final int done = _recordings.indexWhere(
           (Recording item) => item.id == id,
         );
-        if (done < 0) return;
+        if (done < 0 || _cancelledProcessingIds.contains(id)) return;
         final String transcript = _recordings[done].transcript ?? '';
         // Deliberately last: the item is already `completed` and persisted, so a
         // refusing clipboard cannot undo a successful capture.
         await _copyToClipboard(recording.type, transcript, id);
+        if (_cancelledProcessingIds.contains(id)) return;
         // Deliberately after the `completed` write as well: the item is already
         // durable, so a model outage, a malformed response or a kill in this
         // window costs a title, never a capture.
@@ -2601,6 +2667,7 @@ class RecordingsController extends ChangeNotifier {
         } finally {
           _endUsageJob();
         }
+        if (_cancelledProcessingIds.contains(id)) return;
         // Last of all, and after enrichment rather than before it, so the note
         // reaches the vault already named and classified. Mirroring first would
         // create a file called `…-recording-1432-…` and then have to live with
@@ -2609,22 +2676,37 @@ class RecordingsController extends ChangeNotifier {
         // install with no profile still wants its captures copied.
         await _mirrorToVault(id);
       } catch (exception) {
-        await _update(
-          id,
-          (Recording item) => item.copyWith(
-            status: RecordingStatus.failed,
-            error: exception.toString(),
-          ),
-        );
-        _logSink.log(
-          'Processing failed: $exception',
-          level: LogLevel.error,
-          recordingId: id,
-        );
+        if (_cancelledProcessingIds.contains(id)) {
+          await _update(
+            id,
+            (Recording item) => item.copyWith(
+              status: RecordingStatus.failed,
+              error: 'Cancelled by user',
+            ),
+          );
+        } else {
+          await _update(
+            id,
+            (Recording item) => item.copyWith(
+              status: RecordingStatus.failed,
+              error: exception.toString(),
+            ),
+          );
+          _logSink.log(
+            'Processing failed: $exception',
+            level: LogLevel.error,
+            recordingId: id,
+          );
+        }
       }
     } finally {
+      _processingTickerTimer?.cancel();
+      _processingTickerTimer = null;
+      _processingStartTime = null;
+      _cancelledProcessingIds.remove(id);
       releaseUsageScope();
       _processingId = null;
+      if (!_disposed) notifyListeners();
     }
   }
 
@@ -3317,6 +3399,8 @@ class RecordingsController extends ChangeNotifier {
   void dispose() {
     _disposed = true; // lets an in-flight drain loop exit at the next boundary
     _timer?.cancel();
+    _processingTickerTimer?.cancel();
+    _processingTickerTimer = null;
     unawaited(_amplitudeSub?.cancel());
     _elapsedTicker.dispose();
     _levelTicker.dispose();
