@@ -110,4 +110,24 @@ void main() {
 
     expect(repository.items, isEmpty);
   });
+
+  test('SqliteClipboardRepository normalizes legacy [Obrazek] preview to [Image]', () async {
+    final SqliteClipboardRepository repository = SqliteClipboardRepository();
+    db.execute('''
+      INSERT INTO clipboard_items (id, type, text, image_path, copied_at, preview, collections_json)
+      VALUES (?, ?, ?, ?, ?, ?, ?);
+    ''', <Object?>[
+      'legacy-sql-1',
+      'image',
+      null,
+      p.join(dir.path, 'legacy.png'),
+      DateTime.utc(2026, 8, 9, 12, 0).millisecondsSinceEpoch,
+      '[Obrazek]',
+      '[]',
+    ]);
+
+    final List<ClipboardItem> items = await repository.getItems();
+    expect(items.length, 1);
+    expect(items.first.preview, '[Image]');
+  });
 }
