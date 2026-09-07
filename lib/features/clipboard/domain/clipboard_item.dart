@@ -48,6 +48,14 @@ class ClipboardItem {
       ? '${text.substring(0, previewLength)}...'
       : text;
 
+  /// Normalizes legacy persisted preview strings (e.g. legacy Polish `[Obrazek]`)
+  /// to the canonical English representation (`[Image]`).
+  static String? normalizePreview(String? preview) {
+    if (preview == null) return null;
+    if (preview == '[Obrazek]') return '[Image]';
+    return preview;
+  }
+
   Map<String, dynamic> toJson() => <String, dynamic>{
         'id': id,
         'type': type.name,
@@ -70,7 +78,7 @@ class ClipboardItem {
       copiedAt: DateTime.parse(json['copiedAt'] as String),
       text: json['text'] as String?,
       imagePath: json['imagePath'] as String?,
-      preview: json['preview'] as String?,
+      preview: normalizePreview(json['preview'] as String?),
       collections: parsedCollections,
     );
   }

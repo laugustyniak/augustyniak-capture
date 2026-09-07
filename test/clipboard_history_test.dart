@@ -55,6 +55,22 @@ void main() {
       final String tooLong = 'y' * 121;
       expect(ClipboardItem.previewFor(tooLong), '${'y' * 120}...');
     });
+
+    test('normalizePreview converts legacy Polish [Obrazek] to [Image]', () {
+      expect(ClipboardItem.normalizePreview('[Obrazek]'), '[Image]');
+      expect(ClipboardItem.normalizePreview('[Image]'), '[Image]');
+      expect(ClipboardItem.normalizePreview('custom text'), 'custom text');
+      expect(ClipboardItem.normalizePreview(null), isNull);
+
+      final ClipboardItem legacy = ClipboardItem.fromJson(<String, dynamic>{
+        'id': 'legacy-img-1',
+        'type': 'image',
+        'copiedAt': '2026-08-06T20:00:00.000Z',
+        'imagePath': '/tmp/clip.png',
+        'preview': '[Obrazek]',
+      });
+      expect(legacy.preview, '[Image]');
+    });
   });
 
   group('ClipboardRepository', () {

@@ -3,6 +3,7 @@ import 'package:flutter/services.dart';
 
 import '../../../app/ui_kit.dart';
 import '../../gamification/presentation/done_burst_animation.dart';
+import '../domain/capture_type.dart';
 import '../domain/recording.dart';
 import 'card_parts.dart';
 
@@ -144,6 +145,7 @@ class RecordingRow extends StatelessWidget {
                   padding: const EdgeInsets.fromLTRB(_indent, 9, 4, 2),
                   child: ProcessingStrip(
                     enriching: isEnriching,
+                    type: recording.type,
                     elapsed: processingElapsed,
                   ),
                 ),
@@ -198,13 +200,17 @@ class _CollapsedBadge extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     if (recording.status != RecordingStatus.completed) {
+      final String transcribingBase = recording.type == CaptureType.image
+          ? 'EXTRACTING'
+          : 'TRANSCRIBING';
+      final String transcribingText = processingElapsed != null
+          ? '$transcribingBase · ${formatDuration(processingElapsed!)}'
+          : transcribingBase;
       final (String label, Color color) = switch (recording.status) {
         RecordingStatus.saved => ('RAW', Console.muted),
         RecordingStatus.pendingTranscription => ('QUEUED', Console.amber),
         RecordingStatus.transcribing => (
-          processingElapsed != null
-              ? 'TRANSCRIBING · ${formatDuration(processingElapsed!)}'
-              : 'TRANSCRIBING',
+          transcribingText,
           Console.accent,
         ),
         RecordingStatus.failed => ('FAILED', Console.red),
