@@ -9,6 +9,7 @@ import 'package:flutter/services.dart';
 import 'package:path/path.dart' as p;
 
 import '../../../app/ui_kit.dart';
+import '../../../app/version_footer.dart';
 import '../../../core/database/app_database.dart';
 import '../../backup/data/file_picker_archive_location.dart';
 import '../../backup/data/zip_capture_archive.dart';
@@ -954,6 +955,9 @@ class _RecordingsPageState extends State<RecordingsPage>
                 child: CelebrationOverlay(
                   controller: gamification,
                   child: Scaffold(
+                  persistentFooterButtons: _isDesktop
+                      ? const <Widget>[VersionFooter()]
+                      : null,
                   // No AppBar: each tab draws the design's own header (accent eyebrow +
                   // large title) inside its scroll area, so the title scrolls with the
                   // content instead of sitting in a separate bar above it.
