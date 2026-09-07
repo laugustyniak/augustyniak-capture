@@ -121,4 +121,27 @@ void main() {
 
     expect(controller.playbackPosition, isNot(Duration.zero));
   });
+
+  testWidgets('AudioWaveformVisualizer gracefully handles empty samples and zero sizes', (
+    WidgetTester tester,
+  ) async {
+    await tester.pumpWidget(
+      const MaterialApp(
+        home: Scaffold(
+          body: Center(
+            child: SizedBox(
+              width: 0,
+              height: 0,
+              child: AudioWaveformVisualizer(
+                progress: 0.5,
+                samples: <double>[],
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+
+    expect(find.byType(AudioWaveformVisualizer), findsOneWidget);
+  });
 }

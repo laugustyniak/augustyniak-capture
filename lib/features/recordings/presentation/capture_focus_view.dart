@@ -755,6 +755,21 @@ class _AudioPlaybackBar extends StatefulWidget {
 class _AudioPlaybackBarState extends State<_AudioPlaybackBar> {
   double? _dragSeconds;
   static const List<double> _speeds = <double>[1.0, 1.25, 1.5, 2.0];
+  late List<double> _samples;
+
+  @override
+  void initState() {
+    super.initState();
+    _samples = generateWaveformSamples(widget.recording.id);
+  }
+
+  @override
+  void didUpdateWidget(covariant _AudioPlaybackBar oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.recording.id != widget.recording.id) {
+      _samples = generateWaveformSamples(widget.recording.id);
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -781,7 +796,6 @@ class _AudioPlaybackBarState extends State<_AudioPlaybackBar> {
     final double progress = maxSeconds > 0
         ? (currentSeconds / maxSeconds).clamp(0.0, 1.0)
         : 0.0;
-    final List<double> samples = generateWaveformSamples(recording.id);
 
     return Container(
       width: double.infinity,
@@ -813,9 +827,21 @@ class _AudioPlaybackBarState extends State<_AudioPlaybackBar> {
               label: 'Audio playback scrub bar',
               value:
                   '${formatDuration(currentPosition)} of ${formatDuration(totalDuration)}',
+              increasedValue:
+                  '${formatDuration(Duration(milliseconds: ((currentSeconds + 5.0).clamp(0.0, maxSeconds) * 1000).round()))} of ${formatDuration(totalDuration)}',
+              decreasedValue:
+                  '${formatDuration(Duration(milliseconds: ((currentSeconds - 5.0).clamp(0.0, maxSeconds) * 1000).round()))} of ${formatDuration(totalDuration)}',
+              onIncrease: () {
+                final double target = (currentSeconds + 5.0).clamp(0.0, maxSeconds);
+                controller.seekPlayback(Duration(milliseconds: (target * 1000).round()));
+              },
+              onDecrease: () {
+                final double target = (currentSeconds - 5.0).clamp(0.0, maxSeconds);
+                controller.seekPlayback(Duration(milliseconds: (target * 1000).round()));
+              },
               child: AudioWaveformVisualizer(
                 progress: progress,
-                samples: samples,
+                samples: _samples,
                 onSeek: (double ratio) {
                   final double targetSec = ratio * maxSeconds;
                   controller.seekPlayback(

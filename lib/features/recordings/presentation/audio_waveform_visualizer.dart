@@ -85,13 +85,14 @@ class WaveformPainter extends CustomPainter {
 
   @override
   void paint(Canvas canvas, Size size) {
-    if (samples.isEmpty || size.width <= 0) return;
+    if (samples.isEmpty || size.width <= 0 || size.height <= 0) return;
     final int count = samples.length;
     const double barWidth = 3.0;
-    final double spacing =
-        count > 1 ? ((size.width - (count * barWidth)) / (count - 1)).clamp(1.5, 6.0) : 2.0;
+    final double spacing = count > 1
+        ? math.max(1.0, (size.width - (count * barWidth)) / (count - 1))
+        : 0.0;
     final double totalWidth = count * barWidth + (count - 1) * spacing;
-    final double startX = ((size.width - totalWidth) / 2.0).clamp(0.0, size.width);
+    final double startX = math.max(0.0, (size.width - totalWidth) / 2.0);
     final double progressX = progress * size.width;
 
     final Paint activePaint = Paint()
@@ -103,7 +104,8 @@ class WaveformPainter extends CustomPainter {
 
     for (int i = 0; i < count; i++) {
       final double x = startX + i * (barWidth + spacing);
-      final double barHeight = (samples[i] * size.height).clamp(4.0, size.height);
+      final double minHeight = math.min(3.0, size.height);
+      final double barHeight = (samples[i] * size.height).clamp(minHeight, size.height);
       final double y = (size.height - barHeight) / 2.0;
       final RRect rrect = RRect.fromRectAndRadius(
         Rect.fromLTWH(x, y, barWidth, barHeight),
