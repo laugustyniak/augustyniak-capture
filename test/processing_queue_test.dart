@@ -409,4 +409,97 @@ void main() {
       await c.waitForProcessing();
     },
   );
+
+  test(
+    'resumeInterruptedProcessing finds stuck captures, re-enqueues without duplication, and drains to completion',
+    () async {
+      final Directory dir = await _tmp();
+      addTearDown(() => dir.delete(recursive: true));
+      final Recording pending = Recording(
+        id: 'p1',
+        filePath: '${dir.path}/p1.txt',
+        createdAt: DateTime.utc(2026, 7, 25, 10),
+        durationMs: 0,
+        status: RecordingStatus.pendingTranscription,
+        type: CaptureType.text,
+      );
+      final Recording transcribing = Recording(
+        id: 't1',
+        filePath: '${dir.path}/t1.txt',
+        createdAt: DateTime.utc(2026, 7, 25, 11),
+        durationMs: 0,
+        status: RecordingStatus.transcribing,
+        type: CaptureType.text,
+      );
+      final Recording awaits = Recording(
+        id: 'a1',
+        filePath: '${dir.path}/a1.txt',
+        createdAt: DateTime.utc(2026, 7, 25, 12),
+        durationMs: 0,
+        status: RecordingStatus.saved,
+        type: CaptureType.text,
+      );
+      final Recording completed = Recording(
+        id: 'c1',
+        filePath: '${dir.path}/c1.txt',
+        createdAt: DateTime.utc(2026, 7, 25, 9),
+        durationMs: 0,
+        status: RecordingStatus.completed,
+        type: CaptureType.text,
+        transcript: 'already done',
+      );
+
+      final _TestProcessor proc = _TestProcessor();
+      final RecordingsController c = _controller(
+        _SeededRepo(dir, <Recording>[pending, transcribing, awaits, completed]),
+        proc,
+      );
+      addTearDown(c.dispose);
+
+      await c.initialize();
+      await c.waitForProcessing();
+
+      expect(proc.processed, containsAll(<String>['p1', 't1', 'a1']));
+      expect(proc.processed.contains('c1'), isFalse);
+      expect(
+        c.recordings.every((Recording r) => r.status == RecordingStatus.completed),
+        isTrue,
+      );
+
+      // Calling resumeInterruptedProcessing again when all are completed does nothing
+      proc.processed.clear();
+      await c.resumeInterruptedProcessing();
+      await c.waitForProcessing();
+      expect(proc.processed, isEmpty);
+    },
+  );
+
+  test(
+    'resumeInterruptedProcessing does not duplicate in-flight or queued items',
+    () async {
+      final Directory dir = await _tmp();
+      addTearDown(() => dir.delete(recursive: true));
+      final _TestProcessor proc = _TestProcessor(gated: true);
+      final RecordingsController c = _controller(_FakeRepo(dir), proc);
+      addTearDown(c.dispose);
+
+      await c.addTextNote('running-item');
+      await _pump();
+      expect(proc.gates.length, 1);
+      expect(c.isProcessing, isTrue);
+
+      // Trigger resume while the item is already running
+      await c.resumeInterruptedProcessing();
+      await _pump();
+
+      // Should still be only 1 running job, no duplicates queued
+      expect(proc.gates.length, 1);
+      expect(c.pendingProcessingCount, 1);
+
+      proc.gates[0].complete();
+      await c.waitForProcessing();
+      expect(proc.calls, 1);
+      expect(c.recordings.single.status, RecordingStatus.completed);
+    },
+  );
 }

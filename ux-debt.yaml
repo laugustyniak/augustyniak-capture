@@ -30,9 +30,9 @@
     - "ISSUES.md:21-25: queue is memory-only; jobs do not survive app killed/suspended"
     - "docs/architecture/capture-pipeline.md: background drain loop lacks WorkManager/BGTaskScheduler hooks"
   workaround: "user must keep app active in foreground or wait for re-enqueue on next app launch"
-  state: accepted
+  state: fixed
   owner: mobile-team
-  issue: null
+  issue: 148
   first_seen: 2026-09-03
   review_by: 2026-12-03
 
