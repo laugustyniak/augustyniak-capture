@@ -1499,4 +1499,38 @@ void main() {
     expect(find.text('Diagram photo'), findsOneWidget);
     expect(find.text('Meeting audio'), findsNothing);
   });
+
+  testWidgets('QueueTab cards expand to full available width on wide viewports', (
+    WidgetTester tester,
+  ) async {
+    tester.view.physicalSize = const Size(1400, 900);
+    tester.view.devicePixelRatio = 1.0;
+    addTearDown(() {
+      tester.view.resetPhysicalSize();
+      tester.view.resetDevicePixelRatio();
+    });
+
+    final RecordingsController controller = await buildRecordingsController(
+      appDir,
+      seed: <Recording>[
+        makeRecording(
+          id: 'wide-card-1',
+          title: 'Full width capture',
+          transcript: 'This card should span full width instead of being capped to 880px.',
+          type: CaptureType.text,
+          status: RecordingStatus.completed,
+        ),
+      ],
+    );
+    await pumpQueue(tester, controller);
+
+    final Finder cardFinder = find.byType(RecordingCard);
+    expect(cardFinder, findsOneWidget);
+
+    final Size cardSize = tester.getSize(cardFinder);
+    // On 1400px viewport, list padding is 16 on each side, card padding is 4 on each side,
+    // so total width = 1400 - (16*2 + 4*2) = 1360px (> 880px).
+    expect(cardSize.width, greaterThan(1300));
+  });
 }
+
