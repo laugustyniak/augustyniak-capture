@@ -5,6 +5,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:augustyniak_capture/app/ui_kit.dart';
 import 'package:augustyniak_capture/features/recordings/domain/capture_type.dart';
+import 'package:augustyniak_capture/features/recordings/domain/note_vault.dart';
 import 'package:augustyniak_capture/features/recordings/domain/recording.dart';
 import 'package:augustyniak_capture/features/recordings/presentation/audio_waveform_visualizer.dart';
 import 'package:augustyniak_capture/features/recordings/presentation/capture_focus_view.dart';
@@ -433,4 +434,64 @@ void main() {
       expect(controller.playbackSpeed, 1.5);
     },
   );
+
+  testWidgets(
+    'the focus view renders vault sync status badge and triggers manual sync',
+    (WidgetTester tester) async {
+      final _FakeTestVault vault = _FakeTestVault();
+      final RecordingsController controller = await buildRecordingsController(
+        appDir,
+        noteVault: vault,
+        seed: <Recording>[
+          makeRecording(
+            id: 'vault_sync_test',
+            title: 'Vault Note',
+            transcript: 'Ready for obsidian vault.',
+            type: CaptureType.text,
+          ),
+        ],
+      );
+
+      // 1. Initial state: not mirrored yet -> VAULT PENDING
+      await pumpFocusView(tester, controller, 'vault_sync_test');
+      await tester.pumpAndSettle();
+
+      expect(inFocusView(find.text('VAULT PENDING')), findsOneWidget);
+      expect(inFocusView(find.byIcon(Icons.folder_shared_outlined)), findsOneWidget);
+
+      // 2. Tap sync button -> triggers retryVaultMirror and shows SnackBar
+      await tester.tap(inFocusView(find.byIcon(Icons.folder_shared_outlined)));
+      await tester.pump();
+      await tester.pumpAndSettle();
+
+      expect(vault.mirroredIds, contains('vault_sync_test'));
+      expect(find.text('Mirrored note to vault'), findsOneWidget);
+
+      // 3. The focus view updates live to show VAULT SYNCED
+      expect(inFocusView(find.text('VAULT SYNCED')), findsOneWidget);
+    },
+  );
+}
+
+class _FakeTestVault implements NoteVault {
+  final Set<String> mirroredIds = <String>{};
+
+  @override
+  bool get isConfigured => true;
+
+  @override
+  Future<VaultWrite> mirror(VaultNote note) async {
+    mirroredIds.add(note.id);
+    return const VaultWrite(outcome: VaultOutcome.created);
+  }
+
+  @override
+  Future<int> countMirrored(Iterable<String> captureIds) async {
+    return captureIds.where(mirroredIds.contains).length;
+  }
+
+  @override
+  Future<bool> hasNote(String captureId) async {
+    return mirroredIds.contains(captureId);
+  }
 }

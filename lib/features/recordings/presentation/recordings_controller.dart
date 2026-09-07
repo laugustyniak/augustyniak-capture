@@ -2282,6 +2282,34 @@ class RecordingsController extends ChangeNotifier {
     return VaultSyncStats(total: total, mirrored: mirrored);
   }
 
+  /// Manually sync/retry mirroring a single capture to the configured note vault.
+  Future<VaultOutcome?> retryVaultMirror(String id) async {
+    if (!_noteVault.isConfigured) return null;
+    final int index = _recordings.indexWhere((Recording item) => item.id == id);
+    if (index < 0) return null;
+    final Recording item = _recordings[index];
+    if ((item.transcript ?? '').trim().isEmpty) return null;
+
+    try {
+      final VaultOutcome outcome = await _mirrorOne(item);
+      notifyListeners();
+      return outcome;
+    } catch (exception) {
+      _logSink.log(
+        'Vault mirror failed: $exception',
+        level: LogLevel.warn,
+        recordingId: id,
+      );
+      return null;
+    }
+  }
+
+  /// Whether a specific capture is currently mirrored in the note vault.
+  Future<bool> isCaptureMirrored(String id) async {
+    if (!_noteVault.isConfigured) return false;
+    return _noteVault.hasNote(id);
+  }
+
   /// Re-queue a failed (or any) item for processing. Like capture, this only
   /// enqueues — it does not hold the `_isBusy` capture lock, so a retry never
   /// blocks starting a new recording.

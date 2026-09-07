@@ -70,6 +70,9 @@ class _FailingVault implements NoteVault {
 
   @override
   Future<int> countMirrored(Iterable<String> captureIds) async => 0;
+
+  @override
+  Future<bool> hasNote(String captureId) async => false;
 }
 
 /// Counts writes without touching a disk, for the questions that are about
@@ -90,6 +93,11 @@ class _CountingVault implements NoteVault {
   Future<int> countMirrored(Iterable<String> captureIds) async {
     final Set<String> known = notes.map((VaultNote n) => n.id).toSet();
     return captureIds.where(known.contains).length;
+  }
+
+  @override
+  Future<bool> hasNote(String captureId) async {
+    return notes.any((VaultNote n) => n.id == captureId);
   }
 }
 
@@ -312,5 +320,30 @@ void main() {
     }
 
     expect(await controller.vaultStats(), const VaultSyncStats(total: 1, mirrored: 0));
+  });
+
+  test('isCaptureMirrored and retryVaultMirror report and sync individual capture', () async {
+    final RecordingsController controller = build(
+      vault: realVault(),
+      transcription: _StubTranscription('Notatka do zsynchronizowania.'),
+    );
+
+    await controller.addTextNote('Pojedyncza notatka');
+    await controller.waitForProcessing();
+
+    final String captureId = controller.recordings.single.id;
+    expect(await controller.isCaptureMirrored(captureId), isTrue);
+
+    // Delete the file on disk to simulate unmirrored state
+    for (final File f in notes()) {
+      f.deleteSync();
+    }
+    expect(await controller.isCaptureMirrored(captureId), isFalse);
+
+    // Force retry/resync single capture
+    final VaultOutcome? outcome = await controller.retryVaultMirror(captureId);
+    expect(outcome, VaultOutcome.created);
+    expect(await controller.isCaptureMirrored(captureId), isTrue);
+    expect(notes(), hasLength(1));
   });
 }

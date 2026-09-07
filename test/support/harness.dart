@@ -18,6 +18,7 @@ import 'package:augustyniak_capture/features/recordings/domain/agent_handoff.dar
 import 'package:augustyniak_capture/features/recordings/domain/capture_category.dart';
 import 'package:augustyniak_capture/features/recordings/domain/capture_type.dart';
 import 'package:augustyniak_capture/features/recordings/domain/media_opener.dart';
+import 'package:augustyniak_capture/features/recordings/domain/note_vault.dart';
 import 'package:augustyniak_capture/features/recordings/domain/capture_router.dart';
 import 'package:augustyniak_capture/features/recordings/domain/recording.dart';
 import 'package:augustyniak_capture/features/recordings/domain/route_record.dart';
@@ -130,6 +131,7 @@ Future<RecordingsController> buildRecordingsController(
   FakeRecordingsRepository? repository,
   UsageSink usageSink = const NoopUsageSink(),
   ClosureLog closureLog = const NoopClosureLog(),
+  NoteVault noteVault = const DisabledNoteVault(),
   Project? Function(String projectId)? projectById,
   GamificationController? gamificationController,
   CommandClient commandClient = const DisabledCommandClient(),
@@ -146,6 +148,7 @@ Future<RecordingsController> buildRecordingsController(
     player: FakePlayer(),
     usageSink: usageSink,
     closureLog: closureLog,
+    noteVault: noteVault,
     projectById: projectById,
     gamificationController: gamificationController,
     commandClient: commandClient,
