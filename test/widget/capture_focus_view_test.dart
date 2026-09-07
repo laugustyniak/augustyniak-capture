@@ -6,6 +6,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:augustyniak_capture/app/ui_kit.dart';
 import 'package:augustyniak_capture/features/recordings/domain/capture_type.dart';
 import 'package:augustyniak_capture/features/recordings/domain/recording.dart';
+import 'package:augustyniak_capture/features/recordings/presentation/audio_waveform_visualizer.dart';
 import 'package:augustyniak_capture/features/recordings/presentation/capture_focus_view.dart';
 import 'package:augustyniak_capture/features/recordings/presentation/queue_tab.dart';
 import 'package:augustyniak_capture/features/recordings/presentation/recording_card.dart';
@@ -416,7 +417,7 @@ void main() {
       await pumpFocusView(tester, controller, 'audio_playback_test');
 
       expect(inFocusView(find.text('AUDIO PLAYBACK')), findsOneWidget);
-      expect(inFocusView(find.byType(Slider)), findsOneWidget);
+      expect(inFocusView(find.byType(AudioWaveformVisualizer)), findsOneWidget);
       expect(inFocusView(find.text('00:00 / 00:45')), findsOneWidget);
       expect(inFocusView(find.text('1x')), findsOneWidget);
 

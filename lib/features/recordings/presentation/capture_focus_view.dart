@@ -6,6 +6,7 @@ import '../../../app/markdown_view.dart';
 import '../../../app/ui_kit.dart';
 import '../domain/capture_type.dart';
 import '../domain/recording.dart';
+import 'audio_waveform_visualizer.dart';
 import 'card_parts.dart';
 import 'handoff_sheet.dart';
 import 'inline_video_player.dart';
@@ -777,6 +778,11 @@ class _AudioPlaybackBarState extends State<_AudioPlaybackBar> {
 
     final double currentSpeed = controller.playbackSpeed;
 
+    final double progress = maxSeconds > 0
+        ? (currentSeconds / maxSeconds).clamp(0.0, 1.0)
+        : 0.0;
+    final List<double> samples = generateWaveformSamples(recording.id);
+
     return Container(
       width: double.infinity,
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
@@ -800,41 +806,26 @@ class _AudioPlaybackBarState extends State<_AudioPlaybackBar> {
             '${formatDuration(currentPosition)} / ${formatDuration(totalDuration)}',
             style: ConsoleText.micro.copyWith(color: Console.textSoft),
           ),
-          const SizedBox(width: 8),
+          const SizedBox(width: 10),
           Expanded(
-            child: SliderTheme(
-              data: SliderThemeData(
-                trackHeight: 3,
-                activeTrackColor: Console.accent,
-                inactiveTrackColor: Console.track,
-                thumbColor: Console.accent,
-                overlayColor: Console.accent.withValues(alpha: .15),
-                thumbShape: const RoundSliderThumbShape(
-                  enabledThumbRadius: 6,
-                  elevation: 0,
-                ),
-                overlayShape: const RoundSliderOverlayShape(
-                  overlayRadius: 12,
-                ),
-              ),
-              child: Slider(
-                value: currentSeconds.clamp(0.0, maxSeconds),
-                max: maxSeconds,
-                onChanged: (double val) {
-                  setState(() => _dragSeconds = val);
-                },
-                onChangeEnd: (double val) {
-                  setState(() => _dragSeconds = null);
+            child: Semantics(
+              slider: true,
+              label: 'Audio playback scrub bar',
+              value:
+                  '${formatDuration(currentPosition)} of ${formatDuration(totalDuration)}',
+              child: AudioWaveformVisualizer(
+                progress: progress,
+                samples: samples,
+                onSeek: (double ratio) {
+                  final double targetSec = ratio * maxSeconds;
                   controller.seekPlayback(
-                    Duration(milliseconds: (val * 1000).round()),
+                    Duration(milliseconds: (targetSec * 1000).round()),
                   );
                 },
-                semanticFormatterCallback: (double val) =>
-                    '${formatDuration(Duration(seconds: val.round()))} of ${formatDuration(totalDuration)}',
               ),
             ),
           ),
-          const SizedBox(width: 6),
+          const SizedBox(width: 8),
           InkWell(
             borderRadius: BorderRadius.circular(8),
             onTap: () {
