@@ -555,7 +555,7 @@ class _Header extends StatelessWidget {
   }
 }
 
-class _VaultSyncBadge extends StatelessWidget {
+class _VaultSyncBadge extends StatefulWidget {
   const _VaultSyncBadge({
     required this.controller,
     required this.recordingId,
@@ -565,11 +565,30 @@ class _VaultSyncBadge extends StatelessWidget {
   final String recordingId;
 
   @override
+  State<_VaultSyncBadge> createState() => _VaultSyncBadgeState();
+}
+
+class _VaultSyncBadgeState extends State<_VaultSyncBadge> {
+  late Future<bool> _future;
+
+  @override
+  void initState() {
+    super.initState();
+    _future = widget.controller.isCaptureMirrored(widget.recordingId);
+  }
+
+  @override
+  void didUpdateWidget(covariant _VaultSyncBadge oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    _future = widget.controller.isCaptureMirrored(widget.recordingId);
+  }
+
+  @override
   Widget build(BuildContext context) {
-    if (!controller.mirrorsToVault) return const SizedBox.shrink();
+    if (!widget.controller.mirrorsToVault) return const SizedBox.shrink();
 
     return FutureBuilder<bool>(
-      future: controller.isCaptureMirrored(recordingId),
+      future: _future,
       builder: (BuildContext context, AsyncSnapshot<bool> snapshot) {
         final bool isMirrored = snapshot.data ?? false;
         return StatusPill(
