@@ -570,18 +570,7 @@ class RecordingsController extends ChangeNotifier {
     // and nothing else in the app would ever pick it up. The drain only runs
     // segments that hold no text, so a row that already has its transcript
     // costs nothing here.
-    final List<String> stuck = _recordings
-        .where(
-          (Recording item) =>
-              item.status == RecordingStatus.pendingTranscription ||
-              item.status == RecordingStatus.transcribing ||
-              item.awaitsProcessing,
-        )
-        .map((Recording item) => item.id)
-        .toList();
-    for (final String id in stuck) {
-      await _enqueueProcessing(id);
-    }
+    await resumeInterruptedProcessing();
 
     // Deliberately not awaited: posters are cosmetic, and shelling ffmpeg once
     // per video must never be something the first frame of the app waits for.
@@ -2406,6 +2395,28 @@ class RecordingsController extends ChangeNotifier {
       }
     } finally {
       _enrichmentRetries.remove(id);
+    }
+  }
+
+  /// Resume jobs left non-terminal or interrupted (e.g. by app termination,
+  /// background suspension, timeout or crash).
+  ///
+  /// Scans [_recordings] for captures in [RecordingStatus.pendingTranscription],
+  /// [RecordingStatus.transcribing], or matching [Recording.awaitsProcessing].
+  /// Re-enqueues them idempotently.
+  Future<void> resumeInterruptedProcessing() async {
+    if (_indexUnreadable || _disposed) return;
+    final List<String> stuck = _recordings
+        .where(
+          (Recording item) =>
+              item.status == RecordingStatus.pendingTranscription ||
+              item.status == RecordingStatus.transcribing ||
+              item.awaitsProcessing,
+        )
+        .map((Recording item) => item.id)
+        .toList();
+    for (final String id in stuck) {
+      await _enqueueProcessing(id);
     }
   }
 

@@ -841,6 +841,7 @@ class _RecordingsPageState extends State<RecordingsPage>
     super.didChangeAppLifecycleState(state);
     if (state == AppLifecycleState.resumed) {
       unawaited(controller.refreshCommandOutcomes());
+      unawaited(controller.resumeInterruptedProcessing());
     }
   }
 
