@@ -78,6 +78,9 @@ class QueueToolbar extends StatelessWidget {
     required this.projects,
     required this.selectedProjectId,
     required this.onProjectChanged,
+    required this.typeFilter,
+    required this.typeCounts,
+    required this.onTypeChanged,
     required this.statusFilter,
     required this.counts,
     required this.onStatusChanged,
@@ -88,7 +91,7 @@ class QueueToolbar extends StatelessWidget {
   /// selector claim a fixed share, and what is left has to stay wide enough to
   /// read a query back in.
   static const double singleLineWidth = 700;
-  static const double _projectWidth = 156;
+  static const double _projectWidth = 144;
 
   final int total;
   final int reviewed;
@@ -105,6 +108,10 @@ class QueueToolbar extends StatelessWidget {
   final List<Project> projects;
   final String? selectedProjectId;
   final ValueChanged<String?> onProjectChanged;
+
+  final CaptureTypeFilter typeFilter;
+  final Map<CaptureTypeFilter, int> typeCounts;
+  final ValueChanged<CaptureTypeFilter> onTypeChanged;
 
   final RecordingFilter statusFilter;
   final Map<RecordingFilter, int> counts;
@@ -141,6 +148,11 @@ class QueueToolbar extends StatelessWidget {
                   filter: reviewFilter,
                   onChanged: onReviewChanged,
                 );
+                final Widget type = QueueTypeMenu(
+                  selected: typeFilter,
+                  counts: typeCounts,
+                  onSelected: onTypeChanged,
+                );
                 final Widget status = QueueStatusMenu(
                   selected: statusFilter,
                   counts: counts,
@@ -164,6 +176,8 @@ class QueueToolbar extends StatelessWidget {
                       const SizedBox(width: 8),
                       segments,
                       const SizedBox(width: 8),
+                      type,
+                      const SizedBox(width: 8),
                       status,
                       if (project != null) ...<Widget>[
                         const SizedBox(width: 8),
@@ -179,6 +193,8 @@ class QueueToolbar extends StatelessWidget {
                     Row(
                       children: <Widget>[
                         Expanded(child: search),
+                        const SizedBox(width: 8),
+                        type,
                         const SizedBox(width: 8),
                         status,
                       ],
@@ -229,6 +245,95 @@ class QueueToolbar extends StatelessWidget {
             ),
           ),
         ],
+      ),
+    );
+  }
+}
+
+/// The capture type buckets, as one button that names the active one.
+class QueueTypeMenu extends StatelessWidget {
+  QueueTypeMenu({
+    super.key,
+    required this.selected,
+    required this.counts,
+    required this.onSelected,
+  });
+
+  final CaptureTypeFilter selected;
+  final Map<CaptureTypeFilter, int> counts;
+  final ValueChanged<CaptureTypeFilter> onSelected;
+
+  static String labelFor(CaptureTypeFilter value) => switch (value) {
+    CaptureTypeFilter.all => 'TYPE',
+    CaptureTypeFilter.audio => 'AUDIO',
+    CaptureTypeFilter.image => 'IMAGES',
+    CaptureTypeFilter.text => 'NOTES',
+    CaptureTypeFilter.video => 'VIDEOS',
+  };
+
+  @override
+  Widget build(BuildContext context) {
+    final bool narrowed = selected != CaptureTypeFilter.all;
+    final Color foreground = narrowed ? Console.accent : Console.chipLabel;
+
+    return PopupMenuButton<CaptureTypeFilter>(
+      tooltip: 'Filter by media type',
+      color: Console.surfaceRaised,
+      position: PopupMenuPosition.under,
+      onSelected: onSelected,
+      itemBuilder: (BuildContext context) => CaptureTypeFilter.values
+          .map(
+            (CaptureTypeFilter value) => PopupMenuItem<CaptureTypeFilter>(
+              value: value,
+              height: 38,
+              child: Row(
+                children: <Widget>[
+                  SizedBox(
+                    width: 22,
+                    child: value == selected
+                        ? Icon(
+                            Icons.check_rounded,
+                            size: 15,
+                            color: Console.accent,
+                          )
+                        : null,
+                  ),
+                  Text(
+                    '${labelFor(value)} ${counts[value] ?? 0}',
+                    style: ConsoleText.chip.copyWith(
+                      color: value == selected
+                          ? Console.accent
+                          : Console.textSoft,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          )
+          .toList(),
+      child: Container(
+        constraints: const BoxConstraints(minHeight: 40),
+        padding: const EdgeInsets.symmetric(horizontal: 11),
+        decoration: BoxDecoration(
+          color: narrowed
+              ? Console.accent.withValues(alpha: .12)
+              : Console.surfaceRaised,
+          borderRadius: BorderRadius.circular(10),
+          border: Border.all(
+            color: narrowed ? Console.accent.withValues(alpha: .4) : Console.border,
+          ),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: <Widget>[
+            Text(
+              '${labelFor(selected)} ${counts[selected] ?? 0}',
+              style: ConsoleText.chip.copyWith(color: foreground),
+            ),
+            const SizedBox(width: 4),
+            Icon(Icons.arrow_drop_down_rounded, size: 18, color: foreground),
+          ],
+        ),
       ),
     );
   }
@@ -468,6 +573,40 @@ class QueueStatusChips extends StatelessWidget {
             padding: const EdgeInsets.only(right: 7),
             child: ConsoleChip(
               label: QueueStatusMenu.labelFor(item),
+              count: counts[item] ?? 0,
+              selected: item == selected,
+              onSelected: () => onSelected(item),
+            ),
+          );
+        }).toList(),
+      ),
+    );
+  }
+}
+
+/// The capture type buckets as chips — the phone's filter panel.
+class QueueTypeChips extends StatelessWidget {
+  QueueTypeChips({
+    super.key,
+    required this.selected,
+    required this.counts,
+    required this.onSelected,
+  });
+
+  final CaptureTypeFilter selected;
+  final Map<CaptureTypeFilter, int> counts;
+  final ValueChanged<CaptureTypeFilter> onSelected;
+
+  @override
+  Widget build(BuildContext context) {
+    return SingleChildScrollView(
+      scrollDirection: Axis.horizontal,
+      child: Row(
+        children: CaptureTypeFilter.values.map((CaptureTypeFilter item) {
+          return Padding(
+            padding: const EdgeInsets.only(right: 7),
+            child: ConsoleChip(
+              label: QueueTypeMenu.labelFor(item),
               count: counts[item] ?? 0,
               selected: item == selected,
               onSelected: () => onSelected(item),

@@ -98,6 +98,17 @@ void main() {
     await tester.pumpAndSettle();
   }
 
+  Future<void> openTypeMenu(WidgetTester tester) async {
+    await tester.tap(find.byType(QueueTypeMenu));
+    await tester.pumpAndSettle();
+  }
+
+  Future<void> selectType(WidgetTester tester, String label) async {
+    await openTypeMenu(tester);
+    await tester.tap(find.text(label).last);
+    await tester.pumpAndSettle();
+  }
+
   testWidgets('empty index shows the empty panel, not a list', (
     WidgetTester tester,
   ) async {
@@ -1375,5 +1386,117 @@ void main() {
     // Edit mode left with the row it belonged to, rather than lingering on an
     // id nothing in the queue answers to any more.
     expect(find.byIcon(Icons.delete_outline_rounded), findsNothing);
+  });
+
+  testWidgets('filtering by capture type isolates audio, images, notes, and video', (
+    WidgetTester tester,
+  ) async {
+    final RecordingsController controller = await buildRecordingsController(
+      appDir,
+      seed: <Recording>[
+        makeRecording(
+          id: 'audio-1',
+          title: 'Voice capture',
+          type: CaptureType.audioRecording,
+          status: RecordingStatus.completed,
+        ),
+        makeRecording(
+          id: 'img-1',
+          title: 'Screenshot OCR',
+          type: CaptureType.image,
+          status: RecordingStatus.completed,
+        ),
+        makeRecording(
+          id: 'note-1',
+          title: 'Quick thought',
+          type: CaptureType.text,
+          status: RecordingStatus.completed,
+        ),
+        makeRecording(
+          id: 'vid-1',
+          title: 'Screen clip',
+          type: CaptureType.video,
+          status: RecordingStatus.completed,
+        ),
+      ],
+    );
+    await pumpQueue(tester, controller);
+
+    // Initial state: ALL TYPES shows everything
+    expect(find.text('Voice capture'), findsOneWidget);
+    expect(find.text('Screenshot OCR'), findsOneWidget);
+    expect(find.text('Quick thought'), findsOneWidget);
+    expect(find.text('Screen clip'), findsOneWidget);
+
+    // Filter to IMAGES
+    await selectType(tester, 'IMAGES 1');
+    expect(find.text('Screenshot OCR'), findsOneWidget);
+    expect(find.text('Voice capture'), findsNothing);
+    expect(find.text('Quick thought'), findsNothing);
+    expect(find.text('Screen clip'), findsNothing);
+
+    // Filter to NOTES
+    await selectType(tester, 'NOTES 1');
+    expect(find.text('Quick thought'), findsOneWidget);
+    expect(find.text('Screenshot OCR'), findsNothing);
+    expect(find.text('Voice capture'), findsNothing);
+    expect(find.text('Screen clip'), findsNothing);
+
+    // Filter to AUDIO
+    await selectType(tester, 'AUDIO 1');
+    expect(find.text('Voice capture'), findsOneWidget);
+    expect(find.text('Quick thought'), findsNothing);
+    expect(find.text('Screenshot OCR'), findsNothing);
+
+    // Filter back to TYPE (all)
+    await selectType(tester, 'TYPE 4');
+    expect(find.text('Voice capture'), findsOneWidget);
+    expect(find.text('Screenshot OCR'), findsOneWidget);
+    expect(find.text('Quick thought'), findsOneWidget);
+    expect(find.text('Screen clip'), findsOneWidget);
+  });
+
+  testWidgets('compact mobile header renders QueueTypeChips and filters by type', (
+    WidgetTester tester,
+  ) async {
+    tester.view.physicalSize = const Size(393, 852);
+    tester.view.devicePixelRatio = 1.0;
+    addTearDown(() {
+      tester.view.resetPhysicalSize();
+      tester.view.resetDevicePixelRatio();
+    });
+
+    final RecordingsController controller = await buildRecordingsController(
+      appDir,
+      seed: <Recording>[
+        makeRecording(
+          id: 'audio-1',
+          title: 'Meeting audio',
+          type: CaptureType.audioRecording,
+          status: RecordingStatus.completed,
+        ),
+        makeRecording(
+          id: 'img-1',
+          title: 'Diagram photo',
+          type: CaptureType.image,
+          status: RecordingStatus.completed,
+        ),
+      ],
+    );
+    await pumpQueue(tester, controller);
+
+    // Open filter panel on mobile
+    await tester.tap(find.bySemanticsLabel('Toggle filters'));
+    await tester.pumpAndSettle();
+
+    expect(find.byType(QueueTypeChips), findsOneWidget);
+    expect(find.text('IMAGES 1'), findsOneWidget);
+
+    // Tap IMAGES chip
+    await tester.tap(find.text('IMAGES 1'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Diagram photo'), findsOneWidget);
+    expect(find.text('Meeting audio'), findsNothing);
   });
 }
