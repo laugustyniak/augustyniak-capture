@@ -417,7 +417,7 @@ class ProviderPreset {
         'openai/gpt-oss-120b',
         'openai/gpt-oss-20b',
       ],
-      tokenHint: 'Groq API key (gsk_…)',
+      tokenHint: 'Groq API key (gsk_…) — note: does not support image OCR',
     ),
     ProviderPreset(
       name: 'Local Ollama',

@@ -104,9 +104,9 @@
   evidence:
     - "docs/architecture/settings-security.md:13: Groq production lineup has no vision model, landing image captures in failed state"
   workaround: "user must manually switch active enrichment profile to OpenAI/Anthropic/Gemini for OCR"
-  state: accepted
+  state: fixed
   owner: settings-team
-  issue: null
+  issue: 139
   first_seen: 2026-09-03
   review_by: 2026-12-03
 

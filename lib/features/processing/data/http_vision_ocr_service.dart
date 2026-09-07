@@ -97,13 +97,16 @@ class HttpVisionOcrService implements OcrService {
         .timeout(requestTimeout);
 
     if (response.statusCode < 200 || response.statusCode >= 300) {
-      throw HttpException(
-        describeProviderFailure(
-          'OCR',
-          response.statusCode,
-          utf8.decode(response.bodyBytes),
-        ),
+      String failure = describeProviderFailure(
+        'OCR',
+        response.statusCode,
+        utf8.decode(response.bodyBytes),
       );
+      if (endpoint.host.contains('groq.com')) {
+        failure =
+            '$failure (Groq text models do not support image OCR; configure OpenAI, Anthropic, or Gemini for vision).';
+      }
+      throw HttpException(failure);
     }
 
     final String body = utf8.decode(response.bodyBytes);
