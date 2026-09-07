@@ -62,7 +62,7 @@ class SqliteClipboardRepository implements ClipboardRepository {
           text: row['text'] as String?,
           imagePath: row['image_path'] as String?,
           copiedAt: DateTime.fromMillisecondsSinceEpoch(row['copied_at'] as int),
-          preview: row['preview'] as String?,
+          preview: ClipboardItem.normalizePreview(row['preview'] as String?),
           collections: collections,
         ),
       );
