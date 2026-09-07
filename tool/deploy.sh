@@ -139,6 +139,9 @@ fi
 
 # --- per-host install ---------------------------------------------------
 
+build_revision="$(git describe --always --dirty --abbrev=12)"
+build_args+=("--dart-define=APP_GIT_SHA=$build_revision")
+
 install_linux() {
   local bundle="build/linux/x64/release/bundle"
   local opt_dir="$HOME/.local/opt/$cli_name"
