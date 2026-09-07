@@ -49,9 +49,9 @@
     - "ISSUES.md:38-41: settings.json plaintext token warning in Models tab"
     - "docs/architecture/settings-security.md:7-12: headless Linux or unsigned builds drop to plaintext fallback"
   workaround: "user relies on filesystem permissions or passes credentials via ephemeral CLI defines"
-  state: accepted
+  state: fixed
   owner: settings-team
-  issue: null
+  issue: 118
   first_seen: 2026-09-03
   review_by: 2026-12-03
 
