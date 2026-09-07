@@ -4,26 +4,6 @@ Local issue tracker (no GitHub remote yet). Move to `gh issue` once a remote exi
 
 ## Open
 
-### In-app video playback
-
-Poster extraction is implemented: Android uses `MediaMetadataRetriever`, iOS
-uses AVFoundation, and desktop uses system `ffmpeg`. Video playback still opens
-the platform player; add an in-app player if inline playback becomes valuable.
-
-### Background transcription queue — job persistence across app suspension
-
-The in-process decoupling is **done**: processing no longer runs inline under
-`_isBusy`. Capture enqueues an already-persisted item and returns; a background
-drain loop (`_drainProcessingQueue`) runs jobs one at a time off the capture
-lock, so a long job never blocks the next capture (`_enqueueProcessing` /
-`_isDraining`).
-
-Remaining (mobile-only, deferred): the queue lives only in memory, so jobs
-don't survive the app being killed/suspended. Add WorkManager (Android) /
-BGTaskScheduler (iOS) so a `pendingTranscription`/`transcribing` item resumes
-after suspension. On resume, re-enqueue any item left non-terminal in
-`recordings.json`.
-
 ### On-device models
 
 The Models tab manages *remote* provider profiles only. Local inference
@@ -35,9 +15,17 @@ needs a native dependency that is not in `pubspec.yaml` today.
 source→verify→persist→process ordering that `RecordingsController.stopRecording()`
 and `addTextNote()` both implement.
 
-### Transcript editing
+## Done — queue resumption on app launch & resume (#148)
 
-No way to fix a bad transcript or set a title. Read-only today.
+- **Background queue recovery:** exposed `resumeInterruptedProcessing()` on `RecordingsController` to automatically detect and resume non-terminal/stuck captures (`pendingTranscription`, `transcribing`, `awaitsProcessing`) on app startup and in `didChangeAppLifecycleState` upon `AppLifecycleState.resumed`.
+
+## Done — in-app video playback (#120)
+
+- **Inline video player:** implemented `InlineVideoPlayer` and `VideoPlaybackController` for video captures with scrubbing bar, timestamp tracker, volume/mute toggle, poster preview fallback, and focus view integration.
+
+## Done — transcript & custom title editing (#119)
+
+- **Capture editing:** added support for editing transcripts and custom titles in `RecordingsController` and inline `RecordingEditor`. Persisted user revisions with `RevisionSource.user` and synced changes to Obsidian markdown vault notes.
 
 ## Done — token encryption (#118)
 
