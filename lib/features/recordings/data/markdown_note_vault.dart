@@ -431,12 +431,13 @@ class _Parsed {
   /// Null when the file carries no front matter at all — a note the reader has
   /// rewritten from scratch, which is as foreign as an edited one.
   static _Parsed? of(String content) {
-    if (!content.startsWith('---\n')) return null;
-    final int end = content.indexOf('\n---\n', 3);
+    final String normalized = content.replaceAll('\r\n', '\n');
+    if (!normalized.startsWith('---\n')) return null;
+    final int end = normalized.indexOf('\n---\n', 3);
     if (end < 0) return null;
 
     final Map<String, String> fields = <String, String>{};
-    for (final String line in content.substring(4, end + 1).split('\n')) {
+    for (final String line in normalized.substring(4, end + 1).split('\n')) {
       final int colon = line.indexOf(':');
       if (colon <= 0) continue;
       fields[line.substring(0, colon).trim()] = line
@@ -446,6 +447,6 @@ class _Parsed {
     // `+5` clears the closing fence and its newline; the blank line the writer
     // puts after it belongs to the body, and must, or the hash would not match
     // what was hashed.
-    return _Parsed(frontMatter: fields, body: content.substring(end + 5));
+    return _Parsed(frontMatter: fields, body: normalized.substring(end + 5));
   }
 }

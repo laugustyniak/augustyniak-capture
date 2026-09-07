@@ -1445,6 +1445,7 @@ class RecordingsController extends ChangeNotifier {
         // A player that will not stop must not keep a capture undeletable.
       }
       _playingId = null;
+      _playbackPosition = Duration.zero;
     }
 
     try {

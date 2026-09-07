@@ -296,4 +296,23 @@ void main() {
     expect(await subject.countMirrored(<String>[id1]), 1);
     expect(await subject.countMirrored(<String>[id3]), 0);
   });
+
+  test('a note with CRLF line endings is parsed and updated without false foreign detection', () async {
+    final MarkdownNoteVault subject = build();
+    await subject.mirror(note(title: 'Tytuł początkowy'));
+
+    final File file = soleNote();
+    final String lfContent = file.readAsStringSync();
+    // Simulate Windows / cloud-sync converting LF to CRLF
+    final String crlfContent = lfContent.replaceAll('\n', '\r\n');
+    file.writeAsStringSync(crlfContent);
+
+    // Update note with a new title
+    final VaultWrite updated = await subject.mirror(note(title: 'Tytuł zaktualizowany'));
+    expect(
+      updated.outcome,
+      VaultOutcome.updated,
+      reason: 'CRLF-converted note must still be recognized as ours',
+    );
+  });
 }
