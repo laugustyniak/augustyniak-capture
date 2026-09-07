@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import '../../../app/markdown_view.dart';
 import '../../../app/ui_kit.dart';
 import '../domain/capture_type.dart';
+import '../domain/note_vault.dart';
 import '../domain/recording.dart';
 import 'audio_waveform_visualizer.dart';
 import 'card_parts.dart';
@@ -164,6 +165,7 @@ class _FocusBody extends StatelessWidget {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: <Widget>[
           _Header(
+            controller: controller,
             recording: recording,
             filename: filename,
             failed: failed,
@@ -436,6 +438,7 @@ String _emptyTextFor(Recording recording) => switch (recording.status) {
 
 class _Header extends StatelessWidget {
   _Header({
+    required this.controller,
     required this.recording,
     required this.filename,
     required this.failed,
@@ -445,6 +448,7 @@ class _Header extends StatelessWidget {
     this.isEnriching = false,
   });
 
+  final RecordingsController controller;
   final Recording recording;
   final String filename;
   final bool failed;
@@ -482,7 +486,8 @@ class _Header extends StatelessWidget {
               if (projectName != null ||
                   recording.category != null ||
                   isEnriching ||
-                  recording.status != RecordingStatus.completed) ...<Widget>[
+                  recording.status != RecordingStatus.completed ||
+                  controller.mirrorsToVault) ...<Widget>[
                 const SizedBox(height: 7),
                 Wrap(
                   spacing: 6,
@@ -525,6 +530,12 @@ class _Header extends StatelessWidget {
                         label: 'FAILED',
                         color: Console.red,
                       ),
+                    if (controller.mirrorsToVault &&
+                        (recording.transcript ?? '').trim().isNotEmpty)
+                      _VaultSyncBadge(
+                        controller: controller,
+                        recordingId: recording.id,
+                      ),
                   ],
                 ),
               ],
@@ -540,6 +551,33 @@ class _Header extends StatelessWidget {
           iconSize: 18,
         ),
       ],
+    );
+  }
+}
+
+class _VaultSyncBadge extends StatelessWidget {
+  const _VaultSyncBadge({
+    required this.controller,
+    required this.recordingId,
+  });
+
+  final RecordingsController controller;
+  final String recordingId;
+
+  @override
+  Widget build(BuildContext context) {
+    if (!controller.mirrorsToVault) return const SizedBox.shrink();
+
+    return FutureBuilder<bool>(
+      future: controller.isCaptureMirrored(recordingId),
+      builder: (BuildContext context, AsyncSnapshot<bool> snapshot) {
+        final bool isMirrored = snapshot.data ?? false;
+        return StatusPill(
+          label: isMirrored ? 'VAULT SYNCED' : 'VAULT PENDING',
+          color: isMirrored ? Console.green : Console.mutedSoft,
+          outlined: true,
+        );
+      },
     );
   }
 }
@@ -622,6 +660,30 @@ class _Actions extends StatelessWidget {
                   icon: Icons.auto_awesome_outlined,
                   onTap: () => controller.retryEnrichment(recording.id),
                   semanticLabel: 'Run LLM enrichment',
+                ),
+              if (controller.mirrorsToVault && hasTranscript)
+                ConsoleIconButton(
+                  icon: Icons.folder_shared_outlined,
+                  onTap: () async {
+                    final VaultOutcome? outcome =
+                        await controller.retryVaultMirror(recording.id);
+                    if (context.mounted && outcome != null) {
+                      final String message = switch (outcome) {
+                        VaultOutcome.created => 'Mirrored note to vault',
+                        VaultOutcome.updated => 'Updated note in vault',
+                        VaultOutcome.unchanged => 'Vault note already up to date',
+                        VaultOutcome.foreign =>
+                          'Vault note left alone (edited externally)',
+                      };
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        SnackBar(
+                          content: Text(message),
+                          duration: const Duration(seconds: 2),
+                        ),
+                      );
+                    }
+                  },
+                  semanticLabel: 'Sync to Obsidian vault',
                 ),
               if (recording.type.isPlayableAudio)
                 ConsoleIconButton(

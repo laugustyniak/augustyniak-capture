@@ -155,6 +155,20 @@ class MarkdownNoteVault implements NoteVault {
     return matched;
   }
 
+  @override
+  Future<bool> hasNote(String captureId) async {
+    final String? root = _root;
+    if (root == null) return false;
+
+    final Directory vault = Directory(root);
+    if (!await vault.exists()) return false;
+
+    final Directory dir = Directory(p.join(root, _folderName()));
+    if (!await dir.exists()) return false;
+
+    return (await _locate(dir, captureId)) != null;
+  }
+
   String _folderName() {
     final String raw = _folder().trim();
     if (raw.isEmpty) return VaultDefaults.folder;

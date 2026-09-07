@@ -180,6 +180,9 @@ abstract interface class NoteVault {
   /// Returns how many of the given [captureIds] currently have a corresponding
   /// file in the vault.
   Future<int> countMirrored(Iterable<String> captureIds);
+
+  /// Returns whether a note for [captureId] currently exists in the vault.
+  Future<bool> hasNote(String captureId);
 }
 
 /// Layout constants, in the domain rather than beside the implementation
@@ -210,6 +213,9 @@ class DisabledNoteVault implements NoteVault {
 
   @override
   Future<int> countMirrored(Iterable<String> captureIds) async => 0;
+
+  @override
+  Future<bool> hasNote(String captureId) async => false;
 }
 
 /// Thrown when a mirror is asked for with no vault directory set. Logged at
