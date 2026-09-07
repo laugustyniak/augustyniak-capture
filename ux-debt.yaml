@@ -68,7 +68,7 @@
     - "ISSUES.md:7-11: playback opens platform player via SystemMediaOpener shelling out to xdg-open/open"
     - "docs/architecture/ui.md:24: video_player rejected for Linux desktop support, causing window focus loss"
   workaround: "user switches between external media player and app manually"
-  state: accepted
+  state: fixed
   owner: ui-team
   issue: null
   first_seen: 2026-09-03
@@ -176,7 +176,7 @@
   evidence:
     - "lib/features/recordings/presentation/recording_editor.dart: _commitText() silently reverts empty text without user feedback"
   workaround: "user realizes text was restored upon blur"
-  state: accepted
+  state: fixed
   owner: ui-team
   issue: 127
   first_seen: 2026-09-06
@@ -194,7 +194,7 @@
   evidence:
     - "lib/features/recordings/presentation/capture_focus_view.dart: audio playback is binary play/stop without seek or speed adjustment"
   workaround: "user must listen from 00:00 at 1x speed"
-  state: accepted
+  state: fixed
   owner: ui-team
   issue: 128
   first_seen: 2026-09-06
