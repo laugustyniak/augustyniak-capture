@@ -976,53 +976,51 @@ class _RecordingsPageState extends State<RecordingsPage>
                             // IndexedStack so the Queue tab keeps its search text and filter
                             // while the user visits Models/Logs/Config.
                             //
-                            // Wrapped here rather than inside each tab: five separate width
-                            // caps would drift apart, and the dock below has to agree with
-                            // whatever this one is or the record button stops lining up with
-                            // the column it captures into.
-                            ConsolePageWidth(
-                              child: IndexedStack(
-                                index: navigationIndex,
-                                children: <Widget>[
-                                  QueueTab(
-                                    controller: controller,
-                                    projects: projects,
-                                    initialProjectId:
-                                        activeQueueProjectFilterId,
-                                    // The amber dot on the Models destination
-                                    // already says this, but it says it where
-                                    // nobody on a first run is looking. The
-                                    // queue is the screen the app opens on and
-                                    // the one an unconfigured install leaves
-                                    // empty, so the prompt belongs there too.
-                                    hasTranscriptionProfile:
-                                        settings.activeProfile != null,
-                                    onConfigureModels: () => setState(
-                                      () => navigationIndex = modelsIndex,
-                                    ),
-                                    onAppendRecording: (String id) =>
-                                        _startRecording(appendTo: id),
-                                    onAppendNote: (String id) =>
-                                        _composeTextNote(context, appendTo: id),
-                                    onAppendUpload:
-                                        (String id, CaptureType type) =>
-                                            controller.addUpload(
-                                              type,
-                                              appendTo: id,
-                                            ),
-                                    // Null until `_bootstrap()`'s database open
-                                    // resolves — same nullable resolver shape
-                                    // the PRICING section below already reads
-                                    // through.
-                                    usageRepository: _usageRepository,
-                                    storagePrice: settings.storagePrice,
+                            IndexedStack(
+                              index: navigationIndex,
+                              children: <Widget>[
+                                QueueTab(
+                                  controller: controller,
+                                  projects: projects,
+                                  initialProjectId:
+                                      activeQueueProjectFilterId,
+                                  // The amber dot on the Models destination
+                                  // already says this, but it says it where
+                                  // nobody on a first run is looking. The
+                                  // queue is the screen the app opens on and
+                                  // the one an unconfigured install leaves
+                                  // empty, so the prompt belongs there too.
+                                  hasTranscriptionProfile:
+                                      settings.activeProfile != null,
+                                  onConfigureModels: () => setState(
+                                    () => navigationIndex = modelsIndex,
                                   ),
-                                  TimerTab(
+                                  onAppendRecording: (String id) =>
+                                      _startRecording(appendTo: id),
+                                  onAppendNote: (String id) =>
+                                      _composeTextNote(context, appendTo: id),
+                                  onAppendUpload:
+                                      (String id, CaptureType type) =>
+                                          controller.addUpload(
+                                            type,
+                                            appendTo: id,
+                                          ),
+                                  // Null until `_bootstrap()`'s database open
+                                  // resolves — same nullable resolver shape
+                                  // the PRICING section below already reads
+                                  // through.
+                                  usageRepository: _usageRepository,
+                                  storagePrice: settings.storagePrice,
+                                ),
+                                ConsolePageWidth(
+                                  child: TimerTab(
                                     controller: timer,
                                     settings: settings,
                                     momentum: momentum,
                                   ),
-                                  ProjectsTab(
+                                ),
+                                ConsolePageWidth(
+                                  child: ProjectsTab(
                                     controller: projects,
                                     recordingsController: controller,
                                     // Read off the settings controller rather
@@ -1038,13 +1036,21 @@ class _RecordingsPageState extends State<RecordingsPage>
                                       });
                                     },
                                   ),
-                                  ClipboardTab(
+                                ),
+                                ConsolePageWidth(
+                                  child: ClipboardTab(
                                     watcherService: clipboardWatcher,
                                     recordingsController: controller,
                                   ),
-                                  ModelsTab(controller: settings),
-                                  LogsTab(store: logs),
-                                  ConfigTab(
+                                ),
+                                ConsolePageWidth(
+                                  child: ModelsTab(controller: settings),
+                                ),
+                                ConsolePageWidth(
+                                  child: LogsTab(store: logs),
+                                ),
+                                ConsolePageWidth(
+                                  child: ConfigTab(
                                     controller: settings,
                                     recordingsController: controller,
                                     storagePath: storagePath,
@@ -1113,8 +1119,8 @@ class _RecordingsPageState extends State<RecordingsPage>
                                     onExportArchive: backup.export,
                                     onImportArchive: _importArchive,
                                   ),
-                                ],
-                              ),
+                                ),
+                              ],
                             ),
                             // The compact bar and the rail both carry the capture actions
                             // themselves; only the tablet form in between still needs the
@@ -1127,12 +1133,10 @@ class _RecordingsPageState extends State<RecordingsPage>
                                 left: 0,
                                 right: 0,
                                 bottom: 0,
-                                child: ConsolePageWidth(
-                                  child: CaptureDock(
-                                    controller: controller,
-                                    onOpenCaptureMenu: () =>
-                                        _openCaptureMenu(context),
-                                  ),
+                                child: CaptureDock(
+                                  controller: controller,
+                                  onOpenCaptureMenu: () =>
+                                      _openCaptureMenu(context),
                                 ),
                               ),
                             // Overlaid rather than swapped into the IndexedStack: the Queue
