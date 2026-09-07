@@ -190,6 +190,29 @@ void main() {
       );
     });
 
+    test('Groq endpoint non-2xx appends vision OCR explanation', () async {
+      final HttpVisionOcrService service = HttpVisionOcrService(
+        endpoint: Uri.parse('https://api.groq.com/openai/v1/chat/completions'),
+        client: MockClient(
+          (_) async => http.Response('{"error":"unsupported_parameter"}', 400),
+        ),
+      );
+      expect(
+        () async =>
+            service.extractText(await writeImage('scan.png', _pngMagic)),
+        throwsA(
+          isA<HttpException>().having(
+            (HttpException e) => e.message,
+            'message',
+            allOf(
+              contains('400'),
+              contains('Groq text models do not support image OCR'),
+            ),
+          ),
+        ),
+      );
+    });
+
     test('non-chat-shaped body throws FormatException', () async {
       final HttpVisionOcrService service = HttpVisionOcrService(
         endpoint: Uri.parse('https://api.example.com/v1/chat/completions'),
