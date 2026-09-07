@@ -212,9 +212,9 @@
   evidence:
     - "lib/features/processing/data/http_vision_ocr_service.dart: 2-minute request timeout with static pulsing status pill"
   workaround: "user waits for timeout or restarts app"
-  state: accepted
+  state: fixed
   owner: processing-team
-  issue: null
+  issue: 141
   first_seen: 2026-09-06
   review_by: 2026-12-06
 

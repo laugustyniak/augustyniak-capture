@@ -180,7 +180,7 @@ class RecordingCard extends StatelessWidget {
     // while the model reads the text it says that rather than the resting READY.
     final _StatusVisual? visual = isEnriching
         ? _StatusVisual('ANALYZING', Console.accent, pulse: true)
-        : _statusVisual(recording.status);
+        : _statusVisual(recording);
     final String filename = File(recording.filePath).uri.pathSegments.last;
     final String displayName = displayNameFor(recording);
     // Generic processor output: a transcription, OCR text or a note body.
@@ -824,7 +824,7 @@ class _StatusVisual {
 }
 
 /// Null for the resting state, which draws no badge at all — see the card.
-_StatusVisual? _statusVisual(RecordingStatus status) => switch (status) {
+_StatusVisual? _statusVisual(Recording recording) => switch (recording.status) {
   // Persisted but not yet handed to a processor — the design calls it RAW.
   RecordingStatus.saved => _StatusVisual('RAW', Console.muted),
   RecordingStatus.pendingTranscription => _StatusVisual(
@@ -832,7 +832,7 @@ _StatusVisual? _statusVisual(RecordingStatus status) => switch (status) {
     Console.amber,
   ),
   RecordingStatus.transcribing => _StatusVisual(
-    'TRANSCRIBING',
+    recording.type == CaptureType.image ? 'EXTRACTING' : 'TRANSCRIBING',
     Console.accent,
     pulse: true,
   ),
