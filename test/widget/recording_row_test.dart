@@ -2,6 +2,7 @@ import 'dart:io';
 
 import 'package:augustyniak_capture/app/ui_kit.dart';
 import 'package:augustyniak_capture/features/recordings/domain/capture_category.dart';
+import 'package:augustyniak_capture/features/recordings/domain/capture_type.dart';
 import 'package:augustyniak_capture/features/recordings/domain/recording.dart';
 import 'package:augustyniak_capture/features/recordings/presentation/card_parts.dart';
 import 'package:augustyniak_capture/features/recordings/presentation/queue_toolbar.dart';
@@ -326,6 +327,54 @@ void main() {
       );
       expect(pill.color, categoryColorFor(CaptureCategory.agentTask));
       expect(pill.color, isNot(Console.accent));
+    });
+
+    testWidgets('ProcessingStrip renders image -> text and EXTRACTING for image capture', (
+      WidgetTester tester,
+    ) async {
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: ProcessingStrip(
+              enriching: false,
+              type: CaptureType.image,
+            ),
+          ),
+        ),
+      );
+      await tester.pump();
+
+      expect(find.text('EXTRACTING'), findsOneWidget);
+      expect(find.text('image → text'), findsOneWidget);
+    });
+
+    testWidgets('RecordingRow renders EXTRACTING when image capture is transcribing', (
+      WidgetTester tester,
+    ) async {
+      final Recording imageRec = makeRecording(
+        id: 'img-1',
+        title: 'Image receipt',
+        type: CaptureType.image,
+        status: RecordingStatus.transcribing,
+      );
+
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: RecordingRow(
+              recording: imageRec,
+              focused: false,
+              isEnriching: false,
+              onTap: () {},
+              onToggleProcessed: () {},
+            ),
+          ),
+        ),
+      );
+      await tester.pump();
+
+      expect(find.text('EXTRACTING'), findsOneWidget);
+      expect(find.text('image → text'), findsOneWidget);
     });
   });
 }

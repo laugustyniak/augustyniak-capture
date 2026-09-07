@@ -423,7 +423,9 @@ class _FocusBody extends StatelessWidget {
 String _emptyTextFor(Recording recording) => switch (recording.status) {
   RecordingStatus.saved => 'Saved and verified. Not handed to a processor yet.',
   RecordingStatus.pendingTranscription => 'Queued for processing.',
-  RecordingStatus.transcribing => 'Processing…',
+  RecordingStatus.transcribing => recording.type == CaptureType.image
+      ? 'Extracting text from image…'
+      : 'Transcribing speech to text…',
   RecordingStatus.failed =>
     'Processing failed. The source file is intact — retry below.',
   RecordingStatus.completed => 'This capture produced no text.',

@@ -248,28 +248,35 @@ String metaLineFor(Recording recording, String filename) {
 /// Both animations repeat forever: a test pumping a screen with one of these on
 /// it must pump explicit frames, never `pumpAndSettle`.
 class ProcessingStrip extends StatelessWidget {
-  ProcessingStrip({super.key, required this.enriching});
+  ProcessingStrip({
+    super.key,
+    required this.enriching,
+    this.type = CaptureType.audioRecording,
+  });
 
   /// True while the model reads the text; false while the audio is being
-  /// transcribed. Only these two stages animate — everything else in the
-  /// pipeline is either instant or waiting for its turn.
+  /// transcribed or image OCR is running. Only these stages animate — everything
+  /// else in the pipeline is either instant or waiting for its turn.
   final bool enriching;
+  final CaptureType type;
 
   /// Public so a widget test asserts the string that is actually rendered
   /// rather than a copy of it, the same rule `RecordingCard.analyzingLabel`
   /// follows on the desktop card.
   static const String transcribingLabel = 'TRANSCRIBING';
+  static const String ocrLabel = 'EXTRACTING';
   static const String analyzingLabel = 'ANALYZING';
 
   @override
   Widget build(BuildContext context) {
+    final bool isImage = type == CaptureType.image;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: <Widget>[
         Row(
           children: <Widget>[
             SizedBox(
-              // A fixed slot for the two glyphs: a wave is wider than an icon,
+              // A fixed slot for the glyphs: a wave is wider than an icon,
               // and without it the label would shift sideways at the exact
               // moment the stage changes — the one moment the eye is on it.
               width: 22,
@@ -277,18 +284,24 @@ class ProcessingStrip extends StatelessWidget {
                 alignment: Alignment.centerLeft,
                 child: enriching
                     ? SparklePulse(color: Console.accent, size: 14)
+                    : isImage
+                    ? SparklePulse(color: Console.accent, size: 14)
                     : WaveBars(color: Console.accent, height: 13, barCount: 4),
               ),
             ),
             const SizedBox(width: 8),
             Text(
-              enriching ? analyzingLabel : transcribingLabel,
+              enriching
+                  ? analyzingLabel
+                  : (isImage ? ocrLabel : transcribingLabel),
               style: ConsoleText.micro.copyWith(color: Console.accent),
             ),
             const SizedBox(width: 8),
             Expanded(
               child: Text(
-                enriching ? 'title · summary · tags' : 'speech → text',
+                enriching
+                    ? 'title · summary · tags'
+                    : (isImage ? 'image → text' : 'speech → text'),
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
                 textAlign: TextAlign.right,
