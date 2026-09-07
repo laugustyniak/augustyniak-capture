@@ -834,7 +834,6 @@ class _AudioPlaybackBar extends StatefulWidget {
 }
 
 class _AudioPlaybackBarState extends State<_AudioPlaybackBar> {
-  double? _dragSeconds;
   static const List<double> _speeds = <double>[1.0, 1.25, 1.5, 2.0];
   late List<double> _samples;
 
@@ -862,14 +861,13 @@ class _AudioPlaybackBarState extends State<_AudioPlaybackBar> {
         : (controller.playbackDuration > Duration.zero
             ? controller.playbackDuration
             : Duration.zero);
-    final Duration currentPosition = _dragSeconds != null
-        ? Duration(milliseconds: (_dragSeconds! * 1000).round())
-        : (isPlaying ? controller.playbackPosition : Duration.zero);
+    final Duration currentPosition =
+        isPlaying ? controller.playbackPosition : Duration.zero;
 
     final double maxSeconds = totalDuration.inMilliseconds > 0
         ? totalDuration.inMilliseconds / 1000.0
         : 1.0;
-    final double currentSeconds = _dragSeconds ??
+    final double currentSeconds =
         (currentPosition.inMilliseconds / 1000.0).clamp(0.0, maxSeconds);
 
     final double currentSpeed = controller.playbackSpeed;
