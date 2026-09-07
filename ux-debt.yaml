@@ -106,7 +106,7 @@
   workaround: "user must manually switch active enrichment profile to OpenAI/Anthropic/Gemini for OCR"
   state: fixed
   owner: settings-team
-  issue: 139
+  issue: 144
   first_seen: 2026-09-03
   review_by: 2026-12-03
 

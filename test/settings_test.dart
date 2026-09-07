@@ -123,6 +123,147 @@ void main() {
       expect(cleared.bearerToken, isNull);
       expect(cleared.endpoint, 'https://h/e');
     });
+
+    group('supportsVision', () {
+      test('transcription and local profiles return false', () {
+        const ProviderProfile transcription = ProviderProfile(
+          id: 'p1',
+          name: 'Whisper',
+          endpoint: 'https://api.openai.com/v1/audio/transcriptions',
+          kind: ProfileKind.transcription,
+          model: 'whisper-1',
+        );
+        const ProviderProfile local = ProviderProfile(
+          id: 'p2',
+          name: 'Local',
+          endpoint: '',
+          kind: ProfileKind.localWhisper,
+          model: 'ggml-base.bin',
+        );
+
+        expect(transcription.supportsVision, isFalse);
+        expect(local.supportsVision, isFalse);
+      });
+
+      test('Groq enrichment endpoints return false', () {
+        const ProviderProfile groqChat = ProviderProfile(
+          id: 'p1',
+          name: 'Groq Chat',
+          endpoint: 'https://api.groq.com/openai/v1/chat/completions',
+          kind: ProfileKind.enrichment,
+          model: 'llama-3.3-70b-versatile',
+        );
+        const ProviderProfile groqNoModel = ProviderProfile(
+          id: 'p2',
+          name: 'Groq',
+          endpoint: 'https://api.groq.com/openai/v1/chat/completions',
+          kind: ProfileKind.enrichment,
+        );
+
+        expect(groqChat.supportsVision, isFalse);
+        expect(groqNoModel.supportsVision, isFalse);
+      });
+
+      test('hosted vision presets return true', () {
+        const ProviderProfile openAi = ProviderProfile(
+          id: 'p1',
+          name: 'OpenAI',
+          endpoint: 'https://api.openai.com/v1/chat/completions',
+          kind: ProfileKind.enrichment,
+          model: 'gpt-5.6-luna',
+        );
+        const ProviderProfile anthropic = ProviderProfile(
+          id: 'p2',
+          name: 'Anthropic',
+          endpoint: 'https://api.anthropic.com/v1/chat/completions',
+          kind: ProfileKind.enrichment,
+          model: 'claude-haiku-4-5',
+        );
+        const ProviderProfile gemini = ProviderProfile(
+          id: 'p3',
+          name: 'Gemini',
+          endpoint:
+              'https://generativelanguage.googleapis.com/v1beta/openai/chat/completions',
+          kind: ProfileKind.enrichment,
+          model: 'gemini-3.6-flash',
+        );
+
+        expect(openAi.supportsVision, isTrue);
+        expect(anthropic.supportsVision, isTrue);
+        expect(gemini.supportsVision, isTrue);
+      });
+
+      test('local Ollama vision models return true, text-only return false', () {
+        const ProviderProfile qwen = ProviderProfile(
+          id: 'p1',
+          name: 'Ollama Qwen',
+          endpoint: 'http://localhost:11434/v1/chat/completions',
+          kind: ProfileKind.enrichment,
+          model: 'qwen2.5vl',
+        );
+        const ProviderProfile llamaVision = ProviderProfile(
+          id: 'p2',
+          name: 'Ollama Llama Vision',
+          endpoint: 'http://localhost:11434/v1/chat/completions',
+          kind: ProfileKind.enrichment,
+          model: 'llama3.2-vision',
+        );
+        const ProviderProfile gemma3 = ProviderProfile(
+          id: 'p3',
+          name: 'Ollama Gemma3',
+          endpoint: 'http://localhost:11434/v1/chat/completions',
+          kind: ProfileKind.enrichment,
+          model: 'gemma3',
+        );
+        const ProviderProfile textOnly = ProviderProfile(
+          id: 'p4',
+          name: 'Ollama Llama3',
+          endpoint: 'http://localhost:11434/v1/chat/completions',
+          kind: ProfileKind.enrichment,
+          model: 'llama3:8b',
+        );
+
+        expect(qwen.supportsVision, isTrue);
+        expect(llamaVision.supportsVision, isTrue);
+        expect(gemma3.supportsVision, isTrue);
+        expect(textOnly.supportsVision, isFalse);
+      });
+
+      test('custom endpoints default to true unless known text-only', () {
+        const ProviderProfile customDefault = ProviderProfile(
+          id: 'p1',
+          name: 'Custom',
+          endpoint: 'https://custom-ai.internal/v1/chat/completions',
+          kind: ProfileKind.enrichment,
+        );
+        const ProviderProfile customUnknownModel = ProviderProfile(
+          id: 'p2',
+          name: 'Custom Model',
+          endpoint: 'https://custom-ai.internal/v1/chat/completions',
+          kind: ProfileKind.enrichment,
+          model: 'internlm-xcomposer',
+        );
+        const ProviderProfile customTextOnly = ProviderProfile(
+          id: 'p3',
+          name: 'Custom Text',
+          endpoint: 'https://custom-ai.internal/v1/chat/completions',
+          kind: ProfileKind.enrichment,
+          model: 'gpt-3.5-turbo',
+        );
+        const ProviderProfile customMistral = ProviderProfile(
+          id: 'p4',
+          name: 'Custom Mistral',
+          endpoint: 'https://custom-ai.internal/v1/chat/completions',
+          kind: ProfileKind.enrichment,
+          model: 'mistral:latest',
+        );
+
+        expect(customDefault.supportsVision, isTrue);
+        expect(customUnknownModel.supportsVision, isTrue);
+        expect(customTextOnly.supportsVision, isFalse);
+        expect(customMistral.supportsVision, isFalse);
+      });
+    });
   });
 
   group('AudioConfig', () {

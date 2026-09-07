@@ -416,6 +416,63 @@ void main() {
 
     expect(find.text('NO TLS'), findsNothing);
   });
+
+  testWidgets('a text-only enrichment profile renders NO OCR pill', (
+    WidgetTester tester,
+  ) async {
+    final SettingsController controller = buildSettingsController();
+    await controller.initialize();
+    await controller.addProfile(
+      name: 'Groq Chat',
+      endpoint: 'https://api.groq.com/openai/v1/chat/completions',
+      kind: ProfileKind.enrichment,
+      model: 'llama-3.3-70b-versatile',
+    );
+    await pumpModels(tester, controller);
+
+    await scrollTo(tester, find.text('Groq Chat'));
+    expect(find.text('NO OCR'), findsWidgets);
+  });
+
+  testWidgets('a vision enrichment profile does not render NO OCR pill', (
+    WidgetTester tester,
+  ) async {
+    final SettingsController controller = buildSettingsController();
+    await controller.initialize();
+    await controller.addProfile(
+      name: 'OpenAI GPT',
+      endpoint: 'https://api.openai.com/v1/chat/completions',
+      kind: ProfileKind.enrichment,
+      model: 'gpt-4o-mini',
+    );
+    await pumpModels(tester, controller);
+
+    await scrollTo(tester, find.text('OpenAI GPT'));
+    expect(find.text('NO OCR'), findsNothing);
+  });
+
+  testWidgets('editor sheet displays note when non-vision Groq preset is selected', (
+    WidgetTester tester,
+  ) async {
+    final SettingsController controller = buildSettingsController();
+    await controller.initialize();
+    await pumpModels(tester, controller);
+
+    await scrollTo(tester, find.text('ADD ENRICHMENT PROFILE'));
+    await tester.tap(find.text('ADD ENRICHMENT PROFILE'));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 400));
+
+    expect(find.text('NEW ENRICHMENT PROFILE'), findsOneWidget);
+    await scrollTo(tester, find.widgetWithText(ActionChip, 'Groq chat'));
+    await tester.tap(find.widgetWithText(ActionChip, 'Groq chat'));
+    await tester.pump();
+
+    expect(
+      find.textContaining('This provider or model does not support vision OCR'),
+      findsOneWidget,
+    );
+  });
 }
 
 /// Nothing installed, and no filesystem touched.

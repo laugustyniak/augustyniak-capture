@@ -25,7 +25,7 @@ class DisabledOcrService implements OcrService {
   @override
   Future<String> extractText(File image) async {
     throw const ProcessorNotConfiguredException(
-      'Image OCR needs an enrichment profile with a vision-capable model.',
+      'Image OCR needs an enrichment profile with a vision-capable model (e.g. OpenAI, Anthropic, Gemini, or a local vision model).',
     );
   }
 }

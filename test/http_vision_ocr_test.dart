@@ -207,6 +207,31 @@ void main() {
             allOf(
               contains('400'),
               contains('Groq text models do not support image OCR'),
+              contains('switch to OpenAI, Anthropic, Gemini, or a local vision model'),
+            ),
+          ),
+        ),
+      );
+    });
+
+    test('non-vision endpoint error appends guidance to vision providers', () async {
+      final HttpVisionOcrService service = HttpVisionOcrService(
+        endpoint: Uri.parse('https://api.custom.com/v1/chat/completions'),
+        client: MockClient(
+          (_) async => http.Response('{"error":"model does not support image input"}', 400),
+        ),
+      );
+      expect(
+        () async =>
+            service.extractText(await writeImage('scan.png', _pngMagic)),
+        throwsA(
+          isA<HttpException>().having(
+            (HttpException e) => e.message,
+            'message',
+            allOf(
+              contains('400'),
+              contains('The active enrichment provider does not support vision OCR'),
+              contains('switch to OpenAI, Anthropic, Gemini, or a local vision model'),
             ),
           ),
         ),

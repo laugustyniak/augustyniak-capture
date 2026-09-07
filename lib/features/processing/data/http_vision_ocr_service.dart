@@ -97,14 +97,21 @@ class HttpVisionOcrService implements OcrService {
         .timeout(requestTimeout);
 
     if (response.statusCode < 200 || response.statusCode >= 300) {
+      final String decodedBody = utf8.decode(response.bodyBytes);
       String failure = describeProviderFailure(
         'OCR',
         response.statusCode,
-        utf8.decode(response.bodyBytes),
+        decodedBody,
       );
       if (endpoint.host.contains('groq.com')) {
         failure =
-            '$failure (Groq text models do not support image OCR; configure OpenAI, Anthropic, or Gemini for vision).';
+            '$failure (Groq text models do not support image OCR; switch to OpenAI, Anthropic, Gemini, or a local vision model).';
+      } else if (decodedBody.toLowerCase().contains('vision') ||
+          decodedBody.toLowerCase().contains('image_url') ||
+          decodedBody.toLowerCase().contains('not support image') ||
+          decodedBody.toLowerCase().contains('unsupported parameter')) {
+        failure =
+            '$failure (The active enrichment provider does not support vision OCR; switch to OpenAI, Anthropic, Gemini, or a local vision model).';
       }
       throw HttpException(failure);
     }

@@ -319,6 +319,10 @@ class _ActiveProfileCard extends StatelessWidget {
                   label: 'LANG ${item!.language!.toUpperCase()}',
                   color: Console.green,
                 ),
+              if (kind == ProfileKind.enrichment &&
+                  item != null &&
+                  !item.supportsVision)
+                StatusPill(label: 'NO OCR', color: Console.amber),
               // `usableBearerToken`, not `bearerToken`: a still-sealed blob is
               // not null but is dropped before the Authorization header, so a
               // green TOKEN SET would promise exactly the thing that is
@@ -402,7 +406,10 @@ class _ProfileCard extends StatelessWidget {
                     fontSize: 10,
                   ),
                 ),
-                if (profile.model != null || profile.usesInsecureTransport)
+                if (profile.model != null ||
+                    profile.usesInsecureTransport ||
+                    (profile.kind == ProfileKind.enrichment &&
+                        !profile.supportsVision))
                   ...<Widget>[
                     const SizedBox(height: 6),
                     Wrap(
@@ -414,6 +421,9 @@ class _ProfileCard extends StatelessWidget {
                             label: profile.model!.toUpperCase(),
                             color: Console.muted,
                           ),
+                        if (profile.kind == ProfileKind.enrichment &&
+                            !profile.supportsVision)
+                          StatusPill(label: 'NO OCR', color: Console.amber),
                         // Amber rather than red: plain HTTP to a machine the
                         // user controls is a documented setup, so this only
                         // ever appears for a host on the internet — where it
@@ -493,6 +503,7 @@ class _ProfileEditorSheetState extends State<_ProfileEditorSheet> {
     // Model suggestions and the token hint follow the endpoint's host, so a
     // hand-typed endpoint updates them too, not just a preset tap.
     _endpoint.addListener(_onEndpointChanged);
+    _model.addListener(_onEndpointChanged);
   }
 
   void _onEndpointChanged() {
@@ -502,6 +513,7 @@ class _ProfileEditorSheetState extends State<_ProfileEditorSheet> {
   @override
   void dispose() {
     _endpoint.removeListener(_onEndpointChanged);
+    _model.removeListener(_onEndpointChanged);
     _name.dispose();
     _endpoint.dispose();
     _model.dispose();
@@ -680,6 +692,35 @@ class _ProfileEditorSheetState extends State<_ProfileEditorSheet> {
                   ],
                 ),
                 const SizedBox(height: 12),
+              ],
+              if (!isTranscription &&
+                  !ProviderProfile(
+                    id: 'preview',
+                    name: _name.text,
+                    endpoint: _endpoint.text,
+                    kind: ProfileKind.enrichment,
+                    model: _nullIfBlank(_model.text),
+                  ).supportsVision) ...<Widget>[
+                Padding(
+                  padding: const EdgeInsets.only(bottom: 12),
+                  child: Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: <Widget>[
+                      Icon(Icons.info_outline, size: 14, color: Console.amber),
+                      const SizedBox(width: 6),
+                      Expanded(
+                        child: Text(
+                          'This provider or model does not support vision OCR. Image captures will fail until switched to a vision-capable provider (OpenAI, Anthropic, Gemini, or local Ollama with qwen2.5vl/llama3.2-vision).',
+                          style: TextStyle(
+                            color: Console.amber,
+                            fontSize: 11,
+                            height: 1.35,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
               ],
               // Transcription only: the enrichment prompt already asks the
               // model to answer in the language of the input text.
