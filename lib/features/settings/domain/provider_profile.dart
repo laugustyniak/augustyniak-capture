@@ -156,6 +156,46 @@ class ProviderProfile {
     return parsed.host;
   }
 
+  /// Whether this profile is known to support vision OCR (multimodal image inputs)
+  /// when used as an enrichment profile.
+  ///
+  /// OCR rides on the enrichment profile, but some providers (like Groq's
+  /// production chat models) or text-only models do not accept image payloads.
+  /// Remote transcription profiles and local Whisper models return false.
+  /// Custom enrichment endpoints default to true unless configured with an
+  /// explicitly known text-only model or host.
+  bool get supportsVision {
+    if (kind != ProfileKind.enrichment) return false;
+    final String hostName = host.toLowerCase();
+    final String endpointLower = endpoint.toLowerCase();
+    if (hostName.contains('groq.com') || endpointLower.contains('groq.com')) {
+      return false;
+    }
+    if (model == null || model!.trim().isEmpty) {
+      return true;
+    }
+    final String m = model!.trim().toLowerCase();
+    if (m.contains('vision') ||
+        m.contains('vl') ||
+        m.contains('llava') ||
+        m.contains('4o') ||
+        m.contains('5.') ||
+        m.contains('gemini') ||
+        m.contains('claude-3') ||
+        m.contains('claude-4') ||
+        m.contains('claude-sonnet') ||
+        m.contains('claude-haiku') ||
+        m.contains('claude-opus') ||
+        m.contains('claude-fable') ||
+        m.contains('gemma3')) {
+      return true;
+    }
+    if (_isKnownTextOnlyModel(m)) {
+      return false;
+    }
+    return true;
+  }
+
   ProviderProfile copyWith({
     String? name,
     String? endpoint,
@@ -271,6 +311,59 @@ class ProviderProfile {
     if (value == null) return null;
     final String trimmed = value.trim();
     return trimmed.isEmpty ? null : trimmed;
+  }
+
+  static const Set<String> _knownTextOnlyModels = <String>{
+    'gpt-3.5-turbo',
+    'gpt-3.5',
+    'text-davinci-003',
+    'text-davinci-002',
+    'text-curie-001',
+    'text-babbage-001',
+    'text-ada-001',
+    'llama-3.3-70b-versatile',
+    'llama-3.1-70b-versatile',
+    'llama-3.1-8b-instant',
+    'llama-3.2-1b',
+    'llama-3.2-3b',
+    'openai/gpt-oss-120b',
+    'openai/gpt-oss-20b',
+    'mixtral-8x7b-32768',
+    'gemma2-9b-it',
+    'deepseek-r1',
+    'deepseek-v3',
+    'claude-2',
+    'claude-2.0',
+    'claude-2.1',
+    'claude-instant-1.2',
+  };
+
+  static bool _isKnownTextOnlyModel(String modelName) {
+    final String normalized = modelName.trim().toLowerCase();
+    if (normalized.isEmpty) return false;
+    if (_knownTextOnlyModels.contains(normalized)) return true;
+
+    final String baseName = normalized.split(':').first;
+    if (_knownTextOnlyModels.contains(baseName)) return true;
+
+    if (baseName == 'llama3' ||
+        baseName == 'llama3.1' ||
+        baseName == 'llama3.3' ||
+        baseName == 'llama2' ||
+        baseName == 'mistral' ||
+        baseName == 'phi' ||
+        baseName == 'phi3' ||
+        baseName == 'phi4' ||
+        baseName == 'gemma' ||
+        baseName == 'gemma2' ||
+        baseName == 'qwen2' ||
+        baseName == 'qwen2.5' ||
+        baseName == 'deepseek-coder' ||
+        baseName == 'deepseek-r1' ||
+        baseName == 'deepseek-v3') {
+      return true;
+    }
+    return false;
   }
 }
 
