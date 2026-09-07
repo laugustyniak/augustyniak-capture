@@ -252,6 +252,7 @@ class ProcessingStrip extends StatelessWidget {
     super.key,
     required this.enriching,
     this.type = CaptureType.audioRecording,
+    this.elapsed,
   });
 
   /// True while the model reads the text; false while the audio is being
@@ -259,6 +260,9 @@ class ProcessingStrip extends StatelessWidget {
   /// else in the pipeline is either instant or waiting for its turn.
   final bool enriching;
   final CaptureType type;
+
+  /// Elapsed duration for currently running transcription or OCR processing.
+  final Duration? elapsed;
 
   /// Public so a widget test asserts the string that is actually rendered
   /// rather than a copy of it, the same rule `RecordingCard.analyzingLabel`
@@ -270,6 +274,10 @@ class ProcessingStrip extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final bool isImage = type == CaptureType.image;
+    final String baseLabel = isImage ? ocrLabel : transcribingLabel;
+    final String activeLabel = elapsed != null
+        ? '$baseLabel · ${formatDuration(elapsed!)}'
+        : baseLabel;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: <Widget>[
@@ -291,9 +299,7 @@ class ProcessingStrip extends StatelessWidget {
             ),
             const SizedBox(width: 8),
             Text(
-              enriching
-                  ? analyzingLabel
-                  : (isImage ? ocrLabel : transcribingLabel),
+              enriching ? analyzingLabel : activeLabel,
               style: ConsoleText.micro.copyWith(color: Console.accent),
             ),
             const SizedBox(width: 8),

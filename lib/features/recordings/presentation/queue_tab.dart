@@ -695,6 +695,8 @@ class _QueueTabState extends State<QueueTab> {
       onOpen: () => controller.openSource(recording.id),
       onRetry: () => controller.retryTranscription(recording.id),
       onEnrich: () => controller.retryEnrichment(recording.id),
+      onCancelProcessing: () => controller.cancelProcessing(recording.id),
+      processingElapsed: controller.processingElapsedFor(recording.id),
       onEdit: () => setState(() => editingId = recording.id),
       onToggleProcessed: () => _toggleProcessed(recording),
       onOpenFocus: () => _openFocus(recording),

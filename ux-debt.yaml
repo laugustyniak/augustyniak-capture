@@ -214,7 +214,7 @@
   workaround: "user waits for timeout or restarts app"
   state: fixed
   owner: processing-team
-  issue: 141
+  issue: 137
   first_seen: 2026-09-06
   review_by: 2026-12-06
 

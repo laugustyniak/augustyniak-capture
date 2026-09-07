@@ -45,6 +45,8 @@ class RecordingCard extends StatelessWidget {
     this.costUsd,
     this.onOpenFocus,
     this.onConfigureModels,
+    this.onCancelProcessing,
+    this.processingElapsed,
   });
 
   /// Said in both places the action is offered — the poster and the button —
@@ -163,6 +165,8 @@ class RecordingCard extends StatelessWidget {
   /// no other route to, now that the row's accordion is gone.
   final VoidCallback? onOpenFocus;
   final VoidCallback? onConfigureModels;
+  final VoidCallback? onCancelProcessing;
+  final Duration? processingElapsed;
 
   @override
   Widget build(BuildContext context) {
@@ -174,12 +178,27 @@ class RecordingCard extends StatelessWidget {
     // orphan-recovered or salvaged row is `saved` with no text, and gating the
     // button on `failed` alone left it with no control at all.
     final bool canRetry = failed || recording.awaitsProcessing;
+    final bool isTranscribing = recording.status == RecordingStatus.transcribing;
+    final bool isPendingProcessing =
+        recording.status == RecordingStatus.pendingTranscription;
+    final bool canCancel =
+        onCancelProcessing != null && (isTranscribing || isPendingProcessing);
     final bool reviewed = recording.isProcessedByUser;
     // Enrichment cannot move the status — the item is already `completed` — but
     // the pill is the one place the user looks to find out what is going on, so
     // while the model reads the text it says that rather than the resting READY.
+    final String baseTranscribing = recording.type == CaptureType.image
+        ? 'EXTRACTING'
+        : 'TRANSCRIBING';
+    final String? transcribingLabel = isTranscribing
+        ? (processingElapsed != null
+            ? '$baseTranscribing · ${formatDuration(processingElapsed!)}'
+            : baseTranscribing)
+        : null;
     final _StatusVisual? visual = isEnriching
         ? _StatusVisual('ANALYZING', Console.accent, pulse: true)
+        : isTranscribing
+        ? _StatusVisual(transcribingLabel!, Console.accent, pulse: true)
         : _statusVisual(recording);
     final String filename = File(recording.filePath).uri.pathSegments.last;
     final String displayName = displayNameFor(recording);
@@ -229,6 +248,15 @@ class RecordingCard extends StatelessWidget {
           final Widget actionButtons = Row(
             mainAxisSize: MainAxisSize.min,
             children: <Widget>[
+              if (canCancel) ...<Widget>[
+                _GhostButton(
+                  icon: Icons.close_rounded,
+                  label: 'CANCEL',
+                  onTap: onCancelProcessing,
+                  semanticLabel: 'Cancel processing',
+                ),
+                const SizedBox(width: 8),
+              ],
               if (canRetry) ...<Widget>[
                 if (failed &&
                     onConfigureModels != null &&

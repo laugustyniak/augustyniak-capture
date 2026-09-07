@@ -168,6 +168,8 @@ class _FocusBody extends StatelessWidget {
             failed: failed,
             projectName: projectName,
             compact: compact,
+            elapsed: controller.processingElapsedFor(recording.id),
+            isEnriching: controller.isEnriching(recording.id),
           ),
           const SizedBox(height: 14),
           Divider(height: 1, color: Console.border),
@@ -438,6 +440,8 @@ class _Header extends StatelessWidget {
     required this.failed,
     required this.projectName,
     required this.compact,
+    this.elapsed,
+    this.isEnriching = false,
   });
 
   final Recording recording;
@@ -445,6 +449,8 @@ class _Header extends StatelessWidget {
   final bool failed;
   final String? projectName;
   final bool compact;
+  final Duration? elapsed;
+  final bool isEnriching;
 
   @override
   Widget build(BuildContext context) {
@@ -473,7 +479,9 @@ class _Header extends StatelessWidget {
               // Wrapped under the title on a phone rather than beside it: the
               // pills and the close button cannot share 393 px with a name.
               if (projectName != null ||
-                  recording.category != null) ...<Widget>[
+                  recording.category != null ||
+                  isEnriching ||
+                  recording.status != RecordingStatus.completed) ...<Widget>[
                 const SizedBox(height: 7),
                 Wrap(
                   spacing: 6,
@@ -490,6 +498,31 @@ class _Header extends StatelessWidget {
                         label: recording.category!.label,
                         color: categoryColorFor(recording.category),
                         outlined: true,
+                      ),
+                    if (isEnriching)
+                      StatusPill(
+                        label: 'ANALYZING',
+                        color: Console.accent,
+                        pulse: true,
+                      )
+                    else if (recording.status == RecordingStatus.transcribing)
+                      StatusPill(
+                        label: elapsed != null
+                            ? 'TRANSCRIBING · ${formatDuration(elapsed!)}'
+                            : 'TRANSCRIBING',
+                        color: Console.accent,
+                        pulse: true,
+                      )
+                    else if (recording.status ==
+                        RecordingStatus.pendingTranscription)
+                      StatusPill(
+                        label: 'QUEUED',
+                        color: Console.amber,
+                      )
+                    else if (failed)
+                      StatusPill(
+                        label: 'FAILED',
+                        color: Console.red,
                       ),
                   ],
                 ),
@@ -554,6 +587,9 @@ class _Actions extends StatelessWidget {
     final bool canRetry =
         recording.status == RecordingStatus.failed ||
         recording.awaitsProcessing;
+    final bool canCancel =
+        recording.status == RecordingStatus.transcribing ||
+        recording.status == RecordingStatus.pendingTranscription;
     final bool reviewed = recording.isProcessedByUser;
     final bool hasTranscript = (recording.transcript ?? '').trim().isNotEmpty;
     final bool isEnriching = controller.isEnriching(recording.id);
@@ -568,6 +604,12 @@ class _Actions extends StatelessWidget {
             runSpacing: 8,
             crossAxisAlignment: WrapCrossAlignment.center,
             children: <Widget>[
+              if (canCancel)
+                ConsoleIconButton(
+                  icon: Icons.close_rounded,
+                  onTap: () => controller.cancelProcessing(recording.id),
+                  semanticLabel: 'Cancel processing',
+                ),
               if (canRetry)
                 ConsoleIconButton(
                   icon: Icons.refresh_rounded,
