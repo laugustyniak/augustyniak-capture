@@ -51,6 +51,9 @@ enum RecordingFilter { all, queue, ready, failed, raw }
 /// thoughts, so the arrow points the other way.
 enum ReviewFilter { desk, handedOff, all }
 
+/// The *capture type* axis — filters the queue by source media type.
+enum CaptureTypeFilter { all, audio, image, text, video }
+
 /// The original Phase-1 screen: header, review progress, search, status filters
 /// and the capture list. Owns only view state; every mutation goes through
 /// [RecordingsController].
@@ -118,6 +121,7 @@ class QueueTab extends StatefulWidget {
 
 class _QueueTabState extends State<QueueTab> {
   RecordingFilter selectedFilter = RecordingFilter.all;
+  CaptureTypeFilter selectedTypeFilter = CaptureTypeFilter.all;
   ReviewFilter reviewFilter = ReviewFilter.desk;
   String searchQuery = '';
   String? projectFilterId;
@@ -290,12 +294,19 @@ class _QueueTabState extends State<QueueTab> {
                 .where((Recording item) => _matches(filter, item))
                 .length,
         };
+        final Map<CaptureTypeFilter, int> typeCounts = <CaptureTypeFilter, int>{
+          for (final CaptureTypeFilter filter in CaptureTypeFilter.values)
+            filter: all
+                .where((Recording item) => _matchesType(filter, item))
+                .length,
+        };
         // A panel the user did not open, but cannot be allowed to miss: with the
         // control off screen its effect on the list is unexplainable.
         final bool searchOpen = searchPanelOpen || searchQuery.isNotEmpty;
         final bool filtersOpen =
             filterPanelOpen ||
             selectedFilter != RecordingFilter.all ||
+            selectedTypeFilter != CaptureTypeFilter.all ||
             effectiveProjectFilterId != null;
         return _QueueShortcuts(
           focusNode: listFocus,
@@ -425,6 +436,14 @@ class _QueueTabState extends State<QueueTab> {
                               ),
                               const SizedBox(height: 10),
                             ],
+                            QueueTypeChips(
+                              selected: selectedTypeFilter,
+                              counts: typeCounts,
+                              onSelected: (CaptureTypeFilter value) {
+                                setState(() => selectedTypeFilter = value);
+                              },
+                            ),
+                            const SizedBox(height: 10),
                             QueueStatusChips(
                               selected: selectedFilter,
                               counts: counts,
@@ -455,6 +474,11 @@ class _QueueTabState extends State<QueueTab> {
                           selectedProjectId: effectiveProjectFilterId,
                           onProjectChanged: (String? value) {
                             setState(() => projectFilterId = value);
+                          },
+                          typeFilter: selectedTypeFilter,
+                          typeCounts: typeCounts,
+                          onTypeChanged: (CaptureTypeFilter value) {
+                            setState(() => selectedTypeFilter = value);
                           },
                           statusFilter: selectedFilter,
                           counts: counts,
@@ -612,16 +636,21 @@ class _QueueTabState extends State<QueueTab> {
       // that emptied the list is the whole difference between "you are done"
       // and "you cannot see your work".
       icon: all.isEmpty ? Icons.graphic_eq : Icons.inbox_outlined,
-      title: _emptyLabel(selectedFilter, reviewFilter, hasAny: all.isNotEmpty),
+      title: _emptyLabel(
+        selectedFilter,
+        reviewFilter,
+        type: selectedTypeFilter,
+        hasAny: all.isNotEmpty,
+      ),
       blurb: all.isEmpty
           ? 'Every capture is written to disk and verified before processing '
                 'is even attempted.'
-          : 'Adjust the review, status, project, or search filters to broaden '
-                'the queue.',
+          : 'Adjust the review, status, type, project, or search filters to '
+                'broaden the queue.',
     );
   }
 
-  /// The queue narrowed by the status chips, the project selector and the
+  /// The queue narrowed by the status chips, the type filter, the project selector and the
   /// search box — with one deliberate exemption.
   ///
   /// **The row in edit mode is never filtered away.** A typed-but-uncommitted
@@ -644,6 +673,7 @@ class _QueueTabState extends State<QueueTab> {
       if (markingDoneIds.contains(item.id)) return true;
       if (!_matchesReview(reviewFilter, item)) return false;
       if (!_matches(selectedFilter, item)) return false;
+      if (!_matchesType(selectedTypeFilter, item)) return false;
       if (effectiveProjectFilterId != null &&
           item.projectId != effectiveProjectFilterId) {
         return false;
@@ -990,6 +1020,15 @@ bool _matchesReview(ReviewFilter filter, Recording item) => switch (filter) {
   ReviewFilter.handedOff => item.isProcessedByUser,
 };
 
+/// Single definition of the capture type axis, matching [_matches] and [_matchesReview].
+bool _matchesType(CaptureTypeFilter filter, Recording item) => switch (filter) {
+  CaptureTypeFilter.all => true,
+  CaptureTypeFilter.audio => item.type.isPlayableAudio,
+  CaptureTypeFilter.image => item.type == CaptureType.image,
+  CaptureTypeFilter.text => item.type == CaptureType.text,
+  CaptureTypeFilter.video => item.type == CaptureType.video,
+};
+
 /// Keyboard control for the queue.
 ///
 /// The app is desktop-first — it ships system-wide global hotkeys — and until
@@ -1108,9 +1147,13 @@ class _QueueShortcuts extends StatelessWidget {
 String _emptyLabel(
   RecordingFilter filter,
   ReviewFilter review, {
+  CaptureTypeFilter type = CaptureTypeFilter.all,
   required bool hasAny,
 }) {
   if (!hasAny) return 'Nothing captured yet.';
+  if (type != CaptureTypeFilter.all) {
+    return 'Nothing matches the selected filters.';
+  }
   if (filter != RecordingFilter.all && review != ReviewFilter.all) {
     return 'Nothing matches the selected status and review filters.';
   }
