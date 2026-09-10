@@ -1,5 +1,7 @@
 import 'dart:io';
 
+import 'audio_repairer.dart';
+
 /// Raw audio a speech model can be handed directly.
 ///
 /// Owns its own cleanup for the same reason [AudioSegments] does: the PCM is a
@@ -77,9 +79,13 @@ class UnavailableAudioDecoder implements AudioDecoder {
 /// the video extractor and the poster extractor already rely on, so a machine
 /// without it fails the item cleanly and retryably rather than crashing.
 class FfmpegAudioDecoder implements AudioDecoder {
-  const FfmpegAudioDecoder({this.executable = 'ffmpeg'});
+  const FfmpegAudioDecoder({
+    this.executable = 'ffmpeg',
+    this.repairer = const FfmpegAudioRepairer(),
+  });
 
   final String executable;
+  final AudioRepairer repairer;
 
   /// Sample rate, channel count and sample format are the model's, not a
   /// preference: whisper.cpp reads 16 kHz mono float32 and nothing else.
@@ -89,7 +95,10 @@ class FfmpegAudioDecoder implements AudioDecoder {
   bool get isAvailable => true;
 
   @override
-  Future<DecodedAudio> decodeToPcm(File audio) async {
+  Future<DecodedAudio> decodeToPcm(
+    File audio, {
+    bool allowRepair = true,
+  }) async {
     if (!await audio.exists()) {
       throw FileSystemException('Audio file is missing.', audio.path);
     }
@@ -121,11 +130,18 @@ class FfmpegAudioDecoder implements AudioDecoder {
         stderrEncoding: SystemEncoding(),
       );
       if (result.exitCode != 0) {
+        final String stderr = (result.stderr as String).trim();
+        if (allowRepair &&
+            stderr.toLowerCase().contains('moov atom not found') &&
+            await repairer.repair(audio)) {
+          if (await tempDir.exists()) await tempDir.delete(recursive: true);
+          return decodeToPcm(audio, allowRepair: false);
+        }
         throw AudioDecodeException(
           audio.path,
-          (result.stderr as String).trim().isEmpty
+          stderr.isEmpty
               ? 'ffmpeg exited ${result.exitCode}'
-              : (result.stderr as String).trim(),
+              : stderr,
         );
       }
       // ffmpeg can exit 0 having written nothing — the same trap the poster

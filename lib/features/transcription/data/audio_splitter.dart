@@ -2,6 +2,8 @@ import 'dart:io';
 
 import 'package:path/path.dart' as p;
 
+import 'audio_repairer.dart';
+
 /// The result of asking an [AudioSplitter] for a file small enough to send.
 ///
 /// Deliberately owns its own cleanup rather than handing back a bare list: the
@@ -79,15 +81,23 @@ class UnavailableAudioSplitter implements AudioSplitter {
 /// cut lands on an AAC frame boundary (64 ms at 16 kHz). Twenty minutes of audio
 /// is under 10 MB, so the pass costs milliseconds.
 class FfmpegAudioSplitter implements AudioSplitter {
-  const FfmpegAudioSplitter({this.executable = 'ffmpeg'});
+  const FfmpegAudioSplitter({
+    this.executable = 'ffmpeg',
+    this.repairer = const FfmpegAudioRepairer(),
+  });
 
   final String executable;
+  final AudioRepairer repairer;
 
   @override
   bool get isAvailable => true;
 
   @override
-  Future<AudioSegments> split(File audio, Duration maxSegment) async {
+  Future<AudioSegments> split(
+    File audio,
+    Duration maxSegment, {
+    bool allowRepair = true,
+  }) async {
     if (!await audio.exists()) {
       throw FileSystemException('Audio file is missing.', audio.path);
     }
@@ -125,10 +135,17 @@ class FfmpegAudioSplitter implements AudioSplitter {
         stderrEncoding: SystemEncoding(),
       );
       if (result.exitCode != 0) {
+        final String stderr = (result.stderr as String).trim();
+        if (allowRepair &&
+            stderr.toLowerCase().contains('moov atom not found') &&
+            await repairer.repair(audio)) {
+          if (await tempDir.exists()) await tempDir.delete(recursive: true);
+          return split(audio, maxSegment, allowRepair: false);
+        }
         throw ProcessException(
           executable,
           args,
-          (result.stderr as String).trim(),
+          stderr,
           result.exitCode,
         );
       }
