@@ -63,7 +63,44 @@ void main() {
     expect(stored.single.repoPath, '/work/augustyniak-capture');
     expect(stored.single.sessionName, 'augustyniak-capture');
     expect(stored.single.defaultAgent, AgentKind.antigravity);
+    // Deleting the active project moves the pointer to the first remaining
+    // one rather than leaving captures without a project.
+    expect(controller.activeProjectId, first.id);
+
+    await controller.delete(first.id);
     expect(controller.activeProjectId, isNull);
+  });
+
+  test('active falls back to the first project when the stored id is unknown',
+      () async {
+    const List<Project> projects = <Project>[
+      Project(id: 'first', name: 'First', repoPath: '/work/first'),
+      Project(id: 'second', name: 'Second', repoPath: '/work/second'),
+    ];
+    await repository.saveAll(projects, activeProjectId: 'gone');
+
+    final ProjectsController controller = ProjectsController(
+      repository: repository,
+    );
+    await controller.initialize();
+
+    expect(controller.activeProjectId, 'first');
+  });
+
+  test('active falls back to the first project when none was stored',
+      () async {
+    const List<Project> projects = <Project>[
+      Project(id: 'first', name: 'First', repoPath: '/work/first'),
+      Project(id: 'second', name: 'Second', repoPath: '/work/second'),
+    ];
+    await repository.saveAll(projects, activeProjectId: null);
+
+    final ProjectsController controller = ProjectsController(
+      repository: repository,
+    );
+    await controller.initialize();
+
+    expect(controller.activeProjectId, 'first');
   });
 
   test('launch maps project settings into a structured request', () async {
