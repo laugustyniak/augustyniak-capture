@@ -48,11 +48,10 @@ class ProjectsController extends ChangeNotifier {
     notifyListeners();
     try {
       _projects = await _repository.loadAll();
-      final String? storedActive = _repository.loadedActiveProjectId;
-      _activeProjectId =
-          _projects.any((Project item) => item.id == storedActive)
-          ? storedActive
-          : null;
+      _activeProjectId = _resolveActive(
+        _projects,
+        _repository.loadedActiveProjectId,
+      );
     } catch (exception) {
       _error = exception.toString();
     } finally {
@@ -162,8 +161,18 @@ class ProjectsController extends ChangeNotifier {
     final List<Project> remaining = _projects
         .where((Project item) => item.id != id)
         .toList();
-    final String? nextActive = _activeProjectId == id ? null : _activeProjectId;
-    await _save(remaining, activeProjectId: nextActive);
+    await _save(
+      remaining,
+      activeProjectId: _resolveActive(remaining, _activeProjectId),
+    );
+  }
+
+  /// The project captures inherit: [candidate] when it is in [projects],
+  /// otherwise the oldest project. Null only when there is no project at all,
+  /// so a capture is never filed under nothing while one exists to hold it.
+  static String? _resolveActive(List<Project> projects, String? candidate) {
+    if (projects.any((Project item) => item.id == candidate)) return candidate;
+    return projects.isEmpty ? null : projects.first.id;
   }
 
   Future<void> select(String? projectId) async {

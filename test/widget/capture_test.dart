@@ -5,6 +5,7 @@ import 'package:audioplayers/audioplayers.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:record/record.dart';
+import 'package:augustyniak_capture/features/projects/domain/project.dart';
 import 'package:augustyniak_capture/features/recordings/presentation/capture_dock.dart';
 import 'package:augustyniak_capture/features/recordings/presentation/recording_view.dart';
 import 'package:augustyniak_capture/features/recordings/presentation/recordings_controller.dart';
@@ -184,6 +185,37 @@ void main() {
 
       await tester.runAsync(controller.stopRecording);
       await settleIo(tester);
+    });
+
+    testWidgets('FILE UNDER offers only projects, never NONE', (
+      WidgetTester tester,
+    ) async {
+      final RecordingsController controller = buildController();
+      controller.activeProjectId = 'first';
+      await tester.runAsync(controller.startRecording);
+
+      await tester.pumpWidget(
+        hostTab(
+          () => RecordingView(
+            controller: controller,
+            projects: const <Project>[
+              Project(id: 'first', name: 'First', repoPath: '/work/first'),
+              Project(id: 'second', name: 'Second', repoPath: '/work/second'),
+            ],
+          ),
+          listenable: controller,
+        ),
+      );
+      await tester.pump();
+
+      expect(find.text('FILE UNDER'), findsOneWidget);
+      expect(find.text('First'), findsOneWidget);
+      expect(find.text('Second'), findsOneWidget);
+      expect(find.text('NONE'), findsNothing);
+
+      await tester.tap(find.text('Second'));
+      await tester.pump();
+      expect(controller.recordingProjectId, 'second');
     });
 
     testWidgets('DISCARD asks first, and cancelling keeps recording', (
