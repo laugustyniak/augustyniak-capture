@@ -18,7 +18,7 @@ void main() {
   test('record_linux resolves from the fork, not pub.dev', () {
     final String lock = File('pubspec.lock').readAsStringSync();
     final RegExp entry = RegExp(
-      r'^  record_linux:\n(?:^    .*\n)+',
+      r'^  record_linux:\r?\n(?:^    .*\r?\n)+',
       multiLine: true,
     );
     final String? block = entry.firstMatch(lock)?.group(0);
@@ -26,5 +26,10 @@ void main() {
     expect(block, contains('source: git'));
     expect(block, contains('url: "https://github.com/laugustyniak/record.git"'));
     expect(block, contains('path: record_linux'));
+    // The ref is part of the pin: a bump is a decision to be made here too.
+    expect(
+      block,
+      contains('ref: "7328fdb17928b411af7938ca33c936ccb951f522"'),
+    );
   });
 }

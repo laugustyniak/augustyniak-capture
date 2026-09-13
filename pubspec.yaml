@@ -54,7 +54,7 @@ dependency_overrides:
   record_linux:
     git:
       url: https://github.com/laugustyniak/record.git
-      ref: 1ed376ed7cbbd5b8475862b477c6f3b03e245bc4
+      ref: 7328fdb17928b411af7938ca33c936ccb951f522
       path: record_linux
 
 flutter:
