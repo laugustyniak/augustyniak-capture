@@ -46,6 +46,17 @@ dev_dependencies:
     sdk: flutter
   flutter_lints: ^6.0.0
 
+# The published record_linux never reads the stderr of the ffmpeg it spawns:
+# once the pipe buffer fills, ffmpeg blocks, the take stops growing mid-recording
+# and stop() never returns (#168). Pinned to the fork that drains it until
+# llfbandit/record#626 ships; test/record_linux_override_test.dart guards the pin.
+dependency_overrides:
+  record_linux:
+    git:
+      url: https://github.com/laugustyniak/record.git
+      ref: 1ed376ed7cbbd5b8475862b477c6f3b03e245bc4
+      path: record_linux
+
 flutter:
   uses-material-design: true
 
