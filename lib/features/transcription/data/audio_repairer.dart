@@ -5,11 +5,14 @@ import 'package:path/path.dart' as p;
 /// Repairs corrupted or unfinalized audio container files (such as .m4a files
 /// missing the trailing `moov` atom due to an interrupted recording stop).
 abstract interface class AudioRepairer {
-  /// Attempts to repair the container of [audio] in place.
+  /// Attempts to rebuild the container of [audio] into a new file under
+  /// [workDir], which the caller owns and disposes of.
   ///
-  /// Returns `true` if repair succeeded and the file is now readable by decoders,
-  /// or `false` if repair was not possible or failed.
-  Future<bool> repair(File audio);
+  /// Returns the repaired copy, or `null` if repair was not possible or
+  /// failed. **[audio] is only ever read**, and nothing is written beside it:
+  /// the repairer runs one level below a processor, and `findOrphans` adopts
+  /// any stray file in the recordings directory by name.
+  Future<File?> repair(File audio, Directory workDir);
 
   /// Whether repair tools are available in the current environment.
   bool get isAvailable;
@@ -24,7 +27,7 @@ class UnavailableAudioRepairer implements AudioRepairer {
   bool get isAvailable => false;
 
   @override
-  Future<bool> repair(File audio) async => false;
+  Future<File?> repair(File audio, Directory workDir) async => null;
 }
 
 /// Desktop audio repairer using `untrunc` and `ffmpeg`.
@@ -36,7 +39,9 @@ class UnavailableAudioRepairer implements AudioRepairer {
 ///
 /// This repairer uses `untrunc` with a reference .m4a header (either discovered
 /// from sibling recordings in the same directory or synthesized via ffmpeg) to
-/// reconstruct a valid MP4 container in place so playback and transcription proceed.
+/// reconstruct a valid MP4 container. The broken file is first copied into
+/// `workDir/repair/` and untrunc runs on the copy, so its `_fixed` output lands
+/// there too and the source, and the directory it lives in, are never written.
 class FfmpegAudioRepairer implements AudioRepairer {
   const FfmpegAudioRepairer({
     this.ffmpegExecutable = 'ffmpeg',
@@ -50,16 +55,22 @@ class FfmpegAudioRepairer implements AudioRepairer {
   bool get isAvailable => true;
 
   @override
-  Future<bool> repair(File audio) async {
-    if (!await audio.exists()) return false;
+  Future<File?> repair(File audio, Directory workDir) async {
+    if (!await audio.exists()) return null;
     final int length = await audio.length();
-    if (length == 0) return false;
+    if (length == 0) return null;
 
     final String extension = p.extension(audio.path).toLowerCase();
-    if (extension != '.m4a' && extension != '.mp4') return false;
+    if (extension != '.m4a' && extension != '.mp4') return null;
 
+    final Directory repairDir = Directory(p.join(workDir.path, 'repair'));
     File? tempSyntheticDirFile;
     try {
+      await repairDir.create(recursive: true);
+      final File target = await audio.copy(
+        p.join(repairDir.path, 'source$extension'),
+      );
+
       // 1. Collect candidate reference files (valid sibling recordings)
       final List<File> candidateRefs = <File>[];
       final Directory parent = audio.parent;
@@ -79,9 +90,8 @@ class FfmpegAudioRepairer implements AudioRepairer {
 
       // Try candidate sibling references first
       for (final File ref in candidateRefs) {
-        if (await _runUntrunc(ref, audio, extension)) {
-          return true;
-        }
+        final File? fixed = await _runUntrunc(ref, target, extension);
+        if (fixed != null) return fixed;
       }
 
       // 2. If sibling references were absent or failed, generate a synthetic reference
@@ -102,12 +112,12 @@ class FfmpegAudioRepairer implements AudioRepairer {
         ],
       );
       if (genRes.exitCode == 0 && await tempSyntheticDirFile.exists()) {
-        if (await _runUntrunc(tempSyntheticDirFile, audio, extension)) {
-          return true;
-        }
+        final File? fixed =
+            await _runUntrunc(tempSyntheticDirFile, target, extension);
+        if (fixed != null) return fixed;
       }
     } catch (_) {
-      return false;
+      // Fall through to the failure cleanup.
     } finally {
       if (tempSyntheticDirFile != null) {
         try {
@@ -117,12 +127,17 @@ class FfmpegAudioRepairer implements AudioRepairer {
           }
         } catch (_) {}
       }
-      await _cleanFixedArtifacts(audio, extension);
     }
-    return false;
+    // Nothing usable came out: leave workDir as the caller handed it over.
+    try {
+      if (await repairDir.exists()) await repairDir.delete(recursive: true);
+    } catch (_) {}
+    return null;
   }
 
-  Future<bool> _runUntrunc(File reference, File target, String extension) async {
+  /// Runs untrunc against [target] — already the copy under `repair/`, so
+  /// whichever name untrunc picks for its output stays in that directory.
+  Future<File?> _runUntrunc(File reference, File target, String extension) async {
     try {
       final ProcessResult result = await Process.run(
         untruncExecutable,
@@ -130,7 +145,7 @@ class FfmpegAudioRepairer implements AudioRepairer {
         stderrEncoding: SystemEncoding(),
       );
 
-      if (result.exitCode != 0) return false;
+      if (result.exitCode != 0) return null;
 
       final String basePath = target.path.endsWith(extension)
           ? target.path.substring(0, target.path.length - extension.length)
@@ -145,33 +160,12 @@ class FfmpegAudioRepairer implements AudioRepairer {
 
       for (final File fixedFile in candidateOutputs) {
         if (await fixedFile.exists() && await fixedFile.length() > 0) {
-          await fixedFile.copy(target.path);
-          try {
-            await fixedFile.delete();
-          } catch (_) {}
-          return true;
+          return fixedFile;
         }
       }
     } catch (_) {
-      return false;
+      return null;
     }
-    return false;
-  }
-
-  Future<void> _cleanFixedArtifacts(File target, String extension) async {
-    final String basePath = target.path.endsWith(extension)
-        ? target.path.substring(0, target.path.length - extension.length)
-        : target.path;
-    final List<File> candidateOutputs = <File>[
-      File('${target.path}_fixed.mp4'),
-      File('${target.path}_fixed.m4a'),
-      File('${basePath}_fixed.mp4'),
-      File('${basePath}_fixed.m4a'),
-    ];
-    for (final File file in candidateOutputs) {
-      try {
-        if (await file.exists()) await file.delete();
-      } catch (_) {}
-    }
+    return null;
   }
 }

@@ -93,22 +93,38 @@ class FfmpegAudioSplitter implements AudioSplitter {
   bool get isAvailable => true;
 
   @override
-  Future<AudioSegments> split(
-    File audio,
-    Duration maxSegment, {
-    bool allowRepair = true,
-  }) async {
+  Future<AudioSegments> split(File audio, Duration maxSegment) async {
     if (!await audio.exists()) {
       throw FileSystemException('Audio file is missing.', audio.path);
     }
     if (maxSegment <= Duration.zero) return AudioSegments.whole(audio);
 
-    // Keep the source container: the parts have to stay a format the endpoint
-    // accepts, and the one they came from already is.
-    final String extension = p.extension(audio.path);
     final Directory tempDir = await Directory.systemTemp.createTemp(
       'augustyniak_split',
     );
+    // `Process.run` throws outright when the binary is missing — the documented
+    // clean-failure path — so the cleanup has to wrap the call itself, not only
+    // a non-zero exit. Otherwise every failure leaks a temp directory.
+    try {
+      return await _split(audio, maxSegment, tempDir, allowRepair: true);
+    } catch (_) {
+      if (await tempDir.exists()) await tempDir.delete(recursive: true);
+      rethrow;
+    }
+  }
+
+  /// One ffmpeg run. On a container with no `moov` atom the repairer gets one
+  /// attempt, into `tempDir/repair/`, and the run repeats on its copy — the
+  /// source is never the thing repaired.
+  Future<AudioSegments> _split(
+    File audio,
+    Duration maxSegment,
+    Directory tempDir, {
+    required bool allowRepair,
+  }) async {
+    // Keep the source container: the parts have to stay a format the endpoint
+    // accepts, and the one they came from already is.
+    final String extension = p.extension(audio.path);
     final List<String> args = <String>[
       '-y',
       '-i', audio.path,
@@ -125,60 +141,55 @@ class FfmpegAudioSplitter implements AudioSplitter {
       p.join(tempDir.path, 'part_%05d$extension'),
     ];
 
-    // `Process.run` throws outright when the binary is missing — the documented
-    // clean-failure path — so the cleanup has to wrap the call itself, not only
-    // a non-zero exit. Otherwise every failure leaks a temp directory.
-    try {
-      final ProcessResult result = await Process.run(
+    final ProcessResult result = await Process.run(
+      executable,
+      args,
+      stderrEncoding: SystemEncoding(),
+    );
+    if (result.exitCode != 0) {
+      final String stderr = (result.stderr as String).trim();
+      if (allowRepair && stderr.toLowerCase().contains('moov atom not found')) {
+        final File? repaired = await repairer.repair(audio, tempDir);
+        if (repaired != null) {
+          return await _split(repaired, maxSegment, tempDir, allowRepair: false);
+        }
+      }
+      throw ProcessException(
         executable,
         args,
-        stderrEncoding: SystemEncoding(),
+        stderr,
+        result.exitCode,
       );
-      if (result.exitCode != 0) {
-        final String stderr = (result.stderr as String).trim();
-        if (allowRepair &&
-            stderr.toLowerCase().contains('moov atom not found') &&
-            await repairer.repair(audio)) {
-          if (await tempDir.exists()) await tempDir.delete(recursive: true);
-          return await split(audio, maxSegment, allowRepair: false);
-        }
-        throw ProcessException(
-          executable,
-          args,
-          stderr,
-          result.exitCode,
-        );
-      }
-
-      final List<File> parts =
-          (await tempDir
-                .list()
-                .where((FileSystemEntity entity) => entity is File)
-                .cast<File>()
-                .toList())
-            ..sort((File a, File b) => a.path.compareTo(b.path));
-
-      if (parts.isEmpty) {
-        throw ProcessException(
-          executable,
-          args,
-          'ffmpeg reported success but wrote no segments.',
-          0,
-        );
-      }
-
-      // Short input: ffmpeg still wrote a copy, but sending the original is
-      // equivalent and spares the caller a temp directory it would have to
-      // clean up. This is the common case — most captures are one part.
-      if (parts.length == 1) {
-        await tempDir.delete(recursive: true);
-        return AudioSegments.whole(audio);
-      }
-
-      return AudioSegments.parts(parts, tempDir);
-    } catch (_) {
-      if (await tempDir.exists()) await tempDir.delete(recursive: true);
-      rethrow;
     }
+
+    // Non-recursive on purpose: `repair/` and what it holds are not parts.
+    final List<File> parts =
+        (await tempDir
+              .list()
+              .where((FileSystemEntity entity) => entity is File)
+              .cast<File>()
+              .toList())
+          ..sort((File a, File b) => a.path.compareTo(b.path));
+
+    if (parts.isEmpty) {
+      throw ProcessException(
+        executable,
+        args,
+        'ffmpeg reported success but wrote no segments.',
+        0,
+      );
+    }
+
+    // Short input: ffmpeg still wrote a copy, but sending the original is
+    // equivalent and spares the caller a temp directory it would have to
+    // clean up. This is the common case — most captures are one part. Not
+    // after a repair, though: the original is the file ffmpeg just refused,
+    // so the one part has to travel as a derived artifact.
+    if (parts.length == 1 && allowRepair) {
+      await tempDir.delete(recursive: true);
+      return AudioSegments.whole(audio);
+    }
+
+    return AudioSegments.parts(parts, tempDir);
   }
 }
