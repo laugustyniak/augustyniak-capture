@@ -140,7 +140,7 @@ class FfmpegAudioSplitter implements AudioSplitter {
             stderr.toLowerCase().contains('moov atom not found') &&
             await repairer.repair(audio)) {
           if (await tempDir.exists()) await tempDir.delete(recursive: true);
-          return split(audio, maxSegment, allowRepair: false);
+          return await split(audio, maxSegment, allowRepair: false);
         }
         throw ProcessException(
           executable,

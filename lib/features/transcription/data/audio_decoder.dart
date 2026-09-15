@@ -135,7 +135,7 @@ class FfmpegAudioDecoder implements AudioDecoder {
             stderr.toLowerCase().contains('moov atom not found') &&
             await repairer.repair(audio)) {
           if (await tempDir.exists()) await tempDir.delete(recursive: true);
-          return decodeToPcm(audio, allowRepair: false);
+          return await decodeToPcm(audio, allowRepair: false);
         }
         throw AudioDecodeException(
           audio.path,
