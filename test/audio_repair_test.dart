@@ -6,6 +6,8 @@ import 'package:augustyniak_capture/features/transcription/data/audio_splitter.d
 import 'package:flutter_test/flutter_test.dart';
 import 'package:path/path.dart' as p;
 
+import 'video_poster_ffmpeg_test.dart' show ffmpegSkipReason;
+
 class _FakeAudioRepairer implements AudioRepairer {
   _FakeAudioRepairer({this.shouldSucceed = true});
 
@@ -131,7 +133,7 @@ void main() {
       // Exactly 1 repair attempt, no infinite loop
       expect(repairer.callCount, 1);
     });
-  });
+  }, skip: ffmpegSkipReason());
 
   group('FfmpegAudioDecoder with AudioRepairer integration', () {
     late Directory tempDir;
@@ -175,5 +177,5 @@ void main() {
       // Exactly 1 repair attempt, no infinite loop
       expect(repairer.callCount, 1);
     });
-  });
+  }, skip: ffmpegSkipReason());
 }

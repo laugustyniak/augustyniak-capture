@@ -458,8 +458,9 @@ class _PipelineChecklist extends StatelessWidget {
 /// when capture is fastest. Filing mid-recording also matches how the app is
 /// used: you start talking first and work out where it belongs while talking.
 ///
-/// `NONE` is a real option, not an absence: a capture with no project is the
-/// normal case, and it has to be reachable after picking one by mistake.
+/// There is no `NONE` chip: every capture files under a project, and the
+/// projects controller already keeps one active whenever any exists. A wrong
+/// pick is corrected by picking another; the editor can still clear it later.
 class _ProjectPicker extends StatelessWidget {
   const _ProjectPicker({required this.controller, required this.projects});
 
@@ -486,11 +487,6 @@ class _ProjectPicker extends StatelessWidget {
           spacing: 8,
           runSpacing: 8,
           children: <Widget>[
-            ConsoleChip(
-              label: 'NONE',
-              selected: selected == null,
-              onSelected: () => controller.setRecordingProject(null),
-            ),
             for (final Project project in projects)
               ConsoleChip(
                 label: project.name,
