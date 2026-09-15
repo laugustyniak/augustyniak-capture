@@ -720,12 +720,13 @@ packages:
     source: hosted
     version: "2.1.1"
   record_linux:
-    dependency: transitive
+    dependency: "direct overridden"
     description:
-      name: record_linux
-      sha256: b7484fdaf1f6d291543b9cf615e78096662b02df68d7a4728b13f352bde58d27
-      url: "https://pub.dev"
-    source: hosted
+      path: record_linux
+      ref: "7328fdb17928b411af7938ca33c936ccb951f522"
+      resolved-ref: "7328fdb17928b411af7938ca33c936ccb951f522"
+      url: "https://github.com/laugustyniak/record.git"
+    source: git
     version: "2.1.1"
   record_macos:
     dependency: transitive
