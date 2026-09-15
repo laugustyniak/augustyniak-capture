@@ -139,4 +139,22 @@ void main() {
       expect(FilePickerMediaPicker.mimeForPath('/a/b.xyz'), isNull);
     });
   });
+
+  group('FilePickerMediaPicker.audioExtensions', () {
+    // The plugin's own `FileType.audio` filter omits m4a on Linux and macOS,
+    // which hid the app's recording format from its own import dialog.
+    test('lists m4a', () {
+      expect(FilePickerMediaPicker.audioExtensions, contains('m4a'));
+    });
+
+    test('every entry is an audio mime the importer understands', () {
+      for (final String ext in FilePickerMediaPicker.audioExtensions) {
+        expect(
+          FilePickerMediaPicker.mimeForPath('/a/b.$ext'),
+          startsWith('audio/'),
+          reason: ext,
+        );
+      }
+    });
+  });
 }

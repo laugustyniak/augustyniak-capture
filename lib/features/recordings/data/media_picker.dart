@@ -31,6 +31,9 @@ class FilePickerMediaPicker implements MediaPicker {
   Future<PickedMedia?> pick(CaptureType type) async {
     final FilePickerResult? result = await FilePicker.pickFiles(
       type: _filterFor(type),
+      allowedExtensions: type == CaptureType.audioUpload
+          ? audioExtensions
+          : null,
     );
     final List<PlatformFile>? files = result?.files;
     if (files == null || files.isEmpty) return null;
@@ -39,8 +42,21 @@ class FilePickerMediaPicker implements MediaPicker {
     return PickedMedia(file: File(path), mimeType: mimeForPath(path));
   }
 
+  /// Audio is filtered by an explicit list rather than `FileType.audio`: the
+  /// plugin's built-in audio filter is `aac, midi, mp3, ogg, wav` on Linux and
+  /// macOS, which hid `.m4a` — the app's own recording format — from its own
+  /// import dialog. The list is the audio subset of [mimeForPath].
+  static const List<String> audioExtensions = <String>[
+    'mp3',
+    'm4a',
+    'aac',
+    'wav',
+    'ogg',
+    'flac',
+  ];
+
   FileType _filterFor(CaptureType type) => switch (type) {
-    CaptureType.audioUpload => FileType.audio,
+    CaptureType.audioUpload => FileType.custom,
     CaptureType.image => FileType.image,
     CaptureType.video => FileType.video,
     _ => FileType.any,
