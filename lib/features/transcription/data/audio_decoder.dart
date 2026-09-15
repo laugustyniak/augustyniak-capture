@@ -95,10 +95,7 @@ class FfmpegAudioDecoder implements AudioDecoder {
   bool get isAvailable => true;
 
   @override
-  Future<DecodedAudio> decodeToPcm(
-    File audio, {
-    bool allowRepair = true,
-  }) async {
+  Future<DecodedAudio> decodeToPcm(File audio) async {
     if (!await audio.exists()) {
       throw FileSystemException('Audio file is missing.', audio.path);
     }
@@ -106,6 +103,25 @@ class FfmpegAudioDecoder implements AudioDecoder {
     final Directory tempDir = await Directory.systemTemp.createTemp(
       'augustyniak_pcm',
     );
+    // `Process.run` throws outright when the binary is missing — the documented
+    // clean-failure path — so the cleanup wraps the call itself and not only a
+    // non-zero exit, or every failure leaks a temp directory.
+    try {
+      return await _decode(audio, tempDir, allowRepair: true);
+    } catch (_) {
+      if (await tempDir.exists()) await tempDir.delete(recursive: true);
+      rethrow;
+    }
+  }
+
+  /// One ffmpeg run. On a container with no `moov` atom the repairer gets one
+  /// attempt, into the same [tempDir] the PCM lands in, and the run repeats on
+  /// its copy — the source is never the thing repaired.
+  Future<DecodedAudio> _decode(
+    File audio,
+    Directory tempDir, {
+    required bool allowRepair,
+  }) async {
     final File output = File('${tempDir.path}/audio.f32le');
     final List<String> args = <String>[
       '-y',
@@ -120,45 +136,37 @@ class FfmpegAudioDecoder implements AudioDecoder {
       output.path,
     ];
 
-    // `Process.run` throws outright when the binary is missing — the documented
-    // clean-failure path — so the cleanup wraps the call itself and not only a
-    // non-zero exit, or every failure leaks a temp directory.
-    try {
-      final ProcessResult result = await Process.run(
-        executable,
-        args,
-        stderrEncoding: SystemEncoding(),
-      );
-      if (result.exitCode != 0) {
-        final String stderr = (result.stderr as String).trim();
-        if (allowRepair &&
-            stderr.toLowerCase().contains('moov atom not found') &&
-            await repairer.repair(audio)) {
-          if (await tempDir.exists()) await tempDir.delete(recursive: true);
-          return await decodeToPcm(audio, allowRepair: false);
+    final ProcessResult result = await Process.run(
+      executable,
+      args,
+      stderrEncoding: SystemEncoding(),
+    );
+    if (result.exitCode != 0) {
+      final String stderr = (result.stderr as String).trim();
+      if (allowRepair && stderr.toLowerCase().contains('moov atom not found')) {
+        final File? repaired = await repairer.repair(audio, tempDir);
+        if (repaired != null) {
+          return await _decode(repaired, tempDir, allowRepair: false);
         }
-        throw AudioDecodeException(
-          audio.path,
-          stderr.isEmpty
-              ? 'ffmpeg exited ${result.exitCode}'
-              : stderr,
-        );
       }
-      // ffmpeg can exit 0 having written nothing — the same trap the poster
-      // extractor already documents for a clip shorter than its seek. An
-      // exit-code-only check would hand the model an empty buffer and get
-      // confident nonsense back.
-      if (!await output.exists() || await output.length() == 0) {
-        throw AudioDecodeException(
-          audio.path,
-          'ffmpeg reported success but produced no samples',
-        );
-      }
-      return DecodedAudio(file: output, tempDir: tempDir);
-    } catch (_) {
-      if (await tempDir.exists()) await tempDir.delete(recursive: true);
-      rethrow;
+      throw AudioDecodeException(
+        audio.path,
+        stderr.isEmpty
+            ? 'ffmpeg exited ${result.exitCode}'
+            : stderr,
+      );
     }
+    // ffmpeg can exit 0 having written nothing — the same trap the poster
+    // extractor already documents for a clip shorter than its seek. An
+    // exit-code-only check would hand the model an empty buffer and get
+    // confident nonsense back.
+    if (!await output.exists() || await output.length() == 0) {
+      throw AudioDecodeException(
+        audio.path,
+        'ffmpeg reported success but produced no samples',
+      );
+    }
+    return DecodedAudio(file: output, tempDir: tempDir);
   }
 }
 
