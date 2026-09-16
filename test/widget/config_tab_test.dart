@@ -388,6 +388,86 @@ void main() {
     expect(find.text('SYNC NOW (TURSO)'), findsNothing);
   });
 
+  testWidgets('a sealed sync secret is reported, not shown as unconfigured', (
+    WidgetTester tester,
+  ) async {
+    // The failure this pair exists for: every field is populated and correct,
+    // the secret simply cannot be decrypted, and the tab used to render that
+    // identically to a fresh install — one word, DISABLED, for two facts whose
+    // recovery steps differ.
+    final SettingsController controller = buildSettingsController(
+      stored: const AppSettings(
+        tursoDbUrl: 'libsql://capture.turso.io',
+        tursoAuthToken: 'enc:v1:unreadable-blob',
+        tursoSyncEnabled: true,
+      ),
+    );
+    await controller.initialize();
+    await pumpConfig(tester, controller, initialCategory: ConfigCategory.sync);
+
+    expect(controller.syncSecretsUnreadable, isTrue);
+    // Turso is populated-but-sealed, R2 is genuinely absent. The two rows
+    // must say different things, which is the whole point.
+    expect(find.text('ENCRYPTED · Key unreachable'), findsOneWidget);
+    expect(find.text('DISABLED'), findsOneWidget);
+    expect(
+      find.textContaining('cannot be decrypted'),
+      findsOneWidget,
+      reason: 'the sync card must say why the button is dead',
+    );
+  });
+
+  testWidgets('an unconfigured install still reads DISABLED with no alarm', (
+    WidgetTester tester,
+  ) async {
+    // The other half of the pin: absent and unreadable are different facts and
+    // must not converge on one message.
+    final SettingsController controller = buildSettingsController();
+    await controller.initialize();
+    await pumpConfig(tester, controller, initialCategory: ConfigCategory.sync);
+
+    expect(find.text('DISABLED'), findsNWidgets(2));
+    expect(find.text('ENCRYPTED · Key unreachable'), findsNothing);
+    expect(find.textContaining('cannot be decrypted'), findsNothing);
+  });
+
+  testWidgets('the sync button is inert and not painted as enabled', (
+    WidgetTester tester,
+  ) async {
+    // It kept `disabledBackgroundColor: Console.green.withValues(alpha: 0.8)`
+    // and black text, so a dead button was indistinguishable from a live one
+    // and taps produced a ripple and nothing else.
+    final SettingsController controller = buildSettingsController();
+    await controller.initialize();
+    await pumpConfig(tester, controller, initialCategory: ConfigCategory.sync);
+
+    final Finder button = find.widgetWithText(
+      ElevatedButton,
+      'CONFIGURE SYNC',
+    );
+    expect(button, findsOneWidget);
+
+    final ElevatedButton widget = tester.widget<ElevatedButton>(button);
+    expect(widget.onPressed, isNull);
+    // Asserting "not Console.green" would pass vacuously: the override was a
+    // *derived* green (alpha 0.8), a different object that still reads as the
+    // enabled colour on screen. What the fix removes is the override itself,
+    // so the button falls back to the theme's disabled treatment.
+    expect(
+      widget.style?.backgroundColor?.resolve(<WidgetState>{
+        WidgetState.disabled,
+      }),
+      isNull,
+      reason: 'a disabled action must not paint its own background',
+    );
+    expect(
+      widget.style?.foregroundColor?.resolve(<WidgetState>{
+        WidgetState.disabled,
+      }),
+      isNull,
+    );
+  });
+
   test('a credential change invalidates the last sync report', () {
     const AppSettings synced = AppSettings(
       r2Endpoint: 'https://account.r2.cloudflarestorage.com',

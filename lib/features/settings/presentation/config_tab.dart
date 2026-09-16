@@ -543,6 +543,17 @@ class _ConfigTabState extends State<ConfigTab> {
         : null;
     final bool hasTurso = _hasTurso(widget.controller.settings);
     final bool hasR2 = _hasR2(widget.controller.settings);
+    // Per field, not per tab: only the row whose own secret is unreadable may
+    // say so. `syncSecretsUnreadable` answers the card's question; these two
+    // answer each section's.
+    final bool tursoSealed = _sealedSecret(
+      widget.controller,
+      widget.controller.settings.tursoAuthToken,
+    );
+    final bool r2Sealed = _sealedSecret(
+      widget.controller,
+      widget.controller.settings.r2SecretAccessKey,
+    );
     return <Widget>[
       SectionHeader(title: 'CLOUD SYNC'),
       const SizedBox(height: 12),
@@ -574,6 +585,23 @@ class _ConfigTabState extends State<ConfigTab> {
                 style: ConsoleText.micro.copyWith(color: Console.mutedSoft),
               ),
             ],
+            // Why the action below is dead, on the card that owns it. The
+            // same detection drives the Models tab's banner, but a user whose
+            // sync stopped has no reason to go looking there — and DISABLED,
+            // the only thing this card used to say, is what a never-configured
+            // install shows too.
+            if (widget.controller.syncSecretsUnreadable) ...<Widget>[
+              const SizedBox(height: 10),
+              ErrorBanner(
+                message:
+                    'The stored sync credentials cannot be decrypted — the '
+                    'master key was unreachable this launch, so cloud sync is '
+                    'off even though every field below is set. Re-enter the '
+                    'Turso token and the R2 secret access key, or pair this '
+                    'device by QR, to store readable copies.'
+                    '${widget.controller.tokenEncryptionIssue == null ? '' : '\n${widget.controller.tokenEncryptionIssue}'}',
+              ),
+            ],
             const SizedBox(height: 12),
             _SyncNowButton(
               recordingsController: widget.recordingsController,
@@ -598,14 +626,18 @@ class _ConfigTabState extends State<ConfigTab> {
             ),
             InfoRow(
               label: 'SYNC STATUS',
-              value: !hasTurso
+              value: tursoSealed
+                  ? 'ENCRYPTED · Key unreachable'
+                  : !hasTurso
                   ? 'DISABLED'
                   : report?.turso?.success == true
                   ? 'CONNECTED · Last sync succeeded'
                   : report?.turso?.success == false
                   ? 'ERROR · See sync result above'
                   : 'CONFIGURED · Not tested',
-              valueColor: !hasTurso
+              valueColor: tursoSealed
+                  ? Console.red
+                  : !hasTurso
                   ? Console.mutedSoft
                   : report?.turso?.success == true
                   ? Console.green
@@ -659,14 +691,18 @@ class _ConfigTabState extends State<ConfigTab> {
             ),
             InfoRow(
               label: 'MEDIA SYNC',
-              value: !hasR2
+              value: r2Sealed
+                  ? 'ENCRYPTED · Key unreachable'
+                  : !hasR2
                   ? 'DISABLED'
                   : report?.r2?.success == true
                   ? 'CONNECTED · ${_r2Counts(report!.r2!)}'
                   : report?.r2?.success == false
                   ? 'ERROR · See sync result above'
                   : 'CONFIGURED · Not tested',
-              valueColor: !hasR2
+              valueColor: r2Sealed
+                  ? Console.red
+                  : !hasR2
                   ? Console.mutedSoft
                   : report?.r2?.success == true
                   ? Console.green
@@ -1094,8 +1130,11 @@ class _SyncNowButtonState extends State<_SyncNowButton> {
       style: ElevatedButton.styleFrom(
         backgroundColor: Console.green,
         foregroundColor: Colors.black,
-        disabledBackgroundColor: Console.green.withValues(alpha: 0.8),
-        disabledForegroundColor: Colors.black,
+        // No disabled overrides on purpose. Painting the disabled state in a
+        // derived green with black text made a dead button indistinguishable
+        // from a live one — it even keeps its ripple — so the only signal left
+        // was the label, and CONFIGURE SYNC reads as an invitation to tap.
+        // The theme's default disabled treatment is the whole fix.
       ),
       onPressed: _isSyncing || !canSync
           ? null
@@ -1124,6 +1163,17 @@ class _SyncNowButtonState extends State<_SyncNowButton> {
     );
   }
 }
+
+/// True when this value is an `enc:v1:` blob this launch cannot open.
+///
+/// The `tokenEncryptionActive` guard is what separates the failure from the
+/// ordinary plaintext fallback: with a working cipher a sealed value is simply
+/// one that has not been read back yet, and saying "key unreachable" there
+/// would be a second lie in place of the first.
+bool _sealedSecret(SettingsController controller, String? value) =>
+    !controller.tokenEncryptionActive &&
+    value != null &&
+    TokenCipher.isSealed(value);
 
 bool _hasTurso(AppSettings settings) =>
     (settings.tursoDbUrl ?? '').trim().isNotEmpty &&

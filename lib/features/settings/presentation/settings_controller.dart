@@ -138,6 +138,21 @@ class SettingsController extends ChangeNotifier {
         sealed(_settings.commandToken);
   }
 
+  /// The same failure narrowed to the two secrets the cloud-sync predicates
+  /// actually read.
+  ///
+  /// [sealedTokensUnreadable] is a union over the provider profiles and the
+  /// Command token as well, so it answers true for a sealed transcription key
+  /// that cloud sync neither reads nor cares about. The Config tab's sync
+  /// sections need the narrower question, or they would explain a dead SYNC
+  /// button with a credential that is not gating it.
+  bool get syncSecretsUnreadable {
+    if (tokenEncryptionActive) return false;
+    bool sealed(String? value) => value != null && TokenCipher.isSealed(value);
+    return sealed(_settings.tursoAuthToken) ||
+        sealed(_settings.r2SecretAccessKey);
+  }
+
   /// The service the recordings controller should use right now. No active
   /// profile means transcription reports "not configured" — same as a fresh
   /// install with no `--dart-define`.
