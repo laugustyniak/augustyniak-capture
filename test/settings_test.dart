@@ -1068,6 +1068,75 @@ void main() {
     });
   });
 
+  group('SettingsController.syncSecretsUnreadable', () {
+    Future<SettingsController> controllerWith(AppSettings settings) async {
+      final _FakeSettingsRepository repo = _FakeSettingsRepository()
+        ..stored = settings;
+      final SettingsController controller = SettingsController(
+        repository: repo,
+      );
+      await controller.initialize();
+      return controller;
+    }
+
+    test('is true when the Turso token stayed sealed', () async {
+      final SettingsController controller = await controllerWith(
+        const AppSettings(
+          tursoDbUrl: 'libsql://db.turso.io',
+          tursoAuthToken: 'enc:v1:unreadable-blob',
+        ),
+      );
+
+      expect(controller.syncSecretsUnreadable, isTrue);
+    });
+
+    test('is true when the R2 secret stayed sealed', () async {
+      final SettingsController controller = await controllerWith(
+        const AppSettings(
+          r2Endpoint: 'https://account.r2.cloudflarestorage.com',
+          r2Bucket: 'captures',
+          r2AccessKeyId: 'AKIA',
+          r2SecretAccessKey: 'enc:v1:unreadable-blob',
+        ),
+      );
+
+      expect(controller.syncSecretsUnreadable, isTrue);
+    });
+
+    test('a sealed provider token alone does not count', () async {
+      // The whole reason this getter exists beside `sealedTokensUnreadable`:
+      // that one is a union over the profiles and the Command token too, and a
+      // sealed transcription key must not light up a card about cloud sync.
+      final SettingsController controller = await controllerWith(
+        AppSettings(
+          profiles: const <ProviderProfile>[
+            ProviderProfile(
+              id: 'p1',
+              name: 'OpenAI',
+              endpoint: 'https://api.openai.com/v1/audio/transcriptions',
+              bearerToken: 'enc:v1:unreadable-blob',
+            ),
+          ],
+          activeProfileId: 'p1',
+        ),
+      );
+
+      expect(controller.sealedTokensUnreadable, isTrue);
+      expect(controller.syncSecretsUnreadable, isFalse);
+    });
+
+    test('is false when the sync secrets are readable', () async {
+      final SettingsController controller = await controllerWith(
+        const AppSettings(
+          tursoDbUrl: 'libsql://db.turso.io',
+          tursoAuthToken: 'plain-token',
+        ),
+      );
+
+      expect(controller.syncSecretsUnreadable, isFalse);
+    });
+  });
+
   group('SettingsController textScale', () {
     test('setTextScale, zoomIn, zoomOut and resetZoom persist and notify', () async {
       final _FakeSettingsRepository repo = _FakeSettingsRepository();
