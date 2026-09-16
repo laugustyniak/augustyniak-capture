@@ -58,6 +58,19 @@ Recording _legacy(String id, File source) => Recording(
   title: 'Keep this title',
 );
 
+/// A take the drain still has to read: `saved`, no text, measured at capture.
+Recording _salvaged(String id, File source, {required String hash}) =>
+    Recording(
+      id: id,
+      filePath: source.path,
+      createdAt: DateTime.utc(2026, 9, 16),
+      durationMs: 1000,
+      sizeBytes: source.lengthSync(),
+      contentHash: hash,
+      status: RecordingStatus.saved,
+      type: CaptureType.audioRecording,
+    );
+
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
   final TestDefaultBinaryMessenger messenger =
@@ -221,6 +234,119 @@ void main() {
         1,
         reason: 'the backfill must persist once, not once per row',
       );
+    },
+  );
+
+  test(
+    'a source that grew after it was indexed is re-measured before processing',
+    () async {
+      // The #168 stall: the row was written while the encoder was still
+      // alive, so size and fingerprint describe a prefix of the file. The
+      // drain is the last moment before the bytes are read, and the first one
+      // where the finished file can be seen — the same row was already
+      // fingerprinted, so the null-guarded backfill would never look again.
+      final File source = File(p.join(directory.path, 'grown.m4a'))
+        ..writeAsStringSync('the prefix that was indexed');
+      final Recording seeded = _salvaged('grown', source, hash: 'c' * 64);
+      source.writeAsStringSync(
+        'the prefix that was indexed, and the tail the encoder wrote later',
+      );
+      final _Repo repository = _Repo(directory, <Recording>[seeded]);
+      final RecordingsController controller = RecordingsController(
+        repository: repository,
+        transcriptionService: const DisabledTranscriptionService(),
+      );
+      addTearDown(controller.dispose);
+
+      await controller.initialize();
+      await controller.waitForProcessing();
+
+      final Recording refreshed = controller.recordings.single;
+      expect(refreshed.sizeBytes, source.lengthSync());
+      expect(
+        refreshed.contentHash,
+        await const SourceContentHasher().hash(source),
+      );
+      expect(refreshed.segments.single.sizeBytes, source.lengthSync());
+      expect(refreshed.segments.single.contentHash, refreshed.contentHash);
+      // The refresh is one index rewrite, alongside the status transitions the
+      // drain makes anyway — never a second pass for the hash.
+      final int refreshWrites = repository.saved
+          .where((Recording item) => item.sizeBytes == source.lengthSync())
+          .length;
+      expect(refreshWrites, 1);
+    },
+  );
+
+  test(
+    'a re-measure that finds the fingerprint in flight waits for it',
+    () async {
+      // Startup runs the resume sweep and the hash backfill side by side, so
+      // the backfill can already hold this segment's in-flight key when the
+      // drain reaches it. Giving up there would leave the size stale for as
+      // long as the transcript succeeds — the refresh has to wait its turn.
+      final File source = File(p.join(directory.path, 'contended.m4a'))
+        ..writeAsStringSync('the prefix that was indexed');
+      final Recording seeded = Recording(
+        id: 'contended',
+        filePath: source.path,
+        createdAt: DateTime.utc(2026, 9, 16),
+        durationMs: 1000,
+        sizeBytes: source.lengthSync(),
+        status: RecordingStatus.saved,
+        type: CaptureType.audioRecording,
+      );
+      source.writeAsStringSync(
+        'the prefix that was indexed, and the tail the encoder wrote later',
+      );
+      final _GatedHasher hasher = _GatedHasher();
+      final _Repo repository = _Repo(directory, <Recording>[seeded]);
+      final RecordingsController controller = RecordingsController(
+        repository: repository,
+        transcriptionService: const DisabledTranscriptionService(),
+        contentHasher: hasher,
+      );
+      addTearDown(controller.dispose);
+
+      await controller.initialize();
+      // Let the drain reach the refresh while the backfill holds the key.
+      for (int i = 0; i < 50; i++) {
+        await Future<void>.delayed(Duration.zero);
+      }
+      expect(hasher.started, isTrue);
+      hasher.gate.complete();
+      await controller.waitForProcessing();
+
+      final Recording refreshed = controller.recordings.single;
+      expect(refreshed.sizeBytes, source.lengthSync());
+      expect(
+        refreshed.contentHash,
+        await const SourceContentHasher().hash(source),
+      );
+    },
+  );
+
+  test(
+    'a source that did not change keeps its fingerprint untouched',
+    () async {
+      final File source = File(p.join(directory.path, 'same.m4a'))
+        ..writeAsStringSync('exactly what was indexed');
+      final String storedHash = 'c' * 64;
+      final Recording seeded = _salvaged('same', source, hash: storedHash);
+      final _Repo repository = _Repo(directory, <Recording>[seeded]);
+      final RecordingsController controller = RecordingsController(
+        repository: repository,
+        transcriptionService: const DisabledTranscriptionService(),
+      );
+      addTearDown(controller.dispose);
+
+      await controller.initialize();
+      await controller.waitForProcessing();
+
+      // Deliberately wrong, and deliberately left alone: the stored hash is
+      // the contract, and only a changed file is evidence against it.
+      expect(controller.recordings.single.contentHash, storedHash);
+      expect(controller.recordings.single.sizeBytes, source.lengthSync());
     },
   );
 

@@ -940,13 +940,19 @@ class RecordingsController extends ChangeNotifier {
   /// The fingerprint alone — no write, so a caller sweeping many rows can
   /// persist them together. Null means "no fingerprint for this one", never a
   /// failed capture.
-  Future<String?> _hashSource(String id, {int segmentIndex = 0}) async {
+  Future<String?> _hashSource(
+    String id, {
+    int segmentIndex = 0,
+    bool replace = false,
+  }) async {
     final int index = _recordings.indexWhere((Recording item) => item.id == id);
     if (index < 0) return null;
     final CaptureSegment? segment = _recordings[index].segments
         .where((CaptureSegment each) => each.index == segmentIndex)
         .firstOrNull;
-    if (segment == null || segment.contentHash != null) return null;
+    if (segment == null || (!replace && segment.contentHash != null)) {
+      return null;
+    }
     // Keyed per segment: two fragments of one capture are two distinct files
     // and must not exclude each other from the sweep.
     final String key = '$id#$segmentIndex';
@@ -963,6 +969,72 @@ class RecordingsController extends ChangeNotifier {
     } finally {
       _hashesInFlight.remove(key);
     }
+  }
+
+  /// Re-measures a segment whose file changed after it was indexed.
+  ///
+  /// The row is written the moment the source is verified, and on a hung
+  /// stop that is while the encoder is still alive: `sizeBytes` and the
+  /// fingerprint then describe a prefix of the take, and the fingerprint's
+  /// null guard means the backfill never looks again. Size is the cheap
+  /// evidence — one `stat` per job — and only a changed size earns a second
+  /// hash, which is why this may overwrite a stored fingerprint where
+  /// `_computeContentHash` never does. Legacy rows carry `0` and have no
+  /// measurement to compare against, so they are left to the backfill.
+  Future<void> _refreshSegmentIdentity(String id, CaptureSegment segment) async {
+    if (segment.sizeBytes == 0) return;
+    final int sizeBytes;
+    try {
+      final File file = File(segment.filePath);
+      if (!await file.exists()) return;
+      sizeBytes = await file.length();
+    } catch (_) {
+      return;
+    }
+    if (sizeBytes == segment.sizeBytes) return;
+    // The startup backfill may already be reading this very file: it started
+    // beside the resume sweep that queued this job. Its answer is not wanted
+    // — it read whatever the file was when it opened it — but its key is,
+    // and giving up here would leave the size stale for as long as the
+    // transcript then succeeds. Wait for the turn rather than skip it.
+    final String key = '$id#${segment.index}';
+    while (_hashesInFlight.contains(key)) {
+      if (_disposed) return;
+      await Future<void>.delayed(Duration.zero);
+    }
+    final String? hash = await _hashSource(
+      id,
+      segmentIndex: segment.index,
+      replace: true,
+    );
+    if (hash == null || _disposed) return;
+    // One mutation, mirroring `_computeContentHash`: a row that never gained a
+    // fragment stays without a `segments` key, and the row-level fields are
+    // written from segment 0 only.
+    await _update(id, (Recording current) {
+      final bool isRow = segment.index == 0;
+      if (!current.hasStoredSegments) {
+        return isRow
+            ? current.copyWith(sizeBytes: sizeBytes, contentHash: hash)
+            : current;
+      }
+      return current.copyWith(
+        segments: <CaptureSegment>[
+          for (final CaptureSegment each in current.segments)
+            if (each.index == segment.index)
+              each.copyWith(sizeBytes: sizeBytes, contentHash: hash)
+            else
+              each,
+        ],
+        sizeBytes: isRow ? sizeBytes : null,
+        contentHash: isRow ? hash : null,
+      );
+    });
+    _logSink.log(
+      'Source changed after it was indexed · ${segment.sizeBytes} B → '
+      '$sizeBytes B · fingerprint refreshed.',
+      recordingId: id,
+    );
   }
 
   Future<void> startRecording({String? appendTo}) async {
@@ -1273,7 +1345,19 @@ class RecordingsController extends ChangeNotifier {
       // Critical invariant: persist metadata only after the audio file exists.
       _recordings = <Recording>[saved, ..._recordings];
       await _persistAll();
-      unawaited(_computeContentHash(saved.id));
+      // Not after a hung stop: the call is still pending because the encoder
+      // is still alive, so a fingerprint taken now covers a prefix of the take
+      // — and, being non-null, would never be taken again. Null is the honest
+      // state; the startup backfill and the drain's re-measure fill it once
+      // the file has stopped changing.
+      if (stopFailure is! TimeoutException) {
+        unawaited(_computeContentHash(saved.id));
+      } else {
+        _logSink.log(
+          'Fingerprint deferred — the encoder may still be writing.',
+          recordingId: saved.id,
+        );
+      }
       unawaited(_gamificationController?.onCaptureCreated(_recordings.length));
       _logSink.log(
         'File verified and saved · $sizeBytes B',
@@ -2621,6 +2705,9 @@ class RecordingsController extends ChangeNotifier {
                 ? segment.durationMs / 1000
                 : null,
           );
+          // The last moment before the bytes are read, and the first one at
+          // which a file the encoder finished late can be seen.
+          await _refreshSegmentIdentity(id, segment);
           String? text;
           try {
             text = await processor.process(segment);

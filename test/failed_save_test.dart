@@ -109,6 +109,21 @@ void main() {
     );
   });
 
+  test('a hung stop leaves the fingerprint for a later look', () async {
+    // The encoder is still alive when the row is written — that is what the
+    // hang *is* — so a hash taken now covers a prefix and, being non-null,
+    // would never be taken again. Null is the honest state: the startup
+    // backfill and the drain's re-measure fill it once the file is finished.
+    final RecordingsController controller = build(
+      _StoppingRecorder(_StopBehaviour.hangs),
+    );
+    await controller.startRecording();
+    await controller.stopRecording();
+    await controller.waitForProcessing();
+
+    expect(controller.recordings.single.contentHash, isNull);
+  });
+
   test('a hung stop still closes the capture screen', () async {
     // `_isBusy` is what the capture screen and DISCARD both read. Left true it
     // takes the screen hostage *and* silently disables the one control the user
