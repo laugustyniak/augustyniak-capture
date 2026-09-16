@@ -992,6 +992,16 @@ class RecordingsController extends ChangeNotifier {
       return;
     }
     if (sizeBytes == segment.sizeBytes) return;
+    // The startup backfill may already be reading this very file: it started
+    // beside the resume sweep that queued this job. Its answer is not wanted
+    // — it read whatever the file was when it opened it — but its key is,
+    // and giving up here would leave the size stale for as long as the
+    // transcript then succeeds. Wait for the turn rather than skip it.
+    final String key = '$id#${segment.index}';
+    while (_hashesInFlight.contains(key)) {
+      if (_disposed) return;
+      await Future<void>.delayed(Duration.zero);
+    }
     final String? hash = await _hashSource(
       id,
       segmentIndex: segment.index,
