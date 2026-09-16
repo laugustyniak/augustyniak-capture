@@ -147,11 +147,16 @@ void main() {
       ],
     );
     final _GatedTranscriptionService gated = _GatedTranscriptionService();
-    final RecordingsController controller = await buildRecordingsController(
-      appDir,
-      seed: <Recording>[recording],
-      service: gated,
-    );
+    // Built under `runAsync`: the seeded row awaits processing, so `initialize`
+    // starts the drain, and the drain now stats the source before reading it
+    // — real IO that never completes in the fake-async zone.
+    final RecordingsController controller = (await tester.runAsync(
+      () => buildRecordingsController(
+        appDir,
+        seed: <Recording>[recording],
+        service: gated,
+      ),
+    ))!;
 
     // Trigger processing and wait until gated service is in flight
     await tester.runAsync(() async {
@@ -228,11 +233,16 @@ void main() {
       ],
     );
     final _GatedTranscriptionService gated = _GatedTranscriptionService();
-    final RecordingsController controller = await buildRecordingsController(
-      appDir,
-      seed: <Recording>[recording],
-      service: gated,
-    );
+    // Built under `runAsync`: the seeded row awaits processing, so `initialize`
+    // starts the drain, and the drain now stats the source before reading it
+    // — real IO that never completes in the fake-async zone.
+    final RecordingsController controller = (await tester.runAsync(
+      () => buildRecordingsController(
+        appDir,
+        seed: <Recording>[recording],
+        service: gated,
+      ),
+    ))!;
 
     tester.view.physicalSize = const Size(1000, 900);
     tester.view.devicePixelRatio = 1;

@@ -204,6 +204,7 @@ class Recording {
 
   Recording copyWith({
     RecordingStatus? status,
+    int? sizeBytes,
     String? contentHash,
     String? transcript,
     String? thumbPath,
@@ -231,7 +232,7 @@ class Recording {
       filePath: filePath,
       createdAt: createdAt,
       durationMs: durationMs,
-      sizeBytes: sizeBytes,
+      sizeBytes: sizeBytes ?? this.sizeBytes,
       contentHash: contentHash ?? this.contentHash,
       type: type,
       sourceMimeType: sourceMimeType,
