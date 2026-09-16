@@ -50,10 +50,13 @@ class ChunkedTranscriptionService implements TranscriptionService {
     // short-recording path stays byte-identical to what it was.
     if (!segments.isSplit) return _inner.transcribe(audioFile);
 
-    _logSink.log(
-      'Audio exceeds ${maxSegment.inMinutes} min — transcribing in '
-      '${segments.files.length} parts.',
-    );
+    // One derived part is a repaired container, not a long capture.
+    if (segments.files.length > 1) {
+      _logSink.log(
+        'Audio exceeds ${maxSegment.inMinutes} min — transcribing in '
+        '${segments.files.length} parts.',
+      );
+    }
 
     try {
       final List<String> parts = <String>[];
