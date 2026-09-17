@@ -1,5 +1,6 @@
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 
+import '../../../core/security/app_secure_storage.dart';
 import 'aes_gcm_token_cipher.dart';
 
 /// [MasterKeyStore] backed by the OS keyring via `flutter_secure_storage`:
@@ -45,13 +46,9 @@ class SecureStorageMasterKeyStore implements MasterKeyStore {
   /// same way a rebuild can re-prompt for microphone consent. Answering "Always
   /// Allow" once per build settles it; denying it degrades to the plaintext
   /// fallback rather than failing a capture.
-  static const MacOsOptions macOsOptions = MacOsOptions(
-    useDataProtectionKeyChain: false,
-  );
+  static const MacOsOptions macOsOptions = AppSecureStorage.macOsOptions;
 
-  static const FlutterSecureStorage _storage = FlutterSecureStorage(
-    mOptions: macOsOptions,
-  );
+  static const FlutterSecureStorage _storage = AppSecureStorage.instance;
 
   @override
   Future<String?> read() => _storage.read(key: _entry);

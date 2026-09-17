@@ -2,9 +2,12 @@ import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:hotkey_manager/hotkey_manager.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:window_manager/window_manager.dart';
 
 import 'app/app.dart';
+import 'features/auth/data/secure_auth_storage.dart';
+import 'features/auth/domain/supabase_config.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -22,6 +25,29 @@ Future<void> main() async {
     // the registrar's own listener for it. The registrar clears the OS table
     // itself on its first `apply`.
     if (!Platform.isLinux) await hotKeyManager.unregisterAll();
+  }
+
+  final SupabaseConfig? supabase = SupabaseConfig.fromEnvironment();
+  if (supabase != null) {
+    final SecureAuthStorage authStorage = SecureAuthStorage();
+    try {
+      await Supabase.initialize(
+        url: supabase.url,
+        publishableKey: supabase.publishableKey,
+        authOptions: FlutterAuthClientOptions(
+          authFlowType: AuthFlowType.pkce,
+          localStorage: authStorage,
+          pkceAsyncStorage: authStorage,
+        ),
+        debug: false,
+      );
+    } catch (error) {
+      // Authentication is optional. A bad endpoint or unavailable keyring may
+      // disable cloud access, but must never prevent local capture from opening.
+      debugPrint(
+        'Supabase authentication is unavailable (${error.runtimeType}).',
+      );
+    }
   }
 
   runApp(AugustyniakCaptureApp());
