@@ -1532,5 +1532,53 @@ void main() {
     // so total width = 1400 - (16*2 + 4*2) = 1360px (> 880px).
     expect(cardSize.width, greaterThan(1300));
   });
+
+  testWidgets('QueueTab renders cards in 2 columns on wide viewports >= 1600px', (
+    WidgetTester tester,
+  ) async {
+    tester.view.physicalSize = const Size(1800, 1000);
+    tester.view.devicePixelRatio = 1.0;
+    addTearDown(() {
+      tester.view.resetPhysicalSize();
+      tester.view.resetDevicePixelRatio();
+    });
+
+    final RecordingsController controller = await buildRecordingsController(
+      appDir,
+      seed: <Recording>[
+        makeRecording(
+          id: 'wide-card-1',
+          title: 'First capture',
+          transcript: 'First transcript',
+          type: CaptureType.text,
+          status: RecordingStatus.completed,
+        ),
+        makeRecording(
+          id: 'wide-card-2',
+          title: 'Second capture',
+          transcript: 'Second transcript',
+          type: CaptureType.text,
+          status: RecordingStatus.completed,
+        ),
+      ],
+    );
+    await pumpQueue(tester, controller);
+
+    final Finder cards = find.byType(RecordingCard);
+    expect(cards, findsNWidgets(2));
+
+    final Offset pos1 = tester.getTopLeft(cards.at(0));
+    final Offset pos2 = tester.getTopLeft(cards.at(1));
+    final Size size1 = tester.getSize(cards.at(0));
+    final Size size2 = tester.getSize(cards.at(1));
+
+    // Both cards should be side-by-side in row 0
+    expect(pos1.dy, closeTo(pos2.dy, 2.0));
+    expect(pos2.dx, greaterThan(pos1.dx + size1.width / 2));
+    expect(size1.width, lessThan(950));
+    expect(size1.width, greaterThan(750));
+    expect(size2.width, lessThan(950));
+    expect(size2.width, greaterThan(750));
+  });
 }
 

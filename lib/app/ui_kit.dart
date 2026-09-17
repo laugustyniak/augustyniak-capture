@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:io';
 import 'dart:math' as math;
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
@@ -255,6 +256,31 @@ class Console {
   /// insets the page beside it, so the two cannot drift apart.
   static const double railWidth = 216;
 
+  /// At and above this width, the Queue splits captures into a responsive
+  /// two-column layout on wide desktop displays, maintaining comfortable
+  /// line lengths and visual density.
+  static const double wideDesktopBreakpoint = 1600;
+
+  /// Returns an automatic display scaling multiplier for desktop viewports.
+  /// On high-resolution displays (e.g. 4K, 1440p) where devicePixelRatio
+  /// is not scaled by the desktop environment, this scales typography
+  /// and UI to maintain clear readability.
+  static double autoScaleFor(Size size, double devicePixelRatio) {
+    if (kIsWeb) return 1.0;
+    if (!(Platform.isLinux || Platform.isMacOS || Platform.isWindows)) {
+      return 1.0;
+    }
+    // High-resolution desktop (e.g. 4K 3840x2160 or 1440p with low devicePixelRatio)
+    if (devicePixelRatio <= 1.25) {
+      if (size.width >= 3200 || size.height >= 1800) {
+        return 1.4;
+      } else if (size.width >= 2400 || size.height >= 1350) {
+        return 1.2;
+      }
+    }
+    return 1.0;
+  }
+
   static ConsolePalette _palette = ConsolePalette.dark;
 
   /// Swapped by `AugustyniakCaptureApp` from inside `MaterialApp.builder`,
@@ -356,7 +382,7 @@ class ConsoleText {
   /// `AUGUSTYNIAK CAPTURE` above a page title.
   static TextStyle get eyebrow => TextStyle(
     fontFamily: ConsoleFont.mono,
-    fontSize: 10,
+    fontSize: 11,
     fontWeight: FontWeight.w600,
     letterSpacing: 2.2,
     color: Console.accent,
@@ -364,7 +390,7 @@ class ConsoleText {
 
   static TextStyle get pageTitle => TextStyle(
     fontFamily: ConsoleFont.display,
-    fontSize: 26,
+    fontSize: 28,
     height: 1.05,
     fontWeight: FontWeight.w700,
     color: Console.text,
@@ -373,14 +399,14 @@ class ConsoleText {
   /// Right-hand counter next to a page title.
   static TextStyle get counter => TextStyle(
     fontFamily: ConsoleFont.mono,
-    fontSize: 11,
+    fontSize: 12,
     fontWeight: FontWeight.w500,
     color: Console.muted,
   );
 
   static TextStyle get cardTitle => TextStyle(
     fontFamily: ConsoleFont.display,
-    fontSize: 14,
+    fontSize: 16,
     fontWeight: FontWeight.w600,
     color: Console.text,
   );
@@ -388,20 +414,20 @@ class ConsoleText {
   /// The `14:52 · 16 kHz mono · 10:24` line under a card title.
   static TextStyle get cardMeta => TextStyle(
     fontFamily: ConsoleFont.mono,
-    fontSize: 11,
+    fontSize: 12,
     color: Console.muted,
   );
 
   /// Footer facts — `file verified · 6.8 MB · persisted`.
   static TextStyle get micro => TextStyle(
     fontFamily: ConsoleFont.mono,
-    fontSize: 10.5,
+    fontSize: 11.5,
     color: Console.dimText,
   );
 
   static const TextStyle pill = TextStyle(
     fontFamily: ConsoleFont.mono,
-    fontSize: 10,
+    fontSize: 11,
     fontWeight: FontWeight.w600,
   );
 
@@ -413,24 +439,24 @@ class ConsoleText {
 
   static const TextStyle navLabel = TextStyle(
     fontFamily: ConsoleFont.mono,
-    fontSize: 10,
+    fontSize: 11,
     fontWeight: FontWeight.w600,
   );
 
-  /// A rail destination. Display rather than mono, and a full 13 px, because
+  /// A rail destination. Display rather than mono, and a full 14 px, because
   /// the rail has the width to spell a destination out — the bottom bar's
   /// [navLabel] is cramped mono precisely because it does not.
   static TextStyle get railLabel => TextStyle(
     fontFamily: ConsoleFont.display,
-    fontSize: 13,
+    fontSize: 14,
     color: Console.muted,
   );
 
   /// Body copy inside a card or sheet.
   static TextStyle get body => TextStyle(
     fontFamily: ConsoleFont.display,
-    fontSize: 12,
-    height: 1.5,
+    fontSize: 14,
+    height: 1.55,
     color: Console.textSoft,
   );
 }
@@ -450,7 +476,7 @@ class ConsolePageWidth extends StatelessWidget {
   /// About 90 characters of `ConsoleText.body`. Comfortably above the editor's
   /// own `_wideEnough = 460` breakpoint, so the two-column field layout still
   /// resolves to its wide form inside the cap.
-  static const double maxWidth = 880;
+  static const double maxWidth = 960;
 
   final Widget child;
 

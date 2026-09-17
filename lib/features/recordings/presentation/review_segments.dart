@@ -87,7 +87,6 @@ class ReviewSegments extends StatelessWidget {
                 child: Text(
                   '${labelFor(value)} ${_count(value)}',
                   style: ConsoleText.chip.copyWith(
-                    fontSize: 10,
                     letterSpacing: .5,
                     color: selected ? Console.ink : Console.muted,
                   ),

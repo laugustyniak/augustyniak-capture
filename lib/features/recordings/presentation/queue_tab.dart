@@ -512,36 +512,106 @@ class _QueueTabState extends State<QueueTab> {
                                   ),
                                 ],
                               )
-                            : ListView.builder(
-                                padding: _listPadding(compact),
-                                itemCount: visible.length,
-                                itemBuilder: (BuildContext context, int index) {
-                                  final Recording recording = visible[index];
-                                  return Padding(
-                                    padding: const EdgeInsets.fromLTRB(
-                                      4,
-                                      0,
-                                      4,
-                                      10,
-                                    ),
-                                    // The row grows into the editor in place.
-                                    // Animating the height is what keeps the
-                                    // rows below from jumping — the edited item
-                                    // has to stay under the finger that opened
-                                    // it.
-                                    child: AnimatedSize(
-                                      duration: const Duration(
-                                        milliseconds: 220,
-                                      ),
-                                      curve: Curves.easeOutCubic,
-                                      alignment: Alignment.topCenter,
-                                      child: recording.id == editingId
-                                          ? _buildEditor(recording)
-                                          : _buildCard(recording),
-                                    ),
-                                  );
-                                },
-                              ),
+                            : constraints.maxWidth >=
+                                    Console.wideDesktopBreakpoint
+                                ? ListView.builder(
+                                    padding: _listPadding(compact),
+                                    itemCount: (visible.length + 1) ~/ 2,
+                                    itemBuilder: (
+                                      BuildContext context,
+                                      int rowIndex,
+                                    ) {
+                                      final int first = rowIndex * 2;
+                                      final int second = first + 1;
+                                      final Recording left = visible[first];
+                                      final Recording? right =
+                                          second < visible.length
+                                              ? visible[second]
+                                              : null;
+                                      return Padding(
+                                        padding: const EdgeInsets.fromLTRB(
+                                          4,
+                                          0,
+                                          4,
+                                          10,
+                                        ),
+                                        child: Row(
+                                          crossAxisAlignment:
+                                              CrossAxisAlignment.start,
+                                          children: <Widget>[
+                                            Expanded(
+                                              child: AnimatedSize(
+                                                duration: const Duration(
+                                                  milliseconds: 220,
+                                                ),
+                                                curve: Curves.easeOutCubic,
+                                                alignment: Alignment.topCenter,
+                                                child: left.id == editingId
+                                                    ? _buildEditor(left)
+                                                    : _buildCard(left),
+                                              ),
+                                            ),
+                                            const SizedBox(width: 10),
+                                            Expanded(
+                                              child: right != null
+                                                  ? AnimatedSize(
+                                                      duration: const Duration(
+                                                        milliseconds: 220,
+                                                      ),
+                                                      curve:
+                                                          Curves.easeOutCubic,
+                                                      alignment:
+                                                          Alignment.topCenter,
+                                                      child:
+                                                          right.id == editingId
+                                                              ? _buildEditor(
+                                                                  right,
+                                                                )
+                                                              : _buildCard(
+                                                                  right,
+                                                                ),
+                                                    )
+                                                  : const SizedBox.shrink(),
+                                            ),
+                                          ],
+                                        ),
+                                      );
+                                    },
+                                  )
+                                : ListView.builder(
+                                    padding: _listPadding(compact),
+                                    itemCount: visible.length,
+                                    itemBuilder: (
+                                      BuildContext context,
+                                      int index,
+                                    ) {
+                                      final Recording recording =
+                                          visible[index];
+                                      return Padding(
+                                        padding: const EdgeInsets.fromLTRB(
+                                          4,
+                                          0,
+                                          4,
+                                          10,
+                                        ),
+                                        // The row grows into the editor in place.
+                                        // Animating the height is what keeps the
+                                        // rows below from jumping — the edited item
+                                        // has to stay under the finger that opened
+                                        // it.
+                                        child: AnimatedSize(
+                                          duration: const Duration(
+                                            milliseconds: 220,
+                                          ),
+                                          curve: Curves.easeOutCubic,
+                                          alignment: Alignment.topCenter,
+                                          child: recording.id == editingId
+                                              ? _buildEditor(recording)
+                                              : _buildCard(recording),
+                                        ),
+                                      );
+                                    },
+                                  ),
                       ),
                     ),
                   ],
