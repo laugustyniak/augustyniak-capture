@@ -75,9 +75,17 @@ class _AugustyniakCaptureAppState extends State<AugustyniakCaptureApp> {
                 double scale,
                 Widget? innerChild,
               ) {
+                final MediaQueryData mediaQuery = MediaQuery.of(context);
+                final double autoFactor = Console.autoScaleFor(
+                  mediaQuery.size,
+                  mediaQuery.devicePixelRatio,
+                );
+                final double effectiveScale = AppSettings.clampTextScale(
+                  scale * autoFactor,
+                );
                 return MediaQuery(
-                  data: MediaQuery.of(context).copyWith(
-                    textScaler: TextScaler.linear(scale),
+                  data: mediaQuery.copyWith(
+                    textScaler: TextScaler.linear(effectiveScale),
                   ),
                   child: innerChild!,
                 );

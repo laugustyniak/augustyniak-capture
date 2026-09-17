@@ -136,6 +136,27 @@ void main() {
       expect(Console.background, ConsolePalette.dark.background);
       expect(ConsoleText.eyebrow.color, ConsolePalette.dark.accent);
     });
+
+    test('Console desktop breakpoints and high-resolution scaling', () {
+      expect(Console.wideDesktopBreakpoint, 1600);
+      expect(Console.autoScaleFor(const Size(3840, 2160), 1.0), 1.4);
+      expect(Console.autoScaleFor(const Size(2560, 1440), 1.0), 1.2);
+      expect(Console.autoScaleFor(const Size(1920, 1080), 1.0), 1.0);
+      expect(Console.autoScaleFor(const Size(3840, 2160), 2.0), 1.0);
+    });
+
+    test('ConsoleText scales up for desktop readability', () {
+      expect(ConsoleText.cardTitle.fontSize, 16);
+      expect(ConsoleText.body.fontSize, 14);
+      expect(ConsoleText.cardMeta.fontSize, 12);
+      expect(ConsoleText.micro.fontSize, 11.5);
+      expect(ConsoleText.chip.fontSize, 10.5);
+      expect(ConsoleText.pill.fontSize, 11);
+      expect(ConsoleText.eyebrow.fontSize, 11);
+      expect(ConsoleText.pageTitle.fontSize, 28);
+      expect(ConsoleText.counter.fontSize, 12);
+      expect(ConsoleText.railLabel.fontSize, 14);
+    });
   });
 
   group('consoleTheme', () {

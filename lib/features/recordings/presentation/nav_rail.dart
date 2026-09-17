@@ -152,7 +152,7 @@ class _Wordmark extends StatelessWidget {
               ),
               Text(
                 'augustyniak',
-                style: ConsoleText.micro.copyWith(fontSize: 10),
+                style: ConsoleText.micro,
               ),
             ],
           ),
@@ -222,7 +222,6 @@ class _RailButton extends StatelessWidget {
                 Text(
                   '${destination.count}',
                   style: ConsoleText.micro.copyWith(
-                    fontSize: 10,
                     // dimText, not dim: this carries a number the user reads.
                     // `dim` is the non-text tint and sits below the 4.5:1 floor.
                     color: selected ? Console.accent : Console.dimText,
