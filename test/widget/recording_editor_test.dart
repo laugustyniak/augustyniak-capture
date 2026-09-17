@@ -278,7 +278,7 @@ void main() {
     );
   });
 
-  testWidgets('Escape key commits pending edits and exits edit mode', (
+  testWidgets('Escape key discards pending edits and exits edit mode', (
     WidgetTester tester,
   ) async {
     final RecordingsController controller = await buildRecordingsController(
@@ -307,6 +307,6 @@ void main() {
     await settleIo(tester);
 
     expect(find.byType(RecordingEditor), findsNothing);
-    expect(controller.recordings.single.title, 'After Escape Title');
+    expect(controller.recordings.single.title, 'Before Escape');
   });
 }

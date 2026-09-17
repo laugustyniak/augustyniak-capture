@@ -262,13 +262,17 @@ class _RecordingEditorState extends State<RecordingEditor> {
   }
 
   /// Commits whatever is still pending, then hands control back. Reached by the
-  /// DONE button and by Escape.
+  /// DONE button.
   void _finish() {
     _commitTitle();
     _commitSummary();
     _commitText();
     widget.onDone();
   }
+
+  /// Leaves edit mode without committing the text field that is still pending.
+  /// Fields already settled by blur or an explicit tap remain persisted.
+  void _cancel() => widget.onDone();
 
   @override
   Widget build(BuildContext context) {
@@ -277,7 +281,7 @@ class _RecordingEditorState extends State<RecordingEditor> {
 
     return CallbackShortcuts(
       bindings: <ShortcutActivator, VoidCallback>{
-        const SingleActivator(LogicalKeyboardKey.escape): _finish,
+        const SingleActivator(LogicalKeyboardKey.escape): _cancel,
       },
       // The binding above reacts only while focus is inside this subtree, and
       // opening the editor moves focus nowhere: the pencil is in the *card*,
