@@ -23,16 +23,18 @@ Postgres and Storage while preserving offline-first capture.
 
 ## Completed PRs
 
-- [ ] Auth/config foundation (current branch)
+- [x] Auth/config foundation (#188)
+- [ ] Google sign-in and account state (current branch)
 
 ## Next Steps
 
-1. Add Google sign-in and account state without gating local capture.
-2. Add versioned Postgres schema, grants and RLS policies.
-3. Replace pull-and-replace sync with an outbox, revisions and tombstones.
-4. Move media to private Storage with resumable, hash-verified transfers.
+1. Add versioned Postgres schema, grants and RLS policies.
+2. Replace pull-and-replace sync with an outbox, revisions and tombstones.
+3. Move media to private Storage with resumable, hash-verified transfers.
+4. Add the one-time, hash-verified local-library migration.
 
 ## Blockers
 
-- A Supabase project and Google OAuth client configuration are required before
-  live sign-in verification.
+- Google must be enabled in Supabase Auth, and
+  `ai.augustyniak.capture://login-callback/` must be allow-listed, before live
+  sign-in verification.

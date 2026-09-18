@@ -9,12 +9,31 @@ class SupabaseConfig {
   static const String _publishableKey = String.fromEnvironment(
     'SUPABASE_PUBLISHABLE_KEY',
   );
+  static const String _nextPublicUrl = String.fromEnvironment(
+    'NEXT_PUBLIC_SUPABASE_URL',
+  );
+  static const String _nextPublicPublishableKey = String.fromEnvironment(
+    'NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY',
+  );
 
   final String url;
   final String publishableKey;
 
-  static SupabaseConfig? fromEnvironment() =>
-      parse(url: _url, publishableKey: _publishableKey);
+  static SupabaseConfig? fromEnvironment() => resolve(
+    url: _url,
+    publishableKey: _publishableKey,
+    nextPublicUrl: _nextPublicUrl,
+    nextPublicPublishableKey: _nextPublicPublishableKey,
+  );
+
+  static SupabaseConfig? resolve({
+    required String url,
+    required String publishableKey,
+    required String nextPublicUrl,
+    required String nextPublicPublishableKey,
+  }) =>
+      parse(url: url, publishableKey: publishableKey) ??
+      parse(url: nextPublicUrl, publishableKey: nextPublicPublishableKey);
 
   static SupabaseConfig? parse({
     required String url,

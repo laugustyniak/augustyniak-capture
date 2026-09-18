@@ -11,6 +11,7 @@ import 'package:path/path.dart' as p;
 import '../../../app/ui_kit.dart';
 import '../../../app/version_footer.dart';
 import '../../../core/database/app_database.dart';
+import '../../auth/presentation/auth_controller.dart';
 import '../../backup/data/file_picker_archive_location.dart';
 import '../../backup/data/zip_capture_archive.dart';
 import '../../backup/domain/capture_archive.dart';
@@ -99,7 +100,12 @@ import 'text_note_sheet.dart';
 /// recordings controller in sync with settings; every tab body lives in its own
 /// file.
 class RecordingsPage extends StatefulWidget {
-  const RecordingsPage({super.key, this.themeMode, this.textScale});
+  const RecordingsPage({
+    super.key,
+    this.themeMode,
+    this.textScale,
+    this.authController,
+  });
 
   /// Where the shell publishes the persisted theme so `AugustyniakCaptureApp`,
   /// which sits *above* this page, can read it. Write-only from here.
@@ -112,6 +118,8 @@ class RecordingsPage extends StatefulWidget {
   /// Where the shell publishes the persisted text and font scale so
   /// `AugustyniakCaptureApp` can apply it to `MediaQuery.textScaler`.
   final ValueNotifier<double>? textScale;
+
+  final AuthController? authController;
 
   @override
   State<RecordingsPage> createState() => _RecordingsPageState();
@@ -1052,6 +1060,7 @@ class _RecordingsPageState extends State<RecordingsPage>
                                 ConsolePageWidth(
                                   child: ConfigTab(
                                     controller: settings,
+                                    authController: widget.authController,
                                     recordingsController: controller,
                                     storagePath: storagePath,
                                     recordingsCount:

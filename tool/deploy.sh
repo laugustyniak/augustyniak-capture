@@ -196,10 +196,11 @@ PY
 Type=Application
 Name=$display_name
 Comment=$(sed -n 's/^description: //p' pubspec.yaml | head -1)
-Exec=$opt_dir/$binary_name
+Exec=$opt_dir/$binary_name %u
 Icon=$application_id
 Terminal=false
 Categories=AudioVideo;Audio;Recorder;
+MimeType=x-scheme-handler/$application_id;
 StartupWMClass=$application_id
 EOF
 

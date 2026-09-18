@@ -28,6 +28,7 @@ Future<void> main() async {
   }
 
   final SupabaseConfig? supabase = SupabaseConfig.fromEnvironment();
+  SupabaseClient? supabaseClient;
   if (supabase != null) {
     final SecureAuthStorage authStorage = SecureAuthStorage();
     try {
@@ -41,6 +42,7 @@ Future<void> main() async {
         ),
         debug: false,
       );
+      supabaseClient = Supabase.instance.client;
     } catch (error) {
       // Authentication is optional. A bad endpoint or unavailable keyring may
       // disable cloud access, but must never prevent local capture from opening.
@@ -50,5 +52,5 @@ Future<void> main() async {
     }
   }
 
-  runApp(AugustyniakCaptureApp());
+  runApp(AugustyniakCaptureApp(supabaseClient: supabaseClient));
 }

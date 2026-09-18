@@ -5,6 +5,8 @@ import '../../../core/sync/cloud_sync_coordinator.dart';
 import '../../../core/sync/r2_media_sync_service.dart';
 import '../../../core/sync/sync_defaults.dart';
 import '../../../core/sync/sync_endpoint.dart';
+import '../../auth/presentation/account_section.dart';
+import '../../auth/presentation/auth_controller.dart';
 import '../../costs/domain/model_price.dart';
 import '../../costs/domain/price_book.dart';
 import '../../costs/domain/usage_event.dart';
@@ -47,6 +49,7 @@ class ConfigTab extends StatefulWidget {
   const ConfigTab({
     super.key,
     required this.controller,
+    this.authController,
     this.recordingsController,
     required this.storagePath,
     required this.recordingsCount,
@@ -81,6 +84,7 @@ class ConfigTab extends StatefulWidget {
   static void _noRateChange(String key, ModelPrice? price) {}
 
   final SettingsController controller;
+  final AuthController? authController;
   final RecordingsController? recordingsController;
   final String? storagePath;
   final int recordingsCount;
@@ -555,6 +559,8 @@ class _ConfigTabState extends State<ConfigTab> {
       widget.controller.settings.r2SecretAccessKey,
     );
     return <Widget>[
+      AccountSection(controller: widget.authController),
+      const SizedBox(height: 22),
       SectionHeader(title: 'CLOUD SYNC'),
       const SizedBox(height: 12),
       ConsoleCard(
