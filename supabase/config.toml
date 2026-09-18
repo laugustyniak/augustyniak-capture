@@ -5,6 +5,7 @@ project_id = "augustyniak-capture"
 
 [auth]
 additional_redirect_urls = ["ai.augustyniak.capture://login-callback/"]
+enable_signup = false
 
 [auth.external.google]
 enabled = true

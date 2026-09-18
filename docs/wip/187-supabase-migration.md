@@ -27,6 +27,7 @@ Postgres and Storage while preserving offline-first capture.
 - [x] Google sign-in and account state (current branch)
 - [x] Link Supabase CLI and deploy the native callback allow-list
 - [x] Configure and enable the Google provider in hosted Supabase Auth
+- [x] Verify the first Google account and disable new user sign-ups
 
 ## Next Steps
 
@@ -35,8 +36,8 @@ Postgres and Storage while preserving offline-first capture.
 3. Move media to private Storage with resumable, hash-verified transfers.
 4. Add the one-time, hash-verified local-library migration.
 
-## Remaining live verification
+## Verified account state
 
-- Complete one Google login in the installed desktop app and record the
-  resulting owner UUID. New sign-ups can be disabled after that first account
-  exists.
+- Hosted Auth contains exactly one Google user with a durable UUID. New user
+  sign-ups are disabled; that UUID will be the owner for the one-time local
+  library migration.

@@ -20,6 +20,7 @@ void main() {
       contains('"ai.augustyniak.capture://login-callback/"'),
     );
     expect(config, contains('[auth.external.google]'));
+    expect(config, contains('enable_signup = false'));
     expect(config, contains('enabled = true'));
     expect(
       config,
