@@ -33,11 +33,13 @@ class _MemoryRepo extends RecordingsRepository {
 
 class _GatedTranscriptionService implements TranscriptionService {
   final Completer<void> gate = Completer<void>();
+  final Completer<void> started = Completer<void>();
   bool called = false;
 
   @override
   Future<String> transcribe(File audioFile) async {
     called = true;
+    started.complete();
     await gate.future;
     return 'LATE TRANSCRIPTION RESULT';
   }
@@ -45,11 +47,13 @@ class _GatedTranscriptionService implements TranscriptionService {
 
 class _GatedOcrService implements OcrService {
   final Completer<void> gate = Completer<void>();
+  final Completer<void> started = Completer<void>();
   bool called = false;
 
   @override
   Future<String> extractText(File image) async {
     called = true;
+    started.complete();
     await gate.future;
     return 'LATE OCR RESULT';
   }
@@ -159,7 +163,7 @@ void main() {
 
     // Trigger processing
     await controller.retryTranscription('rec_transcribing');
-    await pumpEventQueue();
+    await gated.started.future;
 
     // Wait until gated transcribe is actively called
     expect(gated.called, isTrue);
@@ -179,7 +183,7 @@ void main() {
 
     // Let late HTTP / transcription response complete
     gated.gate.complete();
-    await pumpEventQueue();
+    await controller.waitForProcessing();
 
     // Late arrival must not overwrite the failed status or populate transcript
     final Recording afterLate = controller.recordings.single;
@@ -211,7 +215,7 @@ void main() {
 
     // Start OCR processing
     await controller.retryTranscription('rec_ocr');
-    await pumpEventQueue();
+    await gatedOcr.started.future;
 
     expect(gatedOcr.called, isTrue);
     expect(controller.processingElapsedFor('rec_ocr'), isNotNull);
@@ -225,7 +229,7 @@ void main() {
 
     // Unblock late response
     gatedOcr.gate.complete();
-    await pumpEventQueue();
+    await controller.waitForProcessing();
 
     // Source image file must remain intact on disk
     expect(imageFile.existsSync(), isTrue);
@@ -246,10 +250,10 @@ void main() {
     await controller.initialize();
 
     await controller.retryTranscription('rec_retry');
-    await pumpEventQueue();
+    await gated.started.future;
     await controller.cancelProcessing('rec_retry');
     gated.gate.complete();
-    await pumpEventQueue();
+    await controller.waitForProcessing();
 
     expect(controller.recordings.single.status, RecordingStatus.failed);
     expect(controller.recordings.single.error, 'Cancelled by user');

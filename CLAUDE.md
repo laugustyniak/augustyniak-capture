@@ -52,6 +52,19 @@ in the repo.
 
 - Run: `flutter run`
 - Run with transcription token: `flutter run --dart-define=TRANSCRIPTION_TOKEN=secret`
+- Run with the optional Supabase authentication foundation:
+
+  ```bash
+  flutter run \
+    --dart-define=SUPABASE_URL=https://your-project.supabase.co \
+    --dart-define=SUPABASE_PUBLISHABLE_KEY=sb_publishable_…
+  ```
+
+  These two values are public client configuration, not secrets. Never pass a
+  database password, `service_role`, Supabase secret key or provider-wide API
+  key to the app. Without both values Supabase is not initialized and local
+  capture behaves exactly as before. Persisted sessions and PKCE verifiers use
+  the OS keyring rather than Supabase's Shared Preferences defaults.
 - Run pre-paired to your own cloud sync (all optional, and **never** committed — see `SyncDefaults` below):
 
   ```bash
@@ -75,7 +88,7 @@ CI is **live** (`.github/workflows/ci.yml`) and runs `flutter analyze` + `flutte
 
 ## Architecture
 
-Feature-first layout under `lib/features/<feature>/{domain,data,presentation}`. Fifteen features: `recordings`, `projects`, `transcription`, `processing`, `enrichment`, `settings`, `costs`, `logs`, `shortcuts`, `timer`, `clipboard`, `gamification`, `momentum`, `backup`, `command`. No state-management or DI package — plain `ChangeNotifier` + constructor injection. The one thing that is not feature-scoped is `core/database/app_database.dart` — see Persistence.
+Feature-first layout under `lib/features/<feature>/{domain,data,presentation}`. Sixteen features: `recordings`, `projects`, `transcription`, `processing`, `enrichment`, `settings`, `costs`, `logs`, `shortcuts`, `timer`, `clipboard`, `gamification`, `momentum`, `backup`, `command`, `auth`. No state-management or DI package — plain `ChangeNotifier` + constructor injection. The one thing that is not feature-scoped is `core/database/app_database.dart` — see Persistence.
 
 **Deep reference lives under `docs/`, one file per area.** This file carries the invariants — the ordering rules, the durability rules and the seams. Open the matching reference before changing anything in its area; each is written to be read whole.
 
@@ -148,6 +161,7 @@ Fifteen, each a line and a pointer. Read the pointer before changing anything in
 - **`timer`** / **`momentum`** — a Pomodoro countdown, and append-only logs of the sessions that reached zero and the captures that left the desk. Time is read from the clock, never accumulated. `docs/architecture/timer-momentum.md`.
 - **`gamification`** — entirely cosmetic by construction: a nullable seam, every call site `unawaited`, and nothing it does can reach `status`, a source file or the index. Treat any change that gives it a say in the pipeline as a bug. `docs/architecture/timer-momentum.md`.
 - **`logs`** — a `ChangeNotifier` ring buffer, newest-first, capacity 500. Read-only view; nothing in the Logs tab mutates recordings.
+- **`auth`** — optional Supabase bootstrap and OS-keyring session storage. Missing config or an unavailable keyring never blocks local capture. Issue #187 tracks the staged replacement of Turso/R2; no cloud-data transport belongs here yet.
 
 Not feature-scoped: `core/database/app_database.dart` (see Persistence), `core/http/provider_failure.dart`, `core/sync/`.
 

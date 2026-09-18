@@ -38,6 +38,7 @@ dependencies:
   aws_signature_v4: ^0.6.13
   package_info_plus: ^9.0.1
   url_launcher: ^6.3.2
+  supabase_flutter: ^2.17.2
 
 dev_dependencies:
   flutter_test:
