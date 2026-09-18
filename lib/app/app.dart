@@ -1,7 +1,10 @@
 import 'package:flutter/material.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 
 import 'ui_kit.dart';
 
+import '../features/auth/data/supabase_auth_gateway.dart';
+import '../features/auth/presentation/auth_controller.dart';
 import '../features/recordings/presentation/recordings_page.dart';
 import '../features/settings/domain/app_settings.dart';
 import '../features/settings/domain/app_theme_mode.dart';
@@ -15,7 +18,9 @@ import '../features/settings/domain/app_theme_mode.dart';
 /// every settings change, and this widget is the only reader. One direction
 /// only, so there is no second source of truth to keep in step.
 class AugustyniakCaptureApp extends StatefulWidget {
-  const AugustyniakCaptureApp({super.key});
+  const AugustyniakCaptureApp({super.key, this.supabaseClient});
+
+  final SupabaseClient? supabaseClient;
 
   @override
   State<AugustyniakCaptureApp> createState() => _AugustyniakCaptureAppState();
@@ -31,9 +36,20 @@ class _AugustyniakCaptureAppState extends State<AugustyniakCaptureApp> {
   final ValueNotifier<double> _textScale = ValueNotifier<double>(
     AppSettings.defaultTextScale,
   );
+  AuthController? _authController;
+
+  @override
+  void initState() {
+    super.initState();
+    if (widget.supabaseClient case final SupabaseClient client) {
+      _authController = AuthController(SupabaseAuthGateway(client))
+        ..initialize();
+    }
+  }
 
   @override
   void dispose() {
+    _authController?.dispose();
     _themeMode.dispose();
     _textScale.dispose();
     super.dispose();
@@ -93,7 +109,11 @@ class _AugustyniakCaptureAppState extends State<AugustyniakCaptureApp> {
               child: child,
             );
           },
-          home: RecordingsPage(themeMode: _themeMode, textScale: _textScale),
+          home: RecordingsPage(
+            themeMode: _themeMode,
+            textScale: _textScale,
+            authController: _authController,
+          ),
         );
       },
     );
