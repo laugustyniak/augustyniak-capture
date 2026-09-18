@@ -4,7 +4,7 @@
 
 ## Current Branch
 
-`feat/187-supabase-auth-foundation`
+`feat/187-google-login`
 
 ## Context
 
@@ -24,7 +24,8 @@ Postgres and Storage while preserving offline-first capture.
 ## Completed PRs
 
 - [x] Auth/config foundation (#188)
-- [ ] Google sign-in and account state (current branch)
+- [x] Google sign-in and account state (current branch)
+- [x] Link Supabase CLI and deploy the native callback allow-list
 
 ## Next Steps
 
@@ -35,6 +36,7 @@ Postgres and Storage while preserving offline-first capture.
 
 ## Blockers
 
-- Google must be enabled in Supabase Auth, and
-  `ai.augustyniak.capture://login-callback/` must be allow-listed, before live
-  sign-in verification.
+- A Google Auth Platform client of type Web application must be created with
+  `https://twumuqcqnkwfgwrrxmtl.supabase.co/auth/v1/callback` as its authorized
+  redirect URI. Its ID and secret must then be applied to Supabase Auth before
+  live sign-in verification.

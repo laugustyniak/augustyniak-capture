@@ -177,8 +177,10 @@ Global shortcuts on **Linux** additionally need `sudo apt-get install keybinder-
 ## Supabase OAuth callback
 
 Native Google login returns to
-`ai.augustyniak.capture://login-callback/`. Add that exact URI to the Supabase
-Auth redirect allow list. Android registers the scheme in its manifest; iOS and
+`ai.augustyniak.capture://login-callback/`. The exact URI is declared in the
+sparse `supabase/config.toml` and deployed with `supabase config push`; run
+`supabase config diff` first so unrelated hosted settings remain untouched.
+Android registers the scheme in its manifest; iOS and
 macOS use `CFBundleURLTypes`; Windows registers the current executable under the
 user's URL-protocol registry on launch. The Linux runner accepts URL arguments,
 and `tool/deploy.sh` publishes the corresponding `x-scheme-handler` in the

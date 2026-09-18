@@ -13,6 +13,14 @@ void main() {
     );
   });
 
+  test('Supabase allows the exact native OAuth callback', () {
+    final String config = read('supabase/config.toml');
+    expect(
+      config,
+      contains('"ai.augustyniak.capture://login-callback/"'),
+    );
+  });
+
   test('Android, iOS and macOS register the OAuth callback scheme', () {
     final String android = read('android/app/src/main/AndroidManifest.xml');
     expect(android, contains('android:scheme="ai.augustyniak.capture"'));
