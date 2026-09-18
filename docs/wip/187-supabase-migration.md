@@ -26,6 +26,7 @@ Postgres and Storage while preserving offline-first capture.
 - [x] Auth/config foundation (#188)
 - [x] Google sign-in and account state (current branch)
 - [x] Link Supabase CLI and deploy the native callback allow-list
+- [x] Configure and enable the Google provider in hosted Supabase Auth
 
 ## Next Steps
 
@@ -34,9 +35,8 @@ Postgres and Storage while preserving offline-first capture.
 3. Move media to private Storage with resumable, hash-verified transfers.
 4. Add the one-time, hash-verified local-library migration.
 
-## Blockers
+## Remaining live verification
 
-- A Google Auth Platform client of type Web application must be created with
-  `https://twumuqcqnkwfgwrrxmtl.supabase.co/auth/v1/callback` as its authorized
-  redirect URI. Its ID and secret must then be applied to Supabase Auth before
-  live sign-in verification.
+- Complete one Google login in the installed desktop app and record the
+  resulting owner UUID. New sign-ups can be disabled after that first account
+  exists.

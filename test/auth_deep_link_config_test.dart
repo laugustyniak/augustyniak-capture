@@ -19,6 +19,12 @@ void main() {
       config,
       contains('"ai.augustyniak.capture://login-callback/"'),
     );
+    expect(config, contains('[auth.external.google]'));
+    expect(config, contains('enabled = true'));
+    expect(
+      config,
+      contains('secret = "env(SUPABASE_AUTH_EXTERNAL_GOOGLE_CREDENTIAL)"'),
+    );
   });
 
   test('Android, iOS and macOS register the OAuth callback scheme', () {

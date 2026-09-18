@@ -5,3 +5,9 @@ project_id = "augustyniak-capture"
 
 [auth]
 additional_redirect_urls = ["ai.augustyniak.capture://login-callback/"]
+
+[auth.external.google]
+enabled = true
+client_id = "env(SUPABASE_AUTH_EXTERNAL_GOOGLE_CLIENT_ID)"
+secret = "env(SUPABASE_AUTH_EXTERNAL_GOOGLE_CREDENTIAL)"
+skip_nonce_check = false
