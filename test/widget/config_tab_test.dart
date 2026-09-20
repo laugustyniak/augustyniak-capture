@@ -1,6 +1,12 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:augustyniak_capture/app/ui_kit.dart';
 import 'package:augustyniak_capture/core/sync/cloud_sync_coordinator.dart';
+import 'package:augustyniak_capture/features/auth/domain/auth_gateway.dart';
+import 'package:augustyniak_capture/features/auth/domain/auth_identity.dart';
+import 'package:augustyniak_capture/features/auth/presentation/auth_controller.dart';
 import 'package:augustyniak_capture/features/projects/domain/project.dart';
 import 'package:augustyniak_capture/features/settings/domain/app_settings.dart';
 import 'package:augustyniak_capture/features/settings/domain/app_theme_mode.dart';
@@ -11,6 +17,27 @@ import 'package:augustyniak_capture/features/settings/presentation/settings_cont
 import 'package:augustyniak_capture/features/recordings/presentation/recordings_controller.dart';
 
 import '../support/harness.dart';
+
+/// Same shape as `test/widget/account_section_test.dart`'s fake — duplicated
+/// rather than imported because it is library-private there.
+class _FakeAuthGateway implements AuthGateway {
+  _FakeAuthGateway({this.currentIdentity});
+
+  @override
+  AuthIdentity? currentIdentity;
+
+  final StreamController<AuthIdentity?> changes =
+      StreamController<AuthIdentity?>.broadcast();
+
+  @override
+  Stream<AuthIdentity?> get identityChanges => changes.stream;
+
+  @override
+  Future<bool> signInWithGoogle() async => true;
+
+  @override
+  Future<void> signOut() async {}
+}
 
 /// Guards the Config form before its `ChoiceChip` styling and `InputDecoration`
 /// move into a shared theme — the latter is a known visual change, so the
@@ -29,6 +56,7 @@ void main() {
     bool showShortcuts = false,
     RecordingsController? recordingsController,
     ConfigCategory initialCategory = ConfigCategory.general,
+    AuthController? authController,
   }) async {
     tester.view.physicalSize = const Size(1000, 3200);
     tester.view.devicePixelRatio = 1;
@@ -37,6 +65,7 @@ void main() {
       hostTab(
         () => ConfigTab(
           controller: controller,
+          authController: authController,
           recordingsController: recordingsController,
           storagePath: '/tmp/recordings',
           recordingsCount: 3,
@@ -321,7 +350,7 @@ void main() {
     // Starts on GENERAL
     expect(find.text('APPEARANCE'), findsOneWidget);
     expect(find.text('AUDIO CAPTURE'), findsNothing);
-    expect(find.text('TURSO CLOUD SYNC'), findsNothing);
+    expect(find.text('LEGACY SYNC'), findsNothing);
     expect(find.text('STORAGE'), findsNothing);
 
     // Switch to CAPTURE & AI
@@ -333,14 +362,14 @@ void main() {
     // Switch to SYNC & CLOUD
     await tester.tap(find.text('SYNC & CLOUD'));
     await tester.pumpAndSettle();
-    expect(find.text('TURSO CLOUD SYNC'), findsOneWidget);
+    expect(find.text('LEGACY SYNC'), findsOneWidget);
     expect(find.text('AUDIO CAPTURE'), findsNothing);
 
     // Switch to DATA & COSTS
     await tester.tap(find.text('DATA & COSTS'));
     await tester.pumpAndSettle();
     expect(find.text('ARCHIVE'), findsOneWidget);
-    expect(find.text('TURSO CLOUD SYNC'), findsNothing);
+    expect(find.text('LEGACY SYNC'), findsNothing);
   });
 
   testWidgets('one sync action covers configured Turso and R2', (
@@ -364,7 +393,7 @@ void main() {
     await pumpConfig(tester, controller, initialCategory: ConfigCategory.sync);
 
     expect(find.text('SYNC NOW'), findsOneWidget);
-    expect(find.text('CONFIGURED · Not tested'), findsNWidgets(2));
+    expect(find.text('CONFIGURED · Ready'), findsNWidgets(2));
     expect(find.textContaining('101/101'), findsNothing);
     expect(find.textContaining('aws-us-east-1'), findsNothing);
   });
@@ -467,6 +496,111 @@ void main() {
       isNull,
     );
   });
+
+  testWidgets('the header trailing reads local only with no account', (
+    WidgetTester tester,
+  ) async {
+    final SettingsController controller = buildSettingsController();
+    await controller.initialize();
+    await pumpConfig(tester, controller);
+
+    expect(find.text('local only'), findsOneWidget);
+  });
+
+  testWidgets(
+    'the header trailing follows the signed-in account, not a literal',
+    (WidgetTester tester) async {
+      // The defect this pins: the header used to say `local only`
+      // unconditionally while the account card said SIGNED IN right below it.
+      final _FakeAuthGateway gateway = _FakeAuthGateway(
+        currentIdentity: const AuthIdentity(
+          id: 'owner-id',
+          email: 'owner@example.com',
+        ),
+      );
+      final AuthController auth = AuthController(gateway)..initialize();
+      addTearDown(auth.dispose);
+      addTearDown(gateway.changes.close);
+
+      final SettingsController controller = buildSettingsController();
+      await controller.initialize();
+      await pumpConfig(tester, controller, authController: auth);
+
+      expect(find.text('owner@example.com'), findsOneWidget);
+      expect(find.text('local only'), findsNothing);
+
+      // Signing out — an identity change `ConfigTab` was not previously
+      // listening for at all, since `AuthController` is not part of the
+      // shell's merged `Listenable`.
+      gateway.changes.add(null);
+      // A broadcast stream event needs a microtask turn to be delivered.
+      await tester.pump();
+      await tester.pump();
+
+      expect(find.text('local only'), findsOneWidget);
+      expect(find.text('owner@example.com'), findsNothing);
+    },
+  );
+
+  testWidgets(
+    'the QR pairing button belongs to the legacy section, not the R2 card',
+    (WidgetTester tester) async {
+      // It used to be `Expanded(child: ElevatedButton...)` inside the R2
+      // card's own `Column`, which made a Turso-only install's pairing
+      // button look like an R2-specific feature.
+      final SettingsController controller = buildSettingsController();
+      await controller.initialize();
+      await pumpConfig(tester, controller, initialCategory: ConfigCategory.sync);
+
+      final Finder qrButton = find.widgetWithText(
+        ElevatedButton,
+        'PAIR DEVICE VIA QR CODE',
+      );
+      expect(qrButton, findsOneWidget);
+
+      final Finder r2Card = find.ancestor(
+        of: find.text('CLOUDFLARE R2'),
+        matching: find.byType(ConsoleCard),
+      );
+      expect(r2Card, findsOneWidget);
+      expect(
+        find.descendant(of: r2Card, matching: qrButton),
+        findsNothing,
+        reason: 'pairing configures both Turso and R2, so it cannot live '
+            'inside the card for just one of them',
+      );
+
+      // Below both provider cards, not between the account and the section.
+      final double qrTop = tester.getTopLeft(qrButton).dy;
+      final double r2Bottom = tester.getBottomLeft(r2Card).dy;
+      expect(qrTop, greaterThanOrEqualTo(r2Bottom));
+    },
+  );
+
+  testWidgets(
+    'Turso and R2 read as one demoted section under the Supabase account',
+    (WidgetTester tester) async {
+      final SettingsController controller = buildSettingsController();
+      await controller.initialize();
+      await pumpConfig(tester, controller, initialCategory: ConfigCategory.sync);
+
+      // One page-level header for both providers, not three peer headers.
+      expect(find.text('LEGACY SYNC'), findsOneWidget);
+      expect(find.text('CLOUD SYNC'), findsNothing);
+      expect(find.text('TURSO CLOUD SYNC'), findsNothing);
+      expect(find.text('CLOUDFLARE R2 MEDIA SYNC'), findsNothing);
+      // Demoted to in-card labels instead.
+      expect(find.text('TURSO'), findsOneWidget);
+      expect(find.text('CLOUDFLARE R2'), findsOneWidget);
+      // The account card is still the first thing on the sub-tab.
+      expect(find.text('SUPABASE ACCOUNT'), findsOneWidget);
+      final double accountTop = tester
+          .getTopLeft(find.text('SUPABASE ACCOUNT'))
+          .dy;
+      final double legacyTop = tester.getTopLeft(find.text('LEGACY SYNC')).dy;
+      expect(accountTop, lessThan(legacyTop));
+    },
+  );
 
   test('a credential change invalidates the last sync report', () {
     const AppSettings synced = AppSettings(

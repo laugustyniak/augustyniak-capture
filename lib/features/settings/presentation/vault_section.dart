@@ -202,11 +202,7 @@ class _VaultSectionState extends State<VaultSection> {
                       'matter — for Obsidian, a synced folder, or a notes '
                       'repository. The queue stays the original; this is a '
                       'copy, and deleting one here never touches the other.',
-                      style: TextStyle(
-                        color: Console.mutedSoft,
-                        fontSize: 10,
-                        height: 1.45,
-                      ),
+                      style: ConsoleText.hint,
                     ),
                   ),
                   const SizedBox(width: 10),
@@ -219,7 +215,7 @@ class _VaultSectionState extends State<VaultSection> {
                 ],
               ),
               const SizedBox(height: 12),
-              _FieldLabel(text: 'VAULT DIRECTORY'),
+              Text('VAULT DIRECTORY', style: ConsoleText.fieldLabel),
               const SizedBox(height: 6),
               ConsoleField(
                 controller: _path,
@@ -243,14 +239,10 @@ class _VaultSectionState extends State<VaultSection> {
               Text(
                 'Leave it empty to mirror nothing. Nothing is written until a '
                 'capture finishes processing.',
-                style: TextStyle(
-                  color: Console.mutedSoft,
-                  fontSize: 10,
-                  height: 1.45,
-                ),
+                style: ConsoleText.hint,
               ),
               const SizedBox(height: 12),
-              _FieldLabel(text: 'SUBFOLDER'),
+              Text('SUBFOLDER', style: ConsoleText.fieldLabel),
               const SizedBox(height: 6),
               ConsoleField(
                 controller: _folder,
@@ -295,7 +287,7 @@ class _VaultSectionState extends State<VaultSection> {
                 ErrorBanner(message: _pickerError!),
               ],
               Divider(color: Console.border, height: 26),
-              _FieldLabel(text: 'SOURCE FILES'),
+              Text('SOURCE FILES', style: ConsoleText.fieldLabel),
               const SizedBox(height: 7),
               Wrap(
                 spacing: 8,
@@ -323,11 +315,7 @@ class _VaultSectionState extends State<VaultSection> {
                           'vault grows by the full size of every capture.'
                     : 'Only the text is copied. The note names its source file '
                           'but the media stays where the app keeps it.',
-                style: TextStyle(
-                  color: Console.mutedSoft,
-                  fontSize: 10,
-                  height: 1.45,
-                ),
+                style: ConsoleText.hint,
               ),
               Divider(color: Console.border, height: 26),
               InfoRow(
@@ -369,11 +357,7 @@ class _VaultSectionState extends State<VaultSection> {
                 'later updates the file instead of adding a second one. Once '
                 'you edit a note in the vault the app stops rewriting it — the '
                 'edit wins, and the Logs tab says which note was left alone.',
-                style: TextStyle(
-                  color: Console.mutedSoft,
-                  fontSize: 10,
-                  height: 1.45,
-                ),
+                style: ConsoleText.hint,
               ),
               const SizedBox(height: 12),
               Row(
@@ -437,24 +421,4 @@ class _VaultSectionState extends State<VaultSection> {
     ];
     return parts.join(' · ');
   }
-}
-
-/// The same 9 px all-caps label the choice rows in `ConfigTab` use. Declared
-/// here rather than shared because that one is private to the tab, and a
-/// non-const constructor is required either way — it paints the palette.
-class _FieldLabel extends StatelessWidget {
-  _FieldLabel({required this.text});
-
-  final String text;
-
-  @override
-  Widget build(BuildContext context) => Text(
-    text,
-    style: TextStyle(
-      color: Console.muted,
-      fontSize: 9,
-      fontWeight: FontWeight.w800,
-      letterSpacing: .6,
-    ),
-  );
 }

@@ -37,6 +37,10 @@ class _AccountCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final AuthIdentity? identity = controller.identity;
     return ConsoleCard(
+      // The primary cloud block once signed in — same accent-on-active
+      // treatment the Capture & AI tab's transcription card uses, so the two
+      // "this is the thing that matters" cards read the same way.
+      accent: identity == null ? Console.border : Console.accent,
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: <Widget>[

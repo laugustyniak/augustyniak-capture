@@ -88,67 +88,81 @@ class _BackupSectionState extends State<BackupSection> {
 
   @override
   Widget build(BuildContext context) {
-    return ConsoleCard(
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: <Widget>[
-          SectionHeader(title: 'ARCHIVE'),
-          const SizedBox(height: 10),
-          Text(
-            'A zip of every capture, its source file and the text that was '
-            'made from it. On a phone the recordings live inside the app '
-            'container, which a reinstall deletes — this is the only copy that '
-            'survives that.',
-            style: ConsoleText.micro,
-          ),
-          const SizedBox(height: 6),
-          Text(
-            'Importing only adds: a capture already here is left untouched, and '
-            'no file is overwritten. Provider tokens are never exported.',
-            style: ConsoleText.micro,
-          ),
-          const SizedBox(height: 14),
-          Wrap(
-            spacing: 10,
-            runSpacing: 6,
+    // Header now sits above the card like every other Config section
+    // (`VaultSection`, `MomentumSection`, `ShortcutsSection`) instead of
+    // inside its border, which is where this one used to sit alone.
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: <Widget>[
+        SectionHeader(title: 'ARCHIVE'),
+        const SizedBox(height: 12),
+        ConsoleCard(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
             children: <Widget>[
-              TextButton.icon(
-                onPressed: _busy || widget.onExport == null ? null : _export,
-                icon: const Icon(Icons.archive_outlined, size: 17),
-                label: const Text('EXPORT ARCHIVE'),
+              Text(
+                'A zip of every capture, its source file and the text that '
+                'was made from it. On a phone the recordings live inside the '
+                'app container, which a reinstall deletes — this is the only '
+                'copy that survives that.',
+                style: ConsoleText.micro,
               ),
-              TextButton.icon(
-                onPressed: _busy || widget.onImport == null ? null : _import,
-                icon: const Icon(Icons.unarchive_outlined, size: 17),
-                label: const Text('IMPORT ARCHIVE'),
+              const SizedBox(height: 6),
+              Text(
+                'Importing only adds: a capture already here is left '
+                'untouched, and no file is overwritten. Provider tokens are '
+                'never exported.',
+                style: ConsoleText.micro,
               ),
+              const SizedBox(height: 14),
+              Wrap(
+                spacing: 10,
+                runSpacing: 6,
+                children: <Widget>[
+                  TextButton.icon(
+                    onPressed: _busy || widget.onExport == null
+                        ? null
+                        : _export,
+                    icon: const Icon(Icons.archive_outlined, size: 17),
+                    label: const Text('EXPORT ARCHIVE'),
+                  ),
+                  TextButton.icon(
+                    onPressed: _busy || widget.onImport == null
+                        ? null
+                        : _import,
+                    icon: const Icon(Icons.unarchive_outlined, size: 17),
+                    label: const Text('IMPORT ARCHIVE'),
+                  ),
+                ],
+              ),
+              if (_busy) ...<Widget>[
+                const SizedBox(height: 10),
+                Text('WORKING…', style: ConsoleText.micro),
+              ],
+              if (_outcome != null) ...<Widget>[
+                const SizedBox(height: 10),
+                Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: <Widget>[
+                    Expanded(
+                      child: Text(
+                        _outcome!,
+                        style: ConsoleText.micro.copyWith(
+                          color: _failed ? Console.red : Console.textSoft,
+                        ),
+                      ),
+                    ),
+                    // The destination is the one thing worth carrying
+                    // elsewhere, and it is routinely longer than the row can
+                    // show.
+                    CopyButton(text: _outcome!),
+                  ],
+                ),
+              ],
             ],
           ),
-          if (_busy) ...<Widget>[
-            const SizedBox(height: 10),
-            Text('WORKING…', style: ConsoleText.micro),
-          ],
-          if (_outcome != null) ...<Widget>[
-            const SizedBox(height: 10),
-            Row(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: <Widget>[
-                Expanded(
-                  child: Text(
-                    _outcome!,
-                    style: ConsoleText.micro.copyWith(
-                      color: _failed ? Console.red : Console.textSoft,
-                    ),
-                  ),
-                ),
-                // The destination is the one thing worth carrying elsewhere,
-                // and it is routinely longer than the row can show.
-                CopyButton(text: _outcome!),
-              ],
-            ),
-          ],
-        ],
-      ),
+        ),
+      ],
     );
   }
 }
