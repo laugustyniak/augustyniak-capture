@@ -41,3 +41,5 @@ Postgres and Storage while preserving offline-first capture.
 - Hosted Auth contains exactly one Google user with a durable UUID. New user
   sign-ups are disabled; that UUID will be the owner for the one-time local
   library migration.
+- The installed Linux build restored the signed-in Google session after a full
+  process restart, verifying OS-keyring-backed session persistence.
