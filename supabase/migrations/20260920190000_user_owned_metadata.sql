@@ -20,7 +20,9 @@
 -- slice 3; nothing here bumps it, because a server-side bump would race the
 -- client's own conflict detection. `updated_at` is the opposite: the server
 -- stamps it on insert and on update and ignores whatever the client sent, so a
--- pull cursor can trust it.
+-- client cannot backdate a row past a pull cursor. (It is transaction-start
+-- time; whether a cursor can rely on it under concurrent pushes is slice 3's
+-- question, not this file's promise.)
 
 -- ---------------------------------------------------------------------------
 -- Shared trigger functions
