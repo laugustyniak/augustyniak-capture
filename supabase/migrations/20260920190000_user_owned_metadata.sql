@@ -8,15 +8,19 @@
 --
 -- Ownership is derived from the verified session: `owner_id` defaults to
 -- `auth.uid()`, every policy checks it, and a trigger refuses to move a row to
--- another owner. Every child table references its parent through a composite
--- `(owner_id, parent_id)` key so that a foreign-key check can never confirm the
--- existence of another user's row.
+-- another owner. Every primary key is `(owner_id, id)`, never `id` alone: a
+-- global key would let one user squat an id another user later needs, and the
+-- duplicate-key error would confirm that a stranger's row exists. Every child
+-- table references its parent through the same composite key, so a foreign-key
+-- check can never confirm another user's row either.
 --
 -- Deletes are tombstones. `authenticated` is granted no `delete` at all — a row
 -- leaves the cloud by setting `deleted_at`, which is what the outbox/inbox sync
 -- (slice 3) propagates. `version` is carried by the client and compared by
 -- slice 3; nothing here bumps it, because a server-side bump would race the
--- client's own conflict detection.
+-- client's own conflict detection. `updated_at` is the opposite: the server
+-- stamps it on insert and on update and ignores whatever the client sent, so a
+-- pull cursor can trust it.
 
 -- ---------------------------------------------------------------------------
 -- Shared trigger functions
@@ -37,6 +41,8 @@ begin
 end;
 $$;
 
+-- Fires on insert as well as update, so a client cannot backdate a row past a
+-- pull cursor by supplying its own `updated_at`.
 create or replace function public.touch_updated_at()
 returns trigger
 language plpgsql
@@ -56,19 +62,21 @@ revoke all on function public.touch_updated_at() from public, anon;
 -- projects
 -- ---------------------------------------------------------------------------
 
+-- `Project` in Dart has no colour or creation time; the SQLite mirror carries
+-- both from a legacy schema and invents them. Here they are optional so the
+-- sync client never has to.
 create table public.projects (
-  id text not null,
   owner_id uuid not null default auth.uid() references auth.users (id) on delete cascade,
+  id text not null,
   name text not null,
-  color_hex text not null,
+  color_hex text,
   repository_path text,
-  created_at timestamptz not null,
+  created_at timestamptz not null default now(),
   payload jsonb,
   version bigint not null default 1,
   updated_at timestamptz not null default now(),
   deleted_at timestamptz,
-  primary key (id),
-  unique (owner_id, id)
+  primary key (owner_id, id)
 );
 
 -- ---------------------------------------------------------------------------
@@ -77,8 +85,8 @@ create table public.projects (
 -- ---------------------------------------------------------------------------
 
 create table public.recordings (
-  id text not null,
   owner_id uuid not null default auth.uid() references auth.users (id) on delete cascade,
+  id text not null,
   file_path text not null,
   duration_ms integer not null,
   size_bytes bigint not null default 0,
@@ -100,8 +108,7 @@ create table public.recordings (
   version bigint not null default 1,
   updated_at timestamptz not null default now(),
   deleted_at timestamptz,
-  primary key (id),
-  unique (owner_id, id),
+  primary key (owner_id, id),
   foreign key (owner_id, project_id)
     references public.projects (owner_id, id) on delete set null (project_id)
 );
@@ -142,8 +149,8 @@ create table public.segments (
 -- ---------------------------------------------------------------------------
 
 create table public.clipboard_items (
-  id text not null,
   owner_id uuid not null default auth.uid() references auth.users (id) on delete cascade,
+  id text not null,
   type text not null,
   text text,
   image_path text,
@@ -153,8 +160,7 @@ create table public.clipboard_items (
   version bigint not null default 1,
   updated_at timestamptz not null default now(),
   deleted_at timestamptz,
-  primary key (id),
-  unique (owner_id, id)
+  primary key (owner_id, id)
 );
 
 create index clipboard_items_owner_copied_at_idx
@@ -162,11 +168,13 @@ create index clipboard_items_owner_copied_at_idx
 
 -- ---------------------------------------------------------------------------
 -- revisions — append-only field history of a recording (`revisions.jsonl`).
--- No update policy: a revision is never edited, only written.
+-- `RecordingRevision` has no id of its own; its natural key is what makes a
+-- retried push idempotent. Insert-only: no update grant, no version, no
+-- tombstone — history rides its recording's `deleted_at`. `updated_at` is
+-- stamped on insert so a pull cursor still works.
 -- ---------------------------------------------------------------------------
 
 create table public.revisions (
-  id text not null,
   owner_id uuid not null default auth.uid() references auth.users (id) on delete cascade,
   recording_id text not null,
   at timestamptz not null,
@@ -174,25 +182,22 @@ create table public.revisions (
   from_value text,
   to_value text,
   source text not null,
-  version bigint not null default 1,
   updated_at timestamptz not null default now(),
-  deleted_at timestamptz,
-  primary key (id),
-  unique (owner_id, id),
+  primary key (owner_id, recording_id, at, field),
   foreign key (owner_id, recording_id)
     references public.recordings (owner_id, id) on delete cascade
 );
 
-create index revisions_owner_recording_idx
-  on public.revisions (owner_id, recording_id, at);
+create index revisions_owner_updated_at_idx
+  on public.revisions (owner_id, updated_at);
 
 -- ---------------------------------------------------------------------------
 -- devices — each install that has synced under this account.
 -- ---------------------------------------------------------------------------
 
 create table public.devices (
-  id text not null,
   owner_id uuid not null default auth.uid() references auth.users (id) on delete cascade,
+  id text not null,
   name text not null,
   platform text not null,
   app_version text,
@@ -201,8 +206,7 @@ create table public.devices (
   version bigint not null default 1,
   updated_at timestamptz not null default now(),
   deleted_at timestamptz,
-  primary key (id),
-  unique (owner_id, id)
+  primary key (owner_id, id)
 );
 
 -- ---------------------------------------------------------------------------
@@ -282,7 +286,7 @@ begin
     $p$, t);
     execute format($p$
       create trigger %1$s_touch_updated_at
-        before update on public.%1$I
+        before insert or update on public.%1$I
         for each row execute function public.touch_updated_at()
     $p$, t);
   end loop;
