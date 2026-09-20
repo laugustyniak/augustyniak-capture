@@ -7,7 +7,7 @@
 
 begin;
 
-select plan(66);
+select plan(68);
 
 -- Two accounts. Local GoTrue needs nothing beyond id + email to make these
 -- rows valid targets for the `owner_id` foreign key.
@@ -234,6 +234,7 @@ select pg_temp.sign_in('11111111-1111-1111-1111-111111111111');
 insert into public.projects (id, name) values ('proj-only-a', 'Only A');
 insert into public.recordings (id, file_path, duration_ms, type, status, created_at)
 values ('rec-only-a', 'a.m4a', 1, 'audioRecording', 'saved', now());
+insert into public.devices (id, name, platform) values ('dev-only-a', 'A', 'linux');
 
 select pg_temp.sign_in('22222222-2222-2222-2222-222222222222');
 
@@ -319,6 +320,14 @@ select lives_ok($$
      set title = 'Renamed', deleted_at = now(), updated_at = '2000-01-01'
    where id = 'rec'
 $$, 'the owner edits and tombstones a recording');
+
+select is(
+  (select title from public.recordings where id = 'rec'),
+  'Renamed',
+  'the owner''s edit landed');
+select ok(
+  (select deleted_at is not null from public.recordings where id = 'rec'),
+  'the owner''s tombstone landed');
 
 select is(
   (select updated_at from public.recordings where id = 'rec'),

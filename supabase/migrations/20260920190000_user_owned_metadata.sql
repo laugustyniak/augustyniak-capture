@@ -171,9 +171,13 @@ create index clipboard_items_owner_copied_at_idx
 -- ---------------------------------------------------------------------------
 -- revisions — append-only field history of a recording (`revisions.jsonl`).
 -- `RecordingRevision` has no id of its own; its natural key is what makes a
--- retried push idempotent. Insert-only: no update grant, no version, no
--- tombstone — history rides its recording's `deleted_at`. `updated_at` is
--- stamped on insert so a pull cursor still works.
+-- retried push idempotent. That assumes `at` (`DateTime.now()` per row in
+-- `capture_history.dart`) has enough resolution to tell two distinct edits of
+-- one field apart from one edit pushed twice — slice 3 must verify the clock
+-- on Windows before choosing between `insert` and `on conflict do nothing`.
+-- Insert-only: no update grant, no version, no tombstone — history rides its
+-- recording's `deleted_at`. `updated_at` is stamped on insert so a pull cursor
+-- still works.
 -- ---------------------------------------------------------------------------
 
 create table public.revisions (
