@@ -84,6 +84,7 @@ in the repo.
 
   Omit them and sync is simply unconfigured until the Config tab or a QR pairing fills it in — that is the normal state, not a degraded one. `TURSO_DB_URL` and `TURSO_AUTH_TOKEN` only count as a pair (`SyncDefaults.hasTurso`); either alone reaches nothing. Passing a secret on the command line puts it in your shell history, so prefer the Config tab or QR pairing for anything you intend to keep.
 - All tests: `flutter test`
+- Postgres schema and RLS (`supabase/migrations/`, `supabase/tests/`): `supabase start`, then `supabase db reset` applies every migration from empty and `supabase test db` runs the pgTAP suite. Never `supabase db push` to the hosted project without an explicit go-ahead — it is production Auth's neighbour.
 - Single test file: `flutter test test/recording_test.dart`
 - Single test by name: `flutter test --plain-name "legacy JSON defaults to not reviewed"`
 - Analyze/lint: `flutter analyze` (config in `analysis_options.yaml`: `flutter_lints` + `avoid_print`, `prefer_final_locals`)
