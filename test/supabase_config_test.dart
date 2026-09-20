@@ -5,6 +5,33 @@ import 'package:flutter_test/flutter_test.dart';
 
 void main() {
   group('SupabaseConfig', () {
+    test(
+      'accepts the existing NEXT_PUBLIC names when primary names are absent',
+      () {
+        final SupabaseConfig? config = SupabaseConfig.resolve(
+          url: '',
+          publishableKey: '',
+          nextPublicUrl: 'https://project.supabase.co',
+          nextPublicPublishableKey: 'sb_publishable_test',
+        );
+
+        expect(config?.url, 'https://project.supabase.co');
+        expect(config?.publishableKey, 'sb_publishable_test');
+      },
+    );
+
+    test('prefers Flutter-specific names over NEXT_PUBLIC aliases', () {
+      final SupabaseConfig? config = SupabaseConfig.resolve(
+        url: 'https://flutter.supabase.co',
+        publishableKey: 'sb_publishable_flutter',
+        nextPublicUrl: 'https://next.supabase.co',
+        nextPublicPublishableKey: 'sb_publishable_next',
+      );
+
+      expect(config?.url, 'https://flutter.supabase.co');
+      expect(config?.publishableKey, 'sb_publishable_flutter');
+    });
+
     test('is absent when both build-time values are absent', () {
       expect(SupabaseConfig.parse(url: '', publishableKey: ''), isNull);
     });

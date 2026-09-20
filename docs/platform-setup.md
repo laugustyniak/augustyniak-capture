@@ -174,6 +174,23 @@ that reason.
 
 Global shortcuts on **Linux** additionally need `sudo apt-get install keybinder-3.0` (`hotkey_manager`'s system dependency). Without it the registrar fails at runtime and the shortcuts degrade to unavailable — everything else still works.
 
+## Supabase OAuth callback
+
+Native Google login returns to
+`ai.augustyniak.capture://login-callback/`. The exact URI is declared in the
+sparse `supabase/config.toml` and deployed with `supabase config push`; run
+`supabase config diff` first so unrelated hosted settings remain untouched.
+Google's client ID and secret are injected into that command through
+`SUPABASE_AUTH_EXTERNAL_GOOGLE_CLIENT_ID` and
+`SUPABASE_AUTH_EXTERNAL_GOOGLE_CREDENTIAL`; neither value belongs in the tracked
+configuration or Flutter's `.env.local` defines file.
+Android registers the scheme in its manifest; iOS and
+macOS use `CFBundleURLTypes`; Windows registers the current executable under the
+user's URL-protocol registry on launch. The Linux runner accepts URL arguments,
+and `tool/deploy.sh` publishes the corresponding `x-scheme-handler` in the
+desktop file. A raw `flutter run` Linux build is not an installed URL handler;
+use `tool/deploy.sh --defines .env.local --run` for an end-to-end callback test.
+
 Raising the window from a hotkey on **GNOME/X11** additionally wants `xdotool`
 (`sudo apt-get install xdotool`). It is optional: without it a hotkey still
 captures, but the window only blinks in the taskbar instead of coming forward —

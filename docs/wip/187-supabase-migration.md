@@ -4,7 +4,7 @@
 
 ## Current Branch
 
-`feat/187-supabase-auth-foundation`
+`feat/187-google-login`
 
 ## Context
 
@@ -23,16 +23,23 @@ Postgres and Storage while preserving offline-first capture.
 
 ## Completed PRs
 
-- [ ] Auth/config foundation (current branch)
+- [x] Auth/config foundation (#188)
+- [x] Google sign-in and account state (current branch)
+- [x] Link Supabase CLI and deploy the native callback allow-list
+- [x] Configure and enable the Google provider in hosted Supabase Auth
+- [x] Verify the first Google account and disable new user sign-ups
 
 ## Next Steps
 
-1. Add Google sign-in and account state without gating local capture.
-2. Add versioned Postgres schema, grants and RLS policies.
-3. Replace pull-and-replace sync with an outbox, revisions and tombstones.
-4. Move media to private Storage with resumable, hash-verified transfers.
+1. Add versioned Postgres schema, grants and RLS policies.
+2. Replace pull-and-replace sync with an outbox, revisions and tombstones.
+3. Move media to private Storage with resumable, hash-verified transfers.
+4. Add the one-time, hash-verified local-library migration.
 
-## Blockers
+## Verified account state
 
-- A Supabase project and Google OAuth client configuration are required before
-  live sign-in verification.
+- Hosted Auth contains exactly one Google user with a durable UUID. New user
+  sign-ups are disabled; that UUID will be the owner for the one-time local
+  library migration.
+- The installed Linux build restored the signed-in Google session after a full
+  process restart, verifying OS-keyring-backed session persistence.

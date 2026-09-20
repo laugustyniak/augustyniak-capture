@@ -55,16 +55,21 @@ in the repo.
 - Run with the optional Supabase authentication foundation:
 
   ```bash
-  flutter run \
-    --dart-define=SUPABASE_URL=https://your-project.supabase.co \
-    --dart-define=SUPABASE_PUBLISHABLE_KEY=sb_publishable_…
+  flutter run --dart-define-from-file=.env.local
   ```
 
+  The preferred names are `SUPABASE_URL` and `SUPABASE_PUBLISHABLE_KEY`.
+  `NEXT_PUBLIC_SUPABASE_URL` and `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` are
+  accepted as aliases so the same ignored `.env.local` can seed this Flutter
+  app and a web client. Flutter-specific names win when both pairs exist.
   These two values are public client configuration, not secrets. Never pass a
   database password, `service_role`, Supabase secret key or provider-wide API
   key to the app. Without both values Supabase is not initialized and local
   capture behaves exactly as before. Persisted sessions and PKCE verifiers use
   the OS keyring rather than Supabase's Shared Preferences defaults.
+  Google OAuth returns to `ai.augustyniak.capture://login-callback/`; that exact
+  URI must be present in the Supabase Auth redirect allow list. Native platform
+  registration is checked in, and `tool/deploy.sh` registers the Linux handler.
 - Run pre-paired to your own cloud sync (all optional, and **never** committed — see `SyncDefaults` below):
 
   ```bash
