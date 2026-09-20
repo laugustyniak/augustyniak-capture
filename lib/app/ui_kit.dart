@@ -426,9 +426,9 @@ class ConsoleText {
   );
 
   /// The 9px all-caps label above a choice row or a text field — `THEME`,
-  /// `VAULT DIRECTORY`. Was declared ad hoc at several call sites (the Config
-  /// tab's `_ChoiceRow`, the vault section's `_FieldLabel`) before this
-  /// existed; the two had already drifted a font-weight apart.
+  /// `VAULT DIRECTORY`. Was declared ad hoc, identically, at two call sites
+  /// (the Config tab's `_ChoiceRow`, the vault section's `_FieldLabel`)
+  /// before this existed — one place to change it now.
   static TextStyle get fieldLabel => TextStyle(
     color: Console.muted,
     fontSize: 9,
