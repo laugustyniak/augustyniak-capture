@@ -120,6 +120,12 @@ class NoopApplier implements SyncApplier {
 
   @override
   Future<void> deleteRecording(String id) async {}
+
+  @override
+  Future<void> deleteProject(String id) async {}
+
+  @override
+  Future<void> deleteClipboardItem(String id) async {}
 }
 
 /// A [SyncApplier] that records every call — the pull suite's fake
@@ -133,10 +139,17 @@ class RecordingApplier implements SyncApplier {
   final Map<String, ClipboardItem> clipboardItems = <String, ClipboardItem>{};
   final List<RecordingRevision> revisions = <RecordingRevision>[];
   final List<String> deleted = <String>[];
+  final List<String> deletedProjects = <String>[];
+  final List<String> deletedClipboardItems = <String>[];
   final List<List<Recording>> upserts = <List<Recording>>[];
+
+  /// Set to make the next `upsertRecordings` call throw, simulating a
+  /// repository write failure (e.g. `IndexUnreadableException`).
+  Object? throwOnUpsertRecordings;
 
   @override
   Future<void> upsertRecordings(List<Recording> rows) async {
+    if (throwOnUpsertRecordings != null) throw throwOnUpsertRecordings!;
     upserts.add(rows);
     for (final Recording r in rows) {
       recordings[r.id] = r;
@@ -166,5 +179,17 @@ class RecordingApplier implements SyncApplier {
   Future<void> deleteRecording(String id) async {
     deleted.add(id);
     recordings.remove(id);
+  }
+
+  @override
+  Future<void> deleteProject(String id) async {
+    deletedProjects.add(id);
+    projects.remove(id);
+  }
+
+  @override
+  Future<void> deleteClipboardItem(String id) async {
+    deletedClipboardItems.add(id);
+    clipboardItems.remove(id);
   }
 }

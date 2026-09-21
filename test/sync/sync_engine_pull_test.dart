@@ -184,6 +184,106 @@ void main() {
     expect(transport.tables[SyncTable.projects]!['p']!['version'], 1);
   });
 
+  test('the redirtied re-push does not tombstone other recordings', () async {
+    await engine.run(SyncSnapshot(recordings: [
+      recording(id: 'a', transcript: 'one two'),
+      recording(id: 'b', title: 'other'),
+    ]));
+    await transport.push(SyncTable.recordings, [
+      {...SyncRowCodec.recording(recording(id: 'a', transcript: 'one')), 'version': 2},
+    ]);
+    advance(const Duration(minutes: 1));
+    await engine.run(SyncSnapshot(recordings: [
+      recording(id: 'a', transcript: 'one two'),
+      recording(id: 'b', title: 'other'),
+    ]));
+    expect(transport.tables[SyncTable.recordings]!['b']!['deleted_at'], isNull);
+    expect(transport.tables[SyncTable.recordings]!['b']!['version'], 1);
+  });
+
+  test('a repository write failure leaves bookkeeping untouched', () async {
+    await seedServer(recording(id: 'a', title: 'srv'));
+    advance(const Duration(minutes: 1));
+    applier.throwOnUpsertRecordings = Exception('disk full');
+    final r = await engine.run(const SyncSnapshot());
+    expect(r.success, isFalse);
+    expect(r.failureReason, contains('disk full'));
+    expect(bookkeeping.loadTable('recordings'), isEmpty);
+  });
+
+  test('a pulled revision already pushed by this device is not re-appended', () async {
+    await engine.run(SyncSnapshot(revisions: [revision(recordingId: 'a')]));
+    advance(const Duration(minutes: 1));
+    await engine.run(const SyncSnapshot());
+    expect(applier.revisions, isEmpty);
+  });
+
+  test('the transcript rule does not get reported as an overwritten field', () async {
+    await engine.run(
+      SyncSnapshot(recordings: [recording(id: 'a', title: 'base', transcript: 'one two')]),
+    );
+    await transport.push(SyncTable.recordings, [
+      {
+        ...SyncRowCodec.recording(recording(id: 'a', title: 'theirs', transcript: 'one')),
+        'version': 2,
+      },
+    ]);
+    advance(const Duration(minutes: 1));
+    await engine.run(
+      SyncSnapshot(recordings: [recording(id: 'a', title: 'mine', transcript: 'one two')]),
+    );
+    expect(applier.revisions.map((r) => r.field), ['title']);
+  });
+
+  test('a pulled project tombstone deletes through the callback', () async {
+    await transport.push(SyncTable.projects, [
+      {...SyncRowCodec.project(project(id: 'p')), 'version': 1},
+    ]);
+    advance(const Duration(minutes: 1));
+    await engine.run(const SyncSnapshot());
+    expect(applier.projects.containsKey('p'), isTrue);
+    await transport.push(SyncTable.projects, [
+      {'id': 'p', 'version': 2, 'deleted_at': t0.toIso8601String()},
+    ]);
+    advance(const Duration(minutes: 2));
+    final r = await engine.run(const SyncSnapshot());
+    expect(r.tombstonesApplied, 1);
+    expect(applier.deletedProjects, ['p']);
+    expect(applier.projects.containsKey('p'), isFalse);
+    expect(bookkeeping.loadTable('projects').containsKey('p'), isFalse);
+  });
+
+  test('a pulled clipboard item tombstone deletes through the callback', () async {
+    await transport.push(SyncTable.clipboardItems, [
+      {...SyncRowCodec.clipboardItem(clipboardItem(id: 'c')), 'version': 1},
+    ]);
+    advance(const Duration(minutes: 1));
+    await engine.run(const SyncSnapshot());
+    expect(applier.clipboardItems.containsKey('c'), isTrue);
+    await transport.push(SyncTable.clipboardItems, [
+      {'id': 'c', 'version': 2, 'deleted_at': t0.toIso8601String()},
+    ]);
+    advance(const Duration(minutes: 2));
+    final r = await engine.run(const SyncSnapshot());
+    expect(r.tombstonesApplied, 1);
+    expect(applier.deletedClipboardItems, ['c']);
+    expect(applier.clipboardItems.containsKey('c'), isFalse);
+    expect(bookkeeping.loadTable('clipboard_items').containsKey('c'), isFalse);
+  });
+
+  test('a segments push conflict is adopted into bookkeeping, not repeated', () async {
+    final rec = recordingWithSegments(id: 'a', segmentCount: 1);
+    final seg = SyncRowCodec.segments(rec).single;
+    // Another device already pushed this segment; this device's bookkeeping
+    // is empty, so its own push of the identical content races it.
+    await transport.push(SyncTable.segments, [{...seg, 'version': 1}]);
+    final r1 = await engine.run(SyncSnapshot(recordings: [rec]));
+    expect(r1.conflicts, 1);
+    final r2 = await engine.run(SyncSnapshot(recordings: [rec]));
+    expect(r2.conflicts, 0);
+    expect(r2.pushed, 0);
+  });
+
   test('cursors are mirrored to a sync_state row per table for this device', () async {
     await seedServer(recording(id: 'a'));
     advance(const Duration(minutes: 1));

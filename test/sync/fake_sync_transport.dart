@@ -68,10 +68,46 @@ class FakeSyncTransport implements SyncTransport {
         final int c = (a['updated_at'] as String).compareTo(b['updated_at'] as String);
         return c != 0 ? c : SyncRowCodec.rowId(table, a).compareTo(SyncRowCodec.rowId(table, b));
       });
-    final List<Map<String, Object?>> page = all.skip(offset).take(limit).map((r) => Map<String, Object?>.from(r)).toList();
+    final List<Map<String, Object?>> page = all.skip(offset).take(limit).map(_asPulledRow).toList();
     return SyncPage(rows: page, hasMore: offset + limit < all.length);
   }
 
   @override
   Future<DateTime> serverNow() async => clock();
+
+  /// Columns PostgREST returns as a `timestamptz`. Reformatted on the way
+  /// out of `pull()` — never on the way into `_table` — to the shape
+  /// Postgres actually emits (`+00:00` offset, no trailing `.000` for a
+  /// whole-second value), which differs from Dart's own
+  /// `DateTime.toIso8601String()` (`.000Z`). A caller that keys or hashes a
+  /// pulled row using one of these fields verbatim, instead of parsing and
+  /// re-encoding through the codec, breaks against a real server even though
+  /// it round-trips cleanly against this fake if the fake echoed Dart's own
+  /// format back unchanged.
+  static const List<String> _timestampColumns = <String>[
+    'at',
+    'updated_at',
+    'created_at',
+    'copied_at',
+    'processed_at',
+  ];
+
+  static Map<String, Object?> _asPulledRow(Map<String, Object?> row) {
+    final Map<String, Object?> copy = Map<String, Object?>.from(row);
+    for (final String key in _timestampColumns) {
+      final Object? value = copy[key];
+      if (value is String) {
+        final DateTime? parsed = DateTime.tryParse(value);
+        if (parsed != null) copy[key] = _asPostgresTimestamp(parsed);
+      }
+    }
+    return copy;
+  }
+
+  static String _asPostgresTimestamp(DateTime dt) {
+    final String iso = dt.toUtc().toIso8601String(); // 2026-09-21T12:00:00.000Z
+    final String withoutZ = iso.substring(0, iso.length - 1);
+    final String withoutMillis = withoutZ.replaceFirst(RegExp(r'\.\d+$'), '');
+    return '$withoutMillis+00:00';
+  }
 }
