@@ -69,9 +69,14 @@ class SyncEngine {
     // lag-window re-read) skips it instead of deleting it a second time.
     final Set<String> tombstonedIds = <String>{};
     final List<Recording> redirtied = <Recording>[];
+    // Refusals from the empty-outbox fuse in `_pushTable`, one line per
+    // table it tripped for. Collected rather than returned immediately so a
+    // refusal on one table does not cost the others their own push.
+    final List<String> refusals = <String>[];
     try {
       for (final _Outbox outbox in _outboxes(snapshot)) {
         final _PushOutcome outcome = await _pushTable(outbox);
+        if (outcome.refusalReason != null) refusals.add(outcome.refusalReason!);
         pushed += outcome.applied;
         conflicts += outcome.conflicts;
         skipped += outcome.skipped;
@@ -132,6 +137,7 @@ class SyncEngine {
       conflicts: conflicts,
       tombstonesApplied: tombstones,
       skipped: skipped,
+      failureReason: refusals.isEmpty ? null : refusals.join('; '),
     );
   }
 
@@ -171,6 +177,29 @@ class SyncEngine {
     final Map<String, SyncRowState> known = _bookkeeping.loadTable(
       outbox.table.serverName,
     );
+
+    // The push-side analogue of the index's "a shrink nobody announced is
+    // backed up first" rule. An outbox with nothing in it for a table this
+    // device has bookkept rows for is far more likely a bug upstream — a
+    // controller wired against the wrong repository, `initialize()` never
+    // finishing, a snapshot built too early — than the user genuinely
+    // deleting every row of that table in one sitting. The ordinary sweep
+    // below cannot tell the difference (an empty outbox reads identically
+    // either way), so refuse the whole table's push rather than tombstone
+    // every row it knows about; other tables in this run are unaffected.
+    if (outbox.table.versioned && sweepDeletes && outbox.rows.isEmpty && known.isNotEmpty) {
+      return _PushOutcome(
+        0,
+        0,
+        0,
+        const <Map<String, Object?>>[],
+        refusalReason:
+            'refused: local ${outbox.table.serverName} empty while '
+            '${known.length} row${known.length == 1 ? '' : 's'} '
+            'bookkept',
+      );
+    }
+
     // id, row, hash
     final List<(String, Map<String, Object?>, String)> dirty =
         <(String, Map<String, Object?>, String)>[];
@@ -691,7 +720,13 @@ class _Outbox {
 }
 
 class _PushOutcome {
-  const _PushOutcome(this.applied, this.conflicts, this.skipped, this.conflictRows);
+  const _PushOutcome(
+    this.applied,
+    this.conflicts,
+    this.skipped,
+    this.conflictRows, {
+    this.refusalReason,
+  });
   final int applied;
   final int conflicts;
   final int skipped;
@@ -700,6 +735,12 @@ class _PushOutcome {
   /// server content for that id — so the caller can apply them the same way
   /// a pulled row is applied.
   final List<Map<String, Object?>> conflictRows;
+
+  /// Set when `_pushTable`'s empty-outbox fuse tripped: nothing was pushed
+  /// for this table, [applied]/[conflicts]/[skipped] are all zero, and
+  /// [run] surfaces this as the overall run's `failureReason` once every
+  /// other table has still had its turn.
+  final String? refusalReason;
 }
 
 /// One pull pass's tally, mutated in place as rows are applied.

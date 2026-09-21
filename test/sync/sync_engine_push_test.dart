@@ -87,8 +87,14 @@ void main() {
   });
 
   test('a recording gone from the snapshot becomes a tombstone', () async {
-    await engine.run(SyncSnapshot(recordings: [recording(id: 'a')]));
-    final r = await engine.run(const SyncSnapshot(recordings: []));
+    // Two rows, not one: an outbox that goes *entirely* empty while
+    // bookkeeping is non-empty trips the empty-outbox fuse below instead of
+    // sweeping — this test is about the ordinary per-row tombstone path, so
+    // 'b' stays present and only 'a' is dropped from the snapshot.
+    await engine.run(
+      SyncSnapshot(recordings: [recording(id: 'a'), recording(id: 'b')]),
+    );
+    final r = await engine.run(SyncSnapshot(recordings: [recording(id: 'b')]));
     expect(r.pushed, 1);
     expect(transport.tables[SyncTable.recordings]!['a']!['deleted_at'], isNotNull);
     expect(transport.tables[SyncTable.recordings]!['a']!['version'], 2);
@@ -96,12 +102,54 @@ void main() {
   });
 
   test('a project whose id contains / is tombstoned with the full id', () async {
-    await engine.run(SyncSnapshot(projects: [project(id: 'a/b')]));
-    final r = await engine.run(const SyncSnapshot(projects: []));
+    await engine.run(
+      SyncSnapshot(projects: [project(id: 'a/b'), project(id: 'c')]),
+    );
+    final r = await engine.run(SyncSnapshot(projects: [project(id: 'c')]));
     expect(r.pushed, 1);
     expect(transport.tables[SyncTable.projects]!['a/b']!['id'], 'a/b');
     expect(transport.tables[SyncTable.projects]!['a/b']!['deleted_at'], isNotNull);
   });
+
+  test(
+    'an outbox gone entirely empty while bookkeeping is non-empty is '
+    'refused, not swept — the engine fuse',
+    () async {
+      await engine.run(SyncSnapshot(recordings: [recording(id: 'a')]));
+      final r = await engine.run(const SyncSnapshot(recordings: []));
+
+      expect(r.pushed, 0);
+      expect(r.failureReason, contains('refused'));
+      expect(r.failureReason, contains('recordings'));
+      // Nothing was tombstoned — 'a' is exactly as it was left.
+      expect(transport.tables[SyncTable.recordings]!['a']!['deleted_at'], isNull);
+      expect(bookkeeping.loadTable('recordings').containsKey('a'), isTrue);
+    },
+  );
+
+  test(
+    'the fuse on one table does not cost a push on another in the same run',
+    () async {
+      await engine.run(
+        SyncSnapshot(
+          recordings: [recording(id: 'a')],
+          projects: [project(id: 'p1')],
+        ),
+      );
+      // Recordings goes empty (refused); projects still has its row and
+      // gains a new one — that push must still land.
+      final r = await engine.run(
+        SyncSnapshot(
+          recordings: [],
+          projects: [project(id: 'p1'), project(id: 'p2')],
+        ),
+      );
+
+      expect(r.failureReason, contains('recordings'));
+      expect(transport.tables[SyncTable.projects]!['p2'], isNotNull);
+      expect(bookkeeping.loadTable('recordings').containsKey('a'), isTrue);
+    },
+  );
 
   test('a stale push is counted as a conflict and the version is not advanced', () async {
     await engine.run(SyncSnapshot(recordings: [recording(id: 'a', title: 'one')]));
