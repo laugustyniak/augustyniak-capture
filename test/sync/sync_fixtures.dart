@@ -11,7 +11,12 @@ import 'package:augustyniak_capture/features/sync/domain/sync_snapshot.dart';
 /// `sync_row_codec_test.dart`'s local builders and given names the push and
 /// pull suites can both import.
 
-Recording recording({required String id, String? title}) => Recording(
+Recording recording({
+  required String id,
+  String? title,
+  String? summary,
+  String? transcript,
+}) => Recording(
   id: id,
   filePath: '/tmp/$id.m4a',
   createdAt: DateTime.utc(2026, 9, 21, 8),
@@ -19,6 +24,8 @@ Recording recording({required String id, String? title}) => Recording(
   status: RecordingStatus.completed,
   type: CaptureType.audioRecording,
   title: title,
+  summary: summary,
+  transcript: transcript,
 );
 
 Recording recordingWithSegments({
@@ -113,4 +120,51 @@ class NoopApplier implements SyncApplier {
 
   @override
   Future<void> deleteRecording(String id) async {}
+}
+
+/// A [SyncApplier] that records every call — the pull suite's fake
+/// repository stand-in. `upserts` logs each `upsertRecordings` batch (a
+/// pull-test clears it and asserts it stays empty to prove nothing new was
+/// applied); `recordings`/`projects`/`clipboardItems` mirror the latest
+/// upserted state keyed by id; `deleteRecording` removes from `recordings`.
+class RecordingApplier implements SyncApplier {
+  final Map<String, Recording> recordings = <String, Recording>{};
+  final Map<String, Project> projects = <String, Project>{};
+  final Map<String, ClipboardItem> clipboardItems = <String, ClipboardItem>{};
+  final List<RecordingRevision> revisions = <RecordingRevision>[];
+  final List<String> deleted = <String>[];
+  final List<List<Recording>> upserts = <List<Recording>>[];
+
+  @override
+  Future<void> upsertRecordings(List<Recording> rows) async {
+    upserts.add(rows);
+    for (final Recording r in rows) {
+      recordings[r.id] = r;
+    }
+  }
+
+  @override
+  Future<void> upsertProjects(List<Project> rows) async {
+    for (final Project p in rows) {
+      projects[p.id] = p;
+    }
+  }
+
+  @override
+  Future<void> upsertClipboardItems(List<ClipboardItem> rows) async {
+    for (final ClipboardItem c in rows) {
+      clipboardItems[c.id] = c;
+    }
+  }
+
+  @override
+  Future<void> appendRevisions(List<RecordingRevision> rows) async {
+    revisions.addAll(rows);
+  }
+
+  @override
+  Future<void> deleteRecording(String id) async {
+    deleted.add(id);
+    recordings.remove(id);
+  }
 }

@@ -95,6 +95,14 @@ void main() {
     expect(bookkeeping.loadTable('recordings').containsKey('a'), isFalse);
   });
 
+  test('a project whose id contains / is tombstoned with the full id', () async {
+    await engine.run(SyncSnapshot(projects: [project(id: 'a/b')]));
+    final r = await engine.run(const SyncSnapshot(projects: []));
+    expect(r.pushed, 1);
+    expect(transport.tables[SyncTable.projects]!['a/b']!['id'], 'a/b');
+    expect(transport.tables[SyncTable.projects]!['a/b']!['deleted_at'], isNotNull);
+  });
+
   test('a stale push is counted as a conflict and the version is not advanced', () async {
     await engine.run(SyncSnapshot(recordings: [recording(id: 'a', title: 'one')]));
     // Another device moved the server row to version 2.
