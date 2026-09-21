@@ -182,6 +182,66 @@ void main() {
     expect(controller.projects, isEmpty);
     expect(controller.error, isNotNull);
   });
+
+  test('applySyncedProjects survives a concurrent select — I3', () async {
+    final ProjectsController controller = ProjectsController(
+      repository: repository,
+    );
+    await controller.initialize();
+    final Project local = await controller.create(
+      name: 'Local',
+      repoPath: '/work/local',
+    );
+
+    // A pulled project, applied the way `RepositorySyncApplier` does — not
+    // through a second `ProjectsRepository` writing underneath this
+    // controller, which is the shape that used to lose it.
+    await controller.applySyncedProjects(<Project>[
+      const Project(id: 'pulled', name: 'Pulled', repoPath: '/work/pulled'),
+    ]);
+    expect(controller.projects.map((Project p) => p.id), containsAll(<String>[local.id, 'pulled']));
+
+    // The user's next action — unrelated to sync — must not rewrite
+    // `projects.json` from a pre-sync `_projects` and drop the pulled row.
+    await controller.select(local.id);
+
+    final ProjectsController reloaded = ProjectsController(
+      repository: ProjectsRepository(directoryProvider: () async => directory),
+    );
+    await reloaded.initialize();
+    expect(reloaded.projects.map((Project p) => p.id), containsAll(<String>[local.id, 'pulled']));
+  });
+
+  test('applySyncedProjectDelete does not resurrect on the next select — I3', () async {
+    final ProjectsController controller = ProjectsController(
+      repository: repository,
+    );
+    await controller.initialize();
+    final Project first = await controller.create(
+      name: 'First',
+      repoPath: '/work/first',
+    );
+    final Project second = await controller.create(
+      name: 'Second',
+      repoPath: '/work/second',
+    );
+
+    // Unknown id: no-op, per the SyncApplier "tolerate an unknown id" rule.
+    await controller.applySyncedProjectDelete('does-not-exist');
+    expect(controller.projects, hasLength(2));
+
+    await controller.applySyncedProjectDelete(second.id);
+    expect(controller.projects.map((Project p) => p.id), <String>[first.id]);
+
+    // A later, unrelated select must not bring the deleted project back.
+    await controller.select(first.id);
+    final ProjectsController reloaded = ProjectsController(
+      repository: ProjectsRepository(directoryProvider: () async => directory),
+    );
+    await reloaded.initialize();
+    expect(reloaded.projects.map((Project p) => p.id), <String>[first.id]);
+    expect(reloaded.activeProjectId, first.id);
+  });
 }
 
 class _CapturingLauncher implements AgentSessionLauncher {

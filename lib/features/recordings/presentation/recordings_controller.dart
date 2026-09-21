@@ -107,16 +107,23 @@ class RecordingsController extends ChangeNotifier {
     CommandClient commandClient = const DisabledCommandClient(),
     String? Function()? commandBaseUrl,
     // The Supabase sync seam — a resolver, never a snapshot, so a Config
-    // change only affects a run started afterwards. All five are null in
+    // change only affects a run started afterwards. All eight are null in
     // every existing call site and in every pure-Dart test, which is what
     // keeps Supabase sync out of the suites that build no database: `hasSupabase`
-    // below is false whenever any of them is missing.
+    // below is false whenever any of the seven it checks is missing.
     SyncTransport Function()? syncTransportResolver,
     AuthGateway? authGateway,
     ProjectsRepository? projectsRepository,
     ClipboardRepository? clipboardRepository,
     String? Function()? appVersion,
     Future<String> Function()? syncDeviceId,
+    // `RepositorySyncApplier`'s only way to touch the live `ProjectsController`
+    // — the same reason `deleteRecording` below is a bound callback rather
+    // than a repository: a second writer against `ProjectsRepository`
+    // underneath that controller is exactly the lost-write shape this
+    // avoids. See `docs/architecture/sync.md`.
+    Future<void> Function(List<Project> upserts)? applySyncedProjects,
+    Future<void> Function(String id)? applySyncedProjectDelete,
     Duration recorderTimeout = const Duration(seconds: 8),
   }) : _recorderTimeout = recorderTimeout,
        _repository = repository,
@@ -129,6 +136,8 @@ class RecordingsController extends ChangeNotifier {
        _clipboardRepository = clipboardRepository,
        _appVersion = appVersion,
        _syncDeviceId = syncDeviceId,
+       _applySyncedProjects = applySyncedProjects,
+       _applySyncedProjectDelete = applySyncedProjectDelete,
        _history = CaptureHistory(
          revisionsRepository: revisionsRepository,
          closureLog: closureLog,
@@ -207,6 +216,8 @@ class RecordingsController extends ChangeNotifier {
   final ClipboardRepository? _clipboardRepository;
   final String? Function()? _appVersion;
   final Future<String> Function()? _syncDeviceId;
+  final Future<void> Function(List<Project> upserts)? _applySyncedProjects;
+  final Future<void> Function(String id)? _applySyncedProjectDelete;
 
   /// What every mutation overwrote, and when each capture left the desk. Both
   /// are driven from [_update] and nowhere else — see [CaptureHistory] for why
@@ -625,8 +636,43 @@ class RecordingsController extends ChangeNotifier {
   /// Reloads recordings from SQLite storage into RAM and notifies listeners.
   Future<void> reloadFromStorage() async {
     _recordings = await _repository.loadAll();
-    notifyListeners();
+    if (!_disposed) notifyListeners();
   }
+
+  /// A Supabase pull's upserted rows, applied through the same funnel every
+  /// other mutation in this class uses — merge by id into `_recordings` in
+  /// place, then `_persistAll()` — rather than through a second write path
+  /// underneath this controller. `RecordingsRepository.updateAll` and a bare
+  /// `reloadFromStorage()` refresh were tried first and rejected: either
+  /// writes to disk (or replaces `_recordings` wholesale) without going
+  /// through `_saveInFlight`, so a writer already between its own in-memory
+  /// mutation and its own `_persistAll()` — `_update`, `stopRecording` — can
+  /// resume and persist a list that never saw this upsert, or have this
+  /// upsert persist a list that never saw that writer's mutation. Merging
+  /// into `_recordings` synchronously and then awaiting `_persistAll()`
+  /// composes correctly with any writer already queued behind
+  /// `_saveInFlight`, because `_persistAll` reads `_recordings` only once it
+  /// is actually its turn to write. See `docs/architecture/sync.md`.
+  Future<void> applySyncedRecordings(List<Recording> upserts) async {
+    if (upserts.isEmpty) return;
+    final Map<String, Recording> byId = <String, Recording>{
+      for (final Recording r in _recordings) r.id: r,
+    };
+    for (final Recording r in upserts) {
+      byId[r.id] = r;
+    }
+    _recordings = byId.values.toList()
+      ..sort((Recording a, Recording b) => b.createdAt.compareTo(a.createdAt));
+    await _persistAll();
+    if (!_disposed) notifyListeners();
+  }
+
+  /// Whether `_recordings` still holds [id] — used only by
+  /// `RepositorySyncApplier` to tell a refused delete (index unreadable, a
+  /// source file that would not delete — see `deleteRecording`, which
+  /// returns normally either way) from one that actually happened, so a
+  /// refused tombstone is retried on the next run rather than counted done.
+  bool _hasRecording(String id) => _recordings.any((Recording r) => r.id == id);
 
   /// Triggers Turso sync and reloads local recordings into RAM.
   Future<bool> syncTurso() async {
@@ -722,16 +768,24 @@ class RecordingsController extends ChangeNotifier {
         r2Secret.isNotEmpty &&
         !TokenCipher.isSealed(r2Secret);
 
-    // Every one of the five has to be wired for Supabase sync to run at
+    // Every one of the seven has to be wired for Supabase sync to run at
     // all — an unconfigured install, or one where Supabase was never
     // initialised, leaves this false and the coordinator simply skips the
-    // slot, the same as an unconfigured Turso or R2.
+    // slot, the same as an unconfigured Turso or R2. `!_indexUnreadable` is
+    // not optional: with the index unreadable `_recordings` may already be
+    // `[]` (a fresh session that never got past `initialize()`), and an
+    // empty snapshot would read as "everything was deleted locally" to the
+    // push-side sweep — see the engine's own refusal for an empty outbox,
+    // which this gate backs up rather than relies on alone.
     final bool hasSupabase =
+        !_indexUnreadable &&
         _authGateway?.currentIdentity != null &&
         _syncTransportResolver != null &&
         _projectsRepository != null &&
         _clipboardRepository != null &&
-        _syncDeviceId != null;
+        _syncDeviceId != null &&
+        _applySyncedProjects != null &&
+        _applySyncedProjectDelete != null;
 
     final CloudSyncCoordinator coordinator = CloudSyncCoordinator(
       configurationFingerprint: cloudSyncConfigurationFingerprint(settings),
@@ -754,10 +808,8 @@ class RecordingsController extends ChangeNotifier {
           ? () async {
               // Turso, if configured, ran first and writes SQLite directly —
               // `_recordings` is untouched by it. Refresh before building the
-              // snapshot so it (and a tombstone's later `_persistAll`, should
-              // one land in this run) reflect Turso's pull rather than
-              // silently reverting it, the same hazard `afterRecordingsWrite`
-              // below exists to close.
+              // snapshot so it reflects Turso's pull rather than the applier
+              // (via `applySyncedRecordings`) later silently reverting it.
               await reloadFromStorage();
               final SyncRowsStore store = SyncRowsStore(db.rawDb);
               final String deviceId = await _syncDeviceId();
@@ -777,12 +829,13 @@ class RecordingsController extends ChangeNotifier {
                 transport: _syncTransportResolver(),
                 bookkeeping: store,
                 applier: RepositorySyncApplier(
-                  recordings: _repository,
-                  projects: _projectsRepository,
+                  applySyncedRecordings: applySyncedRecordings,
+                  applySyncedProjects: _applySyncedProjects,
+                  applySyncedProjectDelete: _applySyncedProjectDelete,
                   clipboard: _clipboardRepository,
                   revisions: _revisionsRepository,
                   deleteRecording: deleteRecording,
-                  afterRecordingsWrite: reloadFromStorage,
+                  recordingExists: _hasRecording,
                 ),
               ).run(snapshot);
             }
@@ -801,7 +854,12 @@ class RecordingsController extends ChangeNotifier {
     );
 
     _lastCloudSyncReport = await coordinator.sync();
-    await reloadFromStorage();
+    // An unreadable index already refuses every write (`_persistAll`'s own
+    // guard) — reading it again here would only rethrow the same
+    // `IndexUnreadableException` `initialize()` already reported, out of an
+    // otherwise best-effort call `syncCloud()` callers do not expect to
+    // throw.
+    if (!_indexUnreadable) await reloadFromStorage();
     _logSink.log(
       _lastCloudSyncReport!.message,
       level: _lastCloudSyncReport!.success ? LogLevel.info : LogLevel.warn,

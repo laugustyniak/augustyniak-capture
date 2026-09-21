@@ -175,6 +175,35 @@ class ProjectsController extends ChangeNotifier {
     return projects.isEmpty ? null : projects.first.id;
   }
 
+  /// A Supabase pull's upserted rows, applied through the same funnel every
+  /// other mutation here uses — merge by id into `_projects`, then `_save`
+  /// — rather than through a second `ProjectsRepository` instance writing
+  /// underneath this controller. That second-writer shape is exactly what
+  /// let a pulled project vanish the next time this controller saved: its
+  /// own next `create`/`update`/`select` would rewrite `projects.json` from
+  /// its `_projects`, which the other writer never touched. See
+  /// `docs/architecture/sync.md`.
+  ///
+  /// An existing id is replaced in place (keeping its position); a new one
+  /// is appended, the same order `create` already builds.
+  Future<void> applySyncedProjects(List<Project> upserts) async {
+    if (upserts.isEmpty) return;
+    final Map<String, Project> byId = <String, Project>{
+      for (final Project p in _projects) p.id: p,
+    };
+    for (final Project p in upserts) {
+      byId[p.id] = p;
+    }
+    await _save(byId.values.toList(), activeProjectId: _activeProjectId);
+  }
+
+  /// A pulled tombstone. Identical to [delete] — including its tolerance of
+  /// an id this device never had, which is the `SyncApplier` contract's
+  /// "every `delete*` no-ops on an unknown id" — kept as its own name so a
+  /// sync-originated removal reads distinctly from a user's own delete
+  /// wherever this is called from.
+  Future<void> applySyncedProjectDelete(String id) => delete(id);
+
   Future<void> select(String? projectId) async {
     if (projectId != null &&
         !_projects.any((Project item) => item.id == projectId)) {

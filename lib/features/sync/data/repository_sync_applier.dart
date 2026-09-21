@@ -1,82 +1,57 @@
 import '../../clipboard/data/clipboard_repository.dart';
 import '../../clipboard/domain/clipboard_item.dart';
-import '../../projects/data/projects_repository.dart';
 import '../../projects/domain/project.dart';
-import '../../recordings/data/recordings_repository.dart';
 import '../../recordings/data/revisions_repository.dart';
 import '../../recordings/domain/recording.dart';
 import '../../recordings/domain/recording_revision.dart';
 import '../domain/sync_engine.dart';
 
-/// [SyncEngine]'s pull side, applied through the same repositories the rest
-/// of the app writes through — see the design doc's "Apply: through the
-/// repository, never raw SQL". Every `delete*` tolerates an id it has never
-/// heard of: a pulled tombstone for a row this device never had is a no-op,
-/// not an error.
+/// [SyncEngine]'s pull side. Recordings and projects apply through the
+/// owning controller's own funnel — `RecordingsController.
+/// applySyncedRecordings`/`deleteRecording`, `ProjectsController.
+/// applySyncedProjects`/`applySyncedProjectDelete` — never through a second
+/// `RecordingsRepository`/`ProjectsRepository` writing underneath that
+/// controller: that second-writer shape is what let a concurrent
+/// controller-owned write (a running capture's `_persistAll`, a user's next
+/// `select`) silently revert what this applier had just written, because
+/// the controller's own in-memory list never saw it. Clipboard items apply
+/// straight through `ClipboardRepository`, which is safe here because its
+/// writes are already row-level (`addItem`/`updateItemText`/`deleteItem`),
+/// never a whole-list rewrite from a captured snapshot the way the other
+/// two used to be — see `docs/architecture/sync.md`.
+///
+/// Every `delete*` tolerates an id it has never heard of: a pulled
+/// tombstone for a row this device never had is a no-op, not an error.
 class RepositorySyncApplier implements SyncApplier {
   RepositorySyncApplier({
-    required RecordingsRepository recordings,
-    required ProjectsRepository projects,
+    required Future<void> Function(List<Recording> upserts) applySyncedRecordings,
+    required Future<void> Function(List<Project> upserts) applySyncedProjects,
+    required Future<void> Function(String id) applySyncedProjectDelete,
     required ClipboardRepository clipboard,
     required RevisionsRepository? revisions,
     required Future<void> Function(String id) deleteRecording,
-    Future<void> Function()? afterRecordingsWrite,
-  }) : _recordings = recordings,
-       _projects = projects,
+    required bool Function(String id) recordingExists,
+  }) : _applySyncedRecordings = applySyncedRecordings,
+       _applySyncedProjects = applySyncedProjects,
+       _applySyncedProjectDelete = applySyncedProjectDelete,
        _clipboard = clipboard,
        _revisions = revisions,
        _deleteRecording = deleteRecording,
-       _afterRecordingsWrite = afterRecordingsWrite;
+       _recordingExists = recordingExists;
 
-  final RecordingsRepository _recordings;
-  final ProjectsRepository _projects;
+  final Future<void> Function(List<Recording> upserts) _applySyncedRecordings;
+  final Future<void> Function(List<Project> upserts) _applySyncedProjects;
+  final Future<void> Function(String id) _applySyncedProjectDelete;
   final ClipboardRepository _clipboard;
   final RevisionsRepository? _revisions;
   final Future<void> Function(String id) _deleteRecording;
-
-  /// Called after every recordings write lands on disk, so a caller holding
-  /// its own in-memory copy of the recordings list (`RecordingsController`)
-  /// can refresh it before it next rewrites the whole index from that stale
-  /// copy — see `RecordingsController.deleteRecording`'s `_persistAll`, which
-  /// would otherwise silently undo an upsert this applier just wrote if a
-  /// pulled tombstone for a different row follows it later in the same run.
-  final Future<void> Function()? _afterRecordingsWrite;
+  final bool Function(String id) _recordingExists;
 
   @override
-  Future<void> upsertRecordings(List<Recording> rows) async {
-    if (rows.isEmpty) return;
-    // `updateAll` holds the write lock across load-merge-write, so a capture
-    // indexed by the running app between this read and this write is not
-    // silently dropped by a merge built from a stale snapshot — see its own
-    // doc comment.
-    await _recordings.updateAll((List<Recording> current) async {
-      final Map<String, Recording> byId = <String, Recording>{
-        for (final Recording r in current) r.id: r,
-      };
-      for (final Recording r in rows) {
-        byId[r.id] = r;
-      }
-      return byId.values.toList()
-        ..sort((Recording a, Recording b) => b.createdAt.compareTo(a.createdAt));
-    });
-    await _afterRecordingsWrite?.call();
-  }
+  Future<void> upsertRecordings(List<Recording> rows) => _applySyncedRecordings(rows);
 
   @override
-  Future<void> upsertProjects(List<Project> rows) async {
-    if (rows.isEmpty) return;
-    final List<Project> current = await _projects.loadAll();
-    final Map<String, Project> byId = <String, Project>{
-      for (final Project p in current) p.id: p,
-    };
-    for (final Project p in rows) {
-      byId[p.id] = p;
-    }
-    await _projects.saveAll(
-      byId.values.toList(),
-      activeProjectId: _projects.loadedActiveProjectId,
-    );
-  }
+  Future<void> upsertProjects(List<Project> rows) => _applySyncedProjects(rows);
 
   @override
   Future<void> upsertClipboardItems(List<ClipboardItem> rows) async {
@@ -104,24 +79,24 @@ class RepositorySyncApplier implements SyncApplier {
     await _revisions?.append(rows);
   }
 
+  /// `RecordingsController.deleteRecording` returns normally on a refusal
+  /// (the index unreadable, a source file that would not delete) rather
+  /// than throwing, so it can be pressed again from the UI without an error
+  /// dialog. That silence is exactly wrong for a sync tombstone: the engine
+  /// needs to know the delete did not happen, so it neither bookkeeps the
+  /// row as gone (it is not) nor counts the tombstone applied. Checking
+  /// [_recordingExists] after the call is the only way to tell a refusal
+  /// from success, since the callback's return type carries nothing else.
   @override
-  Future<void> deleteRecording(String id) => _deleteRecording(id);
+  Future<void> deleteRecording(String id) async {
+    await _deleteRecording(id);
+    if (_recordingExists(id)) {
+      throw StateError('delete refused for $id');
+    }
+  }
 
   @override
-  Future<void> deleteProject(String id) async {
-    final List<Project> current = await _projects.loadAll();
-    if (!current.any((Project p) => p.id == id)) return; // unknown id, no-op
-    final String? activeId = _projects.loadedActiveProjectId;
-    final List<Project> remaining = current
-        .where((Project p) => p.id != id)
-        .toList();
-    // Mirrors `ProjectsController._resolveActive`: a dangling active id is
-    // never written, only ever carried through or replaced.
-    final String? nextActiveId = activeId == id
-        ? (remaining.isEmpty ? null : remaining.first.id)
-        : activeId;
-    await _projects.saveAll(remaining, activeProjectId: nextActiveId);
-  }
+  Future<void> deleteProject(String id) => _applySyncedProjectDelete(id);
 
   @override
   Future<void> deleteClipboardItem(String id) => _clipboard.deleteItem(id);

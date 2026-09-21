@@ -434,6 +434,12 @@ class _RecordingsPageState extends State<RecordingsPage>
       clipboardRepository: clipboardRepository,
       appVersion: () => _appVersion,
       syncDeviceId: settings.ensureSyncDeviceId,
+      // A pulled project applies through `projects` itself — never through a
+      // second `ProjectsRepository` writing underneath it — so this
+      // controller's own next `create`/`update`/`select` cannot silently
+      // drop what sync just wrote. See `docs/architecture/sync.md`.
+      applySyncedProjects: projects.applySyncedProjects,
+      applySyncedProjectDelete: projects.applySyncedProjectDelete,
     );
     // Its own `AudioPlayer` inside `AssetAlarmPlayer`, never the recordings
     // controller's: an alarm must not stop a clip being reviewed, and a review
@@ -697,7 +703,16 @@ class _RecordingsPageState extends State<RecordingsPage>
     // `RecordingsController` itself, and racing this against them would
     // mean a tombstone pulled here could rewrite the whole index from a
     // list `recoverOrphans()` has not finished updating yet.
-    if (widget.authGateway?.currentIdentity != null) {
+    //
+    // `isIndexUnreadable` also gates it: an unreadable index leaves
+    // `_recordings` at `[]`, and a Supabase run against an empty snapshot
+    // would read as "every bookkept recording was deleted locally" to the
+    // push-side sweep — `_performCloudSync`'s own `!_indexUnreadable` check
+    // covers just the Supabase slot; this one skips the whole launch run,
+    // including Turso/R2, the same as SYNC NOW would find nothing useful to
+    // do with a queue the controller has already refused to write to.
+    if (!controller.isIndexUnreadable &&
+        widget.authGateway?.currentIdentity != null) {
       unawaited(
         controller.syncCloud().then<void>(
           (_) {},
