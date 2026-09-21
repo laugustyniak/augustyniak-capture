@@ -1,5 +1,5 @@
 begin;
-select plan(21);
+select plan(22);
 
 insert into auth.users (id, email) values
   ('11111111-1111-1111-1111-111111111111', 'a@example.com'),
@@ -114,14 +114,17 @@ delete from push_result;
 
 insert into push_result
 select public.sync_push('segments',
-  '[{"recording_id":"r1","index":0,"file_path":"seg.m4a","type":"audioRecording","created_at":"2026-01-01T00:00:00Z","duration_ms":100,"size_bytes":10,"version":1}]');
+  '[{"recording_id":"r1","index":0,"file_path":"stale.m4a","type":"audioRecording","created_at":"2026-01-01T00:00:00Z","duration_ms":100,"size_bytes":10,"version":1}]');
 
 select is(
   jsonb_array_length((select result->'conflicts' from push_result)), 1,
   'a stale segment push is a conflict');
 select is(
-  (select result->'conflicts'->0->>'index' from push_result), '0',
-  'the conflict row carries the integer index key');
+  (select result->'conflicts'->0->'index' from push_result), '0'::jsonb,
+  'the conflict row carries the integer index key as a number');
+select is(
+  (select result->'conflicts'->0->>'file_path' from push_result), 'seg.m4a',
+  'the conflict carries the server row, not the pushed one');
 
 drop table push_result;
 
