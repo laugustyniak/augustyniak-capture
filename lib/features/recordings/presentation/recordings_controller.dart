@@ -2697,11 +2697,37 @@ class RecordingsController extends ChangeNotifier {
   /// processing queue, and kick the drain loop if it is idle. Returns once the
   /// queued state is persisted; the actual processing runs in the background.
   /// De-dupes so a double capture/retry cannot enqueue the same item twice.
+  ///
+  /// The single funnel behind [resumeInterruptedProcessing], [retryTranscription]
+  /// and every capture entry point — which is why the file-existence guard
+  /// below lives here rather than in each caller. A capture path always
+  /// calls this right after verifying its own source file, so the guard
+  /// never trips for a local capture. A row pulled by sync, though, arrives
+  /// as metadata whose media has not synced yet (slice 4 of #187): its
+  /// `filePath` may be a bare name never resolved against this device's
+  /// recordings directory, or an absolute path to a file that simply is not
+  /// here. Enqueuing it anyway would let `resumeInterruptedProcessing` or
+  /// the RETRY sweep hand the processor a file that does not exist, sweeping
+  /// the capture to `failed` for a transcription that already succeeded on
+  /// the device that made it — see `docs/architecture/sync.md` and
+  /// `docs/architecture/capture-pipeline.md`.
   Future<void> _enqueueProcessing(String id) async {
     // Idempotent: don't re-enqueue an item that is already queued or currently
     // running — that would process it twice (the UI only ever retries `failed`
     // items, so this is a defensive guard).
     if (id == _processingId || _processingQueue.contains(id)) return;
+    final Recording? item = _recordings
+        .where((Recording r) => r.id == id)
+        .cast<Recording?>()
+        .firstOrNull;
+    if (item != null &&
+        !(p.isAbsolute(item.filePath) && File(item.filePath).existsSync())) {
+      _logSink.log(
+        'source not on this device yet — waiting for media sync',
+        recordingId: id,
+      );
+      return;
+    }
     _processingQueue.add(id);
     await _update(
       id,
