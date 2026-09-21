@@ -65,6 +65,11 @@ class CaptureHistory {
         _revisions[id] ?? const <RecordingRevision>[],
       );
 
+  /// Every revision this session holds, across every capture — what a
+  /// Supabase sync run pushes as its `revisions` table.
+  List<RecordingRevision> allRevisions() =>
+      _revisions.values.expand((List<RecordingRevision> rows) => rows).toList();
+
   bool hasClosed(String id) => _closedIds.contains(id);
 
   /// Supporting evidence, never a precondition: a history that will not load

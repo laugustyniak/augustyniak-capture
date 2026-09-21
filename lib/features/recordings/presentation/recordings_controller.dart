@@ -28,16 +28,25 @@ import '../../../core/sync/signed_r2_object_store.dart';
 import '../../../core/sync/sync_defaults.dart';
 import '../../../core/sync/sync_endpoint.dart';
 import '../../../core/sync/turso_sync_service.dart';
+import '../../auth/domain/auth_gateway.dart';
+import '../../clipboard/data/clipboard_repository.dart';
 import '../../settings/data/settings_repository.dart';
 import '../../settings/domain/app_settings.dart';
 import '../../settings/domain/audio_config.dart';
 import '../../settings/domain/token_cipher.dart';
+import '../../sync/data/repository_sync_applier.dart';
+import '../../sync/data/sync_rows_store.dart';
+import '../../sync/domain/sync_engine.dart';
+import '../../sync/domain/sync_row_codec.dart';
+import '../../sync/domain/sync_snapshot.dart';
+import '../../sync/domain/sync_transport.dart';
 import '../../transcription/data/transcription_service.dart';
 import '../../transcription/domain/transcription_limits.dart';
 import '../data/media_importer.dart';
 import '../data/media_picker.dart';
 import '../data/recordings_repository.dart';
 import '../data/revisions_repository.dart';
+import '../../projects/data/projects_repository.dart';
 import '../../projects/domain/project.dart';
 import '../data/agent_artifact_scanner.dart';
 import '../data/capture_history.dart';
@@ -97,11 +106,29 @@ class RecordingsController extends ChangeNotifier {
     ClosureLog closureLog = const NoopClosureLog(),
     CommandClient commandClient = const DisabledCommandClient(),
     String? Function()? commandBaseUrl,
+    // The Supabase sync seam — a resolver, never a snapshot, so a Config
+    // change only affects a run started afterwards. All five are null in
+    // every existing call site and in every pure-Dart test, which is what
+    // keeps Supabase sync out of the suites that build no database: `hasSupabase`
+    // below is false whenever any of them is missing.
+    SyncTransport Function()? syncTransportResolver,
+    AuthGateway? authGateway,
+    ProjectsRepository? projectsRepository,
+    ClipboardRepository? clipboardRepository,
+    String Function()? appVersion,
+    Future<String> Function()? syncDeviceId,
     Duration recorderTimeout = const Duration(seconds: 8),
   }) : _recorderTimeout = recorderTimeout,
        _repository = repository,
        _commandClient = commandClient,
        _commandBaseUrl = commandBaseUrl,
+       _revisionsRepository = revisionsRepository,
+       _syncTransportResolver = syncTransportResolver,
+       _authGateway = authGateway,
+       _projectsRepository = projectsRepository,
+       _clipboardRepository = clipboardRepository,
+       _appVersion = appVersion,
+       _syncDeviceId = syncDeviceId,
        _history = CaptureHistory(
          revisionsRepository: revisionsRepository,
          closureLog: closureLog,
@@ -165,6 +192,21 @@ class RecordingsController extends ChangeNotifier {
   }
 
   final RecordingsRepository _repository;
+
+  /// Null disables Supabase sync's `revisions` table entirely — same seam
+  /// `CaptureHistory` holds, kept here too so `_performCloudSync` can hand it
+  /// straight to `RepositorySyncApplier` without reaching into that class.
+  final RevisionsRepository? _revisionsRepository;
+
+  /// The Supabase sync seam. All five are null unless the app shell wired
+  /// them (Supabase initialised, both repositories built) — see the
+  /// constructor's doc comment.
+  final SyncTransport Function()? _syncTransportResolver;
+  final AuthGateway? _authGateway;
+  final ProjectsRepository? _projectsRepository;
+  final ClipboardRepository? _clipboardRepository;
+  final String Function()? _appVersion;
+  final Future<String> Function()? _syncDeviceId;
 
   /// What every mutation overwrote, and when each capture left the desk. Both
   /// are driven from [_update] and nowhere else — see [CaptureHistory] for why
@@ -680,6 +722,17 @@ class RecordingsController extends ChangeNotifier {
         r2Secret.isNotEmpty &&
         !TokenCipher.isSealed(r2Secret);
 
+    // Every one of the five has to be wired for Supabase sync to run at
+    // all — an unconfigured install, or one where Supabase was never
+    // initialised, leaves this false and the coordinator simply skips the
+    // slot, the same as an unconfigured Turso or R2.
+    final bool hasSupabase =
+        _authGateway?.currentIdentity != null &&
+        _syncTransportResolver != null &&
+        _projectsRepository != null &&
+        _clipboardRepository != null &&
+        _syncDeviceId != null;
+
     final CloudSyncCoordinator coordinator = CloudSyncCoordinator(
       configurationFingerprint: cloudSyncConfigurationFingerprint(settings),
       syncTurso: hasTurso
@@ -693,6 +746,38 @@ class RecordingsController extends ChangeNotifier {
                 success: success,
                 failureReason: service.failureReason,
               );
+            }
+          : null,
+      // Between Turso and R2, on the same rationale Turso goes first for:
+      // its pull may add recording rows whose media R2 can then fetch.
+      syncSupabase: hasSupabase
+          ? () async {
+              final SyncRowsStore store = SyncRowsStore(db.rawDb);
+              final String deviceId = await _syncDeviceId();
+              final SyncSnapshot snapshot = SyncSnapshot(
+                recordings: List<Recording>.of(_recordings),
+                projects: await _projectsRepository.loadAll(),
+                clipboardItems: await _clipboardRepository.getItems(),
+                revisions: _history.allRevisions(),
+                device: SyncRowCodec.device(
+                  id: deviceId,
+                  name: Platform.localHostname,
+                  platform: Platform.operatingSystem,
+                  appVersion: _appVersion?.call(),
+                ),
+              );
+              return SyncEngine(
+                transport: _syncTransportResolver(),
+                bookkeeping: store,
+                applier: RepositorySyncApplier(
+                  recordings: _repository,
+                  projects: _projectsRepository,
+                  clipboard: _clipboardRepository,
+                  revisions: _revisionsRepository,
+                  deleteRecording: deleteRecording,
+                  afterRecordingsWrite: reloadFromStorage,
+                ),
+              ).run(snapshot);
             }
           : null,
       syncR2: hasR2
