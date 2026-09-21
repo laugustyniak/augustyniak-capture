@@ -752,6 +752,13 @@ class RecordingsController extends ChangeNotifier {
       // its pull may add recording rows whose media R2 can then fetch.
       syncSupabase: hasSupabase
           ? () async {
+              // Turso, if configured, ran first and writes SQLite directly —
+              // `_recordings` is untouched by it. Refresh before building the
+              // snapshot so it (and a tombstone's later `_persistAll`, should
+              // one land in this run) reflect Turso's pull rather than
+              // silently reverting it, the same hazard `afterRecordingsWrite`
+              // below exists to close.
+              await reloadFromStorage();
               final SyncRowsStore store = SyncRowsStore(db.rawDb);
               final String deviceId = await _syncDeviceId();
               final SyncSnapshot snapshot = SyncSnapshot(
