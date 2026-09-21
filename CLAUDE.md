@@ -152,7 +152,7 @@ Neither rule is weakened by the two removal paths (`discardRecording`, `deleteRe
 
 ## The features
 
-Sixteen, each a line and a pointer. Read the pointer before changing anything in its area.
+Seventeen features, sixteen lines — `timer`/`momentum` share one. Read the pointer before changing anything in its area.
 
 - **`recordings`** — the queue, the capture screen, the editor, the controller that owns the pipeline. `docs/architecture/capture-pipeline.md`, `docs/architecture/ui.md`.
 - **`processing`** — `Processor` turns a segment's source into text. **The rule to enforce in review: a processor only ever reads the source — never writes, moves or deletes it.** `docs/architecture/processing.md`.

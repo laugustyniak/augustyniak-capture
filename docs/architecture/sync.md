@@ -49,6 +49,27 @@ a well-formed row that lost the version race, a rejection is one the
 function could not apply to its table at all (bad cast, missing column).
 Batch size is 200 rows per call.
 
+## The engine fuse: an empty outbox is refused, not swept
+
+A versioned table whose outbox is entirely empty while `sync_rows`
+bookkeeping for that table is not looks exactly like every row having been
+deleted — and diffing an empty local snapshot against non-empty bookkeeping
+would otherwise push a tombstone for every one of them. That premise is
+almost always a bug upstream (an unindexed read, a controller constructed
+against the wrong directory, a snapshot built before `initialize()`
+finished) rather than the user actually deleting everything, so
+`SyncEngine._pushTable` refuses the sweep instead of performing it: nothing
+is pushed for that table, the row stays bookkept for the next run, and the
+run's `failureReason` names the table and the row count refused. This is
+the push-side analogue of the index's own "a shrink nobody announced is
+backed up first" rule in the root `CLAUDE.md` — an empty local state is
+never taken silently at face value against non-empty stored state. The fuse
+is per table: one table tripping it does not cost a push on any other table
+in the same run. It does not fire on a genuinely partial delete (some rows
+still present, one gone) — that is the ordinary per-row tombstone path
+above — only on the whole table going from non-empty bookkept to empty
+outbox in one step.
+
 ## Pull: server cursor with a lag window
 
 Paged by 500, ordered `(updated_at, id)`:
@@ -70,15 +91,60 @@ The cursor per table is the greatest `updated_at` seen, stored locally under
 `settings['sync.cursor.<table>']` and mirrored to the server's `sync_state`
 row for this device, so a reinstall can see where its predecessor stopped.
 
-## Apply: through the repository, never raw SQL
+## Apply: through the owning controller, never a second writer
 
 **The one rule a future change to this file must not break: apply never
-writes SQL directly.** The Turso path does — it writes SQLite and then
+writes underneath a controller that already owns the same state in
+memory.** The Turso path writes SQLite directly and then
 `reloadFromStorage()` — which is exactly the index/mirror divergence the
-durability machinery in the root `CLAUDE.md` exists to catch. This path
-instead loads through `RecordingsRepository`/`ProjectsRepository`/
-`ClipboardRepository`, merges in memory, and writes once per table per run —
-`RepositorySyncApplier` (`features/sync/data/repository_sync_applier.dart`).
+durability machinery in the root `CLAUDE.md` exists to catch, and round 1 of
+this slice's own review found the same class of bug twice more: a second
+`RecordingsRepository`/`ProjectsRepository` instance, writing whatever the
+pull side merged, underneath `RecordingsController`/`ProjectsController`'s
+own in-memory list. Whichever controller's *own* next mutation persists
+next — `_update`, `stopRecording`, `create`, `select` — rewrites its state
+wholesale from that stale in-memory copy, silently reverting the pull, with
+`sync_rows` already claiming the overwritten rows at the server's version so
+they never even re-pull.
+
+So `RepositorySyncApplier` (`features/sync/data/repository_sync_applier.dart`)
+does not hold a `RecordingsRepository` or a `ProjectsRepository` at all —
+only callbacks bound to the controller that owns each table:
+
+- `applySyncedRecordings` → `RecordingsController.applySyncedRecordings`:
+  merges the pulled batch into `_recordings` **in place**, then calls the
+  controller's own `_persistAll()` — the same funnel `_update` and
+  `stopRecording` use, including its `_saveInFlight` queue. A writer already
+  between its own in-memory mutation and its own `_persistAll` when this
+  runs is not undone: the merge happens synchronously, before either side's
+  `_persistAll` actually reads `_recordings`, so whichever write goes second
+  persists the union of both. `docs/architecture/persistence.md`'s
+  `updateAll` (load-merge-write under one lock) was tried first and
+  rejected — it protects against a *different* writer racing the repository
+  underneath both controller and applier, but not against the controller's
+  *own* queued writer resuming with a stale `_recordings`, which is the
+  actual hazard here.
+- `applySyncedProjects` / `applySyncedProjectDelete` →
+  `ProjectsController.applySyncedProjects` / `.applySyncedProjectDelete`:
+  the same shape — merge or remove against `_projects`, then `_save()`.
+  `applySyncedProjectDelete` is `delete` itself, since a pulled tombstone
+  needs nothing `delete` does not already do (unknown-id no-op included).
+- `deleteRecording` is the controller's own locked removal path, as before
+  — but now the applier checks `RecordingsController`'s own list
+  (`recordingExists`) after calling it. `RecordingsController.deleteRecording`
+  returns normally on a refusal (index unreadable, a source file that would
+  not delete) rather than throwing, which is right for a button the user
+  can press again — and exactly wrong for a sync tombstone read silently as
+  success: without the check, the engine would bookkeep the row as gone and
+  never retry it. A refusal throws `StateError` instead, which the engine's
+  own `run()` surfaces as `failureReason`, and — because the throw happens
+  before `_bookkeeping.remove` runs — leaves the row bookkept for a retry
+  next time.
+- `upsertClipboardItems` / `deleteClipboardItem` still go straight through
+  `ClipboardRepository`, which is safe here on its own: its writes are
+  already row-level (`addItem`/`updateItemText`/`deleteItem`), never a
+  whole-list rewrite from a captured snapshot, so there is no second-writer
+  hazard to close for this table.
 
 For each pulled row, keyed by local hash state:
 
@@ -106,26 +172,33 @@ Push runs first, then pull, then push again only if the pull marked rows
 dirty (the transcript rule). Conflicts `sync_push` returns are applied
 through the same table as pulled rows, in `SyncEngine._resolvePushConflicts`.
 
-### The lost-write hazard `afterRecordingsWrite` closes
+### The lost-write hazard `applySyncedRecordings` closes
 
 `RecordingsController` keeps its own in-memory `_recordings` list, captured
-into the `SyncSnapshot` once at the start of a run. `RepositorySyncApplier`
-writes `recordings.json` underneath that list via
-`RecordingsRepository.updateAll` (load-merge-write under one lock, closing
-the window a plain `loadAll` + `saveAll` would leave against a capture
-indexed by the running app mid-merge). But a tombstone in the *same* run
-calls the controller's own `deleteRecording`, which persists by rewriting
-the whole index from `_recordings` — stale, because it was never told about
-the applier's upsert. Left alone, a push-conflict upsert followed by an
-unrelated pull tombstone in the same run would be silently undone, and
-`sync_rows` would already claim the overwritten rows at the server's
-version, so they would never re-pull either.
+into the `SyncSnapshot` once at the start of a run. The applier no longer
+writes `recordings.json` on its own at all — `upsertRecordings` calls
+`RecordingsController.applySyncedRecordings(upserts)`, which merges the
+pulled batch into `_recordings` **in place** (replace by id, insert new,
+re-sort createdAt-desc) and then calls the controller's own `_persistAll()`.
+A tombstone in the *same* run goes through `deleteRecording`, the
+controller's other funnel onto the identical `_recordings` field — so an
+upsert followed by an unrelated tombstone in one run sees the upsert's
+merge before the tombstone's removal runs, never a stale copy.
 
-`RepositorySyncApplier(afterRecordingsWrite: ...)` closes it:
-`RecordingsController` wires it to its own `reloadFromStorage`, so the
-in-memory list is refreshed immediately after every recordings write the
-applier makes, before any later step in the same run can rewrite the index
-from a stale copy.
+The hazard this closes is not a second sync writer racing the repository —
+it is the controller's **own** queued writer. `_update`/`stopRecording`
+mutate `_recordings` and then `await _persistAll()`; `_persistAll()` itself
+queues behind `_saveInFlight` when another write is already in progress. A
+naive fix (apply straight through `RecordingsRepository`, then
+`reloadFromStorage()`) loses exactly the write that was queued behind that
+lock: `reloadFromStorage()` overwrites `_recordings` with whatever is on
+disk *right now*, and the queued writer then resumes with its
+already-captured, now-stale copy and persists it wholesale, silently
+reverting both the sync pull and its own edit. `applySyncedRecordings`
+mutates the same `_recordings` field every other writer mutates, so there
+is nothing to go stale — whichever write's `_persistAll` runs second
+persists the union of both. `test/sync/applied_recordings_concurrency_test.dart`
+proves it against a deliberately slowed `saveAll`.
 
 ### Clipboard: a known gap, accepted for this slice
 
@@ -141,12 +214,19 @@ behaviour, not something this slice changed; fixing either needs a new
 
 ### Projects: the active id
 
-`upsertProjects` keeps the active project id exactly as
-`ProjectsRepository.loadedActiveProjectId` reports it after the merge's own
-`loadAll()` — never touched by a pull. `deleteProject` mirrors
-`ProjectsController._resolveActive`: deleting the active project reassigns
-to the first remaining one, or to nothing when none remain; deleting any
-other id, or one this device never had, leaves the active id untouched.
+The same lost-write class applies to `ProjectsController._projects` as to
+`RecordingsController._recordings`, so the fix is the same shape:
+`upsertProjects` calls `ProjectsController.applySyncedProjects(upserts)`,
+which merges by id into `_projects` in place and then `_save()`s — the same
+field the controller's own `create`/`update`/`select` mutate, so a pulled
+project cannot be reverted by the user's next action reading a stale copy.
+`deleteProject` calls `ProjectsController.applySyncedProjectDelete(id)`,
+which is `delete` itself: deleting the active project reassigns to the
+first remaining one, or to nothing when none remain; deleting any other id,
+or one this device never had, leaves the active id untouched — the same
+`_resolveActive` logic the delete button already runs, so a pulled
+tombstone for the active project cannot leave `_activeProjectId` pointing
+at a project that no longer exists.
 
 ### A known staleness gap
 
@@ -187,17 +267,28 @@ recording rows whose media R2 can then fetch. `CloudSyncReport` gained a
 gets a line: `Supabase: N pushed · N pulled[ · N conflicts][ · N removed][
 · N skipped]` on success, `Supabase: <failureReason>` on failure.
 
-`RecordingsController` takes five new constructor parameters, all resolvers
-or seams and all null in every existing call site and every pure-Dart test —
-`hasSupabase` in `_performCloudSync` requires every one of them:
+`RecordingsController` takes eight new constructor parameters, all
+resolvers or seams and all null in every existing call site and every
+pure-Dart test — `hasSupabase` in `_performCloudSync` requires every one of
+the seven it checks (`appVersion` is optional, read into the `devices` row
+only when present) **and** `!_indexUnreadable`, so a corrupt index keeps
+the Supabase slot out entirely rather than handing the engine an empty
+`_recordings` snapshot against non-empty bookkeeping — the controller-side
+half of the same guard the engine fuse above is the push-side half of:
 
 - `syncTransportResolver: SyncTransport Function()?` — a resolver, not a
   snapshot, the seam rule the root `CLAUDE.md` states once: a Config change
   only affects a run started afterwards, never one already in flight.
 - `authGateway: AuthGateway?` — `currentIdentity != null` gates the whole
   slot.
-- `projectsRepository`, `clipboardRepository` — the same repositories the
-  rest of the app already writes through.
+- `projectsRepository`, `clipboardRepository` — read once per run to build
+  the snapshot; not held by the applier (see Apply above).
+- `syncDeviceId: Future<String> Function()?` — resolves to
+  `SettingsController.ensureSyncDeviceId()`.
+- `applySyncedProjects: Future<void> Function(List<Project>)?`,
+  `applySyncedProjectDelete: Future<void> Function(String)?` — wired to
+  `ProjectsController.applySyncedProjects`/`.applySyncedProjectDelete`; see
+  Apply above.
 - `appVersion: String? Function()?` — read into the `devices` row.
 
 Device identity: `AppSettings.syncDeviceId`, a uuid generated once by
@@ -213,12 +304,18 @@ platform, appVersion)`, keyed on that id.
 
 - SYNC NOW routes to Supabase when a session exists, alongside whatever
   legacy providers are configured — `RecordingsController.syncCloud()`.
-- One run at launch when a session exists: the last statement in
-  `RecordingsPage._bootstrap()`, `unawaited` and best-effort (the sink
-  contract), and deliberately placed *after* `recoverOrphans()` and every
-  other index-writing step in that method — racing it against
-  `recoverOrphans()` would be the same lost-write hazard `afterRecordingsWrite`
-  closes above, just against a different writer.
+- One run at launch when a session exists **and** the index is readable
+  (`!controller.isIndexUnreadable`): `RecordingsPage._bootstrap()` calls
+  `controller.syncCloud()`, `unawaited` and best-effort (the sink contract),
+  deliberately placed *after* `recoverOrphans()` and every other
+  index-writing step in that method — racing it against `recoverOrphans()`
+  would be the same lost-write hazard `applySyncedRecordings` closes above,
+  just against a different writer. `syncCloud()` runs the whole
+  `CloudSyncCoordinator`, so the launch run is not Supabase-only: whatever
+  of Turso/Supabase/R2 is configured all run once at launch now, not just
+  when the user presses SYNC NOW — an accepted behaviour change from
+  before this slot existed, since the coordinator does not offer a
+  per-provider trigger.
 - Nothing runs signed out. Nothing blocks capture.
 
 `LegacySyncSection`'s Config-tab hint used to say the account "does not sync
