@@ -136,3 +136,10 @@ $$;
 
 revoke all on function public.sync_push(text, jsonb) from public, anon;
 grant execute on function public.sync_push(text, jsonb) to authenticated;
+
+-- A tiny clock RPC. `pull` needs the server's `now()` to compute its lag
+-- window; PostgREST has no clock endpoint of its own.
+create or replace function public.sync_now() returns timestamptz
+language sql stable security invoker set search_path = '' as $$ select now() $$;
+revoke all on function public.sync_now() from public, anon;
+grant execute on function public.sync_now() to authenticated;

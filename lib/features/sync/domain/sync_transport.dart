@@ -12,8 +12,8 @@ class SyncPushResult {
   /// Rows `sync_push` could not apply to their table at all (a bad cast, a
   /// missing not-null column, an unknown column) — distinct from a
   /// `conflicts` row, which is well-formed but lost the version race. The
-  /// fake never populates this; the real transport (Task 8) carries the
-  /// RPC's `rejected` list through unchanged.
+  /// fake never populates this; the real transport (Task 8) unwraps each
+  /// `{row, code}` entry the RPC returns down to its `row`.
   final List<Map<String, Object?>> rejected;
 }
 

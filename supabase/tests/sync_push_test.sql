@@ -1,5 +1,5 @@
 begin;
-select plan(24);
+select plan(25);
 
 insert into auth.users (id, email) values
   ('11111111-1111-1111-1111-111111111111', 'a@example.com'),
@@ -141,6 +141,9 @@ select is(
   'a value that fails to cast is rejected with 22007, not swallowed as a syntax error');
 
 drop table push_result;
+
+-- 12. sync_now answers server time
+select ok((select public.sync_now()) <= now(), 'sync_now answers server time');
 
 select * from finish();
 rollback;
