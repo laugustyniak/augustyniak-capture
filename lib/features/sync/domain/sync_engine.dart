@@ -215,7 +215,21 @@ class SyncEngine {
     // below cannot tell the difference (an empty outbox reads identically
     // either way), so refuse the whole table's push rather than tombstone
     // every row it knows about; other tables in this run are unaffected.
-    if (outbox.table.versioned && sweepDeletes && outbox.rows.isEmpty && known.isNotEmpty) {
+    //
+    // `recordings` only: that is the one table whose false sweep deletes a
+    // source file on another device (the tombstone apply path runs the
+    // real `deleteRecording`). `segments` is a child table that is
+    // genuinely empty for every single-fragment capture — deleting the
+    // only multi-fragment recording trips it on every subsequent run
+    // otherwise — and `projects`/`clipboard_items` tombstones reach no
+    // source file on another device either, so a real "everything in this
+    // table was deleted" run (the last project removed, `clearHistory()`)
+    // must sweep rather than jam on a permanent refusal. See
+    // `docs/architecture/sync.md`.
+    if (outbox.table == SyncTable.recordings &&
+        sweepDeletes &&
+        outbox.rows.isEmpty &&
+        known.isNotEmpty) {
       return _PushOutcome(
         0,
         0,

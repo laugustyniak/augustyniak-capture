@@ -70,6 +70,24 @@ still present, one gone) — that is the ordinary per-row tombstone path
 above — only on the whole table going from non-empty bookkept to empty
 outbox in one step.
 
+**The fuse applies to `recordings` only.** That is the one table whose false
+sweep deletes a source file on another device — the tombstone apply path
+runs the real `deleteRecording`. `segments` is a child of `recordings`, and
+is genuinely, legitimately empty for every single-fragment capture: deleting
+the *only* multi-fragment recording in the library makes its segments outbox
+go from non-empty bookkept to empty in one step, exactly like the false
+positive above, but the parent `recordings` tombstone already covers those
+children — a segments-only fuse would jam that table's push on every
+subsequent run for no bug at all. `projects` and `clipboard_items` sweep
+normally when empty too: their tombstones reach no source file on another
+device, and a real "everything in this table is gone" run (the last project
+deleted, `clearHistory()`) must be able to push it rather than refuse
+forever. The one residual this leaves: deleting the last recording in the
+library makes the *push* side report a refusal (`failureReason` names
+`recordings`) until another capture exists to make the outbox non-empty
+again — pull still runs in the same call, so nothing else in that run is
+held back by it.
+
 ## Pull: server cursor with a lag window
 
 Paged by 500, ordered `(updated_at, id)`:

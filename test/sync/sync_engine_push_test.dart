@@ -233,6 +233,49 @@ void main() {
   );
 
   test(
+    'the fuse does not apply to segments — the last fragment of a '
+    'recording sweeps normally instead of jamming forever — finding 5',
+    () async {
+      final recWithSegments = recordingWithSegments(id: 'a', segmentCount: 2);
+      await engine.run(SyncSnapshot(recordings: [recWithSegments]));
+      expect(bookkeeping.loadTable('segments').length, 2);
+
+      // The recording loses its extra fragments — the segments outbox for
+      // it goes empty while segments bookkeeping is not.
+      final r = await engine.run(SyncSnapshot(recordings: [recording(id: 'a')]));
+      expect(r.failureReason, isNull);
+      expect(bookkeeping.loadTable('segments'), isEmpty);
+    },
+  );
+
+  test(
+    'the fuse does not apply to projects — deleting the last one sweeps '
+    'normally instead of jamming forever — finding 5',
+    () async {
+      await engine.run(SyncSnapshot(projects: [project(id: 'p1')]));
+      final r = await engine.run(const SyncSnapshot());
+      expect(r.failureReason, isNull);
+      expect(transport.tables[SyncTable.projects]!['p1']!['deleted_at'], isNotNull);
+      expect(bookkeeping.loadTable('projects'), isEmpty);
+    },
+  );
+
+  test(
+    'the fuse does not apply to clipboard items — clearHistory sweeps '
+    'normally instead of jamming forever — finding 5',
+    () async {
+      await engine.run(SyncSnapshot(clipboardItems: [clipboardItem(id: 'c1')]));
+      final r = await engine.run(const SyncSnapshot());
+      expect(r.failureReason, isNull);
+      expect(
+        transport.tables[SyncTable.clipboardItems]!['c1']!['deleted_at'],
+        isNotNull,
+      );
+      expect(bookkeeping.loadTable('clipboard_items'), isEmpty);
+    },
+  );
+
+  test(
     'a revision for a recording not in the snapshot is dropped from the '
     'outbox, not disk — finding 4',
     () async {
