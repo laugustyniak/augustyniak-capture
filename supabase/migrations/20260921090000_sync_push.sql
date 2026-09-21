@@ -14,14 +14,15 @@
 --
 -- Each row runs in its own subtransaction (a nested `begin … exception …
 -- end`), so one bad row never aborts the batch. A row whose data is
--- malformed for its table — a missing not-null column, a bad foreign key, a
--- failed check constraint, a value that will not cast, an unknown column in
--- the payload, or (checked up front, before it can reach the SQL parser as a
--- malformed statement) a versioned-table row with no columns beyond its key
--- — is appended to `rejected` with its SQLSTATE instead. A permissions
--- failure (RLS, `insufficient_privilege`) and the `invalid_parameter_value`
--- this function itself raises are not in that list, so they propagate and
--- fail the call loudly.
+-- malformed for its table — any data exception (class 22: a value that will
+-- not cast, an out-of-range number, a bad timestamp, …), any integrity
+-- constraint violation (class 23: a missing not-null column, a bad foreign
+-- key, a failed check), an unknown column in the payload, or (checked up
+-- front, before it can reach the SQL parser as a malformed statement) a row
+-- with no columns beyond its key — is appended to `rejected` with its
+-- SQLSTATE instead. A permissions failure (RLS, `insufficient_privilege`)
+-- and the `invalid_parameter_value` this function itself raises are outside
+-- those classes, so they propagate and fail the call loudly.
 
 create or replace function public.sync_push(table_name text, rows jsonb)
 returns jsonb
@@ -121,8 +122,7 @@ begin
         conflicts := conflicts || coalesce(current_row, row);
       end if;
     exception
-      when not_null_violation or foreign_key_violation or check_violation
-        or invalid_text_representation or datatype_mismatch
+      when data_exception or integrity_constraint_violation
         or undefined_column then
         rejected := rejected
           || jsonb_build_object('row', row, 'code', sqlstate);

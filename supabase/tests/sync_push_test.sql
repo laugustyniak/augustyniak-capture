@@ -1,5 +1,5 @@
 begin;
-select plan(22);
+select plan(24);
 
 insert into auth.users (id, email) values
   ('11111111-1111-1111-1111-111111111111', 'a@example.com'),
@@ -125,6 +125,20 @@ select is(
 select is(
   (select result->'conflicts'->0->>'file_path' from push_result), 'seg.m4a',
   'the conflict carries the server row, not the pushed one');
+
+delete from push_result;
+
+-- 11. a value that fails to cast (data_exception, not integrity_constraint_
+--     violation) is rejected with its SQLSTATE; the batch continues
+insert into push_result
+select public.sync_push('projects',
+  '[{"id":"p9","name":"Bad","created_at":"not-a-date"},{"id":"p10","name":"Good","version":1}]');
+
+select is((select result->>'applied' from push_result), '1',
+  'the sibling row still applies when another row has an uncastable timestamp');
+select is(
+  (select result->'rejected'->0->>'code' from push_result), '22007',
+  'a value that fails to cast is rejected with 22007, not swallowed as a syntax error');
 
 drop table push_result;
 
