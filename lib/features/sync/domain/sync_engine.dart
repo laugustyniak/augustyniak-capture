@@ -462,6 +462,9 @@ class SyncEngine {
         final DateTime? at = DateTime.tryParse('${row['updated_at']}')?.toUtc();
         if (at != null && (newest == null || at.isAfter(newest))) newest = at;
       }
+      // `total.skippedUpdatedAts` is shared across every table this run —
+      // slice out only what this table's own apply call just added.
+      final int skippedBefore = total.skippedUpdatedAts.length;
       switch (table) {
         case SyncTable.recordings:
           await _applyRecordings(rows, localRecordings, total);
@@ -491,6 +494,16 @@ class SyncEngine {
           await _applyRevisions(rows, total);
         default:
           break;
+      }
+      // Hold the cursor at the oldest skipped row's `updated_at`, if this
+      // table skipped any: `newest` above already includes a row this
+      // build could not decode, so advancing the cursor past it would
+      // never re-offer it except when it changes again on the server. The
+      // lag-window re-read (Pull's own doc comment) makes re-pulling the
+      // same row on every run safe.
+      for (int i = skippedBefore; i < total.skippedUpdatedAts.length; i++) {
+        final DateTime skippedAt = total.skippedUpdatedAts[i];
+        if (newest == null || skippedAt.isBefore(newest)) newest = skippedAt;
       }
       if (newest != null) _bookkeeping.setCursor(table.serverName, newest);
     }
@@ -540,7 +553,7 @@ class SyncEngine {
     for (final Map<String, Object?> row in rows) {
       final String? id = row['id'] as String?;
       if (id == null) {
-        out.skipped++;
+        _recordSkip(row, out);
         continue;
       }
       final int serverVersion = row['version'] is int ? row['version'] as int : 0;
@@ -574,7 +587,7 @@ class SyncEngine {
       if (state != null && serverVersion <= state.serverVersion) continue; // already have it
       final Recording? theirs = SyncRowCodec.recordingFromRow(row, local: mine);
       if (theirs == null) {
-        out.skipped++;
+        _recordSkip(row, out);
         continue;
       }
 
@@ -624,6 +637,15 @@ class SyncEngine {
     for (final (id, version, hash) in pendingBookkeeping) {
       _bookkeeping.put(SyncTable.recordings.serverName, id, version, hash);
     }
+  }
+
+  /// Counts a codec-skipped row and, when it carries a parseable
+  /// `updated_at`, remembers it so `_pullAll` can hold that table's cursor
+  /// at the oldest one instead of advancing past it — see finding 8.
+  void _recordSkip(Map<String, Object?> row, _PullOutcome out) {
+    out.skipped++;
+    final DateTime? at = DateTime.tryParse('${row['updated_at']}')?.toUtc();
+    if (at != null) out.skippedUpdatedAts.add(at);
   }
 
   /// One revision per field the server value replaces. `theirs == null` is a
@@ -701,7 +723,7 @@ class SyncEngine {
       }
       final T? decoded = decode(row);
       if (decoded == null) {
-        out.skipped++;
+        _recordSkip(row, out);
         continue;
       }
       final String hash = SyncRowCodec.hash(encode(decoded));
@@ -736,7 +758,7 @@ class SyncEngine {
     for (final Map<String, Object?> row in rows) {
       final RecordingRevision? rev = SyncRowCodec.revisionFromRow(row);
       if (rev == null) {
-        out.skipped++;
+        _recordSkip(row, out);
         continue;
       }
       final Map<String, Object?> canonical = SyncRowCodec.revision(rev);
@@ -792,4 +814,10 @@ class _PullOutcome {
   int tombstones = 0;
   int skipped = 0;
   final List<Recording> redirtied = <Recording>[];
+
+  /// `updated_at` of each row a decode failure skipped this run, across
+  /// every table the shared instance sees — `_pullAll` slices out the
+  /// entries added during one table's own processing before folding them
+  /// into that table's cursor. See `_pullAll`'s doc comment.
+  final List<DateTime> skippedUpdatedAts = <DateTime>[];
 }

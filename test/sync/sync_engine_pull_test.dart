@@ -133,8 +133,41 @@ void main() {
     final r = await engine.run(const SyncSnapshot());
     expect(r.skipped, 1);
     expect(r.pulled, 1);
+
     expect(applier.recordings.keys, ['good']);
   });
+
+  test(
+    'the cursor holds at a skipped row older than the newest one, and '
+    're-offers it next run — finding 8',
+    () async {
+      // A row this build cannot decode (no created_at) — the oldest in
+      // this page.
+      transport.tables.putIfAbsent(SyncTable.recordings, () => {})['bad'] = {
+        'id': 'bad',
+        'updated_at': t0.toIso8601String(),
+        'version': 1,
+      };
+      // A decodable row, newer than the skipped one, same page.
+      advance(const Duration(seconds: 10));
+      await seedServer(recording(id: 'good'));
+
+      advance(const Duration(minutes: 1));
+      final r1 = await engine.run(const SyncSnapshot());
+      expect(r1.skipped, 1);
+      expect(r1.pulled, 1);
+      // Must not advance past the skipped row's own stamp just because a
+      // newer, decodable row was seen in the same page.
+      expect(bookkeeping.cursor('recordings'), t0);
+
+      // Next run still offers the skipped row (its stamp is inside the
+      // window again) and skips it again — proving it was re-pulled, not
+      // silently dropped.
+      advance(const Duration(minutes: 1));
+      final r2 = await engine.run(const SyncSnapshot());
+      expect(r2.skipped, 1);
+    },
+  );
 
   test('the cursor advances to the newest updated_at seen', () async {
     await seedServer(recording(id: 'a'));
