@@ -1,5 +1,5 @@
 begin;
-select plan(13);
+select plan(21);
 
 insert into auth.users (id, email) values
   ('11111111-1111-1111-1111-111111111111', 'a@example.com'),
@@ -68,6 +68,62 @@ select is((select name from public.projects where id = 'p1'), 'Two',
 -- 7. unknown table raises
 select throws_ok($$ select public.sync_push('auth_users', '[]') $$,
   '22023', null, 'an unknown table name is rejected');
+
+-- 8. a mixed batch: a key-only push for an existing row lands in
+--    `rejected`, not an error, and the sibling row still applies
+create temporary table push_result (result jsonb);
+
+insert into push_result
+select public.sync_push('projects',
+  '[{"id":"p1"},{"id":"p6","name":"Six","version":1}]');
+
+select is((select result->>'applied' from push_result), '1',
+  'the other row in a mixed batch still applies');
+select is(
+  jsonb_array_length((select result->'rejected' from push_result)), 1,
+  'a key-only push for an existing row lands in rejected, not an error');
+select is((select name from public.projects where id = 'p6'), 'Six',
+  'the applied row in the mixed batch landed');
+
+delete from push_result;
+
+-- 9. an insert missing a required column is rejected with 23502; the
+--    sibling row in the same batch still applies
+insert into push_result
+select public.sync_push('projects',
+  '[{"id":"p7","version":1},{"id":"p8","name":"Eight","version":1}]');
+
+select is((select result->>'applied' from push_result), '1',
+  'the sibling row still applies when another row violates not-null');
+select is(
+  (select result->'rejected'->0->>'code' from push_result), '23502',
+  'a missing not-null column is rejected with 23502');
+
+delete from push_result;
+
+-- 10. segments: the integer index key round-trips through the conflict
+--     lookup
+insert into push_result
+select public.sync_push('segments',
+  '[{"recording_id":"r1","index":0,"file_path":"seg.m4a","type":"audioRecording","created_at":"2026-01-01T00:00:00Z","duration_ms":100,"size_bytes":10,"version":1}]');
+
+select is((select result->>'applied' from push_result), '1',
+  'segment insert at version 1 applies');
+
+delete from push_result;
+
+insert into push_result
+select public.sync_push('segments',
+  '[{"recording_id":"r1","index":0,"file_path":"seg.m4a","type":"audioRecording","created_at":"2026-01-01T00:00:00Z","duration_ms":100,"size_bytes":10,"version":1}]');
+
+select is(
+  jsonb_array_length((select result->'conflicts' from push_result)), 1,
+  'a stale segment push is a conflict');
+select is(
+  (select result->'conflicts'->0->>'index' from push_result), '0',
+  'the conflict row carries the integer index key');
+
+drop table push_result;
 
 select * from finish();
 rollback;
