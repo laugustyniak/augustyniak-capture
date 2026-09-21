@@ -12,6 +12,7 @@ import 'package:flutter_test/flutter_test.dart';
 Recording _recording({
   String? title,
   String? transcript,
+  String? thumbPath,
   List<CaptureSegment>? segments,
 }) => Recording(
   id: 'rec-1',
@@ -22,10 +23,22 @@ Recording _recording({
   type: CaptureType.audioRecording,
   title: title,
   transcript: transcript,
+  thumbPath: thumbPath,
   category: CaptureCategory.idea,
   tags: const <String>['a', 'b'],
   segments: segments,
 );
+
+/// Walks a decoded JSON-shaped value (maps, lists, scalars — the same shape
+/// `payload` nests) and reports whether any string inside it looks like an
+/// absolute path. Used to check that a device-specific path never survives
+/// into a row destined for the server.
+bool _hasNoAbsolutePath(Object? value) {
+  if (value is String) return !value.startsWith('/');
+  if (value is Map) return value.values.every(_hasNoAbsolutePath);
+  if (value is List) return value.every(_hasNoAbsolutePath);
+  return true;
+}
 
 void main() {
   test('recording row uses server column names and only the file name', () {
@@ -47,15 +60,55 @@ void main() {
   });
 
   test('recording round-trips through a server row', () {
-    final Recording original = _recording(title: 'T', transcript: 'hello');
+    final Recording original = _recording(
+      title: 'T',
+      transcript: 'hello',
+      thumbPath: '/tmp/thumbs/rec-1.jpg',
+      segments: <CaptureSegment>[
+        CaptureSegment(
+          index: 0,
+          filePath: '/tmp/rec-1.m4a',
+          type: CaptureType.audioRecording,
+          createdAt: DateTime.utc(2026, 9, 21, 8),
+          durationMs: 1200,
+          text: 'hello',
+        ),
+        CaptureSegment(
+          index: 1,
+          filePath: '/tmp/rec-1-1.jpg',
+          type: CaptureType.image,
+          createdAt: DateTime.utc(2026, 9, 21, 9),
+        ),
+      ],
+    );
     final Map<String, Object?> row = SyncRowCodec.recording(original)
       ..['version'] = 4
       ..['updated_at'] = '2026-09-21T09:00:00Z'
       ..['deleted_at'] = null;
+
+    expect(
+      _hasNoAbsolutePath(row['payload']),
+      isTrue,
+      reason: 'nothing device-specific leaves the device, payload included',
+    );
+
     final Recording? back = SyncRowCodec.recordingFromRow(row, local: original);
     expect(back, isNotNull);
     expect(back!.toJson()..remove('filePath'), original.toJson()..remove('filePath'));
     expect(back.filePath, original.filePath, reason: 'local path is kept when present');
+
+    final Recording? withoutLocal = SyncRowCodec.recordingFromRow(row);
+    expect(withoutLocal, isNotNull);
+    expect(
+      withoutLocal!.thumbPath,
+      'rec-1.jpg',
+      reason: 'without local, the bare thumb name stays',
+    );
+    expect(
+      withoutLocal.segments.map((CaptureSegment s) => s.filePath).toList(),
+      <String>['rec-1.m4a', 'rec-1-1.jpg'],
+      reason: 'without local, the bare segment names stay',
+    );
   });
 
   test('a recording row missing its id decodes to null, not a throw', () {

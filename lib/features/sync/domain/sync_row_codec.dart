@@ -63,12 +63,18 @@ class SyncRowCodec {
   static Map<String, Object?> recording(Recording r) {
     final Map<String, dynamic> json = r.toJson();
     // Everything with no column of its own rides in `payload`, so a round
-    // trip through the server loses nothing.
+    // trip through the server loses nothing — except the device-specific
+    // absolute paths nested inside it, which are basenamed exactly like the
+    // top-level `file_path` column. Nothing device-specific leaves the
+    // device, `payload` included.
     final Map<String, Object?> payload = <String, Object?>{
-      'thumbPath': json['thumbPath'],
+      'thumbPath': json['thumbPath'] is String
+          ? p.basename(json['thumbPath'] as String)
+          : json['thumbPath'],
       'routes': json['routes'],
       'artifacts': json['artifacts'],
-      if (json.containsKey('segments')) 'segments': json['segments'],
+      if (json.containsKey('segments'))
+        'segments': _basenameSegmentPaths(json['segments']),
     };
     return <String, Object?>{
       'id': r.id,
@@ -93,6 +99,21 @@ class SyncRowCodec {
     };
   }
 
+  /// `filePath` only — every other segment field is left as the processor
+  /// wrote it.
+  static Object? _basenameSegmentPaths(Object? raw) {
+    if (raw is! List) return raw;
+    return <Map<String, dynamic>>[
+      for (final dynamic segment in raw)
+        if (segment is Map<String, dynamic>)
+          <String, dynamic>{
+            ...segment,
+            if (segment['filePath'] is String)
+              'filePath': p.basename(segment['filePath'] as String),
+          },
+    ];
+  }
+
   static Recording? recordingFromRow(
     Map<String, Object?> row, {
     Recording? local,
@@ -107,11 +128,15 @@ class SyncRowCodec {
     final String fileName = row['file_path'] is String
         ? row['file_path'] as String
         : '';
+    // Restore this device's own absolute paths when they are known; a fresh
+    // install (no `local`) keeps the bare names payload/file_path carry, and
+    // a later slice resolves them against the recordings directory.
+    final Map<int, String> localSegmentPaths = <int, String>{
+      if (local != null)
+        for (final segment in local.segments) segment.index: segment.filePath,
+    };
     final Map<String, dynamic> json = <String, dynamic>{
       'id': id,
-      // Keep the local absolute path when one is known; a fresh install gets
-      // the bare name a later slice resolves against the recordings
-      // directory.
       'filePath': local?.filePath ?? fileName,
       'createdAt': createdAt.toIso8601String(),
       'durationMs': row['duration_ms'] is int ? row['duration_ms'] : 0,
@@ -121,7 +146,7 @@ class SyncRowCodec {
       'type': row['type'],
       'sourceMimeType': row['source_mime_type'],
       'transcript': row['transcript'],
-      'thumbPath': payload['thumbPath'],
+      'thumbPath': local?.thumbPath ?? payload['thumbPath'],
       'title': row['title'],
       'category': row['category'],
       'summary': row['summary'],
@@ -133,7 +158,7 @@ class SyncRowCodec {
       'routes': payload['routes'] ?? <Object?>[],
       'artifacts': payload['artifacts'] ?? <Object?>[],
       if (payload.containsKey('segments'))
-        'segments': payload['segments']
+        'segments': _restoreSegmentPaths(payload['segments'], localSegmentPaths)
       else if (local != null && local.hasStoredSegments)
         'segments': local.toJson()['segments'],
     };
@@ -142,6 +167,25 @@ class SyncRowCodec {
     } catch (_) {
       return null;
     }
+  }
+
+  /// Restores each segment's `filePath` from the local segment sharing its
+  /// `index`, when one exists; otherwise the bare name from `payload` stays.
+  static Object? _restoreSegmentPaths(
+    Object? payloadSegments,
+    Map<int, String> localPathsByIndex,
+  ) {
+    if (payloadSegments is! List) return payloadSegments;
+    return <Map<String, dynamic>>[
+      for (final dynamic segment in payloadSegments)
+        if (segment is Map<String, dynamic>)
+          <String, dynamic>{
+            ...segment,
+            if (segment['index'] is int &&
+                localPathsByIndex.containsKey(segment['index'] as int))
+              'filePath': localPathsByIndex[segment['index'] as int],
+          },
+    ];
   }
 
   static List<Map<String, Object?>> segments(Recording r) {
