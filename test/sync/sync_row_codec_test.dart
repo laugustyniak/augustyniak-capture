@@ -87,6 +87,21 @@ void main() {
     );
   });
 
+  test('a revision row with non-string optional fields degrades instead of throwing', () {
+    final RecordingRevision? back = SyncRowCodec.revisionFromRow(<String, Object?>{
+      'recording_id': 'rec-1',
+      'at': '2026-01-01T00:00:00Z',
+      'field': 'title',
+      'from_value': 42,
+      'to_value': 'b',
+      'source': 7,
+    });
+    expect(back, isNotNull);
+    expect(back!.from, isNull, reason: 'a non-string from_value drops to null, not a cast throw');
+    expect(back.to, 'b');
+    expect(back.source, RevisionSource.processor, reason: 'a non-string source degrades to the fromName default');
+  });
+
   test('project round-trips through a server row', () {
     final Project original = Project(
       id: 'proj-1',
@@ -166,5 +181,24 @@ void main() {
 
   test('segments() is empty for a recording with no stored fragments', () {
     expect(SyncRowCodec.segments(_recording()), isEmpty);
+  });
+
+  test('segments() normalizes a local-time segment timestamp to UTC', () {
+    final Recording withLocalTime = _recording(
+      segments: <CaptureSegment>[
+        CaptureSegment(
+          index: 0,
+          filePath: '/tmp/rec-1.m4a',
+          type: CaptureType.audioRecording,
+          createdAt: DateTime(2026, 9, 21, 8),
+        ),
+      ],
+    );
+    final List<Map<String, Object?>> rows = SyncRowCodec.segments(withLocalTime);
+    expect(
+      (rows.single['created_at'] as String).endsWith('Z'),
+      isTrue,
+      reason: 'a timestamptz column must never receive an offsetless local string',
+    );
   });
 }

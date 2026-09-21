@@ -28,6 +28,13 @@ class SyncRowCodec {
   /// would not change the JSON text it produces. A hand-built row that
   /// nested its keys out of order would need one, but nothing in this class
   /// builds rows that way.
+  ///
+  /// This assumes `hash()` only ever compares codec output to codec output
+  /// (push-time content hashing). Postgres `jsonb` canonicalizes key order on
+  /// storage, so a `payload` read back from the server has its nested keys in
+  /// a different order than what was pushed; hashing a *pulled* row against
+  /// `pushed_hash` would need the recursive sort this method deliberately
+  /// skips.
   static String hash(Map<String, Object?> row) {
     final List<MapEntry<String, Object?>> entries = row.entries
         .where(
