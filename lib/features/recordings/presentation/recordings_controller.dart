@@ -116,7 +116,7 @@ class RecordingsController extends ChangeNotifier {
     ProjectsRepository? projectsRepository,
     ClipboardRepository? clipboardRepository,
     String? Function()? appVersion,
-    Future<String> Function()? syncDeviceId,
+    Future<String?> Function()? syncDeviceId,
     // `RepositorySyncApplier`'s only way to touch the live `ProjectsController`
     // — the same reason `deleteRecording` below is a bound callback rather
     // than a repository: a second writer against `ProjectsRepository`
@@ -215,7 +215,7 @@ class RecordingsController extends ChangeNotifier {
   final ProjectsRepository? _projectsRepository;
   final ClipboardRepository? _clipboardRepository;
   final String? Function()? _appVersion;
-  final Future<String> Function()? _syncDeviceId;
+  final Future<String?> Function()? _syncDeviceId;
   final Future<void> Function(List<Project> upserts)? _applySyncedProjects;
   final Future<void> Function(String id)? _applySyncedProjectDelete;
 
@@ -821,8 +821,18 @@ class RecordingsController extends ChangeNotifier {
               // and skipping it when Turso is unconfigured avoids a needless
               // read on every Supabase-only run.
               if (hasTurso) await reloadFromStorage();
+              // `ensureSyncDeviceId()` returns null rather than minting and
+              // persisting an id when `SettingsController.initialize()`
+              // never actually loaded settings — writing one in that state
+              // would overwrite `settings.json` with defaults. Skip the
+              // slot the same way an unconfigured install would.
+              final String? deviceId = await _syncDeviceId();
+              if (deviceId == null) {
+                return const SupabaseSyncResult(
+                  failureReason: 'sync skipped: settings unavailable',
+                );
+              }
               final SyncRowsStore store = SyncRowsStore(db.rawDb);
-              final String deviceId = await _syncDeviceId();
               final SyncSnapshot snapshot = SyncSnapshot(
                 recordings: List<Recording>.of(_recordings),
                 projects: await _projectsRepository.loadAll(),

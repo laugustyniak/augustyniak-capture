@@ -67,6 +67,13 @@ class SettingsController extends ChangeNotifier {
   AppSettings _settings = AppSettings.empty;
   String? _error;
 
+  /// Set once `initialize()` has actually populated [_settings] from either
+  /// a stored file or the environment seed — never on the catch branch,
+  /// where `_settings` is left at [AppSettings.empty]. Distinct from
+  /// [_error]: a later unrelated `_persist` failure also sets `_error`
+  /// without meaning settings were never loaded.
+  bool _loaded = false;
+
   // Cached so that unrelated changes (audio params, profile reordering) don't
   // spawn a fresh HttpWhisperTranscriptionService — and with it a fresh
   // http.Client — on every notification.
@@ -301,6 +308,7 @@ class SettingsController extends ChangeNotifier {
           await _repository.save(_settings);
         }
       }
+      _loaded = true;
     } catch (exception) {
       _error = exception.toString();
     } finally {
@@ -531,7 +539,17 @@ class SettingsController extends ChangeNotifier {
   /// snapshot: this controller is `settings.json`'s single writer, and a
   /// direct `SettingsRepository().save()` from elsewhere would be dropped by
   /// the next unrelated change this controller persists.
-  Future<String> ensureSyncDeviceId() async {
+  ///
+  /// Returns `null` without persisting anything when `initialize()` never
+  /// actually loaded settings (a malformed stored row, a dead keyring on
+  /// the seed path — anything that left `_settings` at [AppSettings.empty]).
+  /// Minting an id and saving it in that state would overwrite
+  /// `settings.json` with defaults — every profile and token gone — the
+  /// moment the launch sync run asks for a device id, with no user action.
+  /// The caller (the launch run / SYNC NOW slot) treats a null id as "sync
+  /// skipped: settings unavailable" rather than throwing.
+  Future<String?> ensureSyncDeviceId() async {
+    if (!_loaded) return null;
     final String? existing = _settings.syncDeviceId;
     if (existing != null) return existing;
     final String id = _uuid.v4();

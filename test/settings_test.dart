@@ -30,6 +30,21 @@ class _FakeSettingsRepository extends SettingsRepository {
   }
 }
 
+/// A load that never succeeds — a malformed stored row, say. `initialize()`
+/// catches this into `_error` and leaves settings at `AppSettings.empty`,
+/// never actually loaded.
+class _ThrowingLoadSettingsRepository extends SettingsRepository {
+  int saveCount = 0;
+
+  @override
+  Future<AppSettings?> load() async => throw const FormatException('bad json');
+
+  @override
+  Future<void> save(AppSettings settings) async {
+    saveCount++;
+  }
+}
+
 void main() {
   group('ProviderProfile', () {
     test('JSON round-trip preserves every field', () {
@@ -658,16 +673,35 @@ void main() {
       );
       await controller.initialize();
 
-      final String first = await controller.ensureSyncDeviceId();
+      final String? first = await controller.ensureSyncDeviceId();
+      expect(first, isNotNull);
       expect(first, isNotEmpty);
       expect(repository.stored?.syncDeviceId, first);
 
       final int savesAfterFirst = repository.saveCount;
-      final String second = await controller.ensureSyncDeviceId();
+      final String? second = await controller.ensureSyncDeviceId();
       expect(second, first);
       // Already had one — no second write.
       expect(repository.saveCount, savesAfterFirst);
     });
+
+    test(
+      'ensureSyncDeviceId returns null without persisting when the load failed',
+      () async {
+        final _ThrowingLoadSettingsRepository repository =
+            _ThrowingLoadSettingsRepository();
+        final SettingsController controller = SettingsController(
+          repository: repository,
+        );
+        await controller.initialize();
+        expect(controller.error, isNotNull);
+
+        final String? id = await controller.ensureSyncDeviceId();
+
+        expect(id, isNull);
+        expect(repository.saveCount, 0);
+      },
+    );
 
     test('reuses the same service until the active profile changes', () async {
       final SettingsController controller = SettingsController(
