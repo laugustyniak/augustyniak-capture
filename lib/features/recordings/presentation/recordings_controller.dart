@@ -879,7 +879,17 @@ class RecordingsController extends ChangeNotifier {
     // `IndexUnreadableException` `initialize()` already reported, out of an
     // otherwise best-effort call `syncCloud()` callers do not expect to
     // throw.
-    if (!_indexUnreadable) await reloadFromStorage();
+    //
+    // Only when Turso or R2 actually ran: both write SQLite directly,
+    // underneath this controller's own `_recordings`, so this is the one
+    // read that can see their writes. The Supabase slot already merged its
+    // pull into `_recordings` in place through `applySyncedRecordings`
+    // (see `docs/architecture/sync.md`), so a Supabase-only install must
+    // not pay a reload here — it is exactly the lost-write hazard that
+    // method exists to close, reached from the other end: a writer already
+    // queued behind `_saveInFlight` would resume with a `_recordings` this
+    // reload just replaced from disk.
+    if (!_indexUnreadable && (hasTurso || hasR2)) await reloadFromStorage();
     _logSink.log(
       _lastCloudSyncReport!.message,
       level: _lastCloudSyncReport!.success ? LogLevel.info : LogLevel.warn,
