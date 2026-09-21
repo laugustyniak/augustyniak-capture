@@ -45,6 +45,13 @@ class SupabaseSyncTransport implements SyncTransport {
     );
   }
 
+  /// Orders by `updated_at` and then by **every** key column, not just the
+  /// first — `segments`, `revisions` and `sync_state` key on more than one
+  /// column, and `(updated_at, firstKey)` alone is only a partial order for
+  /// those: two rows can tie on both and still differ on a later key
+  /// column, which makes their relative position across a page boundary
+  /// arbitrary and can skip a row between one `range()` call and the next.
+  /// The full key tuple makes the order total, so paging is stable.
   @override
   Future<SyncPage> pull(SyncTable table, {required DateTime? since, required int offset, required int limit}) async {
     final DateTime upper = (await serverNow()).subtract(syncLagWindow);
@@ -56,10 +63,11 @@ class SupabaseSyncTransport implements SyncTransport {
       // ever arrived un-normalized.
       query = query.gt('updated_at', since.toUtc().subtract(syncLagWindow).toIso8601String());
     }
-    final List<Map<String, dynamic>> rows = await query
-        .order('updated_at', ascending: true)
-        .order(table.keyColumns.first, ascending: true)
-        .range(offset, offset + limit - 1);
+    PostgrestTransformBuilder<List<Map<String, dynamic>>> ordered = query.order('updated_at', ascending: true);
+    for (final String key in table.keyColumns) {
+      ordered = ordered.order(key, ascending: true);
+    }
+    final List<Map<String, dynamic>> rows = await ordered.range(offset, offset + limit - 1);
     return SyncPage(
       rows: <Map<String, Object?>>[for (final Map<String, dynamic> r in rows) Map<String, Object?>.from(r)],
       hasMore: rows.length == limit,
