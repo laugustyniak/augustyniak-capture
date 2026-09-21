@@ -67,6 +67,13 @@ begin
         from jsonb_object_keys(row) k;
 
       if table_name = 'revisions' then
+        -- A row that strips to no columns at all would render an empty
+        -- column list and fail to parse; caught here as a rejection rather
+        -- than a syntax error that would abort the whole call.
+        if data_columns is null then
+          raise exception 'row for % has no columns', table_name
+            using errcode = 'not_null_violation';
+        end if;
         execute format(
           'insert into public.revisions (%s) select %s from jsonb_populate_record(null::public.revisions, $1) on conflict do nothing',
           (select string_agg(quote_ident(c), ', ') from unnest(data_columns) c),
