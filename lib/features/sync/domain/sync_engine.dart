@@ -259,6 +259,7 @@ class SyncEngine {
           table,
           rows,
           SyncRowCodec.projectFromRow,
+          SyncRowCodec.project,
           _applier.upsertProjects,
           scratch,
         );
@@ -267,6 +268,7 @@ class SyncEngine {
           table,
           rows,
           SyncRowCodec.clipboardItemFromRow,
+          SyncRowCodec.clipboardItem,
           _applier.upsertClipboardItems,
           scratch,
         );
@@ -309,6 +311,7 @@ class SyncEngine {
             table,
             rows,
             SyncRowCodec.projectFromRow,
+            SyncRowCodec.project,
             _applier.upsertProjects,
             total,
           );
@@ -317,6 +320,7 @@ class SyncEngine {
             table,
             rows,
             SyncRowCodec.clipboardItemFromRow,
+            SyncRowCodec.clipboardItem,
             _applier.upsertClipboardItems,
             total,
           );
@@ -451,10 +455,17 @@ class SyncEngine {
   /// Decodes each row, skips a decode failure, bookkeeps `(version, hash)`
   /// gated the same way `_applyRecordings` gates a plain replace, counts
   /// `pulled`, and hands the batch to the applier.
+  ///
+  /// The hash is taken by re-encoding the decoded value through [encode] —
+  /// never the raw pulled `row` — because Postgres `jsonb` reorders a nested
+  /// map's keys on storage (`SyncRowCodec.hash`'s own doc comment). Hashing
+  /// the raw row would make an unchanged pull look locally dirty on the next
+  /// push and re-push it forever.
   Future<void> _applySimple<T>(
     SyncTable table,
     List<Map<String, Object?>> rows,
     T? Function(Map<String, Object?>) decode,
+    Map<String, Object?> Function(T) encode,
     Future<void> Function(List<T>) upsert,
     _PullOutcome out,
   ) async {
@@ -465,12 +476,16 @@ class SyncEngine {
       final int serverVersion = row['version'] is int ? row['version'] as int : 0;
       final SyncRowState? state = known[id];
       if (state != null && serverVersion <= state.serverVersion) continue;
+      // No delete callback exists for this table on SyncApplier (a Task 6
+      // seam decision) — leave the tombstone's bookkeeping alone rather than
+      // decode-and-upsert a row missing most of its fields.
+      if (row['deleted_at'] != null) continue;
       final T? decoded = decode(row);
       if (decoded == null) {
         out.skipped++;
         continue;
       }
-      _bookkeeping.put(table.serverName, id, serverVersion, SyncRowCodec.hash(row));
+      _bookkeeping.put(table.serverName, id, serverVersion, SyncRowCodec.hash(encode(decoded)));
       upserts.add(decoded);
       out.pulled++;
     }
@@ -493,7 +508,12 @@ class SyncEngine {
         out.skipped++;
         continue;
       }
-      _bookkeeping.put(SyncTable.revisions.serverName, id, 0, '');
+      _bookkeeping.put(
+        SyncTable.revisions.serverName,
+        id,
+        0,
+        SyncRowCodec.hash(SyncRowCodec.revision(rev)),
+      );
       toAppend.add(rev);
       out.pulled++;
     }

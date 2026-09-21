@@ -154,6 +154,36 @@ void main() {
     expect(applier.revisions.single.recordingId, 'a');
   });
 
+  test('a pulled project is bookkept by its own hash, not the raw jsonb row', () async {
+    // Simulates Postgres jsonb reordering `payload`'s nested keys on
+    // storage: same content as SyncRowCodec.project(project(id: 'p')), but
+    // the payload map's keys are in a different order than the codec
+    // produces them.
+    transport.tables.putIfAbsent(SyncTable.projects, () => {})['p'] = {
+      'id': 'p',
+      'name': 'Project p',
+      'repository_path': '/tmp/p',
+      'payload': <String, Object?>{
+        'agentSettings': <String, Object?>{},
+        'defaultAgent': null,
+        'sessionName': null,
+        'description': null,
+      },
+      'version': 1,
+      'updated_at': t0.toIso8601String(),
+    };
+    advance(const Duration(minutes: 1));
+    await engine.run(const SyncSnapshot());
+    final pulled = applier.projects['p']!;
+    advance(const Duration(minutes: 2));
+    // Pushing back exactly what was just pulled must be a no-op: if
+    // bookkeeping hashed the raw pulled row instead of re-encoding through
+    // the codec, this would look locally dirty and get pushed again.
+    final r = await engine.run(SyncSnapshot(projects: [pulled]));
+    expect(r.pushed, 0);
+    expect(transport.tables[SyncTable.projects]!['p']!['version'], 1);
+  });
+
   test('cursors are mirrored to a sync_state row per table for this device', () async {
     await seedServer(recording(id: 'a'));
     advance(const Duration(minutes: 1));
