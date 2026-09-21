@@ -58,7 +58,7 @@ test/sync/*_test.dart                                      Tasks 2–7
 - Create: `supabase/tests/sync_push_test.sql`
 
 **Interfaces:**
-- Produces: `public.sync_push(table_name text, rows jsonb) returns jsonb` → `{"applied": int, "conflicts": [row jsonb, …]}`. Row keys are the table's column names. Client never sends `owner_id`, `updated_at`.
+- Produces: `public.sync_push(table_name text, rows jsonb) returns jsonb` → `{"applied": int, "conflicts": [row jsonb, …], "rejected": [{"row": jsonb, "code": sqlstate}, …]}`. A row that fails a constraint or a cast lands in `rejected`; it never aborts the batch. Task 8 reports `rejected.length` as `skipped`. Row keys are the table's column names. Client never sends `owner_id`, `updated_at`.
 
 - [ ] **Step 1: Write the failing pgTAP test**
 
@@ -66,7 +66,7 @@ test/sync/*_test.dart                                      Tasks 2–7
 
 ```sql
 begin;
-select plan(12);
+select plan(13);
 
 insert into auth.users (id, email) values
   ('11111111-1111-1111-1111-111111111111', 'a@example.com'),
@@ -257,7 +257,7 @@ Note on the `where` inside the `on conflict … do update`: when it is false the
 - [ ] **Step 4: Run the suite**
 
 Run: `cd <worktree> && supabase db reset && supabase test db`
-Expected: `Result: PASS`, `Tests=12`. If the `jsonb_populate_record` cast of `at`/`created_at` fails on the `Z` suffix, Postgres accepts ISO-8601 with `Z` for `timestamptz` — check the error text before changing the payload.
+Expected: `Result: PASS`, `Tests=13`. If the `jsonb_populate_record` cast of `at`/`created_at` fails on the `Z` suffix, Postgres accepts ISO-8601 with `Z` for `timestamptz` — check the error text before changing the payload.
 
 - [ ] **Step 5: Prove the gate is real**
 
