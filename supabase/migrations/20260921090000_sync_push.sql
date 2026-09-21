@@ -6,11 +6,17 @@
 -- ownership trigger refuses a change on update. `updated_at` is likewise
 -- ignored; the server stamps it.
 --
--- For the six versioned tables a row is applied when it inserts, or when it
--- updates a row whose version is exactly one behind. A row that matches
--- nothing is returned in `conflicts` with the server's current row, so the
--- caller can resolve without a second round trip. `revisions` has no version
--- and no update grant: it inserts on its natural key and a repeat is a no-op.
+-- For the six versioned tables a row is applied when it updates a row whose
+-- version is exactly one behind, or when it inserts (tried only once no
+-- update matched). The update path only ever sets the columns the payload
+-- actually carries, so a tombstone — id, version and deleted_at, nothing
+-- else — can update an existing row without needing every not-null column
+-- resent; the insert path still requires them all, same as ever, since a
+-- brand-new row has no prior server state to fall back on. A row that
+-- matches nothing existing is returned in `conflicts` with the server's
+-- current row, so the caller can resolve without a second round trip.
+-- `revisions` has no version and no update grant: it inserts on its natural
+-- key and a repeat is a no-op.
 --
 -- Each row runs in its own subtransaction (a nested `begin … exception …
 -- end`), so one bad row never aborts the batch. A row whose data is
@@ -95,32 +101,61 @@ begin
           using errcode = 'not_null_violation';
       end if;
 
+      -- Update first, touching only the columns the payload actually
+      -- carries. `jsonb_populate_record` fills every column this table has
+      -- — NULL for one the payload omits — into a plain, unwritten `src`
+      -- record, so referencing `src.<col>` here never trips a NOT NULL
+      -- check the way giving those same omitted columns to a bare INSERT
+      -- would; a tombstone (id + version + deleted_at only) is exactly
+      -- such a payload, and its target row already has every other
+      -- NOT NULL column filled in from when it was first inserted. RLS's
+      -- own `..._update_own` policy already confines this to the caller's
+      -- rows, the same way it always has for the old `on conflict do
+      -- update` path this replaces.
       execute format(
-        'insert into public.%1$I (%2$s) select %2$s from jsonb_populate_record(null::public.%1$I, $1) '
-        'on conflict (owner_id, %3$s) do update set %4$s '
-        'where public.%1$I.version = excluded.version - 1',
+        'update public.%1$I t set %2$s '
+        'from jsonb_populate_record(null::public.%1$I, $1) as src '
+        'where %3$s and t.version = coalesce(src.version, 0) - 1',
         table_name,
-        (select string_agg(quote_ident(c), ', ') from unnest(data_columns) c),
-        (select string_agg(quote_ident(c), ', ') from unnest(key_columns) c),
-        (select string_agg(format('%1$I = excluded.%1$I', c), ', ')
-           from unnest(data_columns) c where c <> all (key_columns)))
+        (select string_agg(format('%1$I = src.%1$I', c), ', ')
+           from unnest(data_columns) c where c <> all (key_columns)),
+        (select string_agg(format('t.%1$I = src.%1$I', c), ' and ')
+           from unnest(key_columns) c))
       using row;
       get diagnostics touched = row_count;
 
       if touched = 1 then
         applied := applied + 1;
-      else
-        execute format(
-          'select to_jsonb(t) from public.%1$I t where %2$s',
-          table_name,
-          (select string_agg(format('t.%1$I = ($1->>%2$L)::%3$s', c, c,
-             format_type(a.atttypid, a.atttypmod)), ' and ')
-             from unnest(key_columns) c
-             join pg_attribute a on a.attname = c
-              and a.attrelid = format('public.%I', table_name)::regclass))
-        into current_row using row;
-        conflicts := conflicts || coalesce(current_row, row);
+        continue;
       end if;
+
+      -- Not updated: either this row does not exist yet for this owner, or
+      -- it does and lost the version race — the same lookup answers both,
+      -- and is also the conflict row a stale push reports.
+      execute format(
+        'select to_jsonb(t) from public.%1$I t where %2$s',
+        table_name,
+        (select string_agg(format('t.%1$I = ($1->>%2$L)::%3$s', c, c,
+           format_type(a.atttypid, a.atttypmod)), ' and ')
+           from unnest(key_columns) c
+           join pg_attribute a on a.attname = c
+            and a.attrelid = format('public.%I', table_name)::regclass))
+      into current_row using row;
+
+      if current_row is not null then
+        conflicts := conflicts || current_row;
+        continue;
+      end if;
+
+      -- Genuinely new to this owner: a full insert, which still enforces
+      -- every not-null column exactly as before — a brand-new row has no
+      -- prior server-side state to fall back on for the columns it omits.
+      execute format(
+        'insert into public.%1$I (%2$s) select %2$s from jsonb_populate_record(null::public.%1$I, $1)',
+        table_name,
+        (select string_agg(quote_ident(c), ', ') from unnest(data_columns) c))
+      using row;
+      applied := applied + 1;
     exception
       when data_exception or integrity_constraint_violation
         or undefined_column then

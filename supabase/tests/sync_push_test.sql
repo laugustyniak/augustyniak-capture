@@ -1,5 +1,5 @@
 begin;
-select plan(25);
+select plan(28);
 
 insert into auth.users (id, email) values
   ('11111111-1111-1111-1111-111111111111', 'a@example.com'),
@@ -46,6 +46,24 @@ select is(
   '1', 'tombstone applies at the next version');
 select ok((select deleted_at is not null from public.projects where id = 'p1'),
   'deleted_at is set');
+
+-- 4b. a tombstone carrying only its key, version and deleted_at — exactly
+--     what `SyncEngine._tombstone()` sends, never the row's other columns
+--     — still applies to an existing row on a table with other not-null
+--     columns, and those columns are left untouched rather than the update
+--     itself being rejected as if it were a bare insert.
+insert into public.recordings (id, file_path, duration_ms, type, status, created_at)
+values ('r-tombstone', 'r-tombstone.m4a', 1, 'audioRecording', 'saved', now());
+select is(
+  (select public.sync_push('recordings',
+    '[{"id":"r-tombstone","version":2,"deleted_at":"2026-09-21T00:00:00Z"}]'))->>'applied',
+  '1', 'a key+version+deleted_at-only tombstone applies to an existing row');
+select ok(
+  (select deleted_at is not null from public.recordings where id = 'r-tombstone'),
+  'deleted_at is set by the minimal tombstone');
+select is(
+  (select file_path from public.recordings where id = 'r-tombstone'),
+  'r-tombstone.m4a', 'a column the tombstone never mentioned is left untouched');
 
 -- 5. revisions: natural key, no-op on repeat, never a conflict
 insert into public.recordings (id, file_path, duration_ms, type, status, created_at)
