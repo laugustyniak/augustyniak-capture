@@ -1689,7 +1689,7 @@ class RecordingsController extends ChangeNotifier {
           'Deletion is disabled — the recordings index could not be read, so '
           'the rest of the queue cannot be rewritten safely.';
       _logSink.log(_error!, level: LogLevel.error, recordingId: id);
-      notifyListeners();
+      if (!_disposed) notifyListeners();
       return;
     }
 
@@ -1719,7 +1719,7 @@ class RecordingsController extends ChangeNotifier {
       // where the file is, so it stays until the file is actually gone.
       _error = 'Could not delete the source file: $exception';
       _logSink.log(_error!, level: LogLevel.error, recordingId: id);
-      notifyListeners();
+      if (!_disposed) notifyListeners();
       return;
     }
 
@@ -1736,7 +1736,7 @@ class RecordingsController extends ChangeNotifier {
       level: LogLevel.warn,
       recordingId: id,
     );
-    notifyListeners();
+    if (!_disposed) notifyListeners();
   }
 
   /// Save a typed text note. Follows the exact ordering of [stopRecording]:
