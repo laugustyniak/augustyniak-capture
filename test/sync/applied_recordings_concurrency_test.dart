@@ -18,11 +18,13 @@ class _SlowRepository extends RecordingsRepository {
     : super(directoryProvider: () async => root);
 
   Completer<void>? gate;
+  bool shouldThrow = false;
 
   @override
   Future<void> saveAll(List<Recording> recordings) async {
     final Completer<void>? g = gate;
     if (g != null) await g.future;
+    if (shouldThrow) throw const FileSystemException('disk full');
     await super.saveAll(recordings);
   }
 }
@@ -111,6 +113,32 @@ void main() {
         byId['local']!.title,
         'edited',
         reason: 'the in-flight status/title transition must survive',
+      );
+    },
+  );
+
+  test(
+    'a failed write rolls back the in-memory merge and rethrows — round 2 LOW 1',
+    () async {
+      final RecordingsController controller = RecordingsController(
+        repository: repository,
+        transcriptionService: const DisabledTranscriptionService(),
+      );
+      addTearDown(controller.dispose);
+      await controller.initialize();
+
+      final List<Recording> before = List<Recording>.of(controller.recordings);
+      repository.shouldThrow = true;
+
+      await expectLater(
+        controller.applySyncedRecordings(<Recording>[_item('pulled')]),
+        throwsA(isA<FileSystemException>()),
+      );
+
+      expect(
+        controller.recordings.map((Recording r) => r.id),
+        before.map((Recording r) => r.id),
+        reason: 'the failed merge must not remain in memory',
       );
     },
   );

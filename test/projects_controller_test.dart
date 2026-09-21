@@ -242,6 +242,29 @@ void main() {
     expect(reloaded.projects.map((Project p) => p.id), <String>[first.id]);
     expect(reloaded.activeProjectId, first.id);
   });
+
+  test(
+    'applySyncedProjects after dispose does not throw and still writes — round 2 LOW 2',
+    () async {
+      final ProjectsController controller = ProjectsController(
+        repository: repository,
+      );
+      await controller.initialize();
+      controller.dispose();
+
+      // Reachable from the unawaited launch-run sync after the owning
+      // widget — and this controller — has already been disposed.
+      await controller.applySyncedProjects(<Project>[
+        const Project(id: 'pulled', name: 'Pulled', repoPath: '/work/pulled'),
+      ]);
+
+      final ProjectsController reloaded = ProjectsController(
+        repository: ProjectsRepository(directoryProvider: () async => directory),
+      );
+      await reloaded.initialize();
+      expect(reloaded.projects.map((Project p) => p.id), <String>['pulled']);
+    },
+  );
 }
 
 class _CapturingLauncher implements AgentSessionLauncher {

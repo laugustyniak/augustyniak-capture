@@ -25,6 +25,17 @@ class ProjectsController extends ChangeNotifier {
   String? _error;
   bool _isLoading = false;
   final Set<String> _launchesInProgress = <String>{};
+  // `applySyncedProjects`/`applySyncedProjectDelete` are reachable from the
+  // unawaited launch-run sync after this controller's owning widget — and
+  // this controller — has been disposed. Guarded the same way
+  // `RecordingsController` guards its own `notifyListeners` calls.
+  bool _disposed = false;
+
+  @override
+  void dispose() {
+    _disposed = true;
+    super.dispose();
+  }
 
   List<Project> get projects => List<Project>.unmodifiable(_projects);
   String? get activeProjectId => _activeProjectId;
@@ -45,7 +56,7 @@ class ProjectsController extends ChangeNotifier {
   Future<void> initialize() async {
     _isLoading = true;
     _error = null;
-    notifyListeners();
+    if (!_disposed) notifyListeners();
     try {
       _projects = await _repository.loadAll();
       _activeProjectId = _resolveActive(
@@ -56,7 +67,7 @@ class ProjectsController extends ChangeNotifier {
       _error = exception.toString();
     } finally {
       _isLoading = false;
-      notifyListeners();
+      if (!_disposed) notifyListeners();
     }
   }
 
@@ -221,7 +232,7 @@ class ProjectsController extends ChangeNotifier {
     final String key = _launchKey(project.id, agent);
     if (!_launchesInProgress.add(key)) return;
     _error = null;
-    notifyListeners();
+    if (!_disposed) notifyListeners();
     try {
       final AgentSettings settings = project.settingsFor(agent);
       await launcher.launch(
@@ -239,7 +250,7 @@ class ProjectsController extends ChangeNotifier {
       rethrow;
     } finally {
       _launchesInProgress.remove(key);
-      notifyListeners();
+      if (!_disposed) notifyListeners();
     }
   }
 
@@ -252,10 +263,10 @@ class ProjectsController extends ChangeNotifier {
       await _repository.saveAll(next, activeProjectId: activeProjectId);
       _projects = List<Project>.unmodifiable(next);
       _activeProjectId = activeProjectId;
-      notifyListeners();
+      if (!_disposed) notifyListeners();
     } catch (exception) {
       _error = exception.toString();
-      notifyListeners();
+      if (!_disposed) notifyListeners();
       rethrow;
     }
   }

@@ -207,7 +207,7 @@ class RecordingsController extends ChangeNotifier {
   /// straight to `RepositorySyncApplier` without reaching into that class.
   final RevisionsRepository? _revisionsRepository;
 
-  /// The Supabase sync seam. All five are null unless the app shell wired
+  /// The Supabase sync seam. All eight are null unless the app shell wired
   /// them (Supabase initialised, both repositories built) — see the
   /// constructor's doc comment.
   final SyncTransport Function()? _syncTransportResolver;
@@ -655,6 +655,7 @@ class RecordingsController extends ChangeNotifier {
   /// is actually its turn to write. See `docs/architecture/sync.md`.
   Future<void> applySyncedRecordings(List<Recording> upserts) async {
     if (upserts.isEmpty) return;
+    final List<Recording> beforeUpdate = _recordings;
     final Map<String, Recording> byId = <String, Recording>{
       for (final Recording r in _recordings) r.id: r,
     };
@@ -663,7 +664,13 @@ class RecordingsController extends ChangeNotifier {
     }
     _recordings = byId.values.toList()
       ..sort((Recording a, Recording b) => b.createdAt.compareTo(a.createdAt));
-    await _persistAll();
+    try {
+      await _persistAll();
+    } catch (_) {
+      // A failed write is not a completed mutation — mirrors `_update`.
+      _recordings = beforeUpdate;
+      rethrow;
+    }
     if (!_disposed) notifyListeners();
   }
 
@@ -807,10 +814,13 @@ class RecordingsController extends ChangeNotifier {
       syncSupabase: hasSupabase
           ? () async {
               // Turso, if configured, ran first and writes SQLite directly —
-              // `_recordings` is untouched by it. Refresh before building the
-              // snapshot so it reflects Turso's pull rather than the applier
-              // (via `applySyncedRecordings`) later silently reverting it.
-              await reloadFromStorage();
+              // `_recordings` is untouched by it. Only reload when Turso
+              // actually ran: `hasSupabase` already required
+              // `!_indexUnreadable` above, so this reload cannot resurrect
+              // the old "index unreadable" throw it used to guard against,
+              // and skipping it when Turso is unconfigured avoids a needless
+              // read on every Supabase-only run.
+              if (hasTurso) await reloadFromStorage();
               final SyncRowsStore store = SyncRowsStore(db.rawDb);
               final String deviceId = await _syncDeviceId();
               final SyncSnapshot snapshot = SyncSnapshot(
