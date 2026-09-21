@@ -14,7 +14,12 @@ enum RevisionSource {
 
   /// The processor that produced the item's text in the first place
   /// (transcription, OCR, or the note passthrough).
-  processor;
+  processor,
+
+  /// Another device's edit that overwrote this one during a cloud sync — the
+  /// server row was newer, and what it replaced is kept here so the loss is
+  /// visible in HISTORY rather than silent.
+  sync;
 
   /// Unknown names degrade to [processor] rather than throwing, the same
   /// forward-compatibility rule `CaptureType.fromName` follows: a history file
@@ -26,6 +31,7 @@ enum RevisionSource {
     RevisionSource.user => 'YOU',
     RevisionSource.enrichment => 'MODEL',
     RevisionSource.processor => 'PIPELINE',
+    RevisionSource.sync => 'SYNC',
   };
 }
 
