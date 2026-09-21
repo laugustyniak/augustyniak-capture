@@ -308,10 +308,45 @@ class SyncEngine {
         for (final Map<String, Object?> row in rows) {
           final String id = SyncRowCodec.rowId(table, row);
           final int version = row['version'] is int ? row['version'] as int : 0;
-          _bookkeeping.put(table.serverName, id, version, SyncRowCodec.hash(row));
+          _bookkeeping.put(
+            table.serverName,
+            id,
+            version,
+            SyncRowCodec.hash(_canonicalServerRow(row)),
+          );
         }
     }
     return scratch;
+  }
+
+  /// Re-shapes a raw server row into the same canonical form the codec's
+  /// own encoders always produce, before it is hashed for adoption.
+  ///
+  /// `sync_push`'s real RPC returns a conflicting row as `to_jsonb(t)`, so a
+  /// timestamp column comes back as Postgres renders it
+  /// (`2026-09-21T12:00:00+00:00`); `SyncRowCodec.segments()`/`device()`
+  /// render the identical instant as Dart's own `toIso8601String()`
+  /// (`2026-09-21T12:00:00.000Z`). Hashing the raw row directly would never
+  /// match what a later, unchanged local push of the same content hashes to
+  /// — one spurious push every run for every adopted row.
+  Map<String, Object?> _canonicalServerRow(Map<String, Object?> row) {
+    final Map<String, Object?> canonical = <String, Object?>{};
+    for (final MapEntry<String, Object?> entry in row.entries) {
+      if (entry.key == 'owner_id' ||
+          entry.key == 'updated_at' ||
+          entry.key == 'version' ||
+          entry.key == 'deleted_at') {
+        continue;
+      }
+      final Object? value = entry.value;
+      if (value is String) {
+        final DateTime? parsed = DateTime.tryParse(value);
+        canonical[entry.key] = parsed?.toUtc().toIso8601String() ?? value;
+      } else {
+        canonical[entry.key] = value;
+      }
+    }
+    return canonical;
   }
 
   Future<_PullOutcome> _pullAll(
@@ -488,8 +523,15 @@ class SyncEngine {
       upserts.add(next);
       out.pulled++;
     }
-    if (revisions.isNotEmpty) await _applier.appendRevisions(revisions);
+    // Conflict revisions after the upsert, not before: a thrown
+    // upsertRecordings must not leave a SYNC revision on disk for a row
+    // that was never actually replaced — the next run would re-diff the
+    // same overwrite and duplicate it. (A tombstone's revisions stay
+    // before deleteRecording, above — HISTORY must show what a delete
+    // threw away before the row is gone, and there is no "row never
+    // replaced" case for a delete to undo.)
     if (upserts.isNotEmpty) await _applier.upsertRecordings(upserts);
+    if (revisions.isNotEmpty) await _applier.appendRevisions(revisions);
     for (final (id, version, hash) in pendingBookkeeping) {
       _bookkeeping.put(SyncTable.recordings.serverName, id, version, hash);
     }

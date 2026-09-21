@@ -49,7 +49,11 @@ class FakeSyncTransport implements SyncTransport {
       } else {
         // `!ok` only when `current` is non-null (a new row is always `ok`);
         // the analyzer promotes `current` to non-null here on that basis.
-        conflicts.add(Map<String, Object?>.from(current));
+        // Reformatted the same way `pull()` reformats a row: the real
+        // `sync_push` RPC returns the conflicting row as `to_jsonb(t)`, so a
+        // caller that hashes it directly sees Postgres's timestamp shape,
+        // not Dart's.
+        conflicts.add(_asPulledRow(current));
       }
     }
     return SyncPushResult(applied: applied, conflicts: conflicts);
@@ -105,9 +109,14 @@ class FakeSyncTransport implements SyncTransport {
   }
 
   static String _asPostgresTimestamp(DateTime dt) {
-    final String iso = dt.toUtc().toIso8601String(); // 2026-09-21T12:00:00.000Z
+    final String iso = dt.toUtc().toIso8601String(); // 2026-09-21T12:00:00.000Z or …120Z
     final String withoutZ = iso.substring(0, iso.length - 1);
-    final String withoutMillis = withoutZ.replaceFirst(RegExp(r'\.\d+$'), '');
-    return '$withoutMillis+00:00';
+    // Postgres keeps a non-zero fraction; trim only trailing zeros (and the
+    // dot itself once nothing but zeros remains), not every digit.
+    final String trimmed = withoutZ.replaceFirstMapped(RegExp(r'\.(\d+)$'), (Match m) {
+      final String digits = m.group(1)!.replaceFirst(RegExp(r'0+$'), '');
+      return digits.isEmpty ? '' : '.$digits';
+    });
+    return '$trimmed+00:00';
   }
 }

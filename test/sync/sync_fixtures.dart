@@ -79,7 +79,14 @@ class MemoryBookkeeping implements SyncBookkeeping {
 
   @override
   Map<String, SyncRowState> loadTable(String table) =>
-      _tables[table] ?? <String, SyncRowState>{};
+      // A defensive copy — matching `SyncRowsStore`, which builds a fresh
+      // map from a `SELECT` every call. The engine mutates the map it gets
+      // back in place while walking one page (a duplicate id inside the
+      // page sees the fresh state); aliasing the live backing map here
+      // would let that in-memory bookkeeping update reach disk before the
+      // matching `put` call runs, defeating the "persist before bookkeep"
+      // ordering the engine relies on.
+      Map<String, SyncRowState>.from(_tables[table] ?? <String, SyncRowState>{});
 
   @override
   void put(String table, String id, int serverVersion, String pushedHash) {

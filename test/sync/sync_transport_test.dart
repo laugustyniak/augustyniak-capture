@@ -60,6 +60,16 @@ void main() {
     expect(r.conflicts, isEmpty);
   });
 
+  test('a pulled timestamp with a non-zero fraction keeps it, trimming only trailing zeros', () async {
+    final FakeSyncTransport fake = FakeSyncTransport(
+      clock: () => DateTime.utc(2026, 9, 21, 12, 0, 0, 120),
+    );
+    await fake.push(SyncTable.projects, [{'id': 'p', 'name': 'a', 'version': 1}]);
+    fake.clock = () => DateTime.utc(2026, 9, 21, 12, 1, 0);
+    final rows = (await fake.pull(SyncTable.projects, since: null, offset: 0, limit: 10)).rows;
+    expect(rows.single['updated_at'], '2026-09-21T12:00:00.12+00:00');
+  });
+
   test('SyncPushResult defaults rejected to empty and the fake never rejects', () async {
     final FakeSyncTransport fake = FakeSyncTransport();
     final SyncPushResult r = await fake.push(SyncTable.projects, [

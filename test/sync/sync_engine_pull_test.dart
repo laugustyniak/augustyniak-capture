@@ -211,6 +211,28 @@ void main() {
     expect(bookkeeping.loadTable('recordings'), isEmpty);
   });
 
+  test('a repository write failure leaves no orphaned conflict revisions', () async {
+    // A genuine conflict, so _applyRecordings actually builds a non-empty
+    // `revisions` list — proving the ordering, not just that nothing ran.
+    await engine.run(
+      SyncSnapshot(recordings: [recording(id: 'a', title: 'base', summary: 'base')]),
+    );
+    await transport.push(SyncTable.recordings, [
+      {
+        ...SyncRowCodec.recording(recording(id: 'a', title: 'theirs', summary: 'base')),
+        'version': 2,
+      },
+    ]);
+    advance(const Duration(minutes: 1));
+    applier.throwOnUpsertRecordings = Exception('disk full');
+    final r = await engine.run(
+      SyncSnapshot(recordings: [recording(id: 'a', title: 'mine', summary: 'mine')]),
+    );
+    expect(r.success, isFalse);
+    expect(bookkeeping.loadTable('recordings')['a']!.serverVersion, 1);
+    expect(applier.revisions, isEmpty);
+  });
+
   test('a pulled revision already pushed by this device is not re-appended', () async {
     await engine.run(SyncSnapshot(revisions: [revision(recordingId: 'a')]));
     advance(const Duration(minutes: 1));
@@ -279,9 +301,17 @@ void main() {
     await transport.push(SyncTable.segments, [{...seg, 'version': 1}]);
     final r1 = await engine.run(SyncSnapshot(recordings: [rec]));
     expect(r1.conflicts, 1);
+    transport.pushes.clear();
     final r2 = await engine.run(SyncSnapshot(recordings: [rec]));
     expect(r2.conflicts, 0);
     expect(r2.pushed, 0);
+    // Not just "no conflict" — no push attempt at all: the adopted hash
+    // must equal what an unchanged local push computes, or this would push
+    // (and succeed, since the server content genuinely did not change).
+    expect(
+      transport.pushes.where((p) => p.$1 == SyncTable.segments && p.$2.isNotEmpty),
+      isEmpty,
+    );
   });
 
   test('cursors are mirrored to a sync_state row per table for this device', () async {
