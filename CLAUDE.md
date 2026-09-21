@@ -94,7 +94,7 @@ CI is **live** (`.github/workflows/ci.yml`) and runs `flutter analyze` + `flutte
 
 ## Architecture
 
-Feature-first layout under `lib/features/<feature>/{domain,data,presentation}`. Sixteen features: `recordings`, `projects`, `transcription`, `processing`, `enrichment`, `settings`, `costs`, `logs`, `shortcuts`, `timer`, `clipboard`, `gamification`, `momentum`, `backup`, `command`, `auth`. No state-management or DI package — plain `ChangeNotifier` + constructor injection. The one thing that is not feature-scoped is `core/database/app_database.dart` — see Persistence.
+Feature-first layout under `lib/features/<feature>/{domain,data,presentation}`. Seventeen features: `recordings`, `projects`, `transcription`, `processing`, `enrichment`, `settings`, `costs`, `logs`, `shortcuts`, `timer`, `clipboard`, `gamification`, `momentum`, `backup`, `command`, `auth`, `sync`. No state-management or DI package — plain `ChangeNotifier` + constructor injection. The one thing that is not feature-scoped is `core/database/app_database.dart` — see Persistence.
 
 **Deep reference lives under `docs/`, one file per area.** This file carries the invariants — the ordering rules, the durability rules and the seams. Open the matching reference before changing anything in its area; each is written to be read whole.
 
@@ -116,6 +116,7 @@ Feature-first layout under `lib/features/<feature>/{domain,data,presentation}`. 
 | `docs/architecture/capture-pipeline.md` | `recordings_controller.dart`, a capture entry point, `CaptureSegment`, `MediaImporter`, the removal paths |
 | `docs/architecture/persistence.md` | `recordings_repository.dart`, `app_database.dart`, any `*_repository.dart`, the JSON indexes or the SQLite mirror |
 | `docs/architecture/processing.md` | `features/processing/`, a `Processor`, `OcrService`, a video extractor, `provider_failure.dart` |
+| `docs/architecture/sync.md` | `features/sync/`, `sync_push`, `sync_rows`, the cursor |
 | `docs/architecture/testing.md` | writing or debugging any test, before trusting a green run |
 
 `docs/plans/` and `docs/superpowers/specs/` hold the design documents those files cite.
@@ -151,7 +152,7 @@ Neither rule is weakened by the two removal paths (`discardRecording`, `deleteRe
 
 ## The features
 
-Fifteen, each a line and a pointer. Read the pointer before changing anything in its area.
+Sixteen, each a line and a pointer. Read the pointer before changing anything in its area.
 
 - **`recordings`** — the queue, the capture screen, the editor, the controller that owns the pipeline. `docs/architecture/capture-pipeline.md`, `docs/architecture/ui.md`.
 - **`processing`** — `Processor` turns a segment's source into text. **The rule to enforce in review: a processor only ever reads the source — never writes, moves or deletes it.** `docs/architecture/processing.md`.
@@ -167,7 +168,8 @@ Fifteen, each a line and a pointer. Read the pointer before changing anything in
 - **`timer`** / **`momentum`** — a Pomodoro countdown, and append-only logs of the sessions that reached zero and the captures that left the desk. Time is read from the clock, never accumulated. `docs/architecture/timer-momentum.md`.
 - **`gamification`** — entirely cosmetic by construction: a nullable seam, every call site `unawaited`, and nothing it does can reach `status`, a source file or the index. Treat any change that gives it a say in the pipeline as a bug. `docs/architecture/timer-momentum.md`.
 - **`logs`** — a `ChangeNotifier` ring buffer, newest-first, capacity 500. Read-only view; nothing in the Logs tab mutates recordings.
-- **`auth`** — optional Supabase bootstrap and OS-keyring session storage. Missing config or an unavailable keyring never blocks local capture. Issue #187 tracks the staged replacement of Turso/R2; no cloud-data transport belongs here yet.
+- **`auth`** — optional Supabase bootstrap and OS-keyring session storage. Missing config or an unavailable keyring never blocks local capture. Issue #187 tracks the staged replacement of Turso/R2; the cloud-data transport itself lives in `features/sync/`.
+- **`sync`** — Supabase metadata sync: push-then-pull over one version-gated RPC, applied through the same repositories the rest of the app writes through, never raw SQL. Runs from SYNC NOW and once at launch, only when signed in; media bytes are a later slice. `docs/architecture/sync.md`.
 
 Not feature-scoped: `core/database/app_database.dart` (see Persistence), `core/http/provider_failure.dart`, `core/sync/`.
 
