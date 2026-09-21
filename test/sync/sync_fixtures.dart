@@ -16,6 +16,7 @@ Recording recording({
   String? title,
   String? summary,
   String? transcript,
+  String? projectId,
 }) => Recording(
   id: id,
   filePath: '/tmp/$id.m4a',
@@ -26,6 +27,7 @@ Recording recording({
   title: title,
   summary: summary,
   transcript: transcript,
+  projectId: projectId,
 );
 
 Recording recordingWithSegments({

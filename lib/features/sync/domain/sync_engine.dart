@@ -143,11 +143,16 @@ class SyncEngine {
 
   /// One table's local rows in server shape, keyed by row id.
   Iterable<_Outbox> _outboxes(SyncSnapshot s) sync* {
+    final Set<String> projectIds = {for (final Project p in s.projects) p.id};
+    final Set<String> recordingIds = {
+      for (final Recording r in s.recordings) r.id,
+    };
     yield _Outbox(SyncTable.projects, {
       for (final Project p in s.projects) p.id: SyncRowCodec.project(p),
     });
     yield _Outbox(SyncTable.recordings, {
-      for (final Recording r in s.recordings) r.id: SyncRowCodec.recording(r),
+      for (final Recording r in s.recordings)
+        r.id: _recordingRow(r, projectIds),
     });
     yield _Outbox(SyncTable.segments, {
       for (final Recording r in s.recordings)
@@ -159,13 +164,36 @@ class SyncEngine {
         c.id: SyncRowCodec.clipboardItem(c),
     });
     yield _Outbox(SyncTable.revisions, {
+      // A revision for a recording not in this snapshot — deleted locally
+      // in a session before this one started keeping revisions bookkept, or
+      // simply not this device's — would fail `sync_push`'s FK on
+      // `revisions.recording_id` every run, forever: `rejected`, never
+      // bookkept, retried and counted indefinitely. Drop it from the
+      // outbox; `revisions.jsonl` itself is append-only and untouched.
       for (final RecordingRevision rev in s.revisions)
-        SyncRowCodec.rowId(SyncTable.revisions, SyncRowCodec.revision(rev)):
-            SyncRowCodec.revision(rev),
+        if (recordingIds.contains(rev.recordingId))
+          SyncRowCodec.rowId(SyncTable.revisions, SyncRowCodec.revision(rev)):
+              SyncRowCodec.revision(rev),
     });
     if (s.device.isNotEmpty) {
       yield _Outbox(SyncTable.devices, {s.device['id'] as String: s.device});
     }
+  }
+
+  /// A recording whose `projectId` names a project not in this snapshot (the
+  /// project was deleted before `ProjectsController.delete` ever clears
+  /// `Recording.projectId`) would otherwise fail `sync_push`'s FK on
+  /// `recordings.project_id` every run, forever — `rejected`, never
+  /// bookkept, retried and counted indefinitely, along with its segments
+  /// and revisions. Send `project_id: null` instead: the row still syncs,
+  /// just without an association the server cannot verify anyway.
+  Map<String, Object?> _recordingRow(Recording r, Set<String> projectIds) {
+    final Map<String, Object?> row = SyncRowCodec.recording(r);
+    final Object? projectId = row['project_id'];
+    if (projectId is String && !projectIds.contains(projectId)) {
+      row['project_id'] = null;
+    }
+    return row;
   }
 
   /// [sweepDeletes] governs the tombstone sweep below: it must be `false`

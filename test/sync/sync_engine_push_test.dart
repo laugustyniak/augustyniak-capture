@@ -202,4 +202,56 @@ void main() {
     final batches = transport.pushes.where((p) => p.$1 == SyncTable.clipboardItems).toList();
     expect(batches.map((b) => b.$2.length), [200, 200, 50]);
   });
+
+  test(
+    'a recording whose project is not in the snapshot pushes with '
+    'project_id null instead of being rejected forever — finding 4',
+    () async {
+      final r = await engine.run(
+        SyncSnapshot(
+          recordings: [recording(id: 'a', projectId: 'deleted-project')],
+        ),
+      );
+      expect(r.pushed, 1);
+      expect(r.skipped, 0);
+      expect(transport.tables[SyncTable.recordings]!['a']!['project_id'], isNull);
+      expect(bookkeeping.loadTable('recordings').containsKey('a'), isTrue);
+    },
+  );
+
+  test(
+    'a recording whose project is in the snapshot keeps its project_id',
+    () async {
+      await engine.run(
+        SyncSnapshot(
+          recordings: [recording(id: 'a', projectId: 'p1')],
+          projects: [project(id: 'p1')],
+        ),
+      );
+      expect(transport.tables[SyncTable.recordings]!['a']!['project_id'], 'p1');
+    },
+  );
+
+  test(
+    'a revision for a recording not in the snapshot is dropped from the '
+    'outbox, not disk — finding 4',
+    () async {
+      final r = await engine.run(
+        SyncSnapshot(
+          recordings: [recording(id: 'kept')],
+          revisions: [
+            revision(recordingId: 'kept'),
+            revision(recordingId: 'gone-from-this-device'),
+          ],
+        ),
+      );
+      expect(r.skipped, 0);
+      // Only the revision for 'kept' reached the transport.
+      expect(transport.tables[SyncTable.revisions]!.length, 1);
+      expect(
+        transport.tables[SyncTable.revisions]!.values.single['recording_id'],
+        'kept',
+      );
+    },
+  );
 }
