@@ -1,8 +1,55 @@
 import 'package:augustyniak_capture/core/sync/cloud_sync_coordinator.dart';
 import 'package:augustyniak_capture/core/sync/r2_media_sync_service.dart';
+import 'package:augustyniak_capture/features/sync/domain/sync_snapshot.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {
+  test('supabase result rides beside turso and r2 in the report', () async {
+    final CloudSyncCoordinator c = CloudSyncCoordinator(
+      syncSupabase: () async => const SupabaseSyncResult(pushed: 2, pulled: 1),
+    );
+    final CloudSyncReport report = await c.sync();
+    expect(report.success, isTrue);
+    expect(report.message, contains('Supabase: 2 pushed · 1 pulled'));
+  });
+
+  test('a supabase failure makes the report fail with its reason', () async {
+    final CloudSyncCoordinator c = CloudSyncCoordinator(
+      syncSupabase: () async => const SupabaseSyncResult(failureReason: 'offline'),
+    );
+    final CloudSyncReport report = await c.sync();
+    expect(report.success, isFalse);
+    expect(report.message, contains('Supabase: offline'));
+  });
+
+  test('a supabase throw is caught and reported without leaking its message', () async {
+    final CloudSyncReport report = await CloudSyncCoordinator(
+      syncSupabase: () => throw StateError('secret token'),
+    ).sync();
+
+    expect(report.success, isFalse);
+    expect(report.supabase?.failureReason, 'Supabase sync failed (StateError).');
+    expect(report.message, isNot(contains('secret token')));
+  });
+
+  test('supabase counts render conflicts, removed and skipped when present', () async {
+    final CloudSyncReport report = await CloudSyncCoordinator(
+      syncSupabase: () async => const SupabaseSyncResult(
+        pushed: 1,
+        pulled: 2,
+        conflicts: 3,
+        tombstonesApplied: 4,
+        skipped: 5,
+      ),
+    ).sync();
+
+    expect(
+      report.message,
+      contains(
+        'Supabase: 1 pushed · 2 pulled · 3 conflicts · 4 removed · 5 skipped',
+      ),
+    );
+  });
   test('runs Turso before R2 and reports both provider results', () async {
     final List<String> order = <String>[];
     final CloudSyncReport report = await CloudSyncCoordinator(
