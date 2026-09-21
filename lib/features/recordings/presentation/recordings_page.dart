@@ -6,16 +6,19 @@ import 'dart:io';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:package_info_plus/package_info_plus.dart';
 import 'package:path/path.dart' as p;
 
 import '../../../app/ui_kit.dart';
 import '../../../app/version_footer.dart';
 import '../../../core/database/app_database.dart';
+import '../../auth/domain/auth_gateway.dart';
 import '../../auth/presentation/auth_controller.dart';
 import '../../backup/data/file_picker_archive_location.dart';
 import '../../backup/data/zip_capture_archive.dart';
 import '../../backup/domain/capture_archive.dart';
 import '../../backup/presentation/backup_coordinator.dart';
+import '../../clipboard/data/clipboard_repository.dart';
 import '../../clipboard/data/xdotool_auto_paste.dart';
 import '../../clipboard/domain/auto_paste.dart';
 import '../../clipboard/domain/clipboard_watcher_service.dart';
@@ -88,6 +91,7 @@ import '../data/system_media_opener.dart';
 import '../domain/agent_handoff.dart';
 import '../domain/capture_type.dart';
 import '../domain/recording.dart';
+import '../../sync/domain/sync_transport.dart';
 import 'capture_dock.dart';
 import 'capture_nav_bar.dart';
 import 'nav_rail.dart';
@@ -105,6 +109,8 @@ class RecordingsPage extends StatefulWidget {
     this.themeMode,
     this.textScale,
     this.authController,
+    this.authGateway,
+    this.syncTransportResolver,
   });
 
   /// Where the shell publishes the persisted theme so `AugustyniakCaptureApp`,
@@ -120,6 +126,18 @@ class RecordingsPage extends StatefulWidget {
   final ValueNotifier<double>? textScale;
 
   final AuthController? authController;
+
+  /// The same gateway `authController` wraps, held separately because the
+  /// controller only exposes the identity *stream* — the recordings
+  /// controller needs `currentIdentity` synchronously to decide whether a
+  /// SYNC NOW press should include Supabase.
+  final AuthGateway? authGateway;
+
+  /// A resolver, never a snapshot — the seam shape every runtime-swappable
+  /// dependency in this app follows. Null whenever Supabase was not
+  /// initialised, which leaves Supabase sync off exactly like an unset
+  /// Turso/R2 credential does.
+  final SyncTransport Function()? syncTransportResolver;
 
   @override
   State<RecordingsPage> createState() => _RecordingsPageState();
@@ -152,12 +170,24 @@ class _RecordingsPageState extends State<RecordingsPage>
 
   final RecordingsRepository repository = RecordingsRepository();
 
+  /// Shared with `clipboardWatcher` below and with the Supabase sync seam,
+  /// so both sides read and write the one in-memory `_items` snapshot
+  /// `SqliteClipboardRepository` keeps rather than two that could diverge.
+  final ClipboardRepository clipboardRepository = SqliteClipboardRepository();
+
   /// Null until `_bootstrap()` opens the database — the shell builds its
   /// controllers synchronously in `initState`, so the very first captures on
   /// a cold start can race the database open. `usageSink` reads this through
   /// a resolver rather than capturing it, and drops an event rather than
   /// throwing while it is still null.
   UsageRepository? _usageRepository;
+
+  /// Null until `_bootstrap()`'s async `PackageInfo.fromPlatform()` call
+  /// resolves — read through a resolver by the Supabase sync seam for the
+  /// same reason `_usageRepository` is, and the same reason every other
+  /// runtime-swappable dependency in this app is a resolver rather than a
+  /// captured value.
+  String? _appVersion;
   late final RecordingUsageSink usageSink;
   late final SettingsController settings;
   late final LogStore logs;
@@ -394,6 +424,16 @@ class _RecordingsPageState extends State<RecordingsPage>
       captureSession: Platform.isAndroid
           ? const ForegroundCaptureSession()
           : const NoopCaptureSession(),
+      // The Supabase sync seam. `syncTransportResolver` and `authGateway`
+      // come from the app shell, null whenever Supabase was never
+      // initialised; the two repositories and the device id are built here,
+      // like every other repository on this page.
+      syncTransportResolver: widget.syncTransportResolver,
+      authGateway: widget.authGateway,
+      projectsRepository: ProjectsRepository(),
+      clipboardRepository: clipboardRepository,
+      appVersion: () => _appVersion,
+      syncDeviceId: settings.ensureSyncDeviceId,
     );
     // Its own `AudioPlayer` inside `AssetAlarmPlayer`, never the recordings
     // controller's: an alarm must not stop a clip being reviewed, and a review
@@ -428,7 +468,7 @@ class _RecordingsPageState extends State<RecordingsPage>
       sessions: () => timer.sessions,
     );
     clipboardWatcher = ClipboardWatcherService(
-      repository: SqliteClipboardRepository(),
+      repository: clipboardRepository,
       autoPaste: _buildAutoPaste(),
     );
     shortcuts = ShortcutsCoordinator(
@@ -593,6 +633,14 @@ class _RecordingsPageState extends State<RecordingsPage>
 
   Future<void> _bootstrap() async {
     await logs.initialize();
+    // Best-effort and unrelated to everything else here: a Supabase sync
+    // run reads `_appVersion` through a resolver, so a plugin that never
+    // answers (no platform channel bound, as in every widget test) only
+    // ever costs that one field of the `devices` row, never start-up.
+    try {
+      final PackageInfo info = await PackageInfo.fromPlatform();
+      _appVersion = info.version;
+    } catch (_) {}
     // Opens (or creates) the SQLite database `usageSink` writes cost rows
     // into. Before this resolves, `_usageRepository` is null and the sink
     // drops whatever it is asked to record — see `RecordingUsageSink`. Ahead
@@ -641,6 +689,24 @@ class _RecordingsPageState extends State<RecordingsPage>
     final Directory directory = await repository.recordingsDirectory();
     if (!mounted) return;
     setState(() => storagePath = directory.path);
+
+    // One Supabase sync run at launch when signed in — `unawaited` and
+    // best-effort, the same sink contract every other fire-and-forget call
+    // here follows. Last in `_bootstrap()`, after `recoverOrphans()` and
+    // every other write to the recordings index above: those run through
+    // `RecordingsController` itself, and racing this against them would
+    // mean a tombstone pulled here could rewrite the whole index from a
+    // list `recoverOrphans()` has not finished updating yet.
+    if (widget.authGateway?.currentIdentity != null) {
+      unawaited(
+        controller.syncCloud().then<void>(
+          (_) {},
+          onError: (Object error) {
+            logs.log('Launch Supabase sync failed: $error', level: LogLevel.warn);
+          },
+        ),
+      );
+    }
   }
 
   /// The distinct model/provider keys the Config tab's PRICING section

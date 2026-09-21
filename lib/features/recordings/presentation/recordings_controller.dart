@@ -115,7 +115,7 @@ class RecordingsController extends ChangeNotifier {
     AuthGateway? authGateway,
     ProjectsRepository? projectsRepository,
     ClipboardRepository? clipboardRepository,
-    String Function()? appVersion,
+    String? Function()? appVersion,
     Future<String> Function()? syncDeviceId,
     Duration recorderTimeout = const Duration(seconds: 8),
   }) : _recorderTimeout = recorderTimeout,
@@ -205,7 +205,7 @@ class RecordingsController extends ChangeNotifier {
   final AuthGateway? _authGateway;
   final ProjectsRepository? _projectsRepository;
   final ClipboardRepository? _clipboardRepository;
-  final String Function()? _appVersion;
+  final String? Function()? _appVersion;
   final Future<String> Function()? _syncDeviceId;
 
   /// What every mutation overwrote, and when each capture left the desk. Both
