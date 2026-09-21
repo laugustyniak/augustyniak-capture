@@ -44,7 +44,14 @@ class FakeSyncTransport implements SyncTransport {
       final int incoming = row['version'] as int;
       final bool ok = current == null || current['version'] == incoming - 1;
       if (ok) {
-        _table(table)[id] = {...row, 'updated_at': clock().toIso8601String()};
+        _table(table)[id] = {
+          ...row,
+          'updated_at': clock().toIso8601String(),
+          // Columns the migration defaults server-side that the device
+          // never sends, so a conflict row (`to_jsonb(t)`) carries them the
+          // way a real one would — see `_defaultsFor`.
+          if (current == null) ..._defaultsFor(table),
+        };
         applied++;
       } else {
         // `!ok` only when `current` is non-null (a new row is always `ok`);
@@ -78,6 +85,23 @@ class FakeSyncTransport implements SyncTransport {
 
   @override
   Future<DateTime> serverNow() async => clock();
+
+  /// Columns the migration gives a server-side default and the device never
+  /// sends — `devices.created_at`/`last_seen_at` (`default now()`),
+  /// `sync_state.pushed_through` (nullable, no local counterpart at all;
+  /// `pulled_through` is the one the device writes). Added only on insert,
+  /// the way Postgres's own column defaults would apply once, so a later
+  /// conflict row for the same id (`to_jsonb(t)`) carries them — exercising
+  /// a caller that naively hashes the whole conflict row against a hash the
+  /// device computed from its own, narrower push payload.
+  Map<String, Object?> _defaultsFor(SyncTable table) => switch (table) {
+    SyncTable.devices => <String, Object?>{
+      'created_at': clock().toIso8601String(),
+      'last_seen_at': clock().toIso8601String(),
+    },
+    SyncTable.syncState => <String, Object?>{'pushed_through': null},
+    _ => const <String, Object?>{},
+  };
 
   /// Columns PostgREST returns as a `timestamptz`. Reformatted on the way
   /// out of `pull()` — never on the way into `_table` — to the shape

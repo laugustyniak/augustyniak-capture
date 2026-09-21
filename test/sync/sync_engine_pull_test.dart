@@ -314,6 +314,68 @@ void main() {
     );
   });
 
+  test(
+    'devices and sync_state push conflicts adopt without a spurious re-push',
+    () async {
+      // Another device already pushed this device's own row, and a
+      // sync_state cursor row for it, before bookkeeping here is populated —
+      // same race as the segments test, but on the two tables whose server
+      // row (`to_jsonb(t)`) carries columns this device never sends:
+      // `devices.created_at`/`last_seen_at` and `sync_state.pushed_through`.
+      await transport.push(SyncTable.devices, [
+        {
+          ...SyncRowCodec.device(id: 'dev', name: 'n', platform: 'linux'),
+          'version': 1,
+        },
+      ]);
+      await transport.push(SyncTable.syncState, [
+        {
+          'device_id': 'dev',
+          'table_name': 'recordings',
+          'pulled_through': null,
+          'version': 1,
+        },
+      ]);
+      const snapshot = SyncSnapshot(
+        device: {'id': 'dev', 'name': 'n', 'platform': 'linux'},
+      );
+      final r1 = await engine.run(snapshot);
+      expect(r1.conflicts, greaterThan(0));
+      final int adoptedDeviceVersion =
+          bookkeeping.loadTable('devices')['dev']!.serverVersion;
+      final int adoptedSyncStateVersion =
+          bookkeeping.loadTable('sync_state')['dev/recordings']!.serverVersion;
+      transport.pushes.clear();
+      final r2 = await engine.run(snapshot);
+      expect(r2.conflicts, 0);
+      expect(
+        transport.pushes.where((p) => p.$1 == SyncTable.devices && p.$2.isNotEmpty),
+        isEmpty,
+      );
+      // sync_state is diffed and re-pushed by the cursor mirror on every
+      // run, but nothing pulled between run 1 and run 2 changed the cursor
+      // it mirrors — so a correctly-projected adopted hash must equal what
+      // that unchanged content pushes, meaning the row for this device/table
+      // is not in run 2's batch at all, and its bookkept version is not
+      // bumped even once (never mind a stray second bump).
+      final devRecordingsRows = transport.pushes
+          .where((p) => p.$1 == SyncTable.syncState)
+          .expand((p) => p.$2)
+          .where(
+            (row) => row['device_id'] == 'dev' && row['table_name'] == 'recordings',
+          );
+      expect(devRecordingsRows, isEmpty);
+      expect(
+        bookkeeping.loadTable('devices')['dev']!.serverVersion,
+        adoptedDeviceVersion,
+      );
+      expect(
+        bookkeeping.loadTable('sync_state')['dev/recordings']!.serverVersion,
+        adoptedSyncStateVersion,
+      );
+    },
+  );
+
   test('cursors are mirrored to a sync_state row per table for this device', () async {
     await seedServer(recording(id: 'a'));
     advance(const Duration(minutes: 1));

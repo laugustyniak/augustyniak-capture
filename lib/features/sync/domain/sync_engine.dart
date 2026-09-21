@@ -83,6 +83,7 @@ class SyncEngine {
             outcome.conflictRows,
             localRecordings,
             tombstonedIds,
+            outbox.rows,
           );
           pulled += resolved.pulled;
           tombstones += resolved.tombstones;
@@ -267,16 +268,21 @@ class SyncEngine {
   /// object to apply them onto. `segments`, `devices` and `sync_state` do
   /// not — there is no repository to write them through — so those are only
   /// *adopted*: bookkeeping is set to the server's version and a hash of the
-  /// server row (the same top-level key set `SyncRowCodec.hash` always
-  /// canonicalizes, so it lines up with what a later unchanged local push of
-  /// the same content would hash to). Nothing is applied locally, and the
-  /// conflict is not re-counted here — `_pushTable` already counted it —
-  /// only adopted so it is not re-conflicted every subsequent run.
+  /// server row projected onto [localRows]' column set for the same id (a
+  /// real conflict row is `to_jsonb(t)` — every column the table has,
+  /// including server-default ones the device never sends, e.g.
+  /// `devices.created_at`/`last_seen_at`, `sync_state.pushed_through` —
+  /// hashing those in would never match what a later unchanged local push
+  /// computes), timestamp-normalised (`_canonicalServerRow`). Nothing is
+  /// applied locally, and the conflict is not re-counted here —
+  /// `_pushTable` already counted it — only adopted so it is not
+  /// re-conflicted every subsequent run.
   Future<_PullOutcome> _resolvePushConflicts(
     SyncTable table,
     List<Map<String, Object?>> rows,
     Map<String, Recording> localRecordings,
     Set<String> tombstonedIds,
+    Map<String, Map<String, Object?>> localRows,
   ) async {
     final _PullOutcome scratch = _PullOutcome();
     switch (table) {
@@ -308,27 +314,37 @@ class SyncEngine {
         for (final Map<String, Object?> row in rows) {
           final String id = SyncRowCodec.rowId(table, row);
           final int version = row['version'] is int ? row['version'] as int : 0;
+          // Restrict the server row to the columns the device's own push
+          // would have sent for this id, before hashing — see the doc
+          // comment above.
+          final Map<String, Object?>? local = localRows[id];
+          final Map<String, Object?> projected = local == null
+              ? row
+              : <String, Object?>{for (final String key in local.keys) key: row[key]};
           _bookkeeping.put(
             table.serverName,
             id,
             version,
-            SyncRowCodec.hash(_canonicalServerRow(row)),
+            SyncRowCodec.hash(_canonicalServerRow(projected)),
           );
         }
     }
     return scratch;
   }
 
-  /// Re-shapes a raw server row into the same canonical form the codec's
-  /// own encoders always produce, before it is hashed for adoption.
+  /// Normalises every timestamp-shaped string in an already-projected server
+  /// row to the form the codec's own encoders produce
+  /// (`toUtc().toIso8601String()`), and drops the four bookkeeping-only
+  /// columns (a no-op if the projection in `_resolvePushConflicts` already
+  /// excluded them, harmless either way).
   ///
   /// `sync_push`'s real RPC returns a conflicting row as `to_jsonb(t)`, so a
   /// timestamp column comes back as Postgres renders it
   /// (`2026-09-21T12:00:00+00:00`); `SyncRowCodec.segments()`/`device()`
   /// render the identical instant as Dart's own `toIso8601String()`
-  /// (`2026-09-21T12:00:00.000Z`). Hashing the raw row directly would never
-  /// match what a later, unchanged local push of the same content hashes to
-  /// — one spurious push every run for every adopted row.
+  /// (`2026-09-21T12:00:00.000Z`). The server row is projected onto the
+  /// columns the device sends, then timestamps are normalised here, so the
+  /// stored hash is what the next unchanged local push computes.
   Map<String, Object?> _canonicalServerRow(Map<String, Object?> row) {
     final Map<String, Object?> canonical = <String, Object?>{};
     for (final MapEntry<String, Object?> entry in row.entries) {
@@ -412,14 +428,15 @@ class SyncEngine {
     // other row; a conflict here is harmless and just counted.
     if (s.device['id'] is String) {
       final String deviceId = s.device['id']! as String;
-      final _PushOutcome mirrored = await _pushTable(_Outbox(SyncTable.syncState, {
+      final _Outbox syncStateOutbox = _Outbox(SyncTable.syncState, {
         for (final SyncTable t in _pulledTables)
           '$deviceId/${t.serverName}': <String, Object?>{
             'device_id': deviceId,
             'table_name': t.serverName,
             'pulled_through': _bookkeeping.cursor(t.serverName)?.toIso8601String(),
           },
-      }));
+      });
+      final _PushOutcome mirrored = await _pushTable(syncStateOutbox);
       total.conflicts += mirrored.conflicts;
       if (mirrored.conflictRows.isNotEmpty) {
         await _resolvePushConflicts(
@@ -427,6 +444,7 @@ class SyncEngine {
           mirrored.conflictRows,
           localRecordings,
           tombstonedIds,
+          syncStateOutbox.rows,
         );
       }
     }
