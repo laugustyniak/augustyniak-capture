@@ -164,6 +164,37 @@ void main() {
       expect(items.map((ClipboardItem c) => c.id), <String>['c1']);
     });
 
+    test(
+      'a pulled item whose text equals the newest local one is inserted, '
+      'not dropped by the adjacent-content dedupe',
+      () async {
+        await clipboard.addItem(
+          ClipboardItem(
+            id: 'local-1',
+            type: ClipboardItemType.text,
+            text: 'same text',
+            copiedAt: DateTime.utc(2026, 1, 1),
+          ),
+        );
+        final RepositorySyncApplier applier = buildApplier();
+
+        await applier.upsertClipboardItems(<ClipboardItem>[
+          ClipboardItem(
+            id: 'pulled-1',
+            type: ClipboardItemType.text,
+            text: 'same text',
+            copiedAt: DateTime.utc(2026, 1, 2),
+          ),
+        ]);
+
+        final List<ClipboardItem> items = await clipboard.getItems();
+        expect(
+          items.map((ClipboardItem c) => c.id),
+          containsAll(<String>['local-1', 'pulled-1']),
+        );
+      },
+    );
+
     test('deleting a known clipboard id removes it', () async {
       await clipboard.addItem(
         ClipboardItem(id: 'c1', type: ClipboardItemType.text, text: 'gone', copiedAt: DateTime.utc(2026, 1, 1)),

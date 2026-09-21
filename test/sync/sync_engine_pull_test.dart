@@ -1,5 +1,11 @@
+import 'dart:io';
+
+import 'package:augustyniak_capture/features/clipboard/data/clipboard_repository.dart';
+import 'package:augustyniak_capture/features/clipboard/domain/clipboard_item.dart';
+import 'package:augustyniak_capture/features/projects/domain/project.dart';
 import 'package:augustyniak_capture/features/recordings/domain/recording.dart';
 import 'package:augustyniak_capture/features/recordings/domain/recording_revision.dart';
+import 'package:augustyniak_capture/features/sync/data/repository_sync_applier.dart';
 import 'package:augustyniak_capture/features/sync/domain/sync_engine.dart';
 import 'package:augustyniak_capture/features/sync/domain/sync_row_codec.dart';
 import 'package:augustyniak_capture/features/sync/domain/sync_snapshot.dart';
@@ -392,4 +398,81 @@ void main() {
       bookkeeping.cursor('recordings')!.toIso8601String(),
     );
   });
+
+  test(
+    'a pulled clipboard item matching the newest local one lands through '
+    'the real repository, and the next run pushes no tombstone for it',
+    () async {
+      // Finding 1: `ClipboardRepository.addItem`'s adjacent-content dedupe
+      // used to drop a pulled row identical to the newest local entry while
+      // `RepositorySyncApplier` still bookkept it as applied — so the next
+      // run's outbox was missing the id and the sweep tombstoned it. Real
+      // applier and real repository here, not the `RecordingApplier` fake
+      // the rest of this file uses, because the bug lived in that seam.
+      final Directory dir = await Directory.systemTemp.createTemp(
+        'augustyniak-capture-clipboard-dedupe-tombstone-',
+      );
+      addTearDown(() => dir.delete(recursive: true));
+      final ClipboardRepository clipboard = LocalJsonClipboardRepository(
+        storageDirectoryProvider: () async => dir,
+      );
+      await clipboard.addItem(
+        ClipboardItem(
+          id: 'local-1',
+          type: ClipboardItemType.text,
+          text: 'same text',
+          copiedAt: DateTime.utc(2026, 9, 21, 7),
+        ),
+      );
+
+      final RepositorySyncApplier realApplier = RepositorySyncApplier(
+        applySyncedRecordings: (List<Recording> _) async {},
+        applySyncedProjects: (List<Project> _) async {},
+        applySyncedProjectDelete: (String _) async {},
+        clipboard: clipboard,
+        revisions: null,
+        deleteRecording: (String _) async {},
+        recordingExists: (String _) => false,
+      );
+      final SyncEngine realEngine = SyncEngine(
+        transport: transport,
+        bookkeeping: bookkeeping,
+        applier: realApplier,
+        clock: () => t0,
+      );
+
+      await transport.push(SyncTable.clipboardItems, [
+        {
+          ...SyncRowCodec.clipboardItem(
+            ClipboardItem(
+              id: 'pulled-1',
+              type: ClipboardItemType.text,
+              text: 'same text',
+              copiedAt: DateTime.utc(2026, 9, 21, 7, 30),
+            ),
+          ),
+          'version': 1,
+        },
+      ]);
+      advance(const Duration(minutes: 1));
+      await realEngine.run(const SyncSnapshot());
+
+      final List<ClipboardItem> afterPull = await clipboard.getItems();
+      expect(
+        afterPull.map((ClipboardItem c) => c.id),
+        containsAll(<String>['local-1', 'pulled-1']),
+        reason: 'the dedupe drop must not cost the pulled item',
+      );
+
+      advance(const Duration(minutes: 2));
+      final SupabaseSyncResult r2 = await realEngine.run(
+        SyncSnapshot(clipboardItems: afterPull),
+      );
+      expect(r2.tombstonesApplied, 0);
+      expect(
+        transport.tables[SyncTable.clipboardItems]!['pulled-1']!['deleted_at'],
+        isNull,
+      );
+    },
+  );
 }

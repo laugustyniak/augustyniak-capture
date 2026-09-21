@@ -18,7 +18,12 @@ import '../domain/sync_engine.dart';
 /// straight through `ClipboardRepository`, which is safe here because its
 /// writes are already row-level (`addItem`/`updateItemText`/`deleteItem`),
 /// never a whole-list rewrite from a captured snapshot the way the other
-/// two used to be — see `docs/architecture/sync.md`.
+/// two used to be — see `docs/architecture/sync.md`. Clipboard *inserts* go
+/// through `insertItem`, never `addItem`: `addItem`'s adjacent-content
+/// dedupe would silently drop a pulled row identical to the newest local
+/// entry while this applier still bookkept it as applied, which caused a
+/// tombstone for another device's row on the next run — see the interface
+/// doc comment on `ClipboardRepository.insertItem`.
 ///
 /// Every `delete*` tolerates an id it has never heard of: a pulled
 /// tombstone for a row this device never had is a no-op, not an error.
@@ -66,7 +71,7 @@ class RepositorySyncApplier implements SyncApplier {
     for (final ClipboardItem row in rows) {
       final ClipboardItem? current = byId[row.id];
       if (current == null) {
-        await _clipboard.addItem(row);
+        await _clipboard.insertItem(row);
       } else if (row.text != null && row.text != current.text) {
         await _clipboard.updateItemText(row.id, row.text!);
       }
