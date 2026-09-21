@@ -526,6 +526,19 @@ class SettingsController extends ChangeNotifier {
     );
   }
 
+  /// Generated once and persisted here — never derived a second time, and
+  /// never written directly by a caller that only holds an `AppSettings`
+  /// snapshot: this controller is `settings.json`'s single writer, and a
+  /// direct `SettingsRepository().save()` from elsewhere would be dropped by
+  /// the next unrelated change this controller persists.
+  Future<String> ensureSyncDeviceId() async {
+    final String? existing = _settings.syncDeviceId;
+    if (existing != null) return existing;
+    final String id = _uuid.v4();
+    await _persist(_settings.copyWith(syncDeviceId: id));
+    return id;
+  }
+
   /// Where captures are mirrored as markdown, or null when nothing is.
   String? get vaultPath => _settings.vaultPath;
   String get vaultFolder => _settings.vaultFolder;

@@ -405,6 +405,21 @@ void main() {
       expect(legacy.vaultCopySources, isTrue);
     });
 
+    test('syncDeviceId is absent in legacy JSON and survives a round-trip '
+        'once set', () {
+      final AppSettings legacy = AppSettings.fromJson(<String, dynamic>{
+        'profiles': <dynamic>[],
+      });
+      expect(legacy.syncDeviceId, isNull);
+      expect(legacy.toJson().containsKey('syncDeviceId'), isFalse);
+
+      const AppSettings withDevice = AppSettings(
+        syncDeviceId: '3f6a1b2c-0000-4000-8000-000000000000',
+      );
+      final AppSettings restored = AppSettings.fromJson(withDevice.toJson());
+      expect(restored.syncDeviceId, '3f6a1b2c-0000-4000-8000-000000000000');
+    });
+
     test('a hand-edited vault path of the wrong type is ignored', () {
       final AppSettings restored = AppSettings.fromJson(<String, dynamic>{
         'vaultPath': 42,
@@ -633,6 +648,25 @@ void main() {
 
       await controller.resetAudio();
       expect(controller.audio, AudioConfig.defaults);
+    });
+
+    test('ensureSyncDeviceId mints one id and persists it, then reuses it',
+        () async {
+      final _FakeSettingsRepository repository = _FakeSettingsRepository();
+      final SettingsController controller = SettingsController(
+        repository: repository,
+      );
+      await controller.initialize();
+
+      final String first = await controller.ensureSyncDeviceId();
+      expect(first, isNotEmpty);
+      expect(repository.stored?.syncDeviceId, first);
+
+      final int savesAfterFirst = repository.saveCount;
+      final String second = await controller.ensureSyncDeviceId();
+      expect(second, first);
+      // Already had one — no second write.
+      expect(repository.saveCount, savesAfterFirst);
     });
 
     test('reuses the same service until the active profile changes', () async {
