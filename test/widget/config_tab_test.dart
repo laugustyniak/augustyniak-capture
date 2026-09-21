@@ -592,6 +592,13 @@ void main() {
       // Demoted to in-card labels instead.
       expect(find.text('TURSO'), findsOneWidget);
       expect(find.text('CLOUDFLARE R2'), findsOneWidget);
+      // The account now syncs metadata itself — the hint says so, and no
+      // longer claims it carries sign-in only.
+      expect(
+        find.textContaining('syncs capture metadata when you are signed in'),
+        findsOneWidget,
+      );
+      expect(find.textContaining('carries sign-in only'), findsNothing);
       // The account card is still the first thing on the sub-tab.
       expect(find.text('SUPABASE ACCOUNT'), findsOneWidget);
       final double accountTop = tester
