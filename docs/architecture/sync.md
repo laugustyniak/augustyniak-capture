@@ -105,9 +105,23 @@ inside the last 30 seconds is picked up on the *next* run rather than
 half-seen on this one. The version gate makes the overlap a no-op: an
 already-applied row is clean and equal.
 
-The cursor per table is the greatest `updated_at` seen, stored locally under
-`settings['sync.cursor.<table>']` and mirrored to the server's `sync_state`
-row for this device, so a reinstall can see where its predecessor stopped.
+The cursor per table is the greatest `updated_at` seen — except when this
+build skipped a row it could not decode, in which case the cursor holds at
+that row's own `updated_at` instead of the newest one seen in the same
+page, so the skipped row is re-offered every run until a build that can
+decode it comes along (the lag-window re-read above is what makes that
+repeat pull safe). Stored locally under `settings['sync.cursor.<table>']`
+and mirrored to the server's `sync_state` row for this device, so a
+reinstall can see where its predecessor stopped.
+
+**Known limit: paging is by offset, not keyset.** `upper` is frozen once
+per table per run, but a row returned on an earlier page that another
+device updates before a later page is fetched leaves the window the next
+page's `offset` expects it in, and that page silently skips one row. It
+self-heals only if the row falls inside the next run's lag window.
+Reachable on first pairing of a library past 500 rows while another device
+edits concurrently. Tracked as a follow-up issue rather than fixed in this
+wave — the real fix is keyset paging on `(updated_at, keys)`.
 
 ## Apply: through the owning controller, never a second writer
 
@@ -180,6 +194,15 @@ entry point the delete button calls and nothing else. **Every `delete*` on
 `SyncApplier` tolerates an id it has never heard of** — a tombstone for a
 row this device never had is a no-op, never a throw.
 
+**A live push racing a tombstone always loses to the tombstone**: deletion
+beats a concurrent edit. The editing device is still bookkept at the
+version before the delete, so its own push of the edit conflicts —
+`sync_push` returns the current (deleted) row, and that conflict is applied
+through the same path as a pulled row above, so the editing device adopts
+the tombstone and deletes locally on its next pull (or immediately, via the
+conflict-resolution path in the same run). There is no path through the
+engine where an edit lands on a row another device already tombstoned.
+
 **`transcript` never shrinks.** It accumulates per the segments rule
 (`docs/architecture/capture-pipeline.md`) and a pull may never shorten it. A
 server transcript shorter than the local one is a per-field conflict the
@@ -222,13 +245,17 @@ proves it against a deliberately slowed `saveAll`.
 
 `ClipboardRepository` has no collection-update method, so
 `upsertClipboardItems` only ever applies `text`: an existing id gets
-`updateItemText` when the pulled text differs, a new id gets `addItem`. A
-pulled row's `collections` are silently not applied. `addItem` also
-deduplicates against the single most recent local entry (same type, text and
-image path) and silently drops a match — a sync-pulled item identical to the
-newest local one will not be inserted. Both are pre-existing repository
-behaviour, not something this slice changed; fixing either needs a new
-`ClipboardRepository` method and is out of scope here.
+`updateItemText` when the pulled text differs, a new id gets `insertItem`. A
+pulled row's `collections` are silently not applied — pre-existing
+repository behaviour, not something this slice changed; fixing it needs a
+new `ClipboardRepository` method and is out of scope here. A new id goes
+through `insertItem`, not `addItem`: `addItem`'s adjacent-content dedupe
+(same type, text and image path as the single most recent local entry)
+silently drops a pulled item identical to the newest local one, while this
+applier still bookkept it as applied — the next run then saw the id missing
+from the outbox and pushed a tombstone for another device's row.
+`insertItem` inserts by id with no dedupe and no-ops only when that id is
+already present.
 
 ### Projects: the active id
 
@@ -254,6 +281,15 @@ writes straight through `RevisionsRepository.append` — durable on disk
 immediately — but the in-memory `CaptureHistory._revisions` map that powers
 the editor's HISTORY section is not refreshed until the next full launch.
 The data is never lost; it is simply not visible in that section until then.
+
+`applySyncedRecordings` merges into `_recordings` and calls `_persistAll()`
+directly — it does not go through `_update`, so a pulled upsert also
+bypasses `_mirrorToVault` (the markdown mirror sees a pulled edit only once
+`reloadFromStorage()` or the next full launch re-reads it, same as HISTORY
+above) and the gamification totals (`GamificationController` only ever
+counts what `_update`/`stopRecording` etc. route through it — a pulled
+capture is never double-counted, but it is also never counted at all on the
+receiving device).
 
 ## Seam
 
@@ -301,8 +337,12 @@ half of the same guard the engine fuse above is the push-side half of:
   slot.
 - `projectsRepository`, `clipboardRepository` — read once per run to build
   the snapshot; not held by the applier (see Apply above).
-- `syncDeviceId: Future<String> Function()?` — resolves to
-  `SettingsController.ensureSyncDeviceId()`.
+- `syncDeviceId: Future<String?> Function()?` — resolves to
+  `SettingsController.ensureSyncDeviceId()`, which is null when
+  `SettingsController.initialize()` never actually loaded settings; the
+  Supabase slot then reports `failureReason: 'sync skipped: settings
+  unavailable'` rather than minting an id and persisting it over
+  `AppSettings.empty`.
 - `applySyncedProjects: Future<void> Function(List<Project>)?`,
   `applySyncedProjectDelete: Future<void> Function(String)?` — wired to
   `ProjectsController.applySyncedProjects`/`.applySyncedProjectDelete`; see
@@ -315,8 +355,11 @@ controller — **never** written directly from a bare `SettingsRepository`
 elsewhere, because `SettingsController` is `settings.json`'s single writer
 and holds its own `AppSettings` snapshot; a second writer's save would be
 silently dropped the next time the controller persists anything else. The
-`devices` row is upserted on every run via `SyncRowCodec.device(id, name,
-platform, appVersion)`, keyed on that id.
+`devices` row (`SyncRowCodec.device(id, name, platform, appVersion)`, keyed
+on that id) is hash-diffed like every other table, not upserted every run —
+so `last_seen_at` only ever holds the timestamp of the run that first
+inserted or last changed the row, not this run's time; a row per run would
+be noise the server never reads back.
 
 ## Triggers
 
@@ -348,7 +391,14 @@ signed in, media still travels through R2 until slice 4.
 - A server row that fails to decode is skipped and counted, never fatal
   (degrade on load, per the root `CLAUDE.md`).
 - Sync never marks a recording `failed`, never touches `status`, never
-  deletes except through the tombstone rule above.
+  deletes except through the tombstone rule above. `status` does travel
+  verbatim on the wire — a row pushed mid-pipeline can arrive on another
+  device as `pendingTranscription`/`transcribing` with no local media yet
+  (slice 4) — so the mechanism that keeps this true is on the *receiving*
+  end: `RecordingsController._enqueueProcessing`, the funnel behind
+  `resumeInterruptedProcessing`, RETRY and every capture path, refuses —
+  no status change — when segment 0's source file is not on this device.
+  See `docs/architecture/capture-pipeline.md`.
 - `_cloudSyncInFlight` covers Supabase too — it guards `_performCloudSync`
   as a whole, so two SYNC NOW presses, or a SYNC NOW racing the launch run,
   never run two syncs at once.

@@ -64,9 +64,15 @@ class SyncRowCodec {
     final Map<String, dynamic> json = r.toJson();
     // Everything with no column of its own rides in `payload`, so a round
     // trip through the server loses nothing — except the device-specific
-    // absolute paths nested inside it, which are basenamed exactly like the
-    // top-level `file_path` column. Nothing device-specific leaves the
-    // device, `payload` included.
+    // absolute paths this codec knows about, which are basenamed exactly
+    // like the top-level `file_path` column: `thumbPath` and each stored
+    // segment's `filePath` here. `payload` is not otherwise scrubbed —
+    // `artifacts[].path` (`agent_artifact.dart`) and `routes[].target`
+    // (`route_record.dart`, "the file that was appended to") are absolute
+    // paths that do leave the device as written, and `project()` below
+    // sends `repoPath` as a real column by schema design. None of it is a
+    // secret; a path is not device-specific in the sense a bearer token is,
+    // it is just local filesystem layout another device cannot use.
     final Map<String, Object?> payload = <String, Object?>{
       'thumbPath': json['thumbPath'] is String
           ? p.basename(json['thumbPath'] as String)
