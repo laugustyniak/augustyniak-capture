@@ -1,5 +1,7 @@
 import 'dart:io';
 
+import 'package:path/path.dart' as p;
+
 import 'package:augustyniak_capture/features/costs/domain/usage_event.dart';
 import 'package:augustyniak_capture/features/costs/domain/usage_parsing.dart';
 import 'package:augustyniak_capture/features/costs/domain/usage_sink.dart';
@@ -59,13 +61,16 @@ class _ThrowingSink implements UsageSink {
 }
 
 Recording _seed({
+  required Directory dir,
   required String id,
   required CaptureType type,
   required int durationMs,
 }) {
+  final File file = File(p.join(dir.path, '$id.bin'))
+    ..writeAsStringSync('source bytes');
   return Recording(
     id: id,
-    filePath: '/nonexistent/$id.bin',
+    filePath: file.path,
     createdAt: DateTime.utc(2026, 8, 9),
     durationMs: durationMs,
     status: RecordingStatus.saved,
@@ -109,7 +114,7 @@ void main() {
       appDir,
       usageSink: sink,
       seed: <Recording>[
-        _seed(id: 'img-1', type: CaptureType.image, durationMs: 0),
+        _seed(dir: appDir, id: 'img-1', type: CaptureType.image, durationMs: 0),
       ],
     );
 
@@ -126,6 +131,7 @@ void main() {
       usageSink: sink,
       seed: <Recording>[
         _seed(
+          dir: appDir,
           id: 'mic-1',
           type: CaptureType.audioRecording,
           durationMs: 90000,
@@ -145,7 +151,7 @@ void main() {
       appDir,
       usageSink: sink,
       seed: <Recording>[
-        _seed(id: 'up-1', type: CaptureType.audioUpload, durationMs: 0),
+        _seed(dir: appDir, id: 'up-1', type: CaptureType.audioUpload, durationMs: 0),
       ],
     );
 
@@ -163,6 +169,7 @@ void main() {
       usageSink: sink,
       seed: <Recording>[
         _seed(
+          dir: appDir,
           id: 'bad-1',
           type: CaptureType.audioRecording,
           durationMs: 1000,
@@ -170,7 +177,7 @@ void main() {
       ],
     );
 
-    // No transcription profile and no file on disk, so the processor throws.
+    // No transcription profile configured, so the processor throws.
     await controller.retryTranscription('bad-1');
     await controller.waitForProcessing();
 

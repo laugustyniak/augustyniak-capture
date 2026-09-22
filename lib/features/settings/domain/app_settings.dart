@@ -35,6 +35,7 @@ class AppSettings {
     this.r2MediaSyncEnabled = false,
     this.commandBaseUrl,
     this.commandToken,
+    this.syncDeviceId,
     this.priceOverrides = const <String, ModelPrice>{},
     StoragePrice? storagePrice,
     Map<ShortcutAction, HotkeyBinding>? shortcuts,
@@ -118,6 +119,12 @@ class AppSettings {
   final String? commandBaseUrl;
   final String? commandToken;
 
+  /// A uuid generated once and persisted here, never rederived — the
+  /// `devices` row a Supabase sync run upserts is keyed on it, and a value
+  /// that changed between runs would look like a device reinstall to the
+  /// server on every launch.
+  final String? syncDeviceId;
+
   /// The fleet token as a request header may carry it.
   ///
   /// A blob that no longer decrypts is preserved verbatim in [commandToken] —
@@ -185,6 +192,7 @@ class AppSettings {
     bool clearCommandBaseUrl = false,
     String? commandToken,
     bool clearCommandToken = false,
+    String? syncDeviceId,
     Map<String, ModelPrice>? priceOverrides,
     StoragePrice? storagePrice,
     bool clearStoragePrice = false,
@@ -226,6 +234,7 @@ class AppSettings {
       commandToken: clearCommandToken
           ? null
           : (commandToken ?? this.commandToken),
+      syncDeviceId: syncDeviceId ?? this.syncDeviceId,
       priceOverrides: priceOverrides ?? this.priceOverrides,
       storagePrice: clearStoragePrice
           ? null
@@ -257,6 +266,7 @@ class AppSettings {
       'r2MediaSyncEnabled': r2MediaSyncEnabled,
       if (commandBaseUrl != null) 'commandBaseUrl': commandBaseUrl,
       if (commandToken != null) 'commandToken': commandToken,
+      if (syncDeviceId != null) 'syncDeviceId': syncDeviceId,
       if (vaultPath != null) ...<String, dynamic>{
         'vaultPath': vaultPath,
         'vaultFolder': vaultFolder,
@@ -382,6 +392,9 @@ class AppSettings {
           : null,
       commandToken: json['commandToken'] is String
           ? json['commandToken'] as String
+          : null,
+      syncDeviceId: json['syncDeviceId'] is String
+          ? json['syncDeviceId'] as String
           : null,
       priceOverrides: priceOverrides,
       storagePrice: storagePrice,

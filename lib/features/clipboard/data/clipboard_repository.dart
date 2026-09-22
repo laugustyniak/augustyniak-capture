@@ -17,6 +17,17 @@ abstract class ClipboardRepository {
   Future<List<ClipboardItem>> getItems();
   Future<void> addItem(ClipboardItem item);
 
+  /// Inserts [item] by id with no adjacent-content dedupe — unlike [addItem],
+  /// which silently drops an item matching the newest local entry's type,
+  /// text and image path. A no-op if [item.id] already exists.
+  ///
+  /// This is the counterpart a pulled sync row needs: `addItem`'s dedupe was
+  /// dropping a pulled item textually identical to the newest local one,
+  /// while `RepositorySyncApplier` still bookkept it as applied — so the
+  /// next run saw the id missing from the outbox and pushed a tombstone for
+  /// another device's row. See `docs/architecture/sync.md`.
+  Future<void> insertItem(ClipboardItem item);
+
   /// Overwrites an entry's text in place.
   ///
   /// `copiedAt` never changes, so a correction does not push the entry back to
@@ -135,6 +146,20 @@ class LocalJsonClipboardRepository implements ClipboardRepository {
       }
     }
 
+    await _insertAndTrim(item);
+  }
+
+  @override
+  Future<void> insertItem(ClipboardItem item) async {
+    if (!_initialized) await initialize();
+    if (_items.any((ClipboardItem existing) => existing.id == item.id)) {
+      return;
+    }
+    await _insertAndTrim(item);
+  }
+
+  /// [addItem]'s insert-and-evict, shared with [insertItem].
+  Future<void> _insertAndTrim(ClipboardItem item) async {
     _items.insert(0, item);
 
     if (_items.length > maxItems) {
@@ -142,10 +167,10 @@ class LocalJsonClipboardRepository implements ClipboardRepository {
       _items = _items.sublist(0, maxItems);
 
       // Clean up orphaned images
-      for (final ClipboardItem item in removed) {
-        if (item.imagePath != null) {
+      for (final ClipboardItem removedItem in removed) {
+        if (removedItem.imagePath != null) {
           try {
-            final File imageFile = File(item.imagePath!);
+            final File imageFile = File(removedItem.imagePath!);
             if (await imageFile.exists()) {
               await imageFile.delete();
             }

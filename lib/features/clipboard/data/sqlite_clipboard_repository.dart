@@ -85,7 +85,7 @@ class SqliteClipboardRepository implements ClipboardRepository {
     }
 
     db.rawDb.execute('''
-      INSERT OR REPLACE INTO clipboard_items 
+      INSERT OR REPLACE INTO clipboard_items
       (id, type, text, image_path, copied_at, preview, collections_json)
       VALUES (?, ?, ?, ?, ?, ?, ?);
     ''', <Object?>[
@@ -98,12 +98,47 @@ class SqliteClipboardRepository implements ClipboardRepository {
       jsonEncode(item.collections.toList()),
     ]);
 
-    // Read the rows about to fall off the end *before* deleting them: an image
-    // item owns a PNG on disk, and a bare `DELETE` drops the only record of
-    // where that file is. `deleteItem` and `clearHistory` both take the file
-    // with the row, and eviction has to as well or the images directory grows
-    // for the rest of the install's life with nothing able to name the strays —
-    // there is no orphan sweep here, unlike the recordings directory.
+    await _trimToMax(db);
+    await getItems();
+  }
+
+  @override
+  Future<void> insertItem(ClipboardItem item) async {
+    final AppDatabase db = _appDatabase ?? await AppDatabase.getInstance();
+
+    // `OR IGNORE`, not `OR REPLACE`: a no-op when `item.id` already exists —
+    // unlike `addItem`, this never overwrites and never dedupes on adjacent
+    // content, so a pulled row textually identical to the newest local item
+    // still lands. See the interface doc comment.
+    db.rawDb.execute('''
+      INSERT OR IGNORE INTO clipboard_items
+      (id, type, text, image_path, copied_at, preview, collections_json)
+      VALUES (?, ?, ?, ?, ?, ?, ?);
+    ''', <Object?>[
+      item.id,
+      item.type == ClipboardItemType.image ? 'image' : 'text',
+      item.text,
+      item.imagePath,
+      item.copiedAt.millisecondsSinceEpoch,
+      item.preview,
+      jsonEncode(item.collections.toList()),
+    ]);
+
+    await _trimToMax(db);
+    await getItems();
+  }
+
+  /// Evicts everything past [maxItems], oldest first — shared by [addItem]
+  /// and [insertItem].
+  ///
+  /// Reads the rows about to fall off the end *before* deleting them: an
+  /// image item owns a PNG on disk, and a bare `DELETE` drops the only
+  /// record of where that file is. `deleteItem` and `clearHistory` both take
+  /// the file with the row, and eviction has to as well or the images
+  /// directory grows for the rest of the install's life with nothing able to
+  /// name the strays — there is no orphan sweep here, unlike the recordings
+  /// directory.
+  Future<void> _trimToMax(AppDatabase db) async {
     final ResultSet evicted = db.rawDb.select('''
       SELECT image_path FROM clipboard_items
       WHERE image_path IS NOT NULL
@@ -127,8 +162,6 @@ class SqliteClipboardRepository implements ClipboardRepository {
     for (final Row row in evicted) {
       await _deleteImage(row['image_path'] as String?);
     }
-
-    await getItems();
   }
 
   /// Best-effort: a PNG that cannot be removed costs disk space, never the

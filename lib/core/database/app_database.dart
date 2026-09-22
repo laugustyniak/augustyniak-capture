@@ -128,6 +128,19 @@ class AppDatabase {
       );
     ''');
 
+    // Device-local sync bookkeeping (#194): the server version last
+    // acknowledged for a row and the hash of what was pushed. Not part of the
+    // backup archive — it must not travel with a restore.
+    _db.execute('''
+      CREATE TABLE IF NOT EXISTS sync_rows (
+        table_name TEXT NOT NULL,
+        id TEXT NOT NULL,
+        server_version INTEGER NOT NULL,
+        pushed_hash TEXT NOT NULL,
+        PRIMARY KEY (table_name, id)
+      )
+    ''');
+
     _db.execute('''
       CREATE TABLE IF NOT EXISTS encrypted_secrets (
         key TEXT PRIMARY KEY,

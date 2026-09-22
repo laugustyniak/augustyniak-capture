@@ -219,6 +219,7 @@ void main() {
     () async {
       final Directory dir = await _tmp();
       addTearDown(() => dir.delete(recursive: true));
+      File('${dir.path}/s1.txt').writeAsStringSync('stuck fragment');
       final Recording stuck = Recording(
         id: 's1',
         filePath: '${dir.path}/s1.txt',
@@ -249,6 +250,7 @@ void main() {
       // then sat in the queue permanently untranscribed.
       final Directory dir = await _tmp();
       addTearDown(() => dir.delete(recursive: true));
+      File('${dir.path}/orphan.txt').writeAsStringSync('recovered fragment');
       final Recording recovered = Recording(
         id: 'orphan',
         filePath: '${dir.path}/orphan.txt',
@@ -415,6 +417,10 @@ void main() {
     () async {
       final Directory dir = await _tmp();
       addTearDown(() => dir.delete(recursive: true));
+      File('${dir.path}/p1.txt').writeAsStringSync('pending fragment');
+      File('${dir.path}/t1.txt').writeAsStringSync('transcribing fragment');
+      File('${dir.path}/a1.txt').writeAsStringSync('awaiting fragment');
+      File('${dir.path}/c1.txt').writeAsStringSync('already done');
       final Recording pending = Recording(
         id: 'p1',
         filePath: '${dir.path}/p1.txt',
@@ -500,6 +506,50 @@ void main() {
       await c.waitForProcessing();
       expect(proc.calls, 1);
       expect(c.recordings.single.status, RecordingStatus.completed);
+    },
+  );
+
+  test(
+    'resumeInterruptedProcessing leaves a recording whose source is not on '
+    'this device untouched — finding 2',
+    () async {
+      final Directory dir = await _tmp();
+      addTearDown(() => dir.delete(recursive: true));
+      // What a sync pull leaves behind before its media has synced (slice 4
+      // of #187): status travels verbatim from the row that pushed it, but
+      // the file behind it is not on this device — a bare name never
+      // resolved against the recordings directory, exactly like
+      // `SyncRowCodec.recordingFromRow` emits for a fresh install.
+      final Recording pulled = Recording(
+        id: 'pulled-1',
+        filePath: 'pulled-1.m4a',
+        createdAt: DateTime.utc(2026, 7, 25, 10),
+        durationMs: 0,
+        status: RecordingStatus.pendingTranscription,
+        type: CaptureType.text,
+      );
+      final _TestProcessor proc = _TestProcessor();
+      final RecordingsController c = _controller(
+        _SeededRepo(dir, <Recording>[pulled]),
+        proc,
+      );
+      addTearDown(c.dispose);
+
+      // initialize() runs resumeInterruptedProcessing() itself.
+      await c.initialize();
+
+      expect(
+        c.recordings.single.status,
+        RecordingStatus.pendingTranscription,
+        reason: 'the gate refuses without changing status either way',
+      );
+      expect(proc.processed, isEmpty);
+      expect(c.isProcessing, isFalse, reason: 'the drain was never kicked');
+
+      // Calling it again directly (RETRY's own funnel) is just as inert.
+      await c.resumeInterruptedProcessing();
+      expect(proc.processed, isEmpty);
+      expect(c.isProcessing, isFalse);
     },
   );
 }

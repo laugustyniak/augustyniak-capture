@@ -10,12 +10,13 @@ import 'qr_sync_sheet.dart';
 import 'settings_controller.dart';
 
 /// Turso + Cloudflare R2, demoted beneath the Supabase account card in the
-/// Sync & Cloud sub-tab. Supabase Auth (#187) carries sign-in only — no data
-/// sync yet — so these two still do the only syncing that actually happens,
-/// and every control here (both edit dialogs, the status rows, sealed-key
-/// handling, the pairing flow) stays fully reachable. Only the visual weight
-/// changes: one section header instead of three page-level ones, and a
-/// small in-card label naming each provider where a `SectionHeader` used to.
+/// Sync & Cloud sub-tab. The Supabase account above now syncs capture
+/// metadata on its own — `features/sync/` — while media still travels only
+/// through R2, so these two remain fully reachable: every control here (both
+/// edit dialogs, the status rows, sealed-key handling, the pairing flow)
+/// stays exactly as it was. Only the visual weight changes: one section
+/// header instead of three page-level ones, and a small in-card label naming
+/// each provider where a `SectionHeader` used to.
 class LegacySyncSection extends StatelessWidget {
   LegacySyncSection({
     super.key,
@@ -45,8 +46,9 @@ class LegacySyncSection extends StatelessWidget {
         const SizedBox(height: 6),
         Text(
           'Metadata syncs through Turso, capture files through Cloudflare '
-          'R2. The Supabase account above carries sign-in only — it does not '
-          'sync captures yet.',
+          'R2. The Supabase account above syncs capture metadata when you '
+          'are signed in; media files still travel through R2 until the '
+          'next slice.',
           style: ConsoleText.hint,
         ),
         const SizedBox(height: 12),

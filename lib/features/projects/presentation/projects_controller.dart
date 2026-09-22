@@ -25,6 +25,17 @@ class ProjectsController extends ChangeNotifier {
   String? _error;
   bool _isLoading = false;
   final Set<String> _launchesInProgress = <String>{};
+  // `applySyncedProjects`/`applySyncedProjectDelete` are reachable from the
+  // unawaited launch-run sync after this controller's owning widget — and
+  // this controller — has been disposed. Guarded the same way
+  // `RecordingsController` guards its own `notifyListeners` calls.
+  bool _disposed = false;
+
+  @override
+  void dispose() {
+    _disposed = true;
+    super.dispose();
+  }
 
   List<Project> get projects => List<Project>.unmodifiable(_projects);
   String? get activeProjectId => _activeProjectId;
@@ -45,7 +56,7 @@ class ProjectsController extends ChangeNotifier {
   Future<void> initialize() async {
     _isLoading = true;
     _error = null;
-    notifyListeners();
+    if (!_disposed) notifyListeners();
     try {
       _projects = await _repository.loadAll();
       _activeProjectId = _resolveActive(
@@ -56,7 +67,7 @@ class ProjectsController extends ChangeNotifier {
       _error = exception.toString();
     } finally {
       _isLoading = false;
-      notifyListeners();
+      if (!_disposed) notifyListeners();
     }
   }
 
@@ -175,6 +186,35 @@ class ProjectsController extends ChangeNotifier {
     return projects.isEmpty ? null : projects.first.id;
   }
 
+  /// A Supabase pull's upserted rows, applied through the same funnel every
+  /// other mutation here uses — merge by id into `_projects`, then `_save`
+  /// — rather than through a second `ProjectsRepository` instance writing
+  /// underneath this controller. That second-writer shape is exactly what
+  /// let a pulled project vanish the next time this controller saved: its
+  /// own next `create`/`update`/`select` would rewrite `projects.json` from
+  /// its `_projects`, which the other writer never touched. See
+  /// `docs/architecture/sync.md`.
+  ///
+  /// An existing id is replaced in place (keeping its position); a new one
+  /// is appended, the same order `create` already builds.
+  Future<void> applySyncedProjects(List<Project> upserts) async {
+    if (upserts.isEmpty) return;
+    final Map<String, Project> byId = <String, Project>{
+      for (final Project p in _projects) p.id: p,
+    };
+    for (final Project p in upserts) {
+      byId[p.id] = p;
+    }
+    await _save(byId.values.toList(), activeProjectId: _activeProjectId);
+  }
+
+  /// A pulled tombstone. Identical to [delete] — including its tolerance of
+  /// an id this device never had, which is the `SyncApplier` contract's
+  /// "every `delete*` no-ops on an unknown id" — kept as its own name so a
+  /// sync-originated removal reads distinctly from a user's own delete
+  /// wherever this is called from.
+  Future<void> applySyncedProjectDelete(String id) => delete(id);
+
   Future<void> select(String? projectId) async {
     if (projectId != null &&
         !_projects.any((Project item) => item.id == projectId)) {
@@ -192,7 +232,7 @@ class ProjectsController extends ChangeNotifier {
     final String key = _launchKey(project.id, agent);
     if (!_launchesInProgress.add(key)) return;
     _error = null;
-    notifyListeners();
+    if (!_disposed) notifyListeners();
     try {
       final AgentSettings settings = project.settingsFor(agent);
       await launcher.launch(
@@ -210,7 +250,7 @@ class ProjectsController extends ChangeNotifier {
       rethrow;
     } finally {
       _launchesInProgress.remove(key);
-      notifyListeners();
+      if (!_disposed) notifyListeners();
     }
   }
 
@@ -223,10 +263,10 @@ class ProjectsController extends ChangeNotifier {
       await _repository.saveAll(next, activeProjectId: activeProjectId);
       _projects = List<Project>.unmodifiable(next);
       _activeProjectId = activeProjectId;
-      notifyListeners();
+      if (!_disposed) notifyListeners();
     } catch (exception) {
       _error = exception.toString();
-      notifyListeners();
+      if (!_disposed) notifyListeners();
       rethrow;
     }
   }

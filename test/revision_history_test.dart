@@ -332,6 +332,22 @@ void main() {
       expect(truncated!.length, lessThan(long.length));
       expect(truncated, contains('500 more characters'));
     });
+
+    test('sync source round-trips and labels as SYNC', () {
+      final RecordingRevision revision = RecordingRevision(
+        recordingId: 'r',
+        at: DateTime.utc(2026, 9, 21),
+        field: 'title',
+        from: 'a',
+        to: 'b',
+        source: RevisionSource.sync,
+      );
+      final RecordingRevision back =
+          RecordingRevision.fromJson(revision.toJson());
+      expect(back.source, RevisionSource.sync);
+      expect(RevisionSource.sync.label, 'SYNC');
+      expect(RevisionSource.fromName('nonsense'), RevisionSource.processor);
+    });
   });
 }
 

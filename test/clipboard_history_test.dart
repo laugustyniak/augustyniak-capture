@@ -1180,6 +1180,14 @@ class _MemoryClipboardRepository implements ClipboardRepository {
   Future<void> addItem(ClipboardItem item) async => _items.insert(0, item);
 
   @override
+  Future<void> insertItem(ClipboardItem item) async {
+    if (_items.any((ClipboardItem existing) => existing.id == item.id)) {
+      return;
+    }
+    _items.insert(0, item);
+  }
+
+  @override
   Future<void> clearHistory() async => _items.clear();
 
   @override
