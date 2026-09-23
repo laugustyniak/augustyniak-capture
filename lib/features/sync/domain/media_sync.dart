@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:io';
 
 import 'package:crypto/crypto.dart';
+import 'package:http/http.dart' show ClientException;
 import 'package:path/path.dart' as p;
 import 'package:uuid/uuid.dart';
 
@@ -69,8 +70,9 @@ class MediaSyncResult {
   /// such a file would pin the wrong bytes for every other device.
   final int waiting;
 
-  /// Pulled segments with no `contentHash` to check a download against.
-  /// Never downloaded: an unverified file must not land as a source.
+  /// Pulled segments with no `contentHash` to check a download against, or
+  /// whose path lies outside the download root (a row an older build
+  /// persisted before paths were reduced to names). Never downloaded.
   final int unverifiable;
 
   /// Downloads whose bytes did not match the synced `contentHash`. Nothing
@@ -137,7 +139,13 @@ class MediaSyncService {
   /// orphan the next launch re-adopts.
   final bool Function(MediaSyncJob job)? stillWanted;
 
-  Future<MediaSyncResult> sync(List<MediaSyncJob> jobs) async {
+  /// [downloadRoot] is the only directory a download may land in. A row an
+  /// older build persisted with a path outside it is uploaded from, never
+  /// written to.
+  Future<MediaSyncResult> sync(
+    List<MediaSyncJob> jobs, {
+    required String downloadRoot,
+  }) async {
     int uploaded = 0;
     int downloaded = 0;
     int unchanged = 0;
@@ -161,7 +169,7 @@ class MediaSyncService {
     try {
       for (final MediaSyncJob job in jobs) {
         try {
-          switch (await _transfer(job)) {
+          switch (await _transfer(job, downloadRoot)) {
             case _Outcome.uploaded:
               uploaded++;
             case _Outcome.downloaded:
@@ -179,6 +187,10 @@ class MediaSyncService {
           rethrow;
         } on SocketException {
           rethrow;
+        } on ClientException {
+          // `package:http`'s name for a lost connection; every job after it
+          // would wait out the same failure.
+          rethrow;
         } catch (error) {
           failed++;
           lastError = error;
@@ -187,6 +199,8 @@ class MediaSyncService {
     } on TimeoutException {
       return result('Storage request timed out. Try again.');
     } on SocketException {
+      return result('Could not reach Storage. Check your network.');
+    } on ClientException {
       return result('Could not reach Storage. Check your network.');
     }
     return result(
@@ -200,7 +214,7 @@ class MediaSyncService {
     );
   }
 
-  Future<_Outcome> _transfer(MediaSyncJob job) async {
+  Future<_Outcome> _transfer(MediaSyncJob job, String downloadRoot) async {
     final File local = File(job.localPath);
     final String? expected = job.contentHash;
     if (await local.exists() && await local.length() > 0) {
@@ -215,7 +229,9 @@ class MediaSyncService {
       }
     }
 
-    if (expected == null) return _Outcome.unverifiable;
+    if (expected == null || !p.isWithin(downloadRoot, local.path)) {
+      return _Outcome.unverifiable;
+    }
     if (!await store.exists(job.key)) return _Outcome.waiting;
     final List<int> bytes = await store.download(job.key);
     if (bytes.isEmpty || sha256.convert(bytes).toString() != expected) {
@@ -227,6 +243,12 @@ class MediaSyncService {
       await partial.writeAsBytes(bytes, flush: true);
       if (stillWanted?.call(job) == false) return _Outcome.unchanged;
       await partial.rename(local.path);
+      // Asked again: a delete that started while the rename was in flight
+      // could not see this file yet, and nothing would ever claim it.
+      if (stillWanted?.call(job) == false) {
+        await local.delete();
+        return _Outcome.unchanged;
+      }
       return _Outcome.downloaded;
     } finally {
       if (await partial.exists()) await partial.delete();

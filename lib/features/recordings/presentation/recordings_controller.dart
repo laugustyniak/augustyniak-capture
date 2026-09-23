@@ -951,11 +951,16 @@ class RecordingsController extends ChangeNotifier {
                 // A capture deleted while its download was in flight must
                 // not come back as an orphan the next launch re-adopts.
                 stillWanted: (MediaSyncJob job) => _recordings.any(
-                  (Recording r) => r.segments.any(
-                    (CaptureSegment s) => s.filePath == job.localPath,
-                  ),
+                  (Recording r) =>
+                      !_deleting.contains(r.id) &&
+                      r.segments.any(
+                        (CaptureSegment s) => s.filePath == job.localPath,
+                      ),
                 ),
-              ).sync(MediaSyncJob.forRecordings(_recordings));
+              ).sync(
+                MediaSyncJob.forRecordings(_recordings),
+                downloadRoot: (await _repository.recordingsDirectory()).path,
+              );
             }
           : null,
       syncR2: hasR2
@@ -1807,6 +1812,20 @@ class RecordingsController extends ChangeNotifier {
     // drain re-reads the list at every step and simply finds nothing, and
     // `_update` no-ops on an id that is gone.
     _processingQueue.remove(id);
+    // Visible to the media slot's `stillWanted` for the whole delete, so a
+    // download finishing while `deleteArtifacts` runs is not written back.
+    _deleting.add(id);
+    try {
+      await _deleteRecordingArtifactsAndRow(id, item);
+    } finally {
+      _deleting.remove(id);
+    }
+  }
+
+  /// Ids whose [deleteRecording] is in progress.
+  final Set<String> _deleting = <String>{};
+
+  Future<void> _deleteRecordingArtifactsAndRow(String id, Recording item) async {
     if (_playingId == id) {
       try {
         await _player.stop();

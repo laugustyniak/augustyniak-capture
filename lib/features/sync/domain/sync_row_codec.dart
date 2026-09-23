@@ -185,19 +185,19 @@ class SyncRowCodec {
     Map<int, String> localPathsByIndex,
   ) {
     if (payloadSegments is! List) return payloadSegments;
-    return <Map<String, dynamic>>[
-      for (final dynamic segment in payloadSegments)
-        if (segment is Map<String, dynamic>)
-          <String, dynamic>{
-            ...segment,
-            'filePath':
-                (segment['index'] is int
-                    ? localPathsByIndex[segment['index'] as int]
-                    : null) ??
-                SyncPathPolicy.localFileName(segment['filePath']) ??
-                '',
-          },
-    ];
+    final List<Map<String, dynamic>> restored = <Map<String, dynamic>>[];
+    for (final dynamic segment in payloadSegments) {
+      if (segment is! Map<String, dynamic>) continue;
+      final String? path =
+          (segment['index'] is int
+              ? localPathsByIndex[segment['index'] as int]
+              : null) ??
+          SyncPathPolicy.localFileName(segment['filePath']);
+      // No usable name: dropped, as `SyncPathPolicy.sanitizePayload` does.
+      if (path == null) continue;
+      restored.add(<String, dynamic>{...segment, 'filePath': path});
+    }
+    return restored;
   }
 
   static List<Map<String, Object?>> segments(Recording r) {

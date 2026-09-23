@@ -341,16 +341,22 @@ that are still not absolute):
 | present, non-empty | present | `unchanged` |
 | present, non-empty | absent, local sha256 = `contentHash` | upload (`upsert: false`, sha256 in metadata) → `uploaded`; a racing duplicate counts `unchanged` |
 | present, non-empty | absent, sha256 ≠ `contentHash` or none | `waiting` — never uploaded: the bucket is write-once, so a take still being finalised would pin the wrong bytes for every other device |
-| absent | any, `contentHash` null | `unverifiable` — never downloaded |
+| absent | any, `contentHash` null, or the path lies outside the recordings directory | `unverifiable` — never downloaded |
 | absent | absent | `waiting` — the capturing device has not uploaded yet; not a failure |
 | absent | present | download → non-empty **and** sha256 = the synced `contentHash` → `.part` beside the target, flushed → the row still exists (`stillWanted`) → renamed → `downloaded`; otherwise `rejected`, nothing written |
 
 A transfer that throws is counted `failed` and the pass moves on, so one
 object the server refuses (a size limit, a bad key) never holds back every
-older capture behind it; only a network error or a timeout ends the pass.
-The `stillWanted` check exists because a capture deleted while its download
-was in flight would otherwise be written back with no row, and `findOrphans`
-would re-adopt it as a new capture at the next launch.
+older capture behind it; only a network error (`SocketException`, or
+`package:http`'s `ClientException`) or a timeout ends the pass. The
+`stillWanted` check exists because a capture deleted while its download was
+in flight would otherwise be written back with no row, and `findOrphans`
+would re-adopt it as a new capture at the next launch. It is asked before
+the rename and again after it, and it treats an id `deleteRecording` is
+still working on (`_deleting`) as gone, so a delete that overlaps the
+rename cannot miss the file either. The `downloadRoot` check covers rows an
+older build persisted with an absolute path before Step 0 existed: such a
+row is still uploaded from, but never written to.
 
 The hash a download is checked against is the row's own `contentHash`, which
 travelled through the version-gated RPC — not the object's metadata. A
@@ -368,6 +374,12 @@ transcript only gains a playable source, and a row pushed mid-pipeline
 `_enqueueProcessing` that refused it had only ever been waiting for this file.
 Such a row is processed on both devices if both still hold it mid-pipeline;
 the `transcript` never-shrinks rule settles the result.
+
+One case the hand-off does not reach: appending a fragment to a pulled
+`completed` row while one of its earlier fragments is still `waiting`. The
+guard refuses the enqueue (every segment must be here) and the row keeps
+`completed`, which the resume sweep does not pick up, so the new fragment is
+not transcribed until something enqueues the row again.
 
 **Known gaps.** `storage_client` 2.8.0's `download()` answers the whole object
 as bytes, so a download holds the file in memory once, and there is no

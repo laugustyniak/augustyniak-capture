@@ -52,10 +52,10 @@ void main() {
 
     final MediaSyncResult first = await real.sync(<MediaSyncJob>[
       job('r1.m4a', hash: hashOf(audio)),
-    ]);
+    ], downloadRoot: dir.path);
     final MediaSyncResult second = await real.sync(<MediaSyncJob>[
       job('r1.m4a', hash: hashOf(audio)),
-    ]);
+    ], downloadRoot: dir.path);
 
     expect(first.uploaded, 1);
     expect(second.uploaded, 0);
@@ -68,11 +68,12 @@ void main() {
 
     final MediaSyncResult unhashed = await MediaSyncService(
       store: store,
-    ).sync(<MediaSyncJob>[job('r1.m4a')]);
+    ).sync(<MediaSyncJob>[job('r1.m4a')], downloadRoot: dir.path);
     final MediaSyncResult stale = await MediaSyncService(store: store).sync(
       <MediaSyncJob>[
         job('r1.m4a', hash: hashOf(<int>[1])),
       ],
+      downloadRoot: dir.path,
     );
 
     expect(unhashed.waiting, 1);
@@ -89,6 +90,7 @@ void main() {
         job('r1.m4a', hash: hashOf(audio)),
         job('r2.m4a', hash: hashOf(audio)),
       ],
+      downloadRoot: dir.path,
     );
 
     expect(result.failed, 1);
@@ -100,21 +102,40 @@ void main() {
   test('a download no longer wanted is not renamed into place', () async {
     store.objects['captures/r1/r1.m4a'] = audio;
 
-    final MediaSyncResult result = await MediaSyncService(
-      store: store,
-      stillWanted: (_) => false,
-    ).sync(<MediaSyncJob>[job('r1.m4a', hash: hashOf(audio))]);
+    final MediaSyncResult result =
+        await MediaSyncService(store: store, stillWanted: (_) => false).sync(
+          <MediaSyncJob>[job('r1.m4a', hash: hashOf(audio))],
+          downloadRoot: dir.path,
+        );
 
     expect(result.downloaded, 0);
     expect(dir.listSync(), isEmpty, reason: 'no source and no .part');
   });
 
+  test('a delete that lands during the rename removes the new file', () async {
+    store.objects['captures/r1/r1.m4a'] = audio;
+    int asked = 0;
+
+    final MediaSyncResult result =
+        await MediaSyncService(
+          store: store,
+          stillWanted: (_) => asked++ == 0,
+        ).sync(<MediaSyncJob>[
+          job('r1.m4a', hash: hashOf(audio)),
+        ], downloadRoot: dir.path);
+
+    expect(asked, 2);
+    expect(result.downloaded, 0);
+    expect(dir.listSync(), isEmpty);
+  });
+
   test('downloads a missing source only when it matches contentHash', () async {
     store.objects['captures/r1/r1.m4a'] = audio;
 
-    final MediaSyncResult result = await MediaSyncService(
-      store: store,
-    ).sync(<MediaSyncJob>[job('r1.m4a', hash: hashOf(audio))]);
+    final MediaSyncResult result = await MediaSyncService(store: store).sync(
+      <MediaSyncJob>[job('r1.m4a', hash: hashOf(audio))],
+      downloadRoot: dir.path,
+    );
 
     expect(result.downloaded, 1);
     expect(result.success, isTrue);
@@ -129,6 +150,7 @@ void main() {
       <MediaSyncJob>[
         job('r1.m4a', hash: hashOf(<int>[9])),
       ],
+      downloadRoot: dir.path,
     );
 
     expect(result.rejected, 1);
@@ -141,21 +163,40 @@ void main() {
     () async {
       store.objects['captures/r1/r1.m4a'] = <int>[];
 
-      final MediaSyncResult result = await MediaSyncService(
-        store: store,
-      ).sync(<MediaSyncJob>[job('r1.m4a', hash: hashOf(<int>[]))]);
+      final MediaSyncResult result = await MediaSyncService(store: store).sync(
+        <MediaSyncJob>[job('r1.m4a', hash: hashOf(<int>[]))],
+        downloadRoot: dir.path,
+      );
 
       expect(result.rejected, 1);
       expect(dir.listSync(), isEmpty);
     },
   );
 
+  test('a path outside the download root is never written', () async {
+    final Directory outside = await Directory.systemTemp.createTemp('outside');
+    addTearDown(() => outside.delete(recursive: true));
+    store.objects['captures/r1/r1.m4a'] = audio;
+
+    final MediaSyncResult result = await MediaSyncService(store: store)
+        .sync(<MediaSyncJob>[
+          MediaSyncJob(
+            key: 'captures/r1/r1.m4a',
+            localPath: p.join(outside.path, 'r1.m4a'),
+            contentHash: hashOf(audio),
+          ),
+        ], downloadRoot: dir.path);
+
+    expect(result.unverifiable, 1);
+    expect(outside.listSync(), isEmpty);
+  });
+
   test('no contentHash is never downloaded', () async {
     store.objects['captures/r1/r1.m4a'] = audio;
 
     final MediaSyncResult result = await MediaSyncService(
       store: store,
-    ).sync(<MediaSyncJob>[job('r1.m4a')]);
+    ).sync(<MediaSyncJob>[job('r1.m4a')], downloadRoot: dir.path);
 
     expect(result.unverifiable, 1);
     expect(result.downloaded, 0);
@@ -163,18 +204,21 @@ void main() {
   });
 
   test('media not uploaded yet is waiting, not a failure', () async {
-    final MediaSyncResult result = await MediaSyncService(
-      store: store,
-    ).sync(<MediaSyncJob>[job('r1.m4a', hash: hashOf(audio))]);
+    final MediaSyncResult result = await MediaSyncService(store: store).sync(
+      <MediaSyncJob>[job('r1.m4a', hash: hashOf(audio))],
+      downloadRoot: dir.path,
+    );
 
     expect(result.waiting, 1);
     expect(result.success, isTrue);
   });
 
   test('a store failure ends the run with a reason', () async {
-    final MediaSyncResult result = await const MediaSyncService(
-      store: DisabledMediaObjectStore(),
-    ).sync(<MediaSyncJob>[job('r1.m4a', hash: hashOf(audio))]);
+    final MediaSyncResult result =
+        await const MediaSyncService(store: DisabledMediaObjectStore()).sync(
+          <MediaSyncJob>[job('r1.m4a', hash: hashOf(audio))],
+          downloadRoot: dir.path,
+        );
 
     expect(result.success, isFalse);
     expect(result.failed, 1);
