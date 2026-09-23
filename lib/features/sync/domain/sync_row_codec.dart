@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'package:crypto/crypto.dart';
 import 'package:path/path.dart' as p;
 
+import '../../../core/sync/sync_path_policy.dart';
 import '../../clipboard/domain/clipboard_item.dart';
 import '../../projects/domain/project.dart';
 import '../../recordings/domain/recording.dart';
@@ -131,12 +132,14 @@ class SyncRowCodec {
     final Map<String, dynamic> payload = payloadRaw is Map
         ? Map<String, dynamic>.from(payloadRaw)
         : <String, dynamic>{};
-    final String fileName = row['file_path'] is String
-        ? row['file_path'] as String
-        : '';
+    // Only the name of a remote path is kept: this device downloads to and
+    // deletes whatever a row names, so a server row must never choose the
+    // location (`SyncPathPolicy`).
+    final String fileName = SyncPathPolicy.localFileName(row['file_path']) ?? '';
     // Restore this device's own absolute paths when they are known; a fresh
-    // install (no `local`) keeps the bare names payload/file_path carry, and
-    // a later slice resolves them against the recordings directory.
+    // install (no `local`) keeps bare names, and the media slot re-roots them
+    // into the recordings directory (`RecordingsController._rerootSyncedPaths`)
+    // before downloading.
     final Map<int, String> localSegmentPaths = <int, String>{
       if (local != null)
         for (final segment in local.segments) segment.index: segment.filePath,
@@ -152,7 +155,7 @@ class SyncRowCodec {
       'type': row['type'],
       'sourceMimeType': row['source_mime_type'],
       'transcript': row['transcript'],
-      'thumbPath': local?.thumbPath ?? payload['thumbPath'],
+      'thumbPath': local?.thumbPath ?? SyncPathPolicy.localFileName(payload['thumbPath']),
       'title': row['title'],
       'category': row['category'],
       'summary': row['summary'],
@@ -176,22 +179,25 @@ class SyncRowCodec {
   }
 
   /// Restores each segment's `filePath` from the local segment sharing its
-  /// `index`, when one exists; otherwise the bare name from `payload` stays.
+  /// `index`, when one exists; otherwise only the name from `payload` stays.
   static Object? _restoreSegmentPaths(
     Object? payloadSegments,
     Map<int, String> localPathsByIndex,
   ) {
     if (payloadSegments is! List) return payloadSegments;
-    return <Map<String, dynamic>>[
-      for (final dynamic segment in payloadSegments)
-        if (segment is Map<String, dynamic>)
-          <String, dynamic>{
-            ...segment,
-            if (segment['index'] is int &&
-                localPathsByIndex.containsKey(segment['index'] as int))
-              'filePath': localPathsByIndex[segment['index'] as int],
-          },
-    ];
+    final List<Map<String, dynamic>> restored = <Map<String, dynamic>>[];
+    for (final dynamic segment in payloadSegments) {
+      if (segment is! Map<String, dynamic>) continue;
+      final String? path =
+          (segment['index'] is int
+              ? localPathsByIndex[segment['index'] as int]
+              : null) ??
+          SyncPathPolicy.localFileName(segment['filePath']);
+      // No usable name: dropped, as `SyncPathPolicy.sanitizePayload` does.
+      if (path == null) continue;
+      restored.add(<String, dynamic>{...segment, 'filePath': path});
+    }
+    return restored;
   }
 
   static List<Map<String, Object?>> segments(Recording r) {

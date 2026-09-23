@@ -2,8 +2,9 @@
 
 Outbox/inbox metadata synchronisation over Postgres, wired in beside Turso and
 R2 rather than replacing either. Slice 3 of #187 (schema from #190). Media
-bytes are slice 4 — a pulled recording arrives as metadata whose source file
-is absent until then. This file is written to be read whole.
+bytes follow through private Storage — slice 4, #198, see "Media" below — so
+a pulled recording is metadata only until the Storage slot of the same run
+fetches its source. This file is written to be read whole.
 
 **Every signed-in device converges on the same metadata** — recordings,
 segments, projects, clipboard items, revisions, devices, sync state —
@@ -291,6 +292,104 @@ counts what `_update`/`stopRecording` etc. route through it — a pulled
 capture is never double-counted, but it is also never counted at all on the
 receiving device).
 
+## Media: private Storage, verified before it lands
+
+Slice 4 of #187 (#198). A fourth `CloudSyncCoordinator` slot, `syncMedia`,
+runs after `syncSupabase` and before `syncR2`: the metadata pull is what adds
+the rows whose sources it fetches, so it reads `_recordings` **at call time**,
+never the `SyncSnapshot` the metadata slot captured before its pull. It is
+wired only when `hasSupabase` is and `mediaStoreResolver` is non-null, and it
+never triggers `reloadFromStorage()` — it writes source files, never the index
+behind the controller's back.
+
+**The bucket.** `captures`, private
+(`supabase/migrations/20260923090000_capture_media_bucket.sql`). Object keys
+are `<auth.uid()>/captures/<recording id>/<file name>`; `SupabaseMediaStore`
+adds the owner prefix, and the bucket's `select`/`insert` policies compare
+that first folder with `auth.uid()`, so a client can only reach its own
+objects whatever key it sends. There is no `update` policy (objects are
+write-once, so an upload can never replace a source another device already
+verified) and no `delete` policy yet: a tombstoned capture's objects stay in
+the bucket, private to their owner, until a later change removes them.
+`supabase/tests/capture_media_bucket_test.sql` pins all of it.
+
+**Step 0 — names only.** `SyncRowCodec.recordingFromRow` keeps only the
+file name of every path a server row carries (`file_path`, `thumbPath`, each
+segment's `filePath`) unless a local row already supplies this device's own
+path. So an absolute path in `_recordings` was always written by this
+device, and a row can never make it download to — or upload from — a
+location of the row's choosing.
+
+**Step 1 — re-root.** `RecordingsController._rerootSyncedPaths` points every
+bare-name path a pull left behind (`SyncRowCodec.recordingFromRow` with no
+local row) into this device's recordings directory — `filePath`, each stored
+segment's `filePath`, `thumbPath` — keeping only the name
+(`SyncPathPolicy.localFileName`), so a pulled row cannot point outside the
+directory; a row whose paths do not actually change is left alone, so an
+unusable name never costs an index rewrite per run. It is the `applySyncedRecordings` shape: an in-place merge into
+`_recordings`, then `_persistAll()`. The codec basenames these paths on the
+way out, so a re-rooted row hashes the same and is not re-pushed. It also
+covers rows pulled by a build from before this slice.
+
+**Step 2 — transfer.** `MediaSyncService` (`features/sync/domain/media_sync.dart`,
+pure Dart over the `MediaObjectStore` seam) walks every segment of every
+recording (`MediaSyncJob.forRecordings`, which skips unsafe ids and paths
+that are still not absolute):
+
+| local source | object | outcome |
+| --- | --- | --- |
+| present, non-empty | present | `unchanged` |
+| present, non-empty | absent, local sha256 = `contentHash` | upload (`upsert: false`, sha256 in metadata) → `uploaded`; a racing duplicate counts `unchanged` |
+| present, non-empty | absent, sha256 ≠ `contentHash` or none | `waiting` — never uploaded: the bucket is write-once, so a take still being finalised would pin the wrong bytes for every other device |
+| absent | any, `contentHash` null, or the path lies outside the recordings directory | `unverifiable` — never downloaded |
+| absent | absent | `waiting` — the capturing device has not uploaded yet; not a failure |
+| absent | present | download → non-empty **and** sha256 = the synced `contentHash` → `.part` beside the target, flushed → the row still exists (`stillWanted`) → renamed → `downloaded`; otherwise `rejected`, nothing written |
+
+A transfer that throws is counted `failed` and the pass moves on, so one
+object the server refuses (a size limit, a bad key) never holds back every
+older capture behind it; only an unreachable store or a timeout ends the pass.
+`SupabaseMediaStore` translates a lost connection into
+`MediaStoreUnreachableException` in both shapes it arrives in — raw
+(`package:http`'s `ClientException`, `SocketException`) and folded by
+`storage_client` into a `StorageException` whose `statusCode` names the
+original error type (`test/sync/supabase_media_store_test.dart`). The
+`stillWanted` check exists because a capture deleted while its download was
+in flight would otherwise be written back with no row, and `findOrphans`
+would re-adopt it as a new capture at the next launch. It is asked before
+the rename and again after it, and it treats an id `deleteRecording` is
+still working on (`_deleting`) as gone, so a delete that overlaps the
+rename cannot miss the file either. The `downloadRoot` check covers rows an
+older build persisted with an absolute path before Step 0 existed: such a
+row is still uploaded from, but never written to.
+
+The hash a download is checked against is the row's own `contentHash`, which
+travelled through the version-gated RPC — not the object's metadata. A
+`rejected` download or a `failed` transfer fails the slot (`success` is false); `waiting` and
+`unverifiable` only show in the counts. The report line is
+`Storage: N uploaded · N downloaded · …`.
+
+**Step 3 — hand-off.** When anything downloaded, `_performCloudSync` calls
+`resumeInterruptedProcessing()` — after its own `reloadFromStorage()`, never
+before, since a reload landing between the drain's in-memory update and its
+persist would drop that write. That is the whole hand-off: the existing
+funnel already filters by status, so a `completed` row pulled with its
+transcript only gains a playable source, and a row pushed mid-pipeline
+(`pendingTranscription`/`transcribing`) is now enqueued here — the guard in
+`_enqueueProcessing` that refused it had only ever been waiting for this file.
+Such a row is processed on both devices if both still hold it mid-pipeline;
+the `transcript` never-shrinks rule settles the result.
+
+One case the hand-off does not reach: appending a fragment to a pulled
+`completed` row while one of its earlier fragments is still `waiting`. The
+guard refuses the enqueue (every segment must be here) and the row keeps
+`completed`, which the resume sweep does not pick up, so the new fragment is
+not transcribed until something enqueues the row again.
+
+**Known gaps.** `storage_client` 2.8.0's `download()` answers the whole object
+as bytes, so a download holds the file in memory once, and there is no
+resumable (TUS) transfer — #187's resumable-transfer item stays open. Objects
+of a deleted capture are not removed from the bucket yet.
+
 ## Seam
 
 ```
@@ -305,6 +404,9 @@ lib/features/sync/
   data/supabase_sync_transport.dart  PostgREST + the RPC — the only file that
                                   imports supabase_flutter
   data/repository_sync_applier.dart  SyncApplier over the real repositories
+  domain/media_sync.dart          MediaSyncService, MediaSyncJob, MediaObjectStore
+                                  DisabledMediaObjectStore — throws at use
+  data/supabase_media_store.dart  the private `captures` bucket
 ```
 
 `SyncEngine` is constructed with a `SyncTransport`, a `SyncBookkeeping`
@@ -348,6 +450,10 @@ half of the same guard the engine fuse above is the push-side half of:
   `ProjectsController.applySyncedProjects`/`.applySyncedProjectDelete`; see
   Apply above.
 - `appVersion: String? Function()?` — read into the `devices` row.
+- `mediaStoreResolver: MediaObjectStore Function(String ownerId)?` — added
+  with the Storage slot (see Media above); built per run for the signed-in
+  user's id. Null keeps that slot out, and it is not one of the seven
+  `hasSupabase` checks.
 
 Device identity: `AppSettings.syncDeviceId`, a uuid generated once by
 `SettingsController.ensureSyncDeviceId()` and persisted through that
@@ -379,9 +485,8 @@ be noise the server never reads back.
   per-provider trigger.
 - Nothing runs signed out. Nothing blocks capture.
 
-`LegacySyncSection`'s Config-tab hint used to say the account "does not sync
-captures yet"; it now says what actually happens — metadata syncs when
-signed in, media still travels through R2 until slice 4.
+`LegacySyncSection`'s Config-tab hint says what actually happens — metadata
+and files sync through the account when signed in, without Turso or R2.
 
 ## Failure handling
 
@@ -394,10 +499,10 @@ signed in, media still travels through R2 until slice 4.
   deletes except through the tombstone rule above. `status` does travel
   verbatim on the wire — a row pushed mid-pipeline can arrive on another
   device as `pendingTranscription`/`transcribing` with no local media yet
-  (slice 4) — so the mechanism that keeps this true is on the *receiving*
+  (see Media below) — so the mechanism that keeps this true is on the *receiving*
   end: `RecordingsController._enqueueProcessing`, the funnel behind
   `resumeInterruptedProcessing`, RETRY and every capture path, refuses —
-  no status change — when segment 0's source file is not on this device.
+  no status change — when any segment's source file is not on this device.
   See `docs/architecture/capture-pipeline.md`.
 - `_cloudSyncInFlight` covers Supabase too — it guards `_performCloudSync`
   as a whole, so two SYNC NOW presses, or a SYNC NOW racing the launch run,
@@ -412,5 +517,9 @@ Pure Dart, in-memory fake transport: `test/sync/sync_engine_push_test.dart`,
 file: merge-and-replace, an unknown id no-op for every `delete*`, the active
 project id preserved and reassigned, clipboard existing-id-updates-text vs.
 new-id-adds. `test/cloud_sync_coordinator_test.dart` covers the third slot
-riding beside Turso and R2. pgTAP for `sync_push` lives in
+riding beside Turso and R2, and the Storage slot's order and message.
+`test/sync/media_sync_test.dart` covers `MediaSyncService` against an
+in-memory bucket; `test/sync/media_sync_slot_test.dart` covers the slot
+through `RecordingsController.syncCloud()` — re-root, download, hand-off,
+rejection, upload. pgTAP for `sync_push` and the `captures` bucket lives in
 `supabase/tests/`.

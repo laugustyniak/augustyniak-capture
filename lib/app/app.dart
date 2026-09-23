@@ -8,6 +8,7 @@ import '../features/auth/presentation/auth_controller.dart';
 import '../features/recordings/presentation/recordings_page.dart';
 import '../features/settings/domain/app_settings.dart';
 import '../features/settings/domain/app_theme_mode.dart';
+import '../features/sync/data/supabase_media_store.dart';
 import '../features/sync/data/supabase_sync_transport.dart';
 
 /// The app shell, and the one place the palette is chosen.
@@ -132,6 +133,12 @@ class _AugustyniakCaptureAppState extends State<AugustyniakCaptureApp> {
             syncTransportResolver: widget.supabaseClient == null
                 ? null
                 : () => SupabaseSyncTransport(widget.supabaseClient!),
+            mediaStoreResolver: widget.supabaseClient == null
+                ? null
+                : (String ownerId) => SupabaseMediaStore(
+                    widget.supabaseClient!,
+                    ownerId: ownerId,
+                  ),
           ),
         );
       },

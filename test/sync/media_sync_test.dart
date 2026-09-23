@@ -1,0 +1,282 @@
+import 'dart:io';
+
+import 'package:augustyniak_capture/features/recordings/domain/capture_type.dart';
+import 'package:augustyniak_capture/features/recordings/domain/recording.dart';
+import 'package:augustyniak_capture/features/sync/domain/media_sync.dart';
+import 'package:crypto/crypto.dart';
+import 'package:flutter_test/flutter_test.dart';
+import 'package:path/path.dart' as p;
+
+/// In-memory bucket with the server's write-once rule.
+class FakeMediaStore implements MediaObjectStore {
+  final Map<String, List<int>> objects = <String, List<int>>{};
+
+  @override
+  Future<bool> exists(String key) async => objects.containsKey(key);
+
+  @override
+  Future<void> upload(String key, File source, {required String sha256}) async {
+    if (objects.containsKey(key)) throw const MediaObjectExistsException();
+    objects[key] = await source.readAsBytes();
+  }
+
+  @override
+  Future<List<int>> download(String key) async => objects[key]!;
+}
+
+String hashOf(List<int> bytes) => sha256.convert(bytes).toString();
+
+void main() {
+  late Directory dir;
+  late FakeMediaStore store;
+  const List<int> audio = <int>[1, 2, 3, 4];
+
+  setUp(() async {
+    dir = await Directory.systemTemp.createTemp('media_sync_test');
+    store = FakeMediaStore();
+  });
+
+  tearDown(() async {
+    if (await dir.exists()) await dir.delete(recursive: true);
+  });
+
+  MediaSyncJob job(String name, {String? hash}) => MediaSyncJob(
+    key: 'captures/r1/$name',
+    localPath: p.join(dir.path, name),
+    contentHash: hash,
+  );
+
+  test('uploads a local source the store lacks, once', () async {
+    await File(p.join(dir.path, 'r1.m4a')).writeAsBytes(audio);
+    final MediaSyncService real = MediaSyncService(store: store);
+
+    final MediaSyncResult first = await real.sync(<MediaSyncJob>[
+      job('r1.m4a', hash: hashOf(audio)),
+    ], downloadRoot: dir.path);
+    final MediaSyncResult second = await real.sync(<MediaSyncJob>[
+      job('r1.m4a', hash: hashOf(audio)),
+    ], downloadRoot: dir.path);
+
+    expect(first.uploaded, 1);
+    expect(second.uploaded, 0);
+    expect(second.unchanged, 1);
+    expect(store.objects['captures/r1/r1.m4a'], audio);
+  });
+
+  test('a local source that does not match its row is held back', () async {
+    await File(p.join(dir.path, 'r1.m4a')).writeAsBytes(audio);
+
+    final MediaSyncResult unhashed = await MediaSyncService(
+      store: store,
+    ).sync(<MediaSyncJob>[job('r1.m4a')], downloadRoot: dir.path);
+    final MediaSyncResult stale = await MediaSyncService(store: store).sync(
+      <MediaSyncJob>[
+        job('r1.m4a', hash: hashOf(<int>[1])),
+      ],
+      downloadRoot: dir.path,
+    );
+
+    expect(unhashed.waiting, 1);
+    expect(stale.waiting, 1);
+    expect(store.objects, isEmpty, reason: 'the bucket is write-once');
+  });
+
+  test('one failing transfer is counted and the pass goes on', () async {
+    store.objects['captures/r1/r2.m4a'] = audio;
+    final _FailingFirstStore failing = _FailingFirstStore(store);
+
+    final MediaSyncResult result = await MediaSyncService(store: failing).sync(
+      <MediaSyncJob>[
+        job('r1.m4a', hash: hashOf(audio)),
+        job('r2.m4a', hash: hashOf(audio)),
+      ],
+      downloadRoot: dir.path,
+    );
+
+    expect(result.failed, 1);
+    expect(result.downloaded, 1);
+    expect(result.success, isFalse);
+    expect(result.failureReason, contains('1 transfer failed'));
+  });
+
+  test('a download no longer wanted is not renamed into place', () async {
+    store.objects['captures/r1/r1.m4a'] = audio;
+
+    final MediaSyncResult result =
+        await MediaSyncService(store: store, stillWanted: (_) => false).sync(
+          <MediaSyncJob>[job('r1.m4a', hash: hashOf(audio))],
+          downloadRoot: dir.path,
+        );
+
+    expect(result.downloaded, 0);
+    expect(dir.listSync(), isEmpty, reason: 'no source and no .part');
+  });
+
+  test('a delete that lands during the rename removes the new file', () async {
+    store.objects['captures/r1/r1.m4a'] = audio;
+    int asked = 0;
+
+    final MediaSyncResult result =
+        await MediaSyncService(
+          store: store,
+          stillWanted: (_) => asked++ == 0,
+        ).sync(<MediaSyncJob>[
+          job('r1.m4a', hash: hashOf(audio)),
+        ], downloadRoot: dir.path);
+
+    expect(asked, 2);
+    expect(result.downloaded, 0);
+    expect(dir.listSync(), isEmpty);
+  });
+
+  test('downloads a missing source only when it matches contentHash', () async {
+    store.objects['captures/r1/r1.m4a'] = audio;
+
+    final MediaSyncResult result = await MediaSyncService(store: store).sync(
+      <MediaSyncJob>[job('r1.m4a', hash: hashOf(audio))],
+      downloadRoot: dir.path,
+    );
+
+    expect(result.downloaded, 1);
+    expect(result.success, isTrue);
+    expect(await File(p.join(dir.path, 'r1.m4a')).readAsBytes(), audio);
+    expect(dir.listSync(), hasLength(1), reason: 'no .part left behind');
+  });
+
+  test('a hash mismatch writes nothing and fails the run', () async {
+    store.objects['captures/r1/r1.m4a'] = audio;
+
+    final MediaSyncResult result = await MediaSyncService(store: store).sync(
+      <MediaSyncJob>[
+        job('r1.m4a', hash: hashOf(<int>[9])),
+      ],
+      downloadRoot: dir.path,
+    );
+
+    expect(result.rejected, 1);
+    expect(result.success, isFalse);
+    expect(dir.listSync(), isEmpty);
+  });
+
+  test(
+    'an empty download is rejected even when the hash is of nothing',
+    () async {
+      store.objects['captures/r1/r1.m4a'] = <int>[];
+
+      final MediaSyncResult result = await MediaSyncService(store: store).sync(
+        <MediaSyncJob>[job('r1.m4a', hash: hashOf(<int>[]))],
+        downloadRoot: dir.path,
+      );
+
+      expect(result.rejected, 1);
+      expect(dir.listSync(), isEmpty);
+    },
+  );
+
+  test('a path outside the download root is never written', () async {
+    final Directory outside = await Directory.systemTemp.createTemp('outside');
+    addTearDown(() => outside.delete(recursive: true));
+    store.objects['captures/r1/r1.m4a'] = audio;
+
+    final MediaSyncResult result = await MediaSyncService(store: store)
+        .sync(<MediaSyncJob>[
+          MediaSyncJob(
+            key: 'captures/r1/r1.m4a',
+            localPath: p.join(outside.path, 'r1.m4a'),
+            contentHash: hashOf(audio),
+          ),
+        ], downloadRoot: dir.path);
+
+    expect(result.unverifiable, 1);
+    expect(outside.listSync(), isEmpty);
+  });
+
+  test('no contentHash is never downloaded', () async {
+    store.objects['captures/r1/r1.m4a'] = audio;
+
+    final MediaSyncResult result = await MediaSyncService(
+      store: store,
+    ).sync(<MediaSyncJob>[job('r1.m4a')], downloadRoot: dir.path);
+
+    expect(result.unverifiable, 1);
+    expect(result.downloaded, 0);
+    expect(dir.listSync(), isEmpty);
+  });
+
+  test('media not uploaded yet is waiting, not a failure', () async {
+    final MediaSyncResult result = await MediaSyncService(store: store).sync(
+      <MediaSyncJob>[job('r1.m4a', hash: hashOf(audio))],
+      downloadRoot: dir.path,
+    );
+
+    expect(result.waiting, 1);
+    expect(result.success, isTrue);
+  });
+
+  test('a store failure ends the run with a reason', () async {
+    final MediaSyncResult result =
+        await const MediaSyncService(store: DisabledMediaObjectStore()).sync(
+          <MediaSyncJob>[job('r1.m4a', hash: hashOf(audio))],
+          downloadRoot: dir.path,
+        );
+
+    expect(result.success, isFalse);
+    expect(result.failed, 1);
+    expect(result.failureReason, contains('StateError'));
+  });
+
+  group('MediaSyncJob.forRecordings', () {
+    Recording rec(String id, String filePath) => Recording(
+      id: id,
+      filePath: filePath,
+      createdAt: DateTime.utc(2026, 9, 23),
+      durationMs: 1,
+      status: RecordingStatus.completed,
+      type: CaptureType.audioRecording,
+      contentHash: hashOf(audio),
+    );
+
+    test('keys by recording id and file name, carrying the hash', () {
+      final List<MediaSyncJob> jobs = MediaSyncJob.forRecordings(<Recording>[
+        rec('r1', p.join(dir.path, 'r1.m4a')),
+      ]);
+
+      expect(jobs.single.key, 'captures/r1/r1.m4a');
+      expect(jobs.single.contentHash, hashOf(audio));
+    });
+
+    test('skips bare names and unsafe ids', () {
+      final List<MediaSyncJob> jobs = MediaSyncJob.forRecordings(<Recording>[
+        rec('r1', 'r1.m4a'),
+        rec('../x', p.join(dir.path, 'x.m4a')),
+      ]);
+
+      expect(jobs, isEmpty);
+    });
+  });
+}
+
+/// Throws on the first `exists` call only, like one object the server
+/// refuses in the middle of a pass.
+class _FailingFirstStore implements MediaObjectStore {
+  _FailingFirstStore(this.inner);
+
+  final MediaObjectStore inner;
+  bool _thrown = false;
+
+  @override
+  Future<bool> exists(String key) async {
+    if (!_thrown) {
+      _thrown = true;
+      throw StateError('refused');
+    }
+    return inner.exists(key);
+  }
+
+  @override
+  Future<void> upload(String key, File source, {required String sha256}) =>
+      inner.upload(key, source, sha256: sha256);
+
+  @override
+  Future<List<int>> download(String key) => inner.download(key);
+}

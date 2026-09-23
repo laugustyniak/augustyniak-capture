@@ -1,9 +1,38 @@
 import 'package:augustyniak_capture/core/sync/cloud_sync_coordinator.dart';
 import 'package:augustyniak_capture/core/sync/r2_media_sync_service.dart';
+import 'package:augustyniak_capture/features/sync/domain/media_sync.dart';
 import 'package:augustyniak_capture/features/sync/domain/sync_snapshot.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {
+  test('storage runs after the supabase metadata slot and reports its counts', () async {
+    final List<String> order = <String>[];
+    final CloudSyncReport report = await CloudSyncCoordinator(
+      syncSupabase: () async {
+        order.add('supabase');
+        return const SupabaseSyncResult(pulled: 1);
+      },
+      syncMedia: () async {
+        order.add('media');
+        return const MediaSyncResult(downloaded: 1, waiting: 2);
+      },
+    ).sync();
+
+    expect(order, <String>['supabase', 'media']);
+    expect(report.success, isTrue);
+    expect(report.message, contains('Storage: 1 downloaded · 2 waiting'));
+  });
+
+  test('a storage throw is caught and fails the report without its message', () async {
+    final CloudSyncReport report = await CloudSyncCoordinator(
+      syncMedia: () => throw StateError('signed url'),
+    ).sync();
+
+    expect(report.success, isFalse);
+    expect(report.media?.failureReason, 'Storage sync failed (StateError).');
+    expect(report.message, isNot(contains('signed url')));
+  });
+
   test('supabase result rides beside turso and r2 in the report', () async {
     final CloudSyncCoordinator c = CloudSyncCoordinator(
       syncSupabase: () async => const SupabaseSyncResult(pushed: 2, pulled: 1),
