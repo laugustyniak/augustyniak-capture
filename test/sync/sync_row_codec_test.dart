@@ -136,6 +136,36 @@ void main() {
     expect(back.segments.single.filePath, 'rec-9.m4a');
   });
 
+  test('a pulled segment with no usable file name is dropped', () {
+    final Recording? back = SyncRowCodec.recordingFromRow(<String, Object?>{
+      'id': 'rec-9',
+      'created_at': '2026-09-23T08:00:00.000Z',
+      'file_path': 'rec-9.m4a',
+      'type': 'audioRecording',
+      'status': 'completed',
+      'payload': <String, Object?>{
+        'segments': <Map<String, Object?>>[
+          for (final (int i, String name) in <(int, String)>[
+            (0, 'rec-9.m4a'),
+            (1, '..'),
+            (2, ''),
+          ])
+            <String, Object?>{
+              'index': i,
+              'filePath': name,
+              'type': 'audioRecording',
+              'createdAt': '2026-09-23T08:00:00.000Z',
+            },
+        ],
+      },
+    });
+
+    expect(
+      back!.segments.map((CaptureSegment s) => s.filePath).toList(),
+      <String>['rec-9.m4a'],
+    );
+  });
+
   test('a recording row missing its id decodes to null, not a throw', () {
     expect(SyncRowCodec.recordingFromRow(<String, Object?>{'title': 'x'}), isNull);
   });

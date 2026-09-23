@@ -246,7 +246,8 @@ class MediaSyncService {
       // Asked again: a delete that started while the rename was in flight
       // could not see this file yet, and nothing would ever claim it.
       if (stillWanted?.call(job) == false) {
-        await local.delete();
+        // The delete may already have removed it.
+        if (await local.exists()) await local.delete();
         return _Outcome.unchanged;
       }
       return _Outcome.downloaded;
