@@ -2,7 +2,6 @@ import 'dart:async';
 import 'dart:io';
 
 import 'package:crypto/crypto.dart';
-import 'package:http/http.dart' show ClientException;
 import 'package:path/path.dart' as p;
 import 'package:uuid/uuid.dart';
 
@@ -45,6 +44,12 @@ class DisabledMediaObjectStore implements MediaObjectStore {
 
 class MediaObjectExistsException implements Exception {
   const MediaObjectExistsException();
+}
+
+/// The store could not be reached at all — every job after this one would
+/// wait out the same failure, so it ends the pass rather than counting.
+class MediaStoreUnreachableException implements Exception {
+  const MediaStoreUnreachableException();
 }
 
 class MediaSyncResult {
@@ -187,9 +192,7 @@ class MediaSyncService {
           rethrow;
         } on SocketException {
           rethrow;
-        } on ClientException {
-          // `package:http`'s name for a lost connection; every job after it
-          // would wait out the same failure.
+        } on MediaStoreUnreachableException {
           rethrow;
         } catch (error) {
           failed++;
@@ -200,7 +203,7 @@ class MediaSyncService {
       return result('Storage request timed out. Try again.');
     } on SocketException {
       return result('Could not reach Storage. Check your network.');
-    } on ClientException {
+    } on MediaStoreUnreachableException {
       return result('Could not reach Storage. Check your network.');
     }
     return result(

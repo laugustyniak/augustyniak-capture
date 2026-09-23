@@ -347,8 +347,12 @@ that are still not absolute):
 
 A transfer that throws is counted `failed` and the pass moves on, so one
 object the server refuses (a size limit, a bad key) never holds back every
-older capture behind it; only a network error (`SocketException`, or
-`package:http`'s `ClientException`) or a timeout ends the pass. The
+older capture behind it; only an unreachable store or a timeout ends the pass.
+`SupabaseMediaStore` translates a lost connection into
+`MediaStoreUnreachableException` in both shapes it arrives in — raw
+(`package:http`'s `ClientException`, `SocketException`) and folded by
+`storage_client` into a `StorageException` whose `statusCode` names the
+original error type (`test/sync/supabase_media_store_test.dart`). The
 `stillWanted` check exists because a capture deleted while its download was
 in flight would otherwise be written back with no row, and `findOrphans`
 would re-adopt it as a new capture at the next launch. It is asked before
