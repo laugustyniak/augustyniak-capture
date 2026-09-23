@@ -90,6 +90,20 @@ Future<void> _pump([int n = 6]) async {
   }
 }
 
+/// Polls until [condition] holds. The drain does real file IO, so how many
+/// event-loop turns it takes depends on how busy the machine is — a fixed
+/// [_pump] count is only safe for asserting that nothing *more* happened.
+/// Throws naming [what] after the backstop, so a hang cannot read as a pass.
+Future<void> _until(bool Function() condition, String what) async {
+  final DateTime deadline = DateTime.now().add(const Duration(seconds: 10));
+  while (!condition()) {
+    if (DateTime.now().isAfter(deadline)) {
+      throw StateError('timed out waiting for $what');
+    }
+    await Future<void>.delayed(const Duration(milliseconds: 1));
+  }
+}
+
 Future<Directory> _tmp() => Directory.systemTemp.createTemp('proc_queue');
 
 RecordingsController _controller(_FakeRepo repo, Processor textProcessor) =>
@@ -124,7 +138,7 @@ void main() {
     addTearDown(c.dispose);
 
     await c.addTextNote('pierwsza');
-    await _pump();
+    await _until(() => proc.gates.length == 1, 'the first job to start');
 
     // Capture lock released and the item is running in the background — not
     // blocked to completion.
@@ -135,15 +149,15 @@ void main() {
 
     // A second capture proceeds while the first is still running.
     await c.addTextNote('druga');
-    await _pump();
+    await _until(() => c.recordings.length == 2, 'the second capture');
     expect(c.recordings.length, 2);
 
     // Release both jobs in turn; everything completes.
     proc.gates[0].complete();
-    await _pump();
+    await _until(() => proc.gates.length == 2, 'the second job to start');
     expect(proc.gates.length, 2); // second job only started after the first
     proc.gates[1].complete();
-    await _pump();
+    await _until(() => !c.isProcessing, 'the queue to drain');
 
     expect(
       c.recordings.every(
@@ -164,7 +178,7 @@ void main() {
     await c.addTextNote('a');
     await c.addTextNote('b');
     await c.addTextNote('c');
-    await _pump();
+    await _until(() => proc.gates.length == 1, 'the first job to start');
 
     // Three enqueued, but only one job is in-flight.
     expect(c.pendingProcessingCount, 3);
@@ -173,9 +187,16 @@ void main() {
 
     // Release jobs as they appear.
     while (proc.processed.length < 3) {
+      final int done = proc.processed.length;
       proc.gates.last.complete();
-      await _pump();
+      await _until(
+        () =>
+            proc.processed.length > done &&
+            (proc.processed.length == 3 || proc.gates.length > done + 1),
+        'the next job',
+      );
     }
+    await _until(() => !c.isProcessing, 'the queue to drain');
 
     expect(proc.maxActive, 1); // never more than one concurrent
     expect(
@@ -196,7 +217,10 @@ void main() {
 
     await c.addTextNote('will-fail');
     await c.addTextNote('will-pass');
-    await _pump(12);
+    await _until(
+      () => !c.isProcessing && c.pendingProcessingCount == 0,
+      'both jobs to finish',
+    );
 
     final List<RecordingStatus> statuses = c.recordings
         .map((Recording r) => r.status)
@@ -340,7 +364,7 @@ void main() {
     addTearDown(c.dispose);
 
     await c.addTextNote('x');
-    await _pump();
+    await _until(() => proc.gates.length == 1, 'the job to start');
     expect(proc.gates.length, 1); // one job running, gated
     final String id = c.recordings.single.id;
 
@@ -350,7 +374,7 @@ void main() {
     expect(proc.gates.length, 1); // still just one process call
 
     proc.gates[0].complete();
-    await _pump();
+    await _until(() => !c.isProcessing, 'the job to finish');
     expect(proc.calls, 1); // processed exactly once
   });
 
@@ -362,12 +386,18 @@ void main() {
     addTearDown(c.dispose);
 
     await c.addTextNote('flaky');
-    await _pump(12);
+    await _until(
+      () => c.recordings.single.status == RecordingStatus.failed,
+      'the first attempt to fail',
+    );
     final Recording failed = c.recordings.single;
     expect(failed.status, RecordingStatus.failed);
 
     await c.retryTranscription(failed.id); // second call no longer fails
-    await _pump(12);
+    await _until(
+      () => c.recordings.single.status == RecordingStatus.completed,
+      'the retry to complete',
+    );
     expect(c.recordings.single.status, RecordingStatus.completed);
   });
 
@@ -391,7 +421,7 @@ void main() {
       addTearDown(c.dispose);
 
       await c.addTextNote('held open');
-      await _pump();
+      await _until(() => proc.gates.length == 1, 'the job to start');
 
       await expectLater(
         c.waitForProcessing(timeout: const Duration(milliseconds: 50)),
@@ -490,7 +520,7 @@ void main() {
       addTearDown(c.dispose);
 
       await c.addTextNote('running-item');
-      await _pump();
+      await _until(() => proc.gates.length == 1, 'the job to start');
       expect(proc.gates.length, 1);
       expect(c.isProcessing, isTrue);
 
