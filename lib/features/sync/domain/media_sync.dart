@@ -54,6 +54,7 @@ class MediaSyncResult {
     this.waiting = 0,
     this.unverifiable = 0,
     this.rejected = 0,
+    this.failed = 0,
     this.failureReason,
   });
 
@@ -61,8 +62,11 @@ class MediaSyncResult {
   final int downloaded;
   final int unchanged;
 
-  /// Pulled rows whose media the capturing device has not uploaded yet — the
-  /// normal state while that device is offline, so not a failure.
+  /// Sources not ready to transfer, neither a failure: a pulled row whose
+  /// media the capturing device has not uploaded yet, or a local source that
+  /// does not hash to its row's `contentHash` yet (a take still being
+  /// finalised, or one never hashed). The bucket is write-once, so uploading
+  /// such a file would pin the wrong bytes for every other device.
   final int waiting;
 
   /// Pulled segments with no `contentHash` to check a download against.
@@ -72,9 +76,13 @@ class MediaSyncResult {
   /// Downloads whose bytes did not match the synced `contentHash`. Nothing
   /// is written for them.
   final int rejected;
+
+  /// Transfers that threw. Each is counted and the pass moves on, so one
+  /// object the server refuses never holds back every older capture.
+  final int failed;
   final String? failureReason;
 
-  bool get success => failureReason == null && rejected == 0;
+  bool get success => failureReason == null && rejected == 0 && failed == 0;
 }
 
 /// One segment source: where it lives on this device and what its bytes
@@ -120,9 +128,14 @@ class MediaSyncJob {
 /// target, then renamed, so a torn or wrong transfer never becomes a source.
 /// It never touches a recording's row or status.
 class MediaSyncService {
-  const MediaSyncService({required this.store});
+  const MediaSyncService({required this.store, this.stillWanted});
 
   final MediaObjectStore store;
+
+  /// Asked right before a verified download is renamed into place. A capture
+  /// deleted while its download was in flight must not come back as an
+  /// orphan the next launch re-adopts.
+  final bool Function(MediaSyncJob job)? stillWanted;
 
   Future<MediaSyncResult> sync(List<MediaSyncJob> jobs) async {
     int uploaded = 0;
@@ -131,6 +144,8 @@ class MediaSyncService {
     int waiting = 0;
     int unverifiable = 0;
     int rejected = 0;
+    int failed = 0;
+    Object? lastError;
 
     MediaSyncResult result([String? failureReason]) => MediaSyncResult(
       uploaded: uploaded,
@@ -139,64 +154,98 @@ class MediaSyncService {
       waiting: waiting,
       unverifiable: unverifiable,
       rejected: rejected,
+      failed: failed,
       failureReason: failureReason,
     );
 
     try {
       for (final MediaSyncJob job in jobs) {
-        final File local = File(job.localPath);
-        if (await local.exists() && await local.length() > 0) {
-          if (await store.exists(job.key)) {
-            unchanged++;
-            continue;
-          }
-          try {
-            await store.upload(job.key, local, sha256: await _hash(local));
-            uploaded++;
-          } on MediaObjectExistsException {
-            unchanged++;
-          }
-          continue;
-        }
-
-        final String? expected = job.contentHash;
-        if (expected == null) {
-          unverifiable++;
-          continue;
-        }
-        if (!await store.exists(job.key)) {
-          waiting++;
-          continue;
-        }
-        final List<int> bytes = await store.download(job.key);
-        if (bytes.isEmpty || sha256.convert(bytes).toString() != expected) {
-          rejected++;
-          continue;
-        }
-        await local.parent.create(recursive: true);
-        final File partial = File('${local.path}.${const Uuid().v4()}.part');
         try {
-          await partial.writeAsBytes(bytes, flush: true);
-          await partial.rename(local.path);
-          downloaded++;
-        } finally {
-          if (await partial.exists()) await partial.delete();
+          switch (await _transfer(job)) {
+            case _Outcome.uploaded:
+              uploaded++;
+            case _Outcome.downloaded:
+              downloaded++;
+            case _Outcome.unchanged:
+              unchanged++;
+            case _Outcome.waiting:
+              waiting++;
+            case _Outcome.unverifiable:
+              unverifiable++;
+            case _Outcome.rejected:
+              rejected++;
+          }
+        } on TimeoutException {
+          rethrow;
+        } on SocketException {
+          rethrow;
+        } catch (error) {
+          failed++;
+          lastError = error;
         }
       }
     } on TimeoutException {
       return result('Storage request timed out. Try again.');
     } on SocketException {
       return result('Could not reach Storage. Check your network.');
-    } catch (error) {
-      return result('Storage sync failed (${error.runtimeType}).');
     }
     return result(
-      rejected > 0
-          ? '$rejected download${rejected == 1 ? '' : 's'} failed verification'
-          : null,
+      <String>[
+        if (rejected > 0)
+          '$rejected download${rejected == 1 ? '' : 's'} failed verification',
+        if (failed > 0)
+          '$failed transfer${failed == 1 ? '' : 's'} failed '
+              '(${lastError.runtimeType})',
+      ].join(' · ').nullIfEmpty,
     );
+  }
+
+  Future<_Outcome> _transfer(MediaSyncJob job) async {
+    final File local = File(job.localPath);
+    final String? expected = job.contentHash;
+    if (await local.exists() && await local.length() > 0) {
+      if (await store.exists(job.key)) return _Outcome.unchanged;
+      final String hash = await _hash(local);
+      if (hash != expected) return _Outcome.waiting;
+      try {
+        await store.upload(job.key, local, sha256: hash);
+        return _Outcome.uploaded;
+      } on MediaObjectExistsException {
+        return _Outcome.unchanged;
+      }
+    }
+
+    if (expected == null) return _Outcome.unverifiable;
+    if (!await store.exists(job.key)) return _Outcome.waiting;
+    final List<int> bytes = await store.download(job.key);
+    if (bytes.isEmpty || sha256.convert(bytes).toString() != expected) {
+      return _Outcome.rejected;
+    }
+    await local.parent.create(recursive: true);
+    final File partial = File('${local.path}.${const Uuid().v4()}.part');
+    try {
+      await partial.writeAsBytes(bytes, flush: true);
+      if (stillWanted?.call(job) == false) return _Outcome.unchanged;
+      await partial.rename(local.path);
+      return _Outcome.downloaded;
+    } finally {
+      if (await partial.exists()) await partial.delete();
+    }
   }
 
   static Future<String> _hash(File file) async =>
       (await sha256.bind(file.openRead()).first).toString();
+}
+
+enum _Outcome {
+  uploaded,
+  downloaded,
+  unchanged,
+  waiting,
+  unverifiable,
+  rejected,
+}
+
+extension on String {
+  String? get nullIfEmpty => isEmpty ? null : this;
 }

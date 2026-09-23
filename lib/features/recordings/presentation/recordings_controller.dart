@@ -728,6 +728,7 @@ class RecordingsController extends ChangeNotifier {
     final String? source = reroot(r.filePath);
     if (source == null) return null;
     final Map<String, dynamic> json = r.toJson();
+    final String before = jsonEncode(json);
     json['filePath'] = source;
     json['thumbPath'] = reroot(json['thumbPath']);
     final Object? segments = json['segments'];
@@ -741,6 +742,9 @@ class RecordingsController extends ChangeNotifier {
             },
       ];
     }
+    // A name that cannot be re-rooted stays as it was; without this check
+    // such a row would count as changed, and rewrite the index, every run.
+    if (jsonEncode(json) == before) return null;
     return Recording.fromJson(json);
   }
 
@@ -942,14 +946,16 @@ class RecordingsController extends ChangeNotifier {
                 );
               }
               await _rerootSyncedPaths();
-              final MediaSyncResult result = await MediaSyncService(
+              return MediaSyncService(
                 store: _mediaStoreResolver(ownerId),
+                // A capture deleted while its download was in flight must
+                // not come back as an orphan the next launch re-adopts.
+                stillWanted: (MediaSyncJob job) => _recordings.any(
+                  (Recording r) => r.segments.any(
+                    (CaptureSegment s) => s.filePath == job.localPath,
+                  ),
+                ),
               ).sync(MediaSyncJob.forRecordings(_recordings));
-              // A pulled row that was mid-pipeline on the device that made
-              // it can now be processed here; everything else it filters
-              // out by status.
-              if (result.downloaded > 0) await resumeInterruptedProcessing();
-              return result;
             }
           : null,
       syncR2: hasR2
@@ -982,6 +988,13 @@ class RecordingsController extends ChangeNotifier {
     // queued behind `_saveInFlight` would resume with a `_recordings` this
     // reload just replaced from disk.
     if (!_indexUnreadable && (hasTurso || hasR2)) await reloadFromStorage();
+    // A pulled row that was mid-pipeline on the device that made it can now
+    // be processed here; the funnel filters everything else out by status.
+    // After the reload above, never before it: a reload landing between the
+    // drain's in-memory update and its persist would drop that write.
+    if ((_lastCloudSyncReport!.media?.downloaded ?? 0) > 0) {
+      await resumeInterruptedProcessing();
+    }
     _logSink.log(
       _lastCloudSyncReport!.message,
       level: _lastCloudSyncReport!.success ? LogLevel.info : LogLevel.warn,
@@ -2812,9 +2825,10 @@ class RecordingsController extends ChangeNotifier {
   ///
   /// The single funnel behind [resumeInterruptedProcessing], [retryTranscription]
   /// and every capture entry point — which is why the file-existence guard
-  /// below lives here rather than in each caller. A capture path always
-  /// calls this right after verifying its own source file, so the guard
-  /// never trips for a local capture. A row pulled by sync, though, arrives
+  /// below lives here rather than in each caller. It requires every
+  /// segment's source, not only segment 0's. A capture path always calls
+  /// this right after verifying its own source file, so the guard never
+  /// trips for a local capture. A row pulled by sync, though, arrives
   /// as metadata whose media has not synced yet: its `filePath` may be a
   /// bare name the Storage slot has not re-rooted yet, or an absolute path
   /// to a file it has not downloaded yet (see [_rerootSyncedPaths]). Enqueuing it anyway would let `resumeInterruptedProcessing` or
@@ -2831,8 +2845,13 @@ class RecordingsController extends ChangeNotifier {
         .where((Recording r) => r.id == id)
         .cast<Recording?>()
         .firstOrNull;
+    // Every segment, not only segment 0: a pulled multi-fragment row can
+    // have fragment 0 downloaded while a later one is still waiting.
     if (item != null &&
-        !(p.isAbsolute(item.filePath) && File(item.filePath).existsSync())) {
+        !item.segments.every(
+          (CaptureSegment s) =>
+              p.isAbsolute(s.filePath) && File(s.filePath).existsSync(),
+        )) {
       _logSink.log(
         'source not on this device yet — waiting for media sync',
         recordingId: id,

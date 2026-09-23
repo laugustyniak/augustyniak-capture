@@ -8,6 +8,7 @@ import 'package:augustyniak_capture/features/auth/domain/auth_identity.dart';
 import 'package:augustyniak_capture/features/clipboard/data/clipboard_repository.dart';
 import 'package:augustyniak_capture/features/projects/data/projects_repository.dart';
 import 'package:augustyniak_capture/features/recordings/data/recordings_repository.dart';
+import 'package:augustyniak_capture/features/recordings/domain/capture_segment.dart';
 import 'package:augustyniak_capture/features/recordings/domain/capture_type.dart';
 import 'package:augustyniak_capture/features/recordings/domain/recording.dart';
 import 'package:augustyniak_capture/features/recordings/presentation/recordings_controller.dart';
@@ -175,6 +176,49 @@ void main() {
     expect(r.status, RecordingStatus.pendingTranscription);
   });
 
+  test('a row is not processed until every fragment is here', () async {
+    final String hash = sha256.convert(audio).toString();
+    final DateTime at = DateTime.utc(2026, 9, 23, 8);
+    await seedIndex(
+      Recording(
+        id: 'r1',
+        filePath: 'r1.m4a',
+        createdAt: at,
+        durationMs: 1200,
+        contentHash: hash,
+        status: RecordingStatus.saved,
+        type: CaptureType.audioRecording,
+        segments: <CaptureSegment>[
+          for (final (int i, String name) in <(int, String)>[
+            (0, 'r1.m4a'),
+            (1, 'r1-1.m4a'),
+          ])
+            CaptureSegment(
+              index: i,
+              filePath: name,
+              type: CaptureType.audioRecording,
+              createdAt: at,
+              contentHash: hash,
+            ),
+        ],
+      ),
+    );
+    store.objects['captures/r1/r1.m4a'] = audio;
+    final RecordingsController c = controller();
+    await c.initialize();
+
+    final CloudSyncReport report = await c.syncCloud();
+    await c.waitForProcessing();
+
+    expect(report.media?.downloaded, 1);
+    expect(report.media?.waiting, 1);
+    expect(
+      c.recordings.single.status,
+      RecordingStatus.saved,
+      reason: 'fragment 1 is still waiting, so processing is refused',
+    );
+  });
+
   test('a local capture is uploaded under its recording id', () async {
     final String source = p.join(dir.path, 'r1.m4a');
     await File(source).writeAsBytes(audio);
@@ -184,6 +228,7 @@ void main() {
         filePath: source,
         createdAt: DateTime.utc(2026, 9, 23, 8),
         durationMs: 1200,
+        contentHash: sha256.convert(audio).toString(),
         status: RecordingStatus.completed,
         type: CaptureType.audioRecording,
       ),

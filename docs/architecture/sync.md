@@ -313,12 +313,20 @@ verified) and no `delete` policy yet: a tombstoned capture's objects stay in
 the bucket, private to their owner, until a later change removes them.
 `supabase/tests/capture_media_bucket_test.sql` pins all of it.
 
+**Step 0 — names only.** `SyncRowCodec.recordingFromRow` keeps only the
+file name of every path a server row carries (`file_path`, `thumbPath`, each
+segment's `filePath`) unless a local row already supplies this device's own
+path. So an absolute path in `_recordings` was always written by this
+device, and a row can never make it download to — or upload from — a
+location of the row's choosing.
+
 **Step 1 — re-root.** `RecordingsController._rerootSyncedPaths` points every
 bare-name path a pull left behind (`SyncRowCodec.recordingFromRow` with no
 local row) into this device's recordings directory — `filePath`, each stored
 segment's `filePath`, `thumbPath` — keeping only the name
 (`SyncPathPolicy.localFileName`), so a pulled row cannot point outside the
-directory. It is the `applySyncedRecordings` shape: an in-place merge into
+directory; a row whose paths do not actually change is left alone, so an
+unusable name never costs an index rewrite per run. It is the `applySyncedRecordings` shape: an in-place merge into
 `_recordings`, then `_persistAll()`. The codec basenames these paths on the
 way out, so a re-rooted row hashes the same and is not re-pushed. It also
 covers rows pulled by a build from before this slice.
@@ -331,19 +339,29 @@ that are still not absolute):
 | local source | object | outcome |
 | --- | --- | --- |
 | present, non-empty | present | `unchanged` |
-| present, non-empty | absent | upload (`upsert: false`, sha256 in metadata) → `uploaded`; a racing duplicate counts `unchanged` |
+| present, non-empty | absent, local sha256 = `contentHash` | upload (`upsert: false`, sha256 in metadata) → `uploaded`; a racing duplicate counts `unchanged` |
+| present, non-empty | absent, sha256 ≠ `contentHash` or none | `waiting` — never uploaded: the bucket is write-once, so a take still being finalised would pin the wrong bytes for every other device |
 | absent | any, `contentHash` null | `unverifiable` — never downloaded |
 | absent | absent | `waiting` — the capturing device has not uploaded yet; not a failure |
-| absent | present | download → non-empty **and** sha256 = the synced `contentHash` → `.part` beside the target, flushed, renamed → `downloaded`; otherwise `rejected`, nothing written |
+| absent | present | download → non-empty **and** sha256 = the synced `contentHash` → `.part` beside the target, flushed → the row still exists (`stillWanted`) → renamed → `downloaded`; otherwise `rejected`, nothing written |
+
+A transfer that throws is counted `failed` and the pass moves on, so one
+object the server refuses (a size limit, a bad key) never holds back every
+older capture behind it; only a network error or a timeout ends the pass.
+The `stillWanted` check exists because a capture deleted while its download
+was in flight would otherwise be written back with no row, and `findOrphans`
+would re-adopt it as a new capture at the next launch.
 
 The hash a download is checked against is the row's own `contentHash`, which
 travelled through the version-gated RPC — not the object's metadata. A
-`rejected` download fails the slot (`success` is false); `waiting` and
+`rejected` download or a `failed` transfer fails the slot (`success` is false); `waiting` and
 `unverifiable` only show in the counts. The report line is
 `Storage: N uploaded · N downloaded · …`.
 
-**Step 3 — hand-off.** When anything downloaded, the slot calls
-`resumeInterruptedProcessing()`. That is the whole hand-off: the existing
+**Step 3 — hand-off.** When anything downloaded, `_performCloudSync` calls
+`resumeInterruptedProcessing()` — after its own `reloadFromStorage()`, never
+before, since a reload landing between the drain's in-memory update and its
+persist would drop that write. That is the whole hand-off: the existing
 funnel already filters by status, so a `completed` row pulled with its
 transcript only gains a playable source, and a row pushed mid-pipeline
 (`pendingTranscription`/`transcribing`) is now enqueued here — the guard in
@@ -468,7 +486,7 @@ and files sync through the account when signed in, without Turso or R2.
   (see Media below) — so the mechanism that keeps this true is on the *receiving*
   end: `RecordingsController._enqueueProcessing`, the funnel behind
   `resumeInterruptedProcessing`, RETRY and every capture path, refuses —
-  no status change — when segment 0's source file is not on this device.
+  no status change — when any segment's source file is not on this device.
   See `docs/architecture/capture-pipeline.md`.
 - `_cloudSyncInFlight` covers Supabase too — it guards `_performCloudSync`
   as a whole, so two SYNC NOW presses, or a SYNC NOW racing the launch run,
