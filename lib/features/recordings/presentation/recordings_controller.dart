@@ -27,6 +27,7 @@ import '../../../core/sync/r2_media_sync_service.dart';
 import '../../../core/sync/signed_r2_object_store.dart';
 import '../../../core/sync/sync_defaults.dart';
 import '../../../core/sync/sync_endpoint.dart';
+import '../../../core/sync/sync_path_policy.dart';
 import '../../../core/sync/turso_sync_service.dart';
 import '../../auth/domain/auth_gateway.dart';
 import '../../clipboard/data/clipboard_repository.dart';
@@ -36,6 +37,7 @@ import '../../settings/domain/audio_config.dart';
 import '../../settings/domain/token_cipher.dart';
 import '../../sync/data/repository_sync_applier.dart';
 import '../../sync/data/sync_rows_store.dart';
+import '../../sync/domain/media_sync.dart';
 import '../../sync/domain/sync_engine.dart';
 import '../../sync/domain/sync_row_codec.dart';
 import '../../sync/domain/sync_snapshot.dart';
@@ -124,6 +126,9 @@ class RecordingsController extends ChangeNotifier {
     // avoids. See `docs/architecture/sync.md`.
     Future<void> Function(List<Project> upserts)? applySyncedProjects,
     Future<void> Function(String id)? applySyncedProjectDelete,
+    // Supabase Storage for capture media, built per run for the signed-in
+    // user. Null keeps the media slot out entirely, like the seven above.
+    MediaObjectStore Function(String ownerId)? mediaStoreResolver,
     Duration recorderTimeout = const Duration(seconds: 8),
   }) : _recorderTimeout = recorderTimeout,
        _repository = repository,
@@ -138,6 +143,7 @@ class RecordingsController extends ChangeNotifier {
        _syncDeviceId = syncDeviceId,
        _applySyncedProjects = applySyncedProjects,
        _applySyncedProjectDelete = applySyncedProjectDelete,
+       _mediaStoreResolver = mediaStoreResolver,
        _history = CaptureHistory(
          revisionsRepository: revisionsRepository,
          closureLog: closureLog,
@@ -218,6 +224,7 @@ class RecordingsController extends ChangeNotifier {
   final Future<String?> Function()? _syncDeviceId;
   final Future<void> Function(List<Project> upserts)? _applySyncedProjects;
   final Future<void> Function(String id)? _applySyncedProjectDelete;
+  final MediaObjectStore Function(String ownerId)? _mediaStoreResolver;
 
   /// What every mutation overwrote, and when each capture left the desk. Both
   /// are driven from [_update] and nowhere else — see [CaptureHistory] for why
@@ -674,6 +681,69 @@ class RecordingsController extends ChangeNotifier {
     if (!_disposed) notifyListeners();
   }
 
+  /// Point every pulled row's source paths into this device's recordings
+  /// directory.
+  ///
+  /// A row pulled for a capture this device never had carries bare file names
+  /// (`SyncRowCodec.recordingFromRow` with no local row), which
+  /// `_enqueueProcessing` refuses and a download cannot target. Only the name
+  /// survives, via `SyncPathPolicy.localFileName`, so a pulled row can never
+  /// point outside the directory. The codec basenames these paths on the way
+  /// out, so a re-rooted row stays clean in `sync_rows` and is not re-pushed.
+  /// Same in-place merge as [applySyncedRecordings], for the same reason.
+  Future<void> _rerootSyncedPaths() async {
+    final String directory = (await _repository.recordingsDirectory()).path;
+    final List<Recording> before = _recordings;
+    bool changed = false;
+    final List<Recording> next = <Recording>[];
+    for (final Recording r in _recordings) {
+      final Recording? moved = _rerooted(r, directory);
+      changed |= moved != null;
+      next.add(moved ?? r);
+    }
+    if (!changed) return;
+    _recordings = next;
+    try {
+      await _persistAll();
+    } catch (_) {
+      _recordings = before;
+      rethrow;
+    }
+    if (!_disposed) notifyListeners();
+  }
+
+  static Recording? _rerooted(Recording r, String directory) {
+    bool isLocal(String? path) => path == null || p.isAbsolute(path);
+    if (isLocal(r.filePath) &&
+        isLocal(r.thumbPath) &&
+        r.segments.every((CaptureSegment s) => isLocal(s.filePath))) {
+      return null;
+    }
+    String? reroot(Object? path) {
+      if (path is String && p.isAbsolute(path)) return path;
+      final String? name = SyncPathPolicy.localFileName(path);
+      return name == null ? null : p.join(directory, name);
+    }
+
+    final String? source = reroot(r.filePath);
+    if (source == null) return null;
+    final Map<String, dynamic> json = r.toJson();
+    json['filePath'] = source;
+    json['thumbPath'] = reroot(json['thumbPath']);
+    final Object? segments = json['segments'];
+    if (segments is List) {
+      json['segments'] = <Map<String, dynamic>>[
+        for (final Object? segment in segments)
+          if (segment is Map<String, dynamic>)
+            <String, dynamic>{
+              ...segment,
+              'filePath': reroot(segment['filePath']) ?? segment['filePath'],
+            },
+      ];
+    }
+    return Recording.fromJson(json);
+  }
+
   /// Whether `_recordings` still holds [id] — used only by
   /// `RepositorySyncApplier` to tell a refused delete (index unreadable, a
   /// source file that would not delete — see `deleteRecording`, which
@@ -858,6 +928,28 @@ class RecordingsController extends ChangeNotifier {
                   recordingExists: _hasRecording,
                 ),
               ).run(snapshot);
+            }
+          : null,
+      // After the metadata slot: its pull is what adds the rows whose media
+      // this fetches. Reads `_recordings` at call time, not the snapshot the
+      // metadata slot captured before its pull.
+      syncMedia: hasSupabase && _mediaStoreResolver != null
+          ? () async {
+              final String? ownerId = _authGateway?.currentIdentity?.id;
+              if (ownerId == null) {
+                return const MediaSyncResult(
+                  failureReason: 'sync skipped: signed out',
+                );
+              }
+              await _rerootSyncedPaths();
+              final MediaSyncResult result = await MediaSyncService(
+                store: _mediaStoreResolver(ownerId),
+              ).sync(MediaSyncJob.forRecordings(_recordings));
+              // A pulled row that was mid-pipeline on the device that made
+              // it can now be processed here; everything else it filters
+              // out by status.
+              if (result.downloaded > 0) await resumeInterruptedProcessing();
+              return result;
             }
           : null,
       syncR2: hasR2
@@ -2723,10 +2815,9 @@ class RecordingsController extends ChangeNotifier {
   /// below lives here rather than in each caller. A capture path always
   /// calls this right after verifying its own source file, so the guard
   /// never trips for a local capture. A row pulled by sync, though, arrives
-  /// as metadata whose media has not synced yet (slice 4 of #187): its
-  /// `filePath` may be a bare name never resolved against this device's
-  /// recordings directory, or an absolute path to a file that simply is not
-  /// here. Enqueuing it anyway would let `resumeInterruptedProcessing` or
+  /// as metadata whose media has not synced yet: its `filePath` may be a
+  /// bare name the Storage slot has not re-rooted yet, or an absolute path
+  /// to a file it has not downloaded yet (see [_rerootSyncedPaths]). Enqueuing it anyway would let `resumeInterruptedProcessing` or
   /// the RETRY sweep hand the processor a file that does not exist, sweeping
   /// the capture to `failed` for a transcription that already succeeded on
   /// the device that made it — see `docs/architecture/sync.md` and

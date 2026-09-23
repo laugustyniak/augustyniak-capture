@@ -1,3 +1,4 @@
+import '../../features/sync/domain/media_sync.dart';
 import '../../features/sync/domain/sync_snapshot.dart';
 import 'r2_media_sync_service.dart';
 
@@ -14,6 +15,7 @@ class CloudSyncReport {
     required this.configurationFingerprint,
     this.turso,
     this.supabase,
+    this.media,
     this.r2,
   });
 
@@ -21,24 +23,27 @@ class CloudSyncReport {
   final String configurationFingerprint;
   final TursoSyncResult? turso;
   final SupabaseSyncResult? supabase;
+  final MediaSyncResult? media;
   final R2SyncResult? r2;
 
   bool matchesConfiguration(String fingerprint) =>
       configurationFingerprint == fingerprint;
 
   bool get success =>
-      (turso != null || supabase != null || r2 != null) &&
+      (turso != null || supabase != null || media != null || r2 != null) &&
       (turso == null || turso!.success) &&
       (supabase == null || supabase!.success) &&
+      (media == null || media!.success) &&
       (r2 == null || r2!.success);
   bool get partialSuccess =>
       !success &&
       (turso?.success == true ||
           supabase?.success == true ||
+          media?.success == true ||
           r2?.success == true);
 
   String get message {
-    if (turso == null && supabase == null && r2 == null) {
+    if (turso == null && supabase == null && media == null && r2 == null) {
       return 'Cloud sync is not configured.';
     }
     final String headline = success
@@ -70,6 +75,22 @@ class CloudSyncReport {
         lines.add('Supabase: ${result.failureReason ?? 'sync failed'}');
       }
     }
+    if (media case final MediaSyncResult result) {
+      final List<String> counts = <String>[
+        if (result.uploaded > 0) '${result.uploaded} uploaded',
+        if (result.downloaded > 0) '${result.downloaded} downloaded',
+        if (result.unchanged > 0) '${result.unchanged} unchanged',
+        if (result.waiting > 0) '${result.waiting} waiting',
+        if (result.unverifiable > 0) '${result.unverifiable} unverifiable',
+        if (result.rejected > 0) '${result.rejected} rejected',
+      ];
+      final String detail = counts.isEmpty ? 'no files' : counts.join(' · ');
+      lines.add(
+        result.success
+            ? 'Storage: $detail'
+            : 'Storage: ${result.failureReason ?? 'sync failed'} · $detail',
+      );
+    }
     if (r2 case final R2SyncResult result) {
       final List<String> counts = <String>[
         if (result.uploaded > 0) '${result.uploaded} uploaded',
@@ -94,17 +115,20 @@ class CloudSyncCoordinator {
     this.configurationFingerprint = '',
     this.syncTurso,
     this.syncSupabase,
+    this.syncMedia,
     this.syncR2,
   });
 
   final String configurationFingerprint;
   final Future<TursoSyncResult> Function()? syncTurso;
   final Future<SupabaseSyncResult> Function()? syncSupabase;
+  final Future<MediaSyncResult> Function()? syncMedia;
   final Future<R2SyncResult> Function()? syncR2;
 
   Future<CloudSyncReport> sync() async {
     TursoSyncResult? turso;
     SupabaseSyncResult? supabase;
+    MediaSyncResult? media;
     R2SyncResult? r2;
 
     if (syncTurso != null) {
@@ -130,6 +154,18 @@ class CloudSyncCoordinator {
       }
     }
 
+    // After the metadata pull, which is what adds the rows whose media this
+    // slot fetches.
+    if (syncMedia != null) {
+      try {
+        media = await syncMedia!();
+      } catch (error) {
+        media = MediaSyncResult(
+          failureReason: 'Storage sync failed (${error.runtimeType}).',
+        );
+      }
+    }
+
     if (syncR2 != null) {
       try {
         r2 = await syncR2!();
@@ -146,6 +182,7 @@ class CloudSyncCoordinator {
       configurationFingerprint: configurationFingerprint,
       turso: turso,
       supabase: supabase,
+      media: media,
       r2: r2,
     );
   }

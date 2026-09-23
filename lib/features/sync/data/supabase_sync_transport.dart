@@ -3,8 +3,9 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import '../domain/sync_table.dart';
 import '../domain/sync_transport.dart';
 
-/// PostgREST + the `sync_push` RPC. The only file in the feature that imports
-/// `supabase_flutter`; everything above it is testable without a network.
+/// PostgREST + the `sync_push` RPC. With `supabase_media_store.dart`, the only
+/// files in the feature that import `supabase_flutter`; everything above them
+/// is testable without a network.
 class SupabaseSyncTransport implements SyncTransport {
   SupabaseSyncTransport(this._client);
 

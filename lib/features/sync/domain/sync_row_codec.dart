@@ -136,7 +136,8 @@ class SyncRowCodec {
         : '';
     // Restore this device's own absolute paths when they are known; a fresh
     // install (no `local`) keeps the bare names payload/file_path carry, and
-    // a later slice resolves them against the recordings directory.
+    // the media slot re-roots them into the recordings directory
+    // (`RecordingsController._rerootSyncedPaths`) before downloading.
     final Map<int, String> localSegmentPaths = <int, String>{
       if (local != null)
         for (final segment in local.segments) segment.index: segment.filePath,

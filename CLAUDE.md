@@ -169,7 +169,7 @@ Seventeen features, sixteen lines — `timer`/`momentum` share one. Read the poi
 - **`gamification`** — entirely cosmetic by construction: a nullable seam, every call site `unawaited`, and nothing it does can reach `status`, a source file or the index. Treat any change that gives it a say in the pipeline as a bug. `docs/architecture/timer-momentum.md`.
 - **`logs`** — a `ChangeNotifier` ring buffer, newest-first, capacity 500. Read-only view; nothing in the Logs tab mutates recordings.
 - **`auth`** — optional Supabase bootstrap and OS-keyring session storage. Missing config or an unavailable keyring never blocks local capture. Issue #187 tracks the staged replacement of Turso/R2; the cloud-data transport itself lives in `features/sync/`.
-- **`sync`** — Supabase metadata sync: push-then-pull over one version-gated RPC, applied through the controllers' own apply entry points, never a second repository writing underneath them. Runs from SYNC NOW and once at launch, only when signed in; media bytes are a later slice. `docs/architecture/sync.md`.
+- **`sync`** — Supabase metadata sync: push-then-pull over one version-gated RPC, applied through the controllers' own apply entry points, never a second repository writing underneath them. Runs from SYNC NOW and once at launch, only when signed in; media follows through a private Storage bucket, and a download lands only after it hashes to the synced `contentHash`. `docs/architecture/sync.md`.
 
 Not feature-scoped: `core/database/app_database.dart` (see Persistence), `core/http/provider_failure.dart`, `core/sync/`.
 

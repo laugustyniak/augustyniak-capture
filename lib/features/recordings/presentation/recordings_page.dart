@@ -91,6 +91,7 @@ import '../data/system_media_opener.dart';
 import '../domain/agent_handoff.dart';
 import '../domain/capture_type.dart';
 import '../domain/recording.dart';
+import '../../sync/domain/media_sync.dart';
 import '../../sync/domain/sync_transport.dart';
 import 'capture_dock.dart';
 import 'capture_nav_bar.dart';
@@ -111,6 +112,7 @@ class RecordingsPage extends StatefulWidget {
     this.authController,
     this.authGateway,
     this.syncTransportResolver,
+    this.mediaStoreResolver,
   });
 
   /// Where the shell publishes the persisted theme so `AugustyniakCaptureApp`,
@@ -138,6 +140,10 @@ class RecordingsPage extends StatefulWidget {
   /// initialised, which leaves Supabase sync off exactly like an unset
   /// Turso/R2 credential does.
   final SyncTransport Function()? syncTransportResolver;
+
+  /// Supabase Storage for capture media; null under the same condition as
+  /// [syncTransportResolver].
+  final MediaObjectStore Function(String ownerId)? mediaStoreResolver;
 
   @override
   State<RecordingsPage> createState() => _RecordingsPageState();
@@ -429,6 +435,7 @@ class _RecordingsPageState extends State<RecordingsPage>
       // initialised; the two repositories and the device id are built here,
       // like every other repository on this page.
       syncTransportResolver: widget.syncTransportResolver,
+      mediaStoreResolver: widget.mediaStoreResolver,
       authGateway: widget.authGateway,
       projectsRepository: ProjectsRepository(),
       clipboardRepository: clipboardRepository,
