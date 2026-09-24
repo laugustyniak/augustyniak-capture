@@ -115,14 +115,20 @@ repeat pull safe). Stored locally under `settings['sync.cursor.<table>']`
 and mirrored to the server's `sync_state` row for this device, so a
 reinstall can see where its predecessor stopped.
 
-**Known limit: paging is by offset, not keyset.** `upper` is frozen once
-per table per run, but a row returned on an earlier page that another
-device updates before a later page is fetched leaves the window the next
-page's `offset` expects it in, and that page silently skips one row. It
-self-heals only if the row falls inside the next run's lag window.
-Reachable on first pairing of a library past 500 rows while another device
-edits concurrently. Tracked as a follow-up issue rather than fixed in this
-wave — the real fix is keyset paging on `(updated_at, keys)`.
+**Paging is keyset, not offset (#195).** Each page continues strictly
+after the previous page's last `(updated_at, key…)` tuple
+(`SupabaseSyncTransport.keysetFilter`), spelled out as a nested PostgREST
+`or(updated_at.gt.T, and(updated_at.eq.T, k1.gt.V1), …)` because PostgREST
+has no row-value comparison. Offset paging skipped a row: when another
+device updated a row already returned on an earlier page, that row moved
+later in the order, every row behind it shifted one position earlier, and
+the row at the next page boundary was never read. With keyset paging the
+moved row only moves itself. It is read again later in the same run if its
+new `updated_at` is still inside the window, or on the next run through
+the lag-window re-read. Every value in the filter is double-quoted, since
+`revisions.field` and `sync_state.table_name` are free text. `updated_at`
+is passed back exactly as the server returned it, so `eq` keeps
+microsecond precision.
 
 ## Apply: through the owning controller, never a second writer
 

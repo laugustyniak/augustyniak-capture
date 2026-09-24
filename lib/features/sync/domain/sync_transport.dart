@@ -31,11 +31,17 @@ abstract interface class SyncTransport {
   Future<SyncPushResult> push(SyncTable table, List<Map<String, Object?>> rows);
 
   /// Rows with `updated_at > since - 30 s` and `updated_at <= now() - 30 s`,
-  /// ordered `(updated_at, id)`, one page at a time.
+  /// ordered by `updated_at` and then every key column, one page at a time.
+  ///
+  /// [after] is the last row of the previous page (null for the first): a
+  /// page continues strictly after its `(updated_at, keys…)` tuple rather
+  /// than from an offset, so a row another device updates between two pages
+  /// only moves itself — it cannot shift the rows behind it past the next
+  /// page's start (#195).
   Future<SyncPage> pull(
     SyncTable table, {
     required DateTime? since,
-    required int offset,
+    required Map<String, Object?>? after,
     required int limit,
   });
 
@@ -53,7 +59,7 @@ class DisabledSyncTransport implements SyncTransport {
       _unavailable();
 
   @override
-  Future<SyncPage> pull(SyncTable table, {required DateTime? since, required int offset, required int limit}) async =>
+  Future<SyncPage> pull(SyncTable table, {required DateTime? since, required Map<String, Object?>? after, required int limit}) async =>
       _unavailable();
 
   @override

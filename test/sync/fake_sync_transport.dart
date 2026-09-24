@@ -22,6 +22,10 @@ class FakeSyncTransport implements SyncTransport {
   final List<(SyncTable, List<Map<String, Object?>>)> pushes = [];
   Object? failWith;
 
+  /// Runs at the top of every `pull`, before the window is read — a test's
+  /// stand-in for another device writing between two pages.
+  Future<void> Function(SyncTable table)? beforePull;
+
   Map<String, Map<String, Object?>> _table(SyncTable t) =>
       tables.putIfAbsent(t, () => <String, Map<String, Object?>>{});
 
@@ -67,24 +71,40 @@ class FakeSyncTransport implements SyncTransport {
   }
 
   @override
-  Future<SyncPage> pull(SyncTable table, {required DateTime? since, required int offset, required int limit}) async {
+  Future<SyncPage> pull(SyncTable table, {required DateTime? since, required Map<String, Object?>? after, required int limit}) async {
     if (failWith != null) throw failWith!;
+    await beforePull?.call(table);
     final DateTime upper = clock().subtract(syncLagWindow);
     final DateTime? lower = since?.subtract(syncLagWindow);
     final List<Map<String, Object?>> all = _table(table).values.where((row) {
       final DateTime at = DateTime.parse(row['updated_at'] as String);
       return !at.isAfter(upper) && (lower == null || at.isAfter(lower));
     }).toList()
-      ..sort((a, b) {
-        final int c = (a['updated_at'] as String).compareTo(b['updated_at'] as String);
-        return c != 0 ? c : SyncRowCodec.rowId(table, a).compareTo(SyncRowCodec.rowId(table, b));
-      });
-    final List<Map<String, Object?>> page = all.skip(offset).take(limit).map(_asPulledRow).toList();
-    return SyncPage(rows: page, hasMore: offset + limit < all.length);
+      ..sort((a, b) => _compareKeyset(table, a, b));
+    // Keyset, like the real transport: strictly after the previous page's
+    // last `(updated_at, key)`. `after` arrives in Postgres's timestamp
+    // shape (`_asPulledRow`), so `_compareKeyset` parses rather than
+    // string-compares.
+    final List<Map<String, Object?>> rest = after == null
+        ? all
+        : all.where((row) => _compareKeyset(table, row, after) > 0).toList();
+    final List<Map<String, Object?>> page = rest.take(limit).map(_asPulledRow).toList();
+    return SyncPage(rows: page, hasMore: limit < rest.length);
   }
 
   @override
   Future<DateTime> serverNow() async => clock();
+
+  /// Both sides through `_asPulledRow` first: `after` is already in
+  /// Postgres's timestamp shape while a stored row is in Dart's, and a
+  /// timestamp key column (`revisions.at`) compared as raw text across the
+  /// two shapes would put a row after itself and never end the pull.
+  static int _compareKeyset(SyncTable table, Map<String, Object?> a, Map<String, Object?> b) {
+    final Map<String, Object?> pa = _asPulledRow(a);
+    final Map<String, Object?> pb = _asPulledRow(b);
+    final int c = DateTime.parse(pa['updated_at'] as String).compareTo(DateTime.parse(pb['updated_at'] as String));
+    return c != 0 ? c : SyncRowCodec.rowId(table, pa).compareTo(SyncRowCodec.rowId(table, pb));
+  }
 
   /// Columns the migration gives a server-side default and the device never
   /// sends — `devices.created_at`/`last_seen_at` (`default now()`),

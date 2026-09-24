@@ -52,9 +52,11 @@ class SupabaseSyncTransport implements SyncTransport {
   /// those: two rows can tie on both and still differ on a later key
   /// column, which makes their relative position across a page boundary
   /// arbitrary and can skip a row between one `range()` call and the next.
-  /// The full key tuple makes the order total, so paging is stable.
+  /// The full key tuple makes the order total, which is what lets a page
+  /// continue strictly after the previous page's last tuple — see
+  /// [keysetFilter].
   @override
-  Future<SyncPage> pull(SyncTable table, {required DateTime? since, required int offset, required int limit}) async {
+  Future<SyncPage> pull(SyncTable table, {required DateTime? since, required Map<String, Object?>? after, required int limit}) async {
     final DateTime upper = (await serverNow()).subtract(syncLagWindow);
     PostgrestFilterBuilder<List<Map<String, dynamic>>> query =
         _client.from(table.serverName).select().lte('updated_at', upper.toIso8601String());
@@ -64,16 +66,46 @@ class SupabaseSyncTransport implements SyncTransport {
       // ever arrived un-normalized.
       query = query.gt('updated_at', since.toUtc().subtract(syncLagWindow).toIso8601String());
     }
+    if (after != null) query = query.or(keysetFilter(table, after));
     PostgrestTransformBuilder<List<Map<String, dynamic>>> ordered = query.order('updated_at', ascending: true);
     for (final String key in table.keyColumns) {
       ordered = ordered.order(key, ascending: true);
     }
-    final List<Map<String, dynamic>> rows = await ordered.range(offset, offset + limit - 1);
+    final List<Map<String, dynamic>> rows = await ordered.limit(limit);
     return SyncPage(
       rows: <Map<String, Object?>>[for (final Map<String, dynamic> r in rows) Map<String, Object?>.from(r)],
       hasMore: rows.length == limit,
     );
   }
+
+  /// PostgREST `or` filter for "strictly after [after]" in the pull order:
+  /// `(updated_at, k1, …, kn) > (T, V1, …, Vn)` spelled out lexicographically,
+  /// since PostgREST has no row-value comparison —
+  /// `updated_at.gt.T, and(updated_at.eq.T, k1.gt.V1), …`.
+  ///
+  /// Every value is double-quoted, because a key such as `revisions.field`
+  /// or `sync_state.table_name` is free text and a bare `,` or `)` would
+  /// end the operand. `updated_at` is used exactly as the server returned
+  /// it: re-encoding it through `DateTime` would drop microseconds on a
+  /// platform that only keeps milliseconds, and `eq` would then never match.
+  static String keysetFilter(SyncTable table, Map<String, Object?> after) {
+    final List<(String, Object?)> columns = <(String, Object?)>[
+      ('updated_at', after['updated_at']),
+      for (final String key in table.keyColumns) (key, after[key]),
+    ];
+    final List<String> branches = <String>[];
+    for (int i = 0; i < columns.length; i++) {
+      final List<String> terms = <String>[
+        for (final (String column, Object? value) in columns.take(i)) '$column.eq.${_quote(value)}',
+        '${columns[i].$1}.gt.${_quote(columns[i].$2)}',
+      ];
+      branches.add(terms.length == 1 ? terms.single : 'and(${terms.join(',')})');
+    }
+    return branches.join(',');
+  }
+
+  static String _quote(Object? value) =>
+      '"${'$value'.replaceAll(r'\', r'\\').replaceAll('"', r'\"')}"';
 
   @override
   Future<DateTime> serverNow() async {
