@@ -508,4 +508,33 @@ void main() {
       );
     },
   );
+
+  test('a row another device updates between two pages does not skip the next row', () async {
+    // #195: three rows, two per page. Between the pages another device
+    // bumps `a`, which moves it past the window; offset paging then asks
+    // for "rows 3.." of a list that is now only two long and loses `c`.
+    for (final (int i, String id) in <(int, String)>[(0, 'a'), (1, 'b'), (2, 'c')]) {
+      advance(Duration(seconds: i));
+      await seedServer(recording(id: id, title: id));
+    }
+    advance(const Duration(minutes: 1));
+    engine = SyncEngine(
+      transport: transport,
+      bookkeeping: bookkeeping,
+      applier: applier,
+      clock: () => t0,
+      pageSize: 2,
+    );
+    int recordingPulls = 0;
+    transport.beforePull = (SyncTable table) async {
+      if (table != SyncTable.recordings || ++recordingPulls != 2) return;
+      await transport.push(SyncTable.recordings, [
+        {...SyncRowCodec.recording(recording(id: 'a', title: 'a2')), 'version': 2},
+      ]);
+    };
+
+    await engine.run(const SyncSnapshot());
+
+    expect(applier.recordings.keys, containsAll(<String>['a', 'b', 'c']));
+  });
 }

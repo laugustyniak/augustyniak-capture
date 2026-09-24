@@ -41,15 +41,18 @@ class SyncEngine {
     required SyncBookkeeping bookkeeping,
     required SyncApplier applier,
     DateTime Function()? clock,
+    int pageSize = 500,
   }) : _transport = transport,
        _bookkeeping = bookkeeping,
        _applier = applier,
-       _clock = clock ?? (() => DateTime.now().toUtc());
+       _clock = clock ?? (() => DateTime.now().toUtc()),
+       _pageSize = pageSize;
 
   final SyncTransport _transport;
   final SyncBookkeeping _bookkeeping;
   final SyncApplier _applier;
   final DateTime Function() _clock;
+  final int _pageSize;
 
   Future<SupabaseSyncResult> run(SyncSnapshot snapshot) async {
     int pushed = 0;
@@ -445,18 +448,18 @@ class SyncEngine {
     for (final SyncTable table in _pulledTables) {
       final DateTime? since = _bookkeeping.cursor(table.serverName);
       DateTime? newest = since;
-      int offset = 0;
+      Map<String, Object?>? after;
       final List<Map<String, Object?>> rows = [];
       while (true) {
         final SyncPage page = await _transport.pull(
           table,
           since: since,
-          offset: offset,
-          limit: 500,
+          after: after,
+          limit: _pageSize,
         );
         rows.addAll(page.rows);
-        offset += page.rows.length;
-        if (!page.hasMore) break;
+        if (!page.hasMore || page.rows.isEmpty) break;
+        after = page.rows.last;
       }
       for (final Map<String, Object?> row in rows) {
         final DateTime? at = DateTime.tryParse('${row['updated_at']}')?.toUtc();

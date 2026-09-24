@@ -38,9 +38,9 @@ class _RejectingTransport implements SyncTransport {
   Future<SyncPage> pull(
     SyncTable table, {
     required DateTime? since,
-    required int offset,
+    required Map<String, Object?>? after,
     required int limit,
-  }) => _inner.pull(table, since: since, offset: offset, limit: limit);
+  }) => _inner.pull(table, since: since, after: after, limit: limit);
 
   @override
   Future<DateTime> serverNow() => _inner.serverNow();
