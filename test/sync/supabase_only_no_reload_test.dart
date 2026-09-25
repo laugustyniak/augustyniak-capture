@@ -105,8 +105,6 @@ void main() {
       final CloudSyncReport report = await controller.syncCloud();
 
       expect(report.supabase, isNotNull);
-      expect(report.turso, isNull);
-      expect(report.r2, isNull);
       expect(
         repository.loadAllCalls,
         loadAllCallsAfterInit,

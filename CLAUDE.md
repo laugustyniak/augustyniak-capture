@@ -70,19 +70,6 @@ in the repo.
   Google OAuth returns to `ai.augustyniak.capture://login-callback/`; that exact
   URI must be present in the Supabase Auth redirect allow list. Native platform
   registration is checked in, and `tool/deploy.sh` registers the Linux handler.
-- Run pre-paired to your own cloud sync (all optional, and **never** committed — see `SyncDefaults` below):
-
-  ```bash
-  flutter run \
-    --dart-define=TURSO_DB_URL=libsql://your-db.turso.io \
-    --dart-define=TURSO_AUTH_TOKEN=… \
-    --dart-define=R2_ENDPOINT=https://<account>.r2.cloudflarestorage.com \
-    --dart-define=R2_BUCKET=your-bucket \
-    --dart-define=R2_ACCESS_KEY_ID=… \
-    --dart-define=R2_SECRET_ACCESS_KEY=…
-  ```
-
-  Omit them and sync is simply unconfigured until the Config tab or a QR pairing fills it in — that is the normal state, not a degraded one. `TURSO_DB_URL` and `TURSO_AUTH_TOKEN` only count as a pair (`SyncDefaults.hasTurso`); either alone reaches nothing. Passing a secret on the command line puts it in your shell history, so prefer the Config tab or QR pairing for anything you intend to keep.
 - All tests: `flutter test`
 - Postgres schema and RLS (`supabase/migrations/`, `supabase/tests/`): `supabase start`, then `supabase db reset` applies every migration from empty and `supabase test db` runs the pgTAP suite. Never `supabase db push` to the hosted project without an explicit go-ahead — it is production Auth's neighbour.
 - Single test file: `flutter test test/recording_test.dart`
@@ -106,7 +93,7 @@ Feature-first layout under `lib/features/<feature>/{domain,data,presentation}`. 
 | `docs/architecture/agent-handoff.md` | `CaptureRouter`, `AgentHandoff`, `features/command/`, `renderCaptureBrief`, `RouteRecord`, a project's Command binding |
 | `docs/architecture/backup.md` | `features/backup/`, the archive format, import/merge |
 | `docs/architecture/transcription.md` | the local engine or model store, `ChunkedTranscriptionService`, `AudioSplitter`, `AudioDecoder`, `TranscriptionLimits` |
-| `docs/architecture/settings-security.md` | `TokenCipher`, a master-key store, the endpoint transport guard, `core/sync/` |
+| `docs/architecture/settings-security.md` | `TokenCipher`, a master-key store, the endpoint transport guard |
 | `docs/architecture/shortcuts.md` | `features/shortcuts/`, a registrar, `WindowPresenter` |
 | `docs/architecture/timer-momentum.md` | `features/timer/`, `features/momentum/`, `features/gamification/`, `focus-sessions.jsonl`, `closures.jsonl` |
 | `docs/architecture/clipboard.md` | `features/clipboard/`, `ClipboardWatcherService`, a `ClipboardRepository` |
@@ -168,7 +155,7 @@ Seventeen features, sixteen lines — `timer`/`momentum` share one. Read the poi
 - **`timer`** / **`momentum`** — a Pomodoro countdown, and append-only logs of the sessions that reached zero and the captures that left the desk. Time is read from the clock, never accumulated. `docs/architecture/timer-momentum.md`.
 - **`gamification`** — entirely cosmetic by construction: a nullable seam, every call site `unawaited`, and nothing it does can reach `status`, a source file or the index. Treat any change that gives it a say in the pipeline as a bug. `docs/architecture/timer-momentum.md`.
 - **`logs`** — a `ChangeNotifier` ring buffer, newest-first, capacity 500. Read-only view; nothing in the Logs tab mutates recordings.
-- **`auth`** — optional Supabase bootstrap and OS-keyring session storage. Missing config or an unavailable keyring never blocks local capture. Issue #187 tracks the staged replacement of Turso/R2; the cloud-data transport itself lives in `features/sync/`.
+- **`auth`** — optional Supabase bootstrap and OS-keyring session storage. Missing config or an unavailable keyring never blocks local capture. The cloud-data transport itself lives in `features/sync/`; the Turso/R2 path it replaced was removed in #202.
 - **`sync`** — Supabase metadata sync: push-then-pull over one version-gated RPC, applied through the controllers' own apply entry points, never a second repository writing underneath them. Runs from SYNC NOW and once at launch, only when signed in; media follows through a private Storage bucket, and a download lands only after it hashes to the synced `contentHash`. `docs/architecture/sync.md`.
 
 Not feature-scoped: `core/database/app_database.dart` (see Persistence), `core/http/provider_failure.dart`, `core/sync/`.

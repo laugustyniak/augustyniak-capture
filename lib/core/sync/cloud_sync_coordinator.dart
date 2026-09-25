@@ -1,49 +1,22 @@
 import '../../features/sync/domain/media_sync.dart';
 import '../../features/sync/domain/sync_snapshot.dart';
-import 'r2_media_sync_service.dart';
-
-class TursoSyncResult {
-  const TursoSyncResult({required this.success, this.failureReason});
-
-  final bool success;
-  final String? failureReason;
-}
 
 class CloudSyncReport {
-  const CloudSyncReport({
-    required this.completedAt,
-    required this.configurationFingerprint,
-    this.turso,
-    this.supabase,
-    this.media,
-    this.r2,
-  });
+  const CloudSyncReport({required this.completedAt, this.supabase, this.media});
 
   final DateTime completedAt;
-  final String configurationFingerprint;
-  final TursoSyncResult? turso;
   final SupabaseSyncResult? supabase;
   final MediaSyncResult? media;
-  final R2SyncResult? r2;
-
-  bool matchesConfiguration(String fingerprint) =>
-      configurationFingerprint == fingerprint;
 
   bool get success =>
-      (turso != null || supabase != null || media != null || r2 != null) &&
-      (turso == null || turso!.success) &&
+      (supabase != null || media != null) &&
       (supabase == null || supabase!.success) &&
-      (media == null || media!.success) &&
-      (r2 == null || r2!.success);
+      (media == null || media!.success);
   bool get partialSuccess =>
-      !success &&
-      (turso?.success == true ||
-          supabase?.success == true ||
-          media?.success == true ||
-          r2?.success == true);
+      !success && (supabase?.success == true || media?.success == true);
 
   String get message {
-    if (turso == null && supabase == null && media == null && r2 == null) {
+    if (supabase == null && media == null) {
       return 'Cloud sync is not configured.';
     }
     final String headline = success
@@ -52,15 +25,6 @@ class CloudSyncReport {
         ? 'Sync partially completed'
         : 'Sync failed';
     final List<String> lines = <String>[headline];
-    if (turso case final TursoSyncResult result) {
-      lines.add(
-        result.success
-            ? 'Turso: complete'
-            : 'Turso: ${result.failureReason ?? 'sync failed'}',
-      );
-    }
-    // Between Turso and R2, on the same rationale Turso goes first for: its
-    // pull may add recording rows whose media R2 can then fetch.
     if (supabase case final SupabaseSyncResult result) {
       if (result.success) {
         final List<String> counts = <String>[
@@ -91,59 +55,20 @@ class CloudSyncReport {
             : 'Storage: ${result.failureReason ?? 'sync failed'} · $detail',
       );
     }
-    if (r2 case final R2SyncResult result) {
-      final List<String> counts = <String>[
-        if (result.uploaded > 0) '${result.uploaded} uploaded',
-        if (result.downloaded > 0) '${result.downloaded} downloaded',
-        if (result.unchanged > 0) '${result.unchanged} unchanged',
-        if (result.conflicts > 0) '${result.conflicts} conflicts',
-        if (result.missing > 0) '${result.missing} missing',
-      ];
-      final String detail = counts.isEmpty ? 'no files' : counts.join(' · ');
-      lines.add(
-        result.success
-            ? 'R2: $detail'
-            : 'R2: ${result.failureReason ?? 'sync failed'} · $detail',
-      );
-    }
     return lines.join('\n');
   }
 }
 
 class CloudSyncCoordinator {
-  const CloudSyncCoordinator({
-    this.configurationFingerprint = '',
-    this.syncTurso,
-    this.syncSupabase,
-    this.syncMedia,
-    this.syncR2,
-  });
+  const CloudSyncCoordinator({this.syncSupabase, this.syncMedia});
 
-  final String configurationFingerprint;
-  final Future<TursoSyncResult> Function()? syncTurso;
   final Future<SupabaseSyncResult> Function()? syncSupabase;
   final Future<MediaSyncResult> Function()? syncMedia;
-  final Future<R2SyncResult> Function()? syncR2;
 
   Future<CloudSyncReport> sync() async {
-    TursoSyncResult? turso;
     SupabaseSyncResult? supabase;
     MediaSyncResult? media;
-    R2SyncResult? r2;
 
-    if (syncTurso != null) {
-      try {
-        turso = await syncTurso!();
-      } catch (error) {
-        turso = TursoSyncResult(
-          success: false,
-          failureReason: 'Turso sync failed (${error.runtimeType}).',
-        );
-      }
-    }
-
-    // Between Turso and R2, on the same rationale Turso goes first for: its
-    // pull may add recording rows whose media R2 can then fetch.
     if (syncSupabase != null) {
       try {
         supabase = await syncSupabase!();
@@ -166,24 +91,10 @@ class CloudSyncCoordinator {
       }
     }
 
-    if (syncR2 != null) {
-      try {
-        r2 = await syncR2!();
-      } catch (error) {
-        r2 = R2SyncResult(
-          success: false,
-          failureReason: 'R2 sync failed (${error.runtimeType}).',
-        );
-      }
-    }
-
     return CloudSyncReport(
       completedAt: DateTime.now(),
-      configurationFingerprint: configurationFingerprint,
-      turso: turso,
       supabase: supabase,
       media: media,
-      r2: r2,
     );
   }
 }

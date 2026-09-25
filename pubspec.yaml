@@ -24,18 +24,13 @@ dependencies:
   # flutter_secure_storage needs libsecret-1-dev at build time on Linux.
   flutter_secure_storage: ^9.2.2
   cryptography: ^2.7.0
-  # Cross-platform SQLite engine with FTS5 support and Turso/libSQL compatibility
+  # Cross-platform SQLite engine with FTS5 support
   sqlite3: ^3.5.1
-  # QR Code generation on desktop and scanning on mobile
-  qr_flutter: ^4.1.0
-  mobile_scanner: ^7.4.0
   # Streaming SHA-256 fingerprints for cross-device/archive deduplication.
   crypto: ^3.0.6
   # Zip reader/writer for the portable capture archive
   archive: ^4.0.9
   ffi: ^2.2.0
-  aws_common: ^0.7.15
-  aws_signature_v4: ^0.6.13
   package_info_plus: ^9.0.1
   url_launcher: ^6.3.2
   supabase_flutter: ^2.17.2

@@ -7,7 +7,6 @@ import 'package:sqlite3/sqlite3.dart';
 
 import '../../../core/database/app_database.dart';
 import '../../../core/security/owner_only_file.dart';
-import '../../../core/sync/sync_defaults.dart';
 import '../domain/app_settings.dart';
 import '../domain/provider_profile.dart';
 import '../domain/token_cipher.dart';
@@ -97,7 +96,6 @@ class SettingsRepository {
         }
       } catch (_) {}
 
-      settings = _withSyncDefaults(settings);
       try {
         await save(settings);
       } catch (_) {}
@@ -112,48 +110,17 @@ class SettingsRepository {
     if (decoded is! Map<String, dynamic>) return null;
 
     final AppSettings stored = AppSettings.fromJson(decoded);
-    final AppSettings unsealed = await unsealTokens(stored);
-    final AppSettings settings = _withSyncDefaults(unsealed);
+    final AppSettings settings = await unsealTokens(stored);
 
-    // A token that will not open is left exactly as it is. An earlier build
-    // overwrote a still-sealed `tursoAuthToken` with a build-time default here,
-    // which meant one launch without a working key store silently replaced the
-    // user's own credential and wrote the replacement back in plaintext.
-    if (!identical(settings, unsealed) ||
-        (_cipher.encrypts && _hasPlaintextToken(stored))) {
+    // A token that will not open is left exactly as it is: only a plaintext
+    // one is rewritten, sealed.
+    if (_cipher.encrypts && _hasPlaintextToken(stored)) {
       try {
         await save(settings);
       } catch (_) {}
     }
 
     return settings;
-  }
-
-  /// Fill in whatever this build was given at compile time, and nothing else.
-  ///
-  /// Returns the same instance when there is nothing to add, so the caller can
-  /// tell "seeded" from "unchanged" by identity and skip a pointless rewrite.
-  static AppSettings _withSyncDefaults(AppSettings settings) {
-    final bool seedsTurso =
-        settings.tursoDbUrl == null &&
-        settings.tursoAuthToken == null &&
-        SyncDefaults.hasTurso;
-    final bool seedsR2 =
-        settings.r2Bucket == null &&
-        SyncDefaults.r2Bucket != null &&
-        SyncDefaults.r2SecretAccessKey != null;
-    if (!seedsTurso && !seedsR2) return settings;
-
-    return settings.copyWith(
-      tursoDbUrl: seedsTurso ? SyncDefaults.tursoDbUrl : null,
-      tursoAuthToken: seedsTurso ? SyncDefaults.tursoAuthToken : null,
-      tursoSyncEnabled: seedsTurso ? true : null,
-      r2Endpoint: seedsR2 ? SyncDefaults.r2Endpoint : null,
-      r2Bucket: seedsR2 ? SyncDefaults.r2Bucket : null,
-      r2AccessKeyId: seedsR2 ? SyncDefaults.r2AccessKeyId : null,
-      r2SecretAccessKey: seedsR2 ? SyncDefaults.r2SecretAccessKey : null,
-      r2MediaSyncEnabled: seedsR2 ? true : null,
-    );
   }
 
   Future<void> save(AppSettings settings) async {
@@ -211,24 +178,6 @@ class SettingsRepository {
       }
     }
 
-    String? tursoToken = settings.tursoAuthToken;
-    if (tursoToken != null && tursoToken.isNotEmpty) {
-      final String value = await transform(tursoToken);
-      if (value != tursoToken) {
-        changed = true;
-        tursoToken = value;
-      }
-    }
-
-    String? r2Secret = settings.r2SecretAccessKey;
-    if (r2Secret != null && r2Secret.isNotEmpty) {
-      final String value = await transform(r2Secret);
-      if (value != r2Secret) {
-        changed = true;
-        r2Secret = value;
-      }
-    }
-
     String? commandToken = settings.commandToken;
     if (commandToken != null && commandToken.isNotEmpty) {
       final String value = await transform(commandToken);
@@ -241,24 +190,12 @@ class SettingsRepository {
     return changed
         ? settings.copyWith(
             profiles: profiles,
-            tursoAuthToken: tursoToken,
-            r2SecretAccessKey: r2Secret,
             commandToken: commandToken,
           )
         : settings;
   }
 
   static bool _hasPlaintextToken(AppSettings settings) {
-    if (settings.tursoAuthToken != null &&
-        settings.tursoAuthToken!.isNotEmpty &&
-        !TokenCipher.isSealed(settings.tursoAuthToken!)) {
-      return true;
-    }
-    if (settings.r2SecretAccessKey != null &&
-        settings.r2SecretAccessKey!.isNotEmpty &&
-        !TokenCipher.isSealed(settings.r2SecretAccessKey!)) {
-      return true;
-    }
     if (settings.commandToken != null &&
         settings.commandToken!.isNotEmpty &&
         !TokenCipher.isSealed(settings.commandToken!)) {

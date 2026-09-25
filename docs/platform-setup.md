@@ -117,16 +117,15 @@ back out of `linux/CMakeLists.txt` and `AppInfo.xcconfig`, and
 `StartupWMClass` is the **identifier**, not the binary name, because the GTK
 runner calls `g_set_prgname(APPLICATION_ID)`.
 
-**It passes no credentials on the command line**, for the reason `SyncDefaults`
-states in the root `CLAUDE.md`: a Turso JWT in argv is a Turso JWT in the shell
-history of every machine deployed from. A defines file is passed with
+**It passes no credentials on the command line**: a secret in argv is a secret
+in the shell history of every machine deployed from. A defines file is passed with
 `--dart-define-from-file` instead, looked for at
 `~/.config/augustyniak-capture/deploy.defines.json` first (outside the repository,
 where `git add -A` cannot reach it) and then at `tool/deploy.defines.json`, which
-is gitignored and warned about. With neither the build comes up unpaired, and on
-desktop **that is usually the right answer**: `settings.json` lives in the app's
-documents directory, outside the install, so a copy paired once through the Config
-tab or a QR code stays paired across every redeploy after it. The defines file is
+is gitignored and warned about. With neither the build comes up without Supabase, and
+signing in needs the two public Supabase values from that file; everything else
+the Config tab stores lives in the app's documents directory, outside the install,
+so it survives every redeploy. The defines file is
 for a machine being set up from nothing.
 
 `SystemHotkeyRegistrar` is now genuinely reachable on macOS (it was dead code while there was no `macos/` target), but its `rejected` set still relies on `hotKeyManager.register` throwing on refusal, which the plugin does not document — check the Config tab rather than trusting an empty rejection list.

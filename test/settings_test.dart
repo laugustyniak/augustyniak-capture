@@ -340,6 +340,37 @@ void main() {
       expect(restored.themeMode, AppThemeMode.system);
     });
 
+    test('legacy Turso and R2 fields load and are dropped on the next write', () {
+      // Written by a build that still synced through Turso and Cloudflare R2.
+      // The fields are ignored on load and never written back, so the sealed
+      // secrets leave disk with the first save after the upgrade.
+      final Map<String, dynamic> legacy = <String, dynamic>{
+        'activeProfileId': 'p1',
+        'commandBaseUrl': 'https://command.example',
+        'tursoDbUrl': 'libsql://db.turso.io',
+        'tursoAuthToken': 'enc:v1:sealed-turso-token',
+        'tursoSyncEnabled': true,
+        'r2Endpoint': 'https://account.r2.cloudflarestorage.com',
+        'r2Bucket': 'captures',
+        'r2AccessKeyId': 'key-id',
+        'r2SecretAccessKey': 'enc:v1:sealed-r2-secret',
+        'r2MediaSyncEnabled': true,
+      };
+
+      final Map<String, dynamic> written = AppSettings.fromJson(
+        legacy,
+      ).toJson();
+
+      expect(written['activeProfileId'], 'p1');
+      expect(written['commandBaseUrl'], 'https://command.example');
+      expect(
+        written.keys.where(
+          (String key) => key.startsWith('turso') || key.startsWith('r2'),
+        ),
+        isEmpty,
+      );
+    });
+
     test('theme mode survives a round-trip and degrades on a bad value', () {
       const AppSettings original = AppSettings(themeMode: AppThemeMode.light);
 
@@ -1125,83 +1156,14 @@ void main() {
       expect(controller.sealedTokensUnreadable, isFalse);
     });
 
-    test('a sealed sync credential counts too', () async {
-      // The queue's 401 is the loud symptom, but an unopenable Turso token
+    test('a sealed Command token counts too', () async {
+      // The queue's 401 is the loud symptom, but an unopenable Command token
       // fails just as silently and from the same cause.
       final SettingsController controller = await controllerWith(
-        const AppSettings(tursoAuthToken: 'enc:v1:unreadable-blob'),
+        const AppSettings(commandToken: 'enc:v1:unreadable-blob'),
       );
 
       expect(controller.sealedTokensUnreadable, isTrue);
-    });
-  });
-
-  group('SettingsController.syncSecretsUnreadable', () {
-    Future<SettingsController> controllerWith(AppSettings settings) async {
-      final _FakeSettingsRepository repo = _FakeSettingsRepository()
-        ..stored = settings;
-      final SettingsController controller = SettingsController(
-        repository: repo,
-      );
-      await controller.initialize();
-      return controller;
-    }
-
-    test('is true when the Turso token stayed sealed', () async {
-      final SettingsController controller = await controllerWith(
-        const AppSettings(
-          tursoDbUrl: 'libsql://db.turso.io',
-          tursoAuthToken: 'enc:v1:unreadable-blob',
-        ),
-      );
-
-      expect(controller.syncSecretsUnreadable, isTrue);
-    });
-
-    test('is true when the R2 secret stayed sealed', () async {
-      final SettingsController controller = await controllerWith(
-        const AppSettings(
-          r2Endpoint: 'https://account.r2.cloudflarestorage.com',
-          r2Bucket: 'captures',
-          r2AccessKeyId: 'AKIA',
-          r2SecretAccessKey: 'enc:v1:unreadable-blob',
-        ),
-      );
-
-      expect(controller.syncSecretsUnreadable, isTrue);
-    });
-
-    test('a sealed provider token alone does not count', () async {
-      // The whole reason this getter exists beside `sealedTokensUnreadable`:
-      // that one is a union over the profiles and the Command token too, and a
-      // sealed transcription key must not light up a card about cloud sync.
-      final SettingsController controller = await controllerWith(
-        AppSettings(
-          profiles: const <ProviderProfile>[
-            ProviderProfile(
-              id: 'p1',
-              name: 'OpenAI',
-              endpoint: 'https://api.openai.com/v1/audio/transcriptions',
-              bearerToken: 'enc:v1:unreadable-blob',
-            ),
-          ],
-          activeProfileId: 'p1',
-        ),
-      );
-
-      expect(controller.sealedTokensUnreadable, isTrue);
-      expect(controller.syncSecretsUnreadable, isFalse);
-    });
-
-    test('is false when the sync secrets are readable', () async {
-      final SettingsController controller = await controllerWith(
-        const AppSettings(
-          tursoDbUrl: 'libsql://db.turso.io',
-          tursoAuthToken: 'plain-token',
-        ),
-      );
-
-      expect(controller.syncSecretsUnreadable, isFalse);
     });
   });
 

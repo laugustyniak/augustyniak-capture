@@ -137,8 +137,7 @@ class RecordingsPage extends StatefulWidget {
 
   /// A resolver, never a snapshot — the seam shape every runtime-swappable
   /// dependency in this app follows. Null whenever Supabase was not
-  /// initialised, which leaves Supabase sync off exactly like an unset
-  /// Turso/R2 credential does.
+  /// initialised, which leaves Supabase sync off.
   final SyncTransport Function()? syncTransportResolver;
 
   /// Supabase Storage for capture media; null under the same condition as
@@ -716,8 +715,8 @@ class _RecordingsPageState extends State<RecordingsPage>
     // would read as "every bookkept recording was deleted locally" to the
     // push-side sweep — `_performCloudSync`'s own `!_indexUnreadable` check
     // covers just the Supabase slot; this one skips the whole launch run,
-    // including Turso/R2, the same as SYNC NOW would find nothing useful to
-    // do with a queue the controller has already refused to write to.
+    // the same as SYNC NOW would find nothing useful to do with a queue the
+    // controller has already refused to write to.
     if (!controller.isIndexUnreadable &&
         widget.authGateway?.currentIdentity != null) {
       unawaited(
