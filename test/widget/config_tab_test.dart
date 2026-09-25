@@ -2,13 +2,10 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:augustyniak_capture/app/ui_kit.dart';
-import 'package:augustyniak_capture/core/sync/cloud_sync_coordinator.dart';
 import 'package:augustyniak_capture/features/auth/domain/auth_gateway.dart';
 import 'package:augustyniak_capture/features/auth/domain/auth_identity.dart';
 import 'package:augustyniak_capture/features/auth/presentation/auth_controller.dart';
 import 'package:augustyniak_capture/features/projects/domain/project.dart';
-import 'package:augustyniak_capture/features/settings/domain/app_settings.dart';
 import 'package:augustyniak_capture/features/settings/domain/app_theme_mode.dart';
 import 'package:augustyniak_capture/features/settings/domain/audio_config.dart';
 import 'package:augustyniak_capture/features/settings/presentation/config_tab.dart';
@@ -350,7 +347,7 @@ void main() {
     // Starts on GENERAL
     expect(find.text('APPEARANCE'), findsOneWidget);
     expect(find.text('AUDIO CAPTURE'), findsNothing);
-    expect(find.text('LEGACY SYNC'), findsNothing);
+    expect(find.text('SUPABASE ACCOUNT'), findsNothing);
     expect(find.text('STORAGE'), findsNothing);
 
     // Switch to CAPTURE & AI
@@ -362,139 +359,18 @@ void main() {
     // Switch to SYNC & CLOUD
     await tester.tap(find.text('SYNC & CLOUD'));
     await tester.pumpAndSettle();
-    expect(find.text('LEGACY SYNC'), findsOneWidget);
+    expect(find.text('SUPABASE ACCOUNT'), findsOneWidget);
     expect(find.text('AUDIO CAPTURE'), findsNothing);
+    // Turso, R2 and QR pairing were retired (#202): nothing of them is left.
+    expect(find.textContaining('TURSO'), findsNothing);
+    expect(find.textContaining('R2'), findsNothing);
+    expect(find.textContaining('PAIR DEVICE'), findsNothing);
 
     // Switch to DATA & COSTS
     await tester.tap(find.text('DATA & COSTS'));
     await tester.pumpAndSettle();
     expect(find.text('ARCHIVE'), findsOneWidget);
-    expect(find.text('LEGACY SYNC'), findsNothing);
-  });
-
-  testWidgets('one sync action covers configured Turso and R2', (
-    WidgetTester tester,
-  ) async {
-    final SettingsController controller = buildSettingsController();
-    await controller.initialize();
-    await controller.setTursoConfig(
-      url: 'libsql://capture.turso.io',
-      token: 'turso-token',
-      enabled: true,
-    );
-    await controller.setR2Config(
-      endpoint: 'https://account.r2.cloudflarestorage.com',
-      bucket: 'captures',
-      accessKeyId: 'access-key',
-      secretAccessKey: 'secret-key',
-      enabled: true,
-    );
-
-    await pumpConfig(tester, controller, initialCategory: ConfigCategory.sync);
-
-    expect(find.text('SYNC NOW'), findsOneWidget);
-    expect(find.text('CONFIGURED · Ready'), findsNWidgets(2));
-    expect(find.textContaining('101/101'), findsNothing);
-    expect(find.textContaining('aws-us-east-1'), findsNothing);
-  });
-
-  testWidgets('the same action labels an R2-only sync accurately', (
-    WidgetTester tester,
-  ) async {
-    final SettingsController controller = buildSettingsController();
-    await controller.initialize();
-    await controller.setR2Config(
-      endpoint: 'https://account.r2.cloudflarestorage.com',
-      bucket: 'captures',
-      accessKeyId: 'access-key',
-      secretAccessKey: 'secret-key',
-      enabled: true,
-    );
-
-    await pumpConfig(tester, controller, initialCategory: ConfigCategory.sync);
-
-    expect(find.text('SYNC MEDIA'), findsOneWidget);
-    expect(find.text('SYNC NOW (TURSO)'), findsNothing);
-  });
-
-  testWidgets('a sealed sync secret is reported, not shown as unconfigured', (
-    WidgetTester tester,
-  ) async {
-    // The failure this pair exists for: every field is populated and correct,
-    // the secret simply cannot be decrypted, and the tab used to render that
-    // identically to a fresh install — one word, DISABLED, for two facts whose
-    // recovery steps differ.
-    final SettingsController controller = buildSettingsController(
-      stored: const AppSettings(
-        tursoDbUrl: 'libsql://capture.turso.io',
-        tursoAuthToken: 'enc:v1:unreadable-blob',
-        tursoSyncEnabled: true,
-      ),
-    );
-    await controller.initialize();
-    await pumpConfig(tester, controller, initialCategory: ConfigCategory.sync);
-
-    expect(controller.syncSecretsUnreadable, isTrue);
-    // Turso is populated-but-sealed, R2 is genuinely absent. The two rows
-    // must say different things, which is the whole point.
-    expect(find.text('ENCRYPTED · Key unreachable'), findsOneWidget);
-    expect(find.text('DISABLED'), findsOneWidget);
-    expect(
-      find.textContaining('cannot be decrypted'),
-      findsOneWidget,
-      reason: 'the sync card must say why the button is dead',
-    );
-  });
-
-  testWidgets('an unconfigured install still reads DISABLED with no alarm', (
-    WidgetTester tester,
-  ) async {
-    // The other half of the pin: absent and unreadable are different facts and
-    // must not converge on one message.
-    final SettingsController controller = buildSettingsController();
-    await controller.initialize();
-    await pumpConfig(tester, controller, initialCategory: ConfigCategory.sync);
-
-    expect(find.text('DISABLED'), findsNWidgets(2));
-    expect(find.text('ENCRYPTED · Key unreachable'), findsNothing);
-    expect(find.textContaining('cannot be decrypted'), findsNothing);
-  });
-
-  testWidgets('the sync button is inert and not painted as enabled', (
-    WidgetTester tester,
-  ) async {
-    // It kept `disabledBackgroundColor: Console.green.withValues(alpha: 0.8)`
-    // and black text, so a dead button was indistinguishable from a live one
-    // and taps produced a ripple and nothing else.
-    final SettingsController controller = buildSettingsController();
-    await controller.initialize();
-    await pumpConfig(tester, controller, initialCategory: ConfigCategory.sync);
-
-    final Finder button = find.widgetWithText(
-      ElevatedButton,
-      'CONFIGURE SYNC',
-    );
-    expect(button, findsOneWidget);
-
-    final ElevatedButton widget = tester.widget<ElevatedButton>(button);
-    expect(widget.onPressed, isNull);
-    // Asserting "not Console.green" would pass vacuously: the override was a
-    // *derived* green (alpha 0.8), a different object that still reads as the
-    // enabled colour on screen. What the fix removes is the override itself,
-    // so the button falls back to the theme's disabled treatment.
-    expect(
-      widget.style?.backgroundColor?.resolve(<WidgetState>{
-        WidgetState.disabled,
-      }),
-      isNull,
-      reason: 'a disabled action must not paint its own background',
-    );
-    expect(
-      widget.style?.foregroundColor?.resolve(<WidgetState>{
-        WidgetState.disabled,
-      }),
-      isNull,
-    );
+    expect(find.text('SUPABASE ACCOUNT'), findsNothing);
   });
 
   testWidgets('the header trailing reads local only with no account', (
@@ -541,99 +417,4 @@ void main() {
       expect(find.text('owner@example.com'), findsNothing);
     },
   );
-
-  testWidgets(
-    'the QR pairing button belongs to the legacy section, not the R2 card',
-    (WidgetTester tester) async {
-      // It used to be `Expanded(child: ElevatedButton...)` inside the R2
-      // card's own `Column`, which made a Turso-only install's pairing
-      // button look like an R2-specific feature.
-      final SettingsController controller = buildSettingsController();
-      await controller.initialize();
-      await pumpConfig(tester, controller, initialCategory: ConfigCategory.sync);
-
-      final Finder qrButton = find.widgetWithText(
-        ElevatedButton,
-        'PAIR DEVICE VIA QR CODE',
-      );
-      expect(qrButton, findsOneWidget);
-
-      final Finder r2Card = find.ancestor(
-        of: find.text('CLOUDFLARE R2'),
-        matching: find.byType(ConsoleCard),
-      );
-      expect(r2Card, findsOneWidget);
-      expect(
-        find.descendant(of: r2Card, matching: qrButton),
-        findsNothing,
-        reason: 'pairing configures both Turso and R2, so it cannot live '
-            'inside the card for just one of them',
-      );
-
-      // Below both provider cards, not between the account and the section.
-      final double qrTop = tester.getTopLeft(qrButton).dy;
-      final double r2Bottom = tester.getBottomLeft(r2Card).dy;
-      expect(qrTop, greaterThanOrEqualTo(r2Bottom));
-    },
-  );
-
-  testWidgets(
-    'Turso and R2 read as one demoted section under the Supabase account',
-    (WidgetTester tester) async {
-      final SettingsController controller = buildSettingsController();
-      await controller.initialize();
-      await pumpConfig(tester, controller, initialCategory: ConfigCategory.sync);
-
-      // One page-level header for both providers, not three peer headers.
-      expect(find.text('LEGACY SYNC'), findsOneWidget);
-      expect(find.text('CLOUD SYNC'), findsNothing);
-      expect(find.text('TURSO CLOUD SYNC'), findsNothing);
-      expect(find.text('CLOUDFLARE R2 MEDIA SYNC'), findsNothing);
-      // Demoted to in-card labels instead.
-      expect(find.text('TURSO'), findsOneWidget);
-      expect(find.text('CLOUDFLARE R2'), findsOneWidget);
-      // The account now syncs metadata and files itself — the hint says
-      // so, and no longer claims it carries sign-in only.
-      expect(
-        find.textContaining('syncs capture metadata and files when you are '
-            'signed in'),
-        findsOneWidget,
-      );
-      expect(find.textContaining('carries sign-in only'), findsNothing);
-      // The account card is still the first thing on the sub-tab.
-      expect(find.text('SUPABASE ACCOUNT'), findsOneWidget);
-      final double accountTop = tester
-          .getTopLeft(find.text('SUPABASE ACCOUNT'))
-          .dy;
-      final double legacyTop = tester.getTopLeft(find.text('LEGACY SYNC')).dy;
-      expect(accountTop, lessThan(legacyTop));
-    },
-  );
-
-  test('a credential change invalidates the last sync report', () {
-    const AppSettings synced = AppSettings(
-      r2Endpoint: 'https://account.r2.cloudflarestorage.com',
-      r2Bucket: 'captures',
-      r2AccessKeyId: 'access-key',
-      r2SecretAccessKey: 'old-secret',
-    );
-    const AppSettings changed = AppSettings(
-      r2Endpoint: 'https://account.r2.cloudflarestorage.com',
-      r2Bucket: 'captures',
-      r2AccessKeyId: 'access-key',
-      r2SecretAccessKey: 'new-secret',
-    );
-    final CloudSyncReport report = CloudSyncReport(
-      completedAt: DateTime(2026),
-      configurationFingerprint:
-          RecordingsController.cloudSyncConfigurationFingerprint(synced),
-    );
-
-    expect(
-      report.matchesConfiguration(
-        RecordingsController.cloudSyncConfigurationFingerprint(changed),
-      ),
-      isFalse,
-    );
-  });
 }

@@ -1,7 +1,8 @@
 # Supabase sync
 
-Outbox/inbox metadata synchronisation over Postgres, wired in beside Turso and
-R2 rather than replacing either. Slice 3 of #187 (schema from #190). Media
+Outbox/inbox metadata synchronisation over Postgres. Slice 3 of #187 (schema
+from #190); it replaced the Turso + Cloudflare R2 path, which #202 removed
+together with its `augustyniak_sync_v1` QR pairing. Media
 bytes follow through private Storage — slice 4, #198, see "Media" below — so
 a pulled recording is metadata only until the Storage slot of the same run
 fetches its source. This file is written to be read whole.
@@ -134,7 +135,7 @@ microsecond precision.
 
 **The one rule a future change to this file must not break: apply never
 writes underneath a controller that already owns the same state in
-memory.** The Turso path writes SQLite directly and then
+memory.** The retired Turso path wrote SQLite directly and then
 `reloadFromStorage()` — which is exactly the index/mirror divergence the
 durability machinery in the root `CLAUDE.md` exists to catch, and round 1 of
 this slice's own review found the same class of bug twice more: a second
@@ -300,8 +301,8 @@ receiving device).
 
 ## Media: private Storage, verified before it lands
 
-Slice 4 of #187 (#198). A fourth `CloudSyncCoordinator` slot, `syncMedia`,
-runs after `syncSupabase` and before `syncR2`: the metadata pull is what adds
+Slice 4 of #187 (#198). The second `CloudSyncCoordinator` slot, `syncMedia`,
+runs after `syncSupabase`: the metadata pull is what adds
 the rows whose sources it fetches, so it reads `_recordings` **at call time**,
 never the `SyncSnapshot` the metadata slot captured before its pull. It is
 wired only when `hasSupabase` is and `mediaStoreResolver` is non-null, and it
@@ -422,11 +423,9 @@ the engine stays pure Dart and testable with an in-memory fake transport.
 `conflicts`, `tombstonesApplied`, `skipped`, `failureReason`; `success ==
 failureReason == null`).
 
-`CloudSyncCoordinator` gained a third slot, `syncSupabase`, run between
-`syncTurso` and `syncR2` for the same reason Turso goes first: a pull may add
-recording rows whose media R2 can then fetch. `CloudSyncReport` gained a
-`supabase` field, `success`/`partialSuccess` are three-way, and `message`
-gets a line: `Supabase: N pushed · N pulled[ · N conflicts][ · N removed][
+`CloudSyncCoordinator` runs `syncSupabase` first, because its pull may add
+recording rows whose media `syncMedia` then fetches. `CloudSyncReport` carries
+a `supabase` field beside `media`, and `message` gets a line: `Supabase: N pushed · N pulled[ · N conflicts][ · N removed][
 · N skipped]` on success, `Supabase: <failureReason>` on failure.
 
 `RecordingsController` takes eight new constructor parameters, all
@@ -484,15 +483,9 @@ be noise the server never reads back.
   index-writing step in that method — racing it against `recoverOrphans()`
   would be the same lost-write hazard `applySyncedRecordings` closes above,
   just against a different writer. `syncCloud()` runs the whole
-  `CloudSyncCoordinator`, so the launch run is not Supabase-only: whatever
-  of Turso/Supabase/R2 is configured all run once at launch now, not just
-  when the user presses SYNC NOW — an accepted behaviour change from
-  before this slot existed, since the coordinator does not offer a
-  per-provider trigger.
+  `CloudSyncCoordinator`, so the launch run covers both the metadata and
+  the Storage slot, exactly as SYNC NOW does.
 - Nothing runs signed out. Nothing blocks capture.
-
-`LegacySyncSection`'s Config-tab hint says what actually happens — metadata
-and files sync through the account when signed in, without Turso or R2.
 
 ## Failure handling
 
@@ -522,8 +515,8 @@ Pure Dart, in-memory fake transport: `test/sync/sync_engine_push_test.dart`,
 `test/sync/repository_sync_applier_test.dart` covers the wiring in this
 file: merge-and-replace, an unknown id no-op for every `delete*`, the active
 project id preserved and reassigned, clipboard existing-id-updates-text vs.
-new-id-adds. `test/cloud_sync_coordinator_test.dart` covers the third slot
-riding beside Turso and R2, and the Storage slot's order and message.
+new-id-adds. `test/cloud_sync_coordinator_test.dart` covers the metadata
+slot, the Storage slot's order and message, and a partial success.
 `test/sync/media_sync_test.dart` covers `MediaSyncService` against an
 in-memory bucket; `test/sync/media_sync_slot_test.dart` covers the slot
 through `RecordingsController.syncCloud()` — re-root, download, hand-off,

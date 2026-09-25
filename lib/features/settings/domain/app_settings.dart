@@ -25,14 +25,6 @@ class AppSettings {
     this.vaultCopySources = true,
     this.timerMinutes = TimerDefaults.defaultMinutes,
     this.timerAlarm = AlarmSound.fallback,
-    this.tursoDbUrl,
-    this.tursoAuthToken,
-    this.tursoSyncEnabled = false,
-    this.r2Endpoint,
-    this.r2Bucket,
-    this.r2AccessKeyId,
-    this.r2SecretAccessKey,
-    this.r2MediaSyncEnabled = false,
     this.commandBaseUrl,
     this.commandToken,
     this.syncDeviceId,
@@ -97,16 +89,6 @@ class AppSettings {
 
   Duration get timerDuration =>
       TimerDefaults.clamp(Duration(minutes: timerMinutes));
-
-  final String? tursoDbUrl;
-  final String? tursoAuthToken;
-  final bool tursoSyncEnabled;
-
-  final String? r2Endpoint;
-  final String? r2Bucket;
-  final String? r2AccessKeyId;
-  final String? r2SecretAccessKey;
-  final bool r2MediaSyncEnabled;
 
   /// The Command aggregator's base address, and the fleet token that reaches
   /// it. Both null until the user configures them, which is the normal state:
@@ -180,14 +162,6 @@ class AppSettings {
     bool? vaultCopySources,
     int? timerMinutes,
     AlarmSound? timerAlarm,
-    String? tursoDbUrl,
-    String? tursoAuthToken,
-    bool? tursoSyncEnabled,
-    String? r2Endpoint,
-    String? r2Bucket,
-    String? r2AccessKeyId,
-    String? r2SecretAccessKey,
-    bool? r2MediaSyncEnabled,
     String? commandBaseUrl,
     bool clearCommandBaseUrl = false,
     String? commandToken,
@@ -220,14 +194,6 @@ class AppSettings {
       vaultCopySources: vaultCopySources ?? this.vaultCopySources,
       timerMinutes: timerMinutes ?? this.timerMinutes,
       timerAlarm: timerAlarm ?? this.timerAlarm,
-      tursoDbUrl: tursoDbUrl ?? this.tursoDbUrl,
-      tursoAuthToken: tursoAuthToken ?? this.tursoAuthToken,
-      tursoSyncEnabled: tursoSyncEnabled ?? this.tursoSyncEnabled,
-      r2Endpoint: r2Endpoint ?? this.r2Endpoint,
-      r2Bucket: r2Bucket ?? this.r2Bucket,
-      r2AccessKeyId: r2AccessKeyId ?? this.r2AccessKeyId,
-      r2SecretAccessKey: r2SecretAccessKey ?? this.r2SecretAccessKey,
-      r2MediaSyncEnabled: r2MediaSyncEnabled ?? this.r2MediaSyncEnabled,
       commandBaseUrl: clearCommandBaseUrl
           ? null
           : (commandBaseUrl ?? this.commandBaseUrl),
@@ -256,14 +222,6 @@ class AppSettings {
       if (textScale != defaultTextScale) 'textScale': textScale,
       'timerMinutes': timerMinutes,
       'timerAlarm': timerAlarm.name,
-      if (tursoDbUrl != null) 'tursoDbUrl': tursoDbUrl,
-      if (tursoAuthToken != null) 'tursoAuthToken': tursoAuthToken,
-      'tursoSyncEnabled': tursoSyncEnabled,
-      if (r2Endpoint != null) 'r2Endpoint': r2Endpoint,
-      if (r2Bucket != null) 'r2Bucket': r2Bucket,
-      if (r2AccessKeyId != null) 'r2AccessKeyId': r2AccessKeyId,
-      if (r2SecretAccessKey != null) 'r2SecretAccessKey': r2SecretAccessKey,
-      'r2MediaSyncEnabled': r2MediaSyncEnabled,
       if (commandBaseUrl != null) 'commandBaseUrl': commandBaseUrl,
       if (commandToken != null) 'commandToken': commandToken,
       if (syncDeviceId != null) 'syncDeviceId': syncDeviceId,
@@ -363,30 +321,6 @@ class AppSettings {
       timerAlarm: AlarmSound.fromName(
         json['timerAlarm'] is String ? json['timerAlarm'] as String : null,
       ),
-      tursoDbUrl: json['tursoDbUrl'] is String
-          ? json['tursoDbUrl'] as String
-          : null,
-      tursoAuthToken: json['tursoAuthToken'] is String
-          ? json['tursoAuthToken'] as String
-          : null,
-      tursoSyncEnabled: json['tursoSyncEnabled'] is bool
-          ? json['tursoSyncEnabled'] as bool
-          : false,
-      r2Endpoint: json['r2Endpoint'] is String
-          ? json['r2Endpoint'] as String
-          : null,
-      r2Bucket: json['r2Bucket'] is String
-          ? json['r2Bucket'] as String
-          : null,
-      r2AccessKeyId: json['r2AccessKeyId'] is String
-          ? json['r2AccessKeyId'] as String
-          : null,
-      r2SecretAccessKey: json['r2SecretAccessKey'] is String
-          ? json['r2SecretAccessKey'] as String
-          : null,
-      r2MediaSyncEnabled: json['r2MediaSyncEnabled'] is bool
-          ? json['r2MediaSyncEnabled'] as bool
-          : false,
       commandBaseUrl: json['commandBaseUrl'] is String
           ? json['commandBaseUrl'] as String
           : null,

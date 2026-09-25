@@ -140,24 +140,7 @@ class SettingsController extends ChangeNotifier {
     return _settings.profiles.any(
           (ProviderProfile profile) => sealed(profile.bearerToken),
         ) ||
-        sealed(_settings.tursoAuthToken) ||
-        sealed(_settings.r2SecretAccessKey) ||
         sealed(_settings.commandToken);
-  }
-
-  /// The same failure narrowed to the two secrets the cloud-sync predicates
-  /// actually read.
-  ///
-  /// [sealedTokensUnreadable] is a union over the provider profiles and the
-  /// Command token as well, so it answers true for a sealed transcription key
-  /// that cloud sync neither reads nor cares about. The Config tab's sync
-  /// sections need the narrower question, or they would explain a dead SYNC
-  /// button with a credential that is not gating it.
-  bool get syncSecretsUnreadable {
-    if (tokenEncryptionActive) return false;
-    bool sealed(String? value) => value != null && TokenCipher.isSealed(value);
-    return sealed(_settings.tursoAuthToken) ||
-        sealed(_settings.r2SecretAccessKey);
   }
 
   /// The service the recordings controller should use right now. No active
@@ -486,25 +469,11 @@ class SettingsController extends ChangeNotifier {
   Future<void> resetEnrichmentInstructions() =>
       _persist(_settings.copyWith(resetEnrichmentInstructions: true));
 
-  Future<void> setTursoConfig({
-    String? url,
-    String? token,
-    bool? enabled,
-  }) async {
-    await _persist(
-      _settings.copyWith(
-        tursoDbUrl: url,
-        tursoAuthToken: token,
-        tursoSyncEnabled: enabled,
-      ),
-    );
-  }
-
   /// The control plane's address and fleet token.
   ///
-  /// One setter for both, like [setTursoConfig]: they are useless apart, and a
-  /// pair written in two saves has a moment on disk where the token belongs to
-  /// an address that is no longer there.
+  /// One setter for both: they are useless apart, and a pair written in two
+  /// saves has a moment on disk where the token belongs to an address that is
+  /// no longer there.
   Future<void> setCommandConfig({String? baseUrl, String? token}) async {
     await _persist(
       _settings.copyWith(
@@ -512,24 +481,6 @@ class SettingsController extends ChangeNotifier {
         clearCommandBaseUrl: baseUrl != null && baseUrl.trim().isEmpty,
         commandToken: token,
         clearCommandToken: token != null && token.trim().isEmpty,
-      ),
-    );
-  }
-
-  Future<void> setR2Config({
-    String? endpoint,
-    String? bucket,
-    String? accessKeyId,
-    String? secretAccessKey,
-    bool? enabled,
-  }) async {
-    await _persist(
-      _settings.copyWith(
-        r2Endpoint: endpoint,
-        r2Bucket: bucket,
-        r2AccessKeyId: accessKeyId,
-        r2SecretAccessKey: secretAccessKey,
-        r2MediaSyncEnabled: enabled,
       ),
     );
   }

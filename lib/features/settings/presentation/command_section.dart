@@ -85,7 +85,7 @@ class _CommandSectionState extends State<CommandSection> {
     super.dispose();
   }
 
-  /// Both fields in one save, like `setTursoConfig`: they are useless apart,
+  /// Both fields in one save: they are useless apart,
   /// and a pair written in two saves has a moment on disk where the token
   /// belongs to an address that is no longer there.
   Future<void> _commit() async {

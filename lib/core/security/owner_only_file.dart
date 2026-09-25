@@ -4,7 +4,7 @@ import 'dart:io';
 ///
 /// **Which files this is for:** the ones that hold a secret at rest — the token
 /// master key, the SQLite database whose `settings` row carries provider
-/// bearer tokens plus the Turso and R2 credentials, and the legacy
+/// bearer tokens and the Command token, and the legacy
 /// `settings.json` beside it. Those values are sealed while the key store
 /// works and sit **in the clear when it does not**, which is a documented,
 /// reachable state (a Linux box with no Secret Service; a macOS build the

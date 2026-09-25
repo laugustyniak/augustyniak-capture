@@ -3,7 +3,6 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:audioplayers/audioplayers.dart';
-import 'package:crypto/crypto.dart';
 import 'package:flutter/foundation.dart';
 import 'package:path/path.dart' as p;
 import 'package:record/record.dart';
@@ -23,18 +22,10 @@ import '../../processing/domain/processor.dart';
 import '../../processing/domain/processor_registry.dart';
 import '../../../core/database/app_database.dart';
 import '../../../core/sync/cloud_sync_coordinator.dart';
-import '../../../core/sync/r2_media_sync_service.dart';
-import '../../../core/sync/signed_r2_object_store.dart';
-import '../../../core/sync/sync_defaults.dart';
-import '../../../core/sync/sync_endpoint.dart';
 import '../../../core/sync/sync_path_policy.dart';
-import '../../../core/sync/turso_sync_service.dart';
 import '../../auth/domain/auth_gateway.dart';
 import '../../clipboard/data/clipboard_repository.dart';
-import '../../settings/data/settings_repository.dart';
-import '../../settings/domain/app_settings.dart';
 import '../../settings/domain/audio_config.dart';
-import '../../settings/domain/token_cipher.dart';
 import '../../sync/data/repository_sync_applier.dart';
 import '../../sync/data/sync_rows_store.dart';
 import '../../sync/domain/media_sync.dart';
@@ -235,26 +226,10 @@ class RecordingsController extends ChangeNotifier {
 
   final LogSink _logSink;
 
-  String? _lastSyncFailure;
-
-  String? get lastSyncFailure => _lastSyncFailure;
-
   CloudSyncReport? _lastCloudSyncReport;
   Future<CloudSyncReport>? _cloudSyncInFlight;
 
   CloudSyncReport? get lastCloudSyncReport => _lastCloudSyncReport;
-
-  static String cloudSyncConfigurationFingerprint(AppSettings settings) {
-    final List<Object?> values = <Object?>[
-      settings.tursoDbUrl ?? SyncDefaults.tursoDbUrl,
-      settings.tursoAuthToken ?? SyncDefaults.tursoAuthToken,
-      settings.r2Endpoint ?? SyncDefaults.r2Endpoint,
-      settings.r2Bucket ?? SyncDefaults.r2Bucket,
-      settings.r2AccessKeyId ?? SyncDefaults.r2AccessKeyId,
-      settings.r2SecretAccessKey ?? SyncDefaults.r2SecretAccessKey,
-    ];
-    return sha256.convert(utf8.encode(jsonEncode(values))).toString();
-  }
 
   /// Receives per-call usage. Ambient by design — see [UsageSink]. Defaults to
   /// a no-op so the pure-Dart suites need no database.
@@ -578,35 +553,6 @@ class RecordingsController extends ChangeNotifier {
     }
     _logSink.log('Loaded ${_recordings.length} captures from disk.');
 
-    if (!Platform.environment.containsKey('FLUTTER_TEST')) {
-      try {
-        final AppDatabase db = await AppDatabase.getInstance();
-        final AppSettings settings =
-            await SettingsRepository().load() ?? AppSettings.empty;
-        if (settings.tursoDbUrl != null &&
-            settings.tursoAuthToken != null &&
-            settings.tursoSyncEnabled) {
-          final TursoSyncService syncService = TursoSyncService(db: db);
-          final bool synced = await syncService.pullFromTurso(
-            dbUrl: settings.tursoDbUrl!,
-            authToken: settings.tursoAuthToken!,
-          );
-          if (synced) {
-            _recordings = await _repository.loadAll();
-            _logSink.log(
-              'Synced ${_recordings.length} captures from Turso Cloud.',
-            );
-          } else {
-            _logSink.log(
-              'Turso startup sync failed: ${syncService.failureReason ?? 'unknown error.'}',
-              level: LogLevel.warn,
-            );
-          }
-        }
-      } catch (e) {
-        _logSink.log('Turso startup sync skipped: $e', level: LogLevel.warn);
-      }
-    }
     unawaited(
       _gamificationController?.initialize(
         totalExistingCaptures: _recordings.length,
@@ -755,58 +701,7 @@ class RecordingsController extends ChangeNotifier {
   /// refused tombstone is retried on the next run rather than counted done.
   bool _hasRecording(String id) => _recordings.any((Recording r) => r.id == id);
 
-  /// Triggers Turso sync and reloads local recordings into RAM.
-  Future<bool> syncTurso() async {
-    _lastSyncFailure = null;
-    try {
-      final AppDatabase db = await AppDatabase.getInstance();
-      final AppSettings settings =
-          await SettingsRepository().load() ?? AppSettings.empty;
-
-      final String url = (settings.tursoDbUrl ?? '').trim().isNotEmpty
-          ? settings.tursoDbUrl!
-          : (SyncDefaults.tursoDbUrl ?? '');
-      // A sealed token is one the key store could not open, not a missing one.
-      // Falling through to the build-time value would paper over exactly the
-      // failure the Config tab is trying to report, so it stays empty and the
-      // sync declines below with its own message.
-      final String token =
-          (settings.tursoAuthToken != null &&
-              !TokenCipher.isSealed(settings.tursoAuthToken!))
-          ? settings.tursoAuthToken!
-          : (SyncDefaults.tursoAuthToken ?? '');
-
-      if (url.isEmpty || token.isEmpty) {
-        _lastSyncFailure =
-            'Turso credentials are missing or unavailable. Open Settings to configure them.';
-        _logSink.log(_lastSyncFailure!, level: LogLevel.warn);
-        return false;
-      }
-
-      final TursoSyncService syncService = TursoSyncService(db: db);
-      final bool synced = await syncService.syncTwoWay(
-        dbUrl: url,
-        authToken: token,
-      );
-      _lastSyncFailure = syncService.failureReason;
-      if (synced) {
-        await reloadFromStorage();
-        _logSink.log('Synced ${_recordings.length} captures from Turso Cloud.');
-        return true;
-      }
-      _lastSyncFailure ??= 'Turso sync failed.';
-      _logSink.log(_lastSyncFailure!, level: LogLevel.warn);
-    } catch (e) {
-      _lastSyncFailure = 'Turso sync failed (${e.runtimeType}).';
-      _logSink.log(_lastSyncFailure!, level: LogLevel.warn);
-    }
-    return false;
-  }
-
   /// Runs every configured cloud backend and keeps each outcome visible.
-  ///
-  /// Turso goes first because its pull may add rows whose source files this
-  /// device does not have yet; R2 can then materialize those files locally.
   Future<CloudSyncReport> syncCloud() {
     final Future<CloudSyncReport>? active = _cloudSyncInFlight;
     if (active != null) return active;
@@ -821,40 +716,11 @@ class RecordingsController extends ChangeNotifier {
 
   Future<CloudSyncReport> _performCloudSync() async {
     final AppDatabase db = await AppDatabase.getInstance();
-    final AppSettings settings =
-        await SettingsRepository().load() ?? AppSettings.empty;
-
-    final String tursoUrl =
-        (settings.tursoDbUrl ?? SyncDefaults.tursoDbUrl ?? '').trim();
-    final String tursoToken =
-        (settings.tursoAuthToken ?? SyncDefaults.tursoAuthToken ?? '').trim();
-    final bool hasTurso =
-        tursoUrl.isNotEmpty &&
-        tursoToken.isNotEmpty &&
-        !TokenCipher.isSealed(tursoToken);
-
-    final String r2Endpoint =
-        (settings.r2Endpoint ?? SyncDefaults.r2Endpoint ?? '').trim();
-    final String r2Bucket = (settings.r2Bucket ?? SyncDefaults.r2Bucket ?? '')
-        .trim();
-    final String r2AccessKey =
-        (settings.r2AccessKeyId ?? SyncDefaults.r2AccessKeyId ?? '').trim();
-    final String r2Secret =
-        (settings.r2SecretAccessKey ?? SyncDefaults.r2SecretAccessKey ?? '')
-            .trim();
-    final bool hasR2 =
-        SyncEndpoint.normalizeHttps(r2Endpoint) != null &&
-        r2Bucket.isNotEmpty &&
-        r2AccessKey.isNotEmpty &&
-        r2Secret.isNotEmpty &&
-        !TokenCipher.isSealed(r2Secret);
-
     // Every one of the seven has to be wired for Supabase sync to run at
     // all — an unconfigured install, or one where Supabase was never
     // initialised, leaves this false and the coordinator simply skips the
-    // slot, the same as an unconfigured Turso or R2. `!_indexUnreadable` is
-    // not optional: with the index unreadable `_recordings` may already be
-    // `[]` (a fresh session that never got past `initialize()`), and an
+    // slot. `!_indexUnreadable` is not optional: with the index unreadable
+    // `_recordings` may already be `[]` (a fresh session that never got past `initialize()`), and an
     // empty snapshot would read as "everything was deleted locally" to the
     // push-side sweep — see the engine's own refusal for an empty outbox,
     // which this gate backs up rather than relies on alone.
@@ -869,32 +735,8 @@ class RecordingsController extends ChangeNotifier {
         _applySyncedProjectDelete != null;
 
     final CloudSyncCoordinator coordinator = CloudSyncCoordinator(
-      configurationFingerprint: cloudSyncConfigurationFingerprint(settings),
-      syncTurso: hasTurso
-          ? () async {
-              final TursoSyncService service = TursoSyncService(db: db);
-              final bool success = await service.syncTwoWay(
-                dbUrl: tursoUrl,
-                authToken: tursoToken,
-              );
-              return TursoSyncResult(
-                success: success,
-                failureReason: service.failureReason,
-              );
-            }
-          : null,
-      // Between Turso and R2, on the same rationale Turso goes first for:
-      // its pull may add recording rows whose media R2 can then fetch.
       syncSupabase: hasSupabase
           ? () async {
-              // Turso, if configured, ran first and writes SQLite directly —
-              // `_recordings` is untouched by it. Only reload when Turso
-              // actually ran: `hasSupabase` already required
-              // `!_indexUnreadable` above, so this reload cannot resurrect
-              // the old "index unreadable" throw it used to guard against,
-              // and skipping it when Turso is unconfigured avoids a needless
-              // read on every Supabase-only run.
-              if (hasTurso) await reloadFromStorage();
               // `ensureSyncDeviceId()` returns null rather than minting and
               // persisting an id when `SettingsController.initialize()`
               // never actually loaded settings — writing one in that state
@@ -963,40 +805,11 @@ class RecordingsController extends ChangeNotifier {
               );
             }
           : null,
-      syncR2: hasR2
-          ? () => R2MediaSyncService(
-              db: db,
-              store: SignedR2ObjectStore(
-                endpoint: r2Endpoint,
-                bucket: r2Bucket,
-                accessKeyId: r2AccessKey,
-                secretAccessKey: r2Secret,
-              ),
-            ).sync()
-          : null,
     );
 
     _lastCloudSyncReport = await coordinator.sync();
-    // An unreadable index already refuses every write (`_persistAll`'s own
-    // guard) — reading it again here would only rethrow the same
-    // `IndexUnreadableException` `initialize()` already reported, out of an
-    // otherwise best-effort call `syncCloud()` callers do not expect to
-    // throw.
-    //
-    // Only when Turso or R2 actually ran: both write SQLite directly,
-    // underneath this controller's own `_recordings`, so this is the one
-    // read that can see their writes. The Supabase slot already merged its
-    // pull into `_recordings` in place through `applySyncedRecordings`
-    // (see `docs/architecture/sync.md`), so a Supabase-only install must
-    // not pay a reload here — it is exactly the lost-write hazard that
-    // method exists to close, reached from the other end: a writer already
-    // queued behind `_saveInFlight` would resume with a `_recordings` this
-    // reload just replaced from disk.
-    if (!_indexUnreadable && (hasTurso || hasR2)) await reloadFromStorage();
     // A pulled row that was mid-pipeline on the device that made it can now
     // be processed here; the funnel filters everything else out by status.
-    // After the reload above, never before it: a reload landing between the
-    // drain's in-memory update and its persist would drop that write.
     if ((_lastCloudSyncReport!.media?.downloaded ?? 0) > 0) {
       await resumeInterruptedProcessing();
     }
@@ -1104,11 +917,10 @@ class RecordingsController extends ChangeNotifier {
   ///
   /// Routing each row through [_update] is what this replaces, and the cost was
   /// not theoretical: every call rewrites the entire `recordings.json`, deletes
-  /// and re-inserts every row of the `recordings` table, and kicks a full Turso
-  /// push. On the first launch after this field shipped, a library of four
-  /// hundred captures therefore paid four hundred whole-index rewrites and four
-  /// hundred full-database pushes on top of reading every source through
-  /// SHA-256. The hashing still happens one file at a time — it is IO-bound and
+  /// and re-inserts every row of the `recordings` table. On the first launch
+  /// after this field shipped, a library of four hundred captures therefore
+  /// paid four hundred whole-index rewrites on top of reading every source
+  /// through SHA-256. The hashing still happens one file at a time — it is IO-bound and
   /// a stampede buys nothing — but the result lands once.
   ///
   /// Best-effort under the [_copyToClipboard] contract: a source that cannot be
@@ -3829,32 +3641,9 @@ class RecordingsController extends ChangeNotifier {
     _saveInFlight = mine;
     try {
       await mine;
-      _pushToTursoInBackground();
     } finally {
       if (identical(_saveInFlight, mine)) _saveInFlight = null;
     }
-  }
-
-  void _pushToTursoInBackground() {
-    if (Platform.environment.containsKey('FLUTTER_TEST')) return;
-    unawaited(
-      Future<void>(() async {
-        try {
-          final AppDatabase db = await AppDatabase.getInstance();
-          final AppSettings settings =
-              await SettingsRepository().load() ?? AppSettings.empty;
-          if (settings.tursoDbUrl != null &&
-              settings.tursoAuthToken != null &&
-              settings.tursoSyncEnabled) {
-            final TursoSyncService syncService = TursoSyncService(db: db);
-            await syncService.pushToTurso(
-              dbUrl: settings.tursoDbUrl!,
-              authToken: settings.tursoAuthToken!,
-            );
-          }
-        } catch (_) {}
-      }),
-    );
   }
 
   @override

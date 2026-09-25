@@ -1,8 +1,6 @@
 import 'package:flutter/material.dart';
 
 import '../../../app/ui_kit.dart';
-import '../../../core/sync/cloud_sync_coordinator.dart';
-import '../../../core/sync/sync_endpoint.dart';
 import '../../auth/domain/auth_identity.dart';
 import '../../auth/presentation/account_section.dart';
 import '../../auth/presentation/auth_controller.dart';
@@ -25,7 +23,6 @@ import 'backup_section.dart';
 import 'command_section.dart';
 import 'enrichment_context_section.dart';
 import 'settings_controller.dart';
-import 'sync_section.dart';
 import 'vault_section.dart';
 import '../../momentum/domain/closure_event.dart';
 import '../../momentum/presentation/momentum_section.dart';
@@ -535,46 +532,9 @@ class _ConfigTabState extends State<ConfigTab> {
   }
 
   List<Widget> _buildSyncCategory(BuildContext context) {
-    final CloudSyncReport? candidate =
-        widget.recordingsController?.lastCloudSyncReport;
-    final CloudSyncReport? report =
-        candidate?.matchesConfiguration(
-              RecordingsController.cloudSyncConfigurationFingerprint(
-                widget.controller.settings,
-              ),
-            ) ==
-            true
-        ? candidate
-        : null;
-    final bool hasTurso = _hasTurso(widget.controller.settings);
-    final bool hasR2 = _hasR2(widget.controller.settings);
-    // Per field, not per tab: only the row whose own secret is unreadable may
-    // say so. `syncSecretsUnreadable` answers the card's question; these two
-    // answer each section's.
-    final bool tursoSealed = _sealedSecret(
-      widget.controller,
-      widget.controller.settings.tursoAuthToken,
-    );
-    final bool r2Sealed = _sealedSecret(
-      widget.controller,
-      widget.controller.settings.r2SecretAccessKey,
-    );
     return <Widget>[
       // Primary cloud block: the account this library will belong to.
       AccountSection(controller: widget.authController),
-      const SizedBox(height: 22),
-      // Demoted: Supabase carries Auth only (#187), so Turso/R2 still do the
-      // only syncing that happens — they just no longer look like three peer
-      // cards next to the account above.
-      LegacySyncSection(
-        controller: widget.controller,
-        recordingsController: widget.recordingsController,
-        report: report,
-        hasTurso: hasTurso,
-        hasR2: hasR2,
-        tursoSealed: tursoSealed,
-        r2Sealed: r2Sealed,
-      ),
       const SizedBox(height: 22),
       CommandSection(controller: widget.controller),
     ];
@@ -697,25 +657,3 @@ class _ChoiceRow<T> extends StatelessWidget {
   }
 }
 
-/// True when this value is an `enc:v1:` blob this launch cannot open.
-///
-/// The `tokenEncryptionActive` guard is what separates the failure from the
-/// ordinary plaintext fallback: with a working cipher a sealed value is simply
-/// one that has not been read back yet, and saying "key unreachable" there
-/// would be a second lie in place of the first.
-bool _sealedSecret(SettingsController controller, String? value) =>
-    !controller.tokenEncryptionActive &&
-    value != null &&
-    TokenCipher.isSealed(value);
-
-bool _hasTurso(AppSettings settings) =>
-    (settings.tursoDbUrl ?? '').trim().isNotEmpty &&
-    (settings.tursoAuthToken ?? '').trim().isNotEmpty &&
-    !TokenCipher.isSealed(settings.tursoAuthToken!);
-
-bool _hasR2(AppSettings settings) =>
-    SyncEndpoint.normalizeHttps(settings.r2Endpoint) != null &&
-    (settings.r2Bucket ?? '').trim().isNotEmpty &&
-    (settings.r2AccessKeyId ?? '').trim().isNotEmpty &&
-    (settings.r2SecretAccessKey ?? '').trim().isNotEmpty &&
-    !TokenCipher.isSealed(settings.r2SecretAccessKey!);
