@@ -341,8 +341,9 @@ class _PricingSectionState extends State<PricingSection> {
 
   @override
   Widget build(BuildContext context) {
-    final double storageMonthlyUsd = widget.storageBytes / 1073741824 *
-        (widget.storagePrice.r2PerGbMonth + widget.storagePrice.tursoPerGbMonth);
+    final double storageMonthlyUsd = widget.storageBytes /
+        1073741824 *
+        widget.storagePrice.storagePerGbMonth;
 
     // The primary table is "rates in force"; MISSING RATES is "models with no
     // rate at all". The two are not naturally disjoint — `missingRateCounts`

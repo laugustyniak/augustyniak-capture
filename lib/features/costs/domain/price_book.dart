@@ -10,38 +10,40 @@ class PricedResult {
   final UnpricedReason? reason;
 }
 
-/// Storage rates, in USD per GB-month.
+/// Storage rate, in USD per GB-month.
 ///
-/// A separate type from the per-model map because these are two scalars rather
-/// than a keyed table, and because storage is rendered as a monthly rate rather
-/// than charged per capture.
+/// A separate type from the per-model map because it is a scalar rather than
+/// a keyed table, and because storage is rendered as a monthly rate rather
+/// than charged per capture. It prices the media bytes in the Supabase Storage
+/// bucket only; the Postgres rows that describe them do not scale with audio
+/// size, so no database rate is estimated.
+///
+/// Before #202 this held two rates — R2 for the media and Turso for the index
+/// — under `r2PerGbMonth` / `tursoPerGbMonth`. Neither is a Storage rate, so
+/// [fromJson] ignores both rather than reading one as the new value.
 class StoragePrice {
-  const StoragePrice({
-    required this.r2PerGbMonth,
-    required this.tursoPerGbMonth,
-  });
+  const StoragePrice({required this.storagePerGbMonth});
 
-  final double r2PerGbMonth;
-  final double tursoPerGbMonth;
+  final double storagePerGbMonth;
 
-  /// R2 Standard storage, and Turso's Scaler tier — the middle of the three
-  /// published tiers, since the plan a given install is on is not discoverable
-  /// from here and is one override away.
-  static const StoragePrice defaults = StoragePrice(
-    r2PerGbMonth: 0.015,
-    tursoPerGbMonth: 0.50,
-  );
+  /// Supabase Storage beyond the plan's included quota, read from
+  /// supabase.com/pricing on 2026-09-28. The included quota is not modelled:
+  /// which plan an install is on is not discoverable from here and is one
+  /// override away.
+  static const StoragePrice defaults = StoragePrice(storagePerGbMonth: 0.0213);
 
-  Map<String, dynamic> toJson() => <String, dynamic>{
-    'r2PerGbMonth': r2PerGbMonth,
-    'tursoPerGbMonth': tursoPerGbMonth,
-  };
+  static const String _key = 'storagePerGbMonth';
+
+  /// Whether [json] carries a rate this build understands. A map holding only
+  /// the retired keys is a legacy row, not an override — see
+  /// `AppSettings.fromJson`.
+  static bool isReadable(Map<String, dynamic> json) => json[_key] is num;
+
+  Map<String, dynamic> toJson() => <String, dynamic>{_key: storagePerGbMonth};
 
   factory StoragePrice.fromJson(Map<String, dynamic> json) => StoragePrice(
-    r2PerGbMonth:
-        (json['r2PerGbMonth'] as num?)?.toDouble() ?? defaults.r2PerGbMonth,
-    tursoPerGbMonth: (json['tursoPerGbMonth'] as num?)?.toDouble() ??
-        defaults.tursoPerGbMonth,
+    storagePerGbMonth:
+        (json[_key] as num?)?.toDouble() ?? defaults.storagePerGbMonth,
   );
 }
 
@@ -58,8 +60,6 @@ class StoragePrice {
 ///   platform.claude.com/docs/en/about-claude/models/overview
 ///   ai.google.dev/gemini-api/docs/pricing
 ///   console.groq.com/docs/models
-///   developers.cloudflare.com/r2/pricing
-///   turso.tech/pricing
 abstract final class PriceBookDefaults {
   /// Bump this whenever a rate below changes; the Config tab prints it so a
   /// stale table is visible rather than merely wrong.

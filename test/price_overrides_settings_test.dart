@@ -13,7 +13,7 @@ void main() {
   });
 
   test('an untouched install reads the shipped storage defaults', () {
-    expect(AppSettings.empty.storagePrice.r2PerGbMonth, 0.015);
+    expect(AppSettings.empty.storagePrice.storagePerGbMonth, 0.0213);
     expect(AppSettings.empty.hasCustomStoragePrice, isFalse);
   });
 
@@ -22,28 +22,43 @@ void main() {
       priceOverrides: <String, ModelPrice>{
         'gpt-6-nova': const ModelPrice(inputPerMTok: 3, outputPerMTok: 9),
       },
-      storagePrice: const StoragePrice(
-        r2PerGbMonth: 0.02,
-        tursoPerGbMonth: 0.75,
-      ),
+      storagePrice: const StoragePrice(storagePerGbMonth: 0.02),
     );
 
     final AppSettings restored = AppSettings.fromJson(settings.toJson());
 
     expect(restored.priceOverrides['gpt-6-nova']?.inputPerMTok, 3);
-    expect(restored.storagePrice.tursoPerGbMonth, 0.75);
+    expect(restored.storagePrice.storagePerGbMonth, 0.02);
     expect(restored.hasCustomStoragePrice, isTrue);
   });
 
   test('a stored storage price of zero survives, unlike an absent one', () {
     final AppSettings settings = AppSettings.empty.copyWith(
-      storagePrice: const StoragePrice(r2PerGbMonth: 0, tursoPerGbMonth: 0),
+      storagePrice: const StoragePrice(storagePerGbMonth: 0),
     );
 
     final AppSettings restored = AppSettings.fromJson(settings.toJson());
 
-    expect(restored.storagePrice.r2PerGbMonth, 0);
+    expect(restored.storagePrice.storagePerGbMonth, 0);
     expect(restored.hasCustomStoragePrice, isTrue);
+  });
+
+  test('a storage price holding only the retired keys is not an override', () {
+    // A settings.json from before #202 stores the R2 and Turso rates under
+    // `storagePrice`. Reading that as a custom price would pin every such
+    // install to the shipped default forever, with `hasCustomStoragePrice`
+    // claiming the user chose it; it reads as absent and the next write
+    // drops it, the same way the `turso*` / `r2*` fields are dropped.
+    final AppSettings restored = AppSettings.fromJson(<String, dynamic>{
+      'storagePrice': <String, dynamic>{
+        'r2PerGbMonth': 0.02,
+        'tursoPerGbMonth': 0.75,
+      },
+    });
+
+    expect(restored.hasCustomStoragePrice, isFalse);
+    expect(restored.storagePrice.storagePerGbMonth, 0.0213);
+    expect(restored.toJson().containsKey('storagePrice'), isFalse);
   });
 
   test(
