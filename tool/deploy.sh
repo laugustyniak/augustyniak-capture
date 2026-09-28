@@ -17,20 +17,21 @@
 # `prgname`. Naming the binary there is the plausible wrong answer: the app
 # still launches, and only the dock fails to associate the window with it.
 #
-# **Credentials never reach the command line.** `--dart-define=TURSO_AUTH_TOKEN=…`
-# puts a working JWT in the shell history of every machine it is deployed
+# **Credentials never reach the command line.** `--dart-define=TRANSCRIPTION_TOKEN=…`
+# puts a working token in the shell history of every machine it is deployed
 # from, which is the same class of exposure as committing one. A defines file
 # is passed with `--dart-define-from-file` instead, and it is looked for
 # outside the repository first, so the usual copy is somewhere `git add -A`
-# cannot reach. Absent, the build simply comes up unpaired — that is the
-# normal state, not a degraded one: sync settings live in the app's documents
-# directory, *outside* the install, so a copy paired once through the Config
-# tab or a QR code stays paired across every redeploy after it. Prefer that
+# cannot reach. Absent, the build simply comes up with no seeded provider —
+# that is the normal state, not a degraded one: provider profiles and the
+# Supabase session live in the app's documents directory and the OS keyring,
+# *outside* the install, so a copy configured once through the Config tab and
+# signed in once stays that way across every redeploy after it. Prefer that
 # over a defines file for a machine you deploy to more than once.
 #
 #   tool/deploy.sh                     # build and install for this host
 #   tool/deploy.sh --run               # …and launch it when the install lands
-#   tool/deploy.sh --defines path.json # seed sync credentials into the build
+#   tool/deploy.sh --defines path.json # seed dart-defines into the build
 #   tool/deploy.sh --skip-build        # reinstall the bundle already built
 set -euo pipefail
 
@@ -129,11 +130,11 @@ if [ -n "$defines_file" ]; then
       fi
       ;;
   esac
-  echo "deploy: seeding sync credentials from $defines_file"
+  echo "deploy: seeding dart-defines from $defines_file"
   build_args=(--release "--dart-define-from-file=$defines_file")
 else
-  echo "deploy: no defines file — the build comes up unpaired"
-  echo "        (Config tab or a QR pairing configures it, and that survives redeploys)"
+  echo "deploy: no defines file — the build comes up with no seeded provider"
+  echo "        (the Config tab configures it, and that survives redeploys)"
   build_args=(--release)
 fi
 

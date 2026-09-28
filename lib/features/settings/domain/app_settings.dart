@@ -280,8 +280,15 @@ class AppSettings {
       }
     }
 
+    // A `storagePrice` map written before #202 holds the R2 and Turso rates
+    // and nothing this build prices by. Reading it as a custom price would
+    // pin the install to the shipped default with `hasCustomStoragePrice`
+    // claiming the user chose it, so it reads as absent and the next write
+    // drops it, the same way the retired `turso*` / `r2*` fields are dropped.
     final dynamic rawStorage = json['storagePrice'];
-    final StoragePrice? storagePrice = rawStorage is Map<String, dynamic>
+    final StoragePrice? storagePrice =
+        rawStorage is Map<String, dynamic> &&
+            StoragePrice.isReadable(rawStorage)
         ? StoragePrice.fromJson(rawStorage)
         : null;
 

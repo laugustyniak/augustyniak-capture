@@ -185,7 +185,7 @@ String _grouped(int value) {
 /// already proven [sizeBytes] is a real measurement, so the `!` here can never
 /// fire — the null case is handled by not calling this at all.
 String _storageLine(int sizeBytes, StoragePrice storagePrice) {
-  final double monthly = sizeBytes / 1073741824 *
-      (storagePrice.r2PerGbMonth + storagePrice.tursoPerGbMonth);
+  final double monthly =
+      sizeBytes / 1073741824 * storagePrice.storagePerGbMonth;
   return '${formatBytes(sizeBytes)!} · ${formatUsd(monthly)}/mo';
 }

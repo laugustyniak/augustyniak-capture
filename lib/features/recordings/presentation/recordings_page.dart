@@ -1186,10 +1186,10 @@ class _RecordingsPageState extends State<RecordingsPage>
                                     allTimeUsd:
                                         _usageRepository?.totalAll() ??
                                         UsageTotal.none,
-                                    // Both R2 (source files) and Turso (the
-                                    // index) scale with the same total, so one
-                                    // measured sum feeds both halves of the
-                                    // monthly-rate formula.
+                                    // Only the source files reach the Storage
+                                    // bucket, so the measured media total is
+                                    // the whole input to the monthly-rate
+                                    // formula.
                                     storageBytes: controller.recordings
                                         .fold<int>(
                                           0,

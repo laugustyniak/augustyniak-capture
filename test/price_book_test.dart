@@ -196,19 +196,31 @@ void main() {
   });
 
   group('storage prices', () {
-    test('defaults are the published R2 and Turso rates', () {
-      expect(StoragePrice.defaults.r2PerGbMonth, 0.015);
-      expect(StoragePrice.defaults.tursoPerGbMonth, 0.50);
+    test('default is the published Supabase Storage rate', () {
+      expect(StoragePrice.defaults.storagePerGbMonth, 0.0213);
     });
 
     test('round-trips', () {
-      const StoragePrice price =
-          StoragePrice(r2PerGbMonth: 0.02, tursoPerGbMonth: 0.75);
+      const StoragePrice price = StoragePrice(storagePerGbMonth: 0.02);
 
       final StoragePrice restored = StoragePrice.fromJson(price.toJson());
 
-      expect(restored.r2PerGbMonth, 0.02);
-      expect(restored.tursoPerGbMonth, 0.75);
+      expect(restored.storagePerGbMonth, 0.02);
+    });
+
+    test('the retired R2 and Turso keys are not read as a rate', () {
+      // Written by a build that priced media in R2 and the index in Turso
+      // (#202). Neither number is a Supabase Storage rate, so neither may
+      // become one: the row degrades to the shipped default.
+      final StoragePrice restored = StoragePrice.fromJson(<String, dynamic>{
+        'r2PerGbMonth': 0.02,
+        'tursoPerGbMonth': 0.75,
+      });
+
+      expect(
+        restored.storagePerGbMonth,
+        StoragePrice.defaults.storagePerGbMonth,
+      );
     });
   });
 
