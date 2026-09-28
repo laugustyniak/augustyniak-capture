@@ -22,12 +22,14 @@
 # from, which is the same class of exposure as committing one. A defines file
 # is passed with `--dart-define-from-file` instead, and it is looked for
 # outside the repository first, so the usual copy is somewhere `git add -A`
-# cannot reach. Absent, the build simply comes up with no seeded provider —
-# that is the normal state, not a degraded one: provider profiles and the
-# Supabase session live in the app's documents directory and the OS keyring,
-# *outside* the install, so a copy configured once through the Config tab and
-# signed in once stays that way across every redeploy after it. Prefer that
-# over a defines file for a machine you deploy to more than once.
+# cannot reach. The same file carries `SUPABASE_URL` and
+# `SUPABASE_PUBLISHABLE_KEY` — public client configuration, not secrets, but
+# without the pair Supabase is never initialised, so a build with no defines
+# file captures locally and cannot sign in or sync. Provider profiles seeded
+# through the Config tab live in the app's documents directory, *outside* the
+# install, so those survive every redeploy; the Supabase pair does not, and
+# is the one reason to keep a defines file on a machine you deploy to more
+# than once.
 #
 #   tool/deploy.sh                     # build and install for this host
 #   tool/deploy.sh --run               # …and launch it when the install lands
@@ -133,8 +135,8 @@ if [ -n "$defines_file" ]; then
   echo "deploy: seeding dart-defines from $defines_file"
   build_args=(--release "--dart-define-from-file=$defines_file")
 else
-  echo "deploy: no defines file — the build comes up with no seeded provider"
-  echo "        (the Config tab configures it, and that survives redeploys)"
+  echo "deploy: no defines file — local capture only, no Supabase sign-in or sync"
+  echo "        (provider profiles set in the Config tab survive redeploys)"
   build_args=(--release)
 fi
 
