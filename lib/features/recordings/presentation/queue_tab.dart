@@ -919,6 +919,8 @@ class _QueueTabState extends State<QueueTab> {
             isMarkingDone: markingDoneIds.contains(selected.id),
             onConfigureModels: widget.onConfigureModels,
             costUsd: _costTotals[selected.id],
+            projects: widget.projects?.projects ?? const <Project>[],
+            tagSuggestions: _tagSuggestions(selected),
           );
 
     return Padding(
@@ -1015,6 +1017,8 @@ class _QueueTabState extends State<QueueTab> {
                           widget.onConfigureModels!();
                         },
                   costUsd: _costTotals[item.id],
+                  projects: widget.projects?.projects ?? const <Project>[],
+                  tagSuggestions: _tagSuggestions(item),
                 ),
             // `editingId` is set while the page edits, so the filters keep
             // the row — the exemption [_filter] documents — even though the

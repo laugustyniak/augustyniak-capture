@@ -485,6 +485,13 @@ be noise the server never reads back.
   just against a different writer. `syncCloud()` runs the whole
   `CloudSyncCoordinator`, so the launch run covers both the metadata and
   the Storage slot, exactly as SYNC NOW does.
+- A hand edit (any `_update` with `RevisionSource.user` — title, summary,
+  text, category, project, tags, done) schedules a run `editSyncDelay`
+  (2 s) later, restarted by each further edit, so a burst of blurs is one
+  run. Signed out it schedules nothing. If a run is already in flight when
+  the timer fires, it waits that run out and starts a fresh one: the
+  in-flight run took its snapshot before the edit. Best-effort like the
+  launch run — a failure leaves the row for the next run.
 - Nothing runs signed out. Nothing blocks capture.
 
 ## Failure handling
