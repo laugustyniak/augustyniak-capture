@@ -22,6 +22,7 @@ class AppSettings {
     this.themeMode = AppThemeMode.system,
     this.textScale = defaultTextScale,
     this.queueDensity = QueueDensity.compact,
+    this.navRailExpanded = false,
     this.vaultPath,
     this.vaultFolder = VaultDefaults.folder,
     this.vaultCopySources = true,
@@ -84,6 +85,10 @@ class AppSettings {
   /// Row height in the Queue's master list. Written only when it is not the
   /// default, so a file that never touched it serialises exactly as before.
   final QueueDensity queueDensity;
+
+  /// Whether the wide shell's rail shows labels (220 px) or icons only
+  /// (64 px, the default). Written only when expanded.
+  final bool navRailExpanded;
   final String? vaultPath;
   final String vaultFolder;
   final bool vaultCopySources;
@@ -163,6 +168,7 @@ class AppSettings {
     double? textScale,
     bool resetTextScale = false,
     QueueDensity? queueDensity,
+    bool? navRailExpanded,
     String? vaultPath,
     bool clearVaultPath = false,
     String? vaultFolder,
@@ -197,6 +203,7 @@ class AppSettings {
           ? defaultTextScale
           : (textScale != null ? clampTextScale(textScale) : this.textScale),
       queueDensity: queueDensity ?? this.queueDensity,
+      navRailExpanded: navRailExpanded ?? this.navRailExpanded,
       vaultPath: clearVaultPath ? null : (vaultPath ?? this.vaultPath),
       vaultFolder: vaultFolder ?? this.vaultFolder,
       vaultCopySources: vaultCopySources ?? this.vaultCopySources,
@@ -230,6 +237,7 @@ class AppSettings {
       if (textScale != defaultTextScale) 'textScale': textScale,
       if (queueDensity != QueueDensity.compact)
         'queueDensity': queueDensity.name,
+      if (navRailExpanded) 'navRailExpanded': true,
       'timerMinutes': timerMinutes,
       'timerAlarm': timerAlarm.name,
       if (commandBaseUrl != null) 'commandBaseUrl': commandBaseUrl,
@@ -326,6 +334,7 @@ class AppSettings {
       queueDensity: QueueDensity.fromName(
         json['queueDensity'] is String ? json['queueDensity'] as String : null,
       ),
+      navRailExpanded: json['navRailExpanded'] == true,
       vaultPath: json['vaultPath'] is String
           ? json['vaultPath'] as String
           : null,

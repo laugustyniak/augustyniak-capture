@@ -256,6 +256,9 @@ class Console {
   /// insets the page beside it, so the two cannot drift apart.
   static const double railWidth = 216;
 
+  /// The rail's icon-only width, its default on desktop.
+  static const double railCollapsedWidth = 64;
+
   /// At and above this width the Queue is master–detail: a column of one-line
   /// rows to scan, and the selected capture drawn whole beside it. Measured
   /// on the Queue's own constraints, not the window, so the rail's width is

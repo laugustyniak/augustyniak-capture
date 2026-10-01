@@ -135,4 +135,63 @@ void main() {
     expect(find.text('CLEAR 0 / 0'), findsOneWidget);
     expect(find.text('0%'), findsOneWidget);
   });
+
+  testWidgets('collapsed: 64 px of icons, labels in tooltips, a toggle back', (
+    WidgetTester tester,
+  ) async {
+    int toggles = 0;
+    int? selected;
+    int recordings = 0;
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: Row(
+            children: <Widget>[
+              ConsoleNavRail(
+                destinations: const <RailDestination>[
+                  RailDestination(
+                    icon: Icons.format_list_bulleted_rounded,
+                    label: 'Queue',
+                    count: 3039,
+                    progress: .5,
+                  ),
+                  RailDestination(
+                    icon: Icons.account_tree_outlined,
+                    label: 'Projects',
+                  ),
+                ],
+                selectedIndex: 0,
+                onSelected: (int value) => selected = value,
+                reviewed: 1,
+                total: 2,
+                busy: false,
+                onRecord: () => recordings++,
+                onCapture: () {},
+                expanded: false,
+                onToggleExpanded: () => toggles++,
+              ),
+              const Expanded(child: SizedBox.shrink()),
+            ],
+          ),
+        ),
+      ),
+    );
+
+    expect(tester.getSize(find.byType(ConsoleNavRail)).width, 64);
+    // No visible labels, no CLEAR strip — the names live in tooltips.
+    expect(find.text('Projects'), findsNothing);
+    expect(find.textContaining('CLEAR'), findsNothing);
+    expect(find.byTooltip('Projects'), findsOneWidget);
+    // A four-digit count is shortened to fit the icon's corner.
+    expect(find.text('3k'), findsOneWidget);
+    // The Queue's handed-off ratio becomes a ring.
+    expect(find.byType(CircularProgressIndicator), findsOneWidget);
+
+    await tester.tap(find.byTooltip('Projects'));
+    await tester.tap(find.bySemanticsLabel('Start recording'));
+    await tester.tap(find.bySemanticsLabel('Expand sidebar'));
+    expect(selected, 1);
+    expect(recordings, 1);
+    expect(toggles, 1);
+  });
 }

@@ -425,6 +425,22 @@ void main() {
       );
     });
 
+    test('rail expansion survives a round-trip and defaults to collapsed', () {
+      const AppSettings original = AppSettings(navRailExpanded: true);
+      expect(AppSettings.fromJson(original.toJson()).navRailExpanded, isTrue);
+      expect(
+        const AppSettings().toJson().containsKey('navRailExpanded'),
+        isFalse,
+      );
+      expect(AppSettings.fromJson(<String, dynamic>{}).navRailExpanded, isFalse);
+      expect(
+        AppSettings.fromJson(<String, dynamic>{
+          'navRailExpanded': 'yes',
+        }).navRailExpanded,
+        isFalse,
+      );
+    });
+
     test('textScale survives a round-trip and clamps bounds', () {
       const AppSettings original = AppSettings(textScale: 1.25);
 

@@ -107,6 +107,14 @@ class SettingsController extends ChangeNotifier {
   /// Row height in the Queue's master list.
   QueueDensity get queueDensity => _settings.queueDensity;
 
+  /// Whether the wide shell's rail is expanded to show labels.
+  bool get navRailExpanded => _settings.navRailExpanded;
+
+  Future<void> setNavRailExpanded(bool value) async {
+    if (value == _settings.navRailExpanded) return;
+    await _persist(_settings.copyWith(navRailExpanded: value));
+  }
+
   /// Never null: an untouched install resolves to the shipped default.
   String get enrichmentInstructions => _settings.enrichmentInstructions;
 

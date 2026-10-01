@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../../../app/ui_kit.dart';
+import '../../../app/version_footer.dart';
 import '../../auth/domain/auth_identity.dart';
 import '../../auth/presentation/account_section.dart';
 import '../../auth/presentation/auth_controller.dart';
@@ -18,6 +19,7 @@ import '../domain/app_settings.dart';
 import '../domain/app_theme_mode.dart';
 import '../domain/audio_config.dart';
 import '../domain/provider_profile.dart';
+import '../domain/queue_density.dart';
 import '../domain/token_cipher.dart';
 import 'backup_section.dart';
 import 'command_section.dart';
@@ -332,6 +334,20 @@ class _ConfigTabState extends State<ConfigTab> {
               'and Ctrl 0 (Cmd 0) to zoom.',
               style: ConsoleText.hint,
             ),
+            Divider(color: Console.border, height: 22),
+            _ChoiceRow<QueueDensity>(
+              label: 'QUEUE ROWS',
+              value: widget.controller.queueDensity,
+              options: QueueDensity.values,
+              labelFor: (QueueDensity density) => density.label.toUpperCase(),
+              onChanged: widget.controller.setQueueDensity,
+            ),
+            const SizedBox(height: 6),
+            Text(
+              'Row height in the wide Queue list. COMFORTABLE adds a second '
+              'summary line. Also on the Queue toolbar.',
+              style: ConsoleText.hint,
+            ),
           ],
         ),
       ),
@@ -376,6 +392,12 @@ class _ConfigTabState extends State<ConfigTab> {
           ],
         ),
       ),
+      const SizedBox(height: 22),
+      // Moved here from a footer under every tab: the version is something
+      // looked up once in a while, not 48 px every screen should pay for.
+      SectionHeader(title: 'ABOUT'),
+      const SizedBox(height: 12),
+      ConsoleCard(child: const VersionFooter()),
     ];
   }
 
