@@ -270,8 +270,8 @@ class Console {
   /// keep its title, three tags, project and two mono columns on one line;
   /// the upper one stops a 4K window turning each row into a sentence the eye
   /// has to travel across.
-  static const double masterListMinWidth = 560;
-  static const double masterListMaxWidth = 820;
+  static const double masterListMinWidth = 644;
+  static const double masterListMaxWidth = 943;
 
   /// At and above this Queue width the detail panel splits into the reading
   /// column and a fixed meta column beside it; below it the meta facts sit
