@@ -138,7 +138,8 @@ void main() {
     });
 
     test('Console desktop breakpoints and high-resolution scaling', () {
-      expect(Console.wideDesktopBreakpoint, 1600);
+      expect(Console.masterDetailBreakpoint, 1280);
+      expect(Console.detailMetaBreakpoint, 2200);
       expect(Console.autoScaleFor(const Size(3840, 2160), 1.0), 1.4);
       expect(Console.autoScaleFor(const Size(2560, 1440), 1.0), 1.2);
       expect(Console.autoScaleFor(const Size(1920, 1080), 1.0), 1.0);

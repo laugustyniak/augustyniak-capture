@@ -84,6 +84,8 @@ class QueueToolbar extends StatelessWidget {
     required this.statusFilter,
     required this.counts,
     required this.onStatusChanged,
+    this.leading,
+    this.trailing = const <Widget>[],
   });
 
   /// Below this the bar splits into two rows. Derived from what the row needs
@@ -116,6 +118,18 @@ class QueueToolbar extends StatelessWidget {
   final RecordingFilter statusFilter;
   final Map<RecordingFilter, int> counts;
   final ValueChanged<RecordingFilter> onStatusChanged;
+
+  /// The master–detail Queue's page title, drawn on the bar instead of above
+  /// it. Null keeps the bar as it was.
+  final Widget? leading;
+
+  /// Controls pushed to the bar's right end (density, sync). When any are
+  /// given the search field stops taking all the slack and holds
+  /// [_searchMaxWidth] instead — on a 2560 px window an `Expanded` field
+  /// would be a metre of empty box.
+  final List<Widget> trailing;
+
+  static const double _searchMaxWidth = 480;
 
   @override
   Widget build(BuildContext context) {
@@ -166,6 +180,39 @@ class QueueToolbar extends StatelessWidget {
                         onChanged: onProjectChanged,
                         compact: true,
                       );
+                if (leading != null || trailing.isNotEmpty) {
+                  return Row(
+                    children: <Widget>[
+                      if (leading != null) ...<Widget>[
+                        leading!,
+                        const SizedBox(width: 16),
+                      ],
+                      Flexible(
+                        child: ConstrainedBox(
+                          constraints: const BoxConstraints(
+                            maxWidth: _searchMaxWidth,
+                          ),
+                          child: search,
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      segments,
+                      const SizedBox(width: 8),
+                      type,
+                      const SizedBox(width: 8),
+                      status,
+                      if (project != null) ...<Widget>[
+                        const SizedBox(width: 8),
+                        SizedBox(width: _projectWidth, child: project),
+                      ],
+                      const Spacer(),
+                      for (final Widget widget in trailing) ...<Widget>[
+                        const SizedBox(width: 8),
+                        widget,
+                      ],
+                    ],
+                  );
+                }
                 if (constraints.maxWidth >= singleLineWidth) {
                   return Row(
                     children: <Widget>[

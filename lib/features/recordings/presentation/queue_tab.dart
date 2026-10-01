@@ -11,15 +11,18 @@ import '../../costs/domain/price_book.dart';
 import '../../costs/domain/usage_event.dart';
 import '../../projects/domain/project.dart';
 import '../../projects/presentation/projects_controller.dart';
+import '../../settings/domain/queue_density.dart';
 import '../domain/agent_artifact.dart';
 import '../domain/capture_category.dart';
 import '../domain/capture_type.dart';
 import '../domain/recording.dart';
 import '../domain/route_record.dart';
 import 'agent_artifact_viewer_modal.dart';
+import 'capture_focus_view.dart';
 import 'card_parts.dart';
 import 'compact_queue_header.dart';
 import 'handoff_sheet.dart';
+import 'queue_list_row.dart';
 import 'queue_toolbar.dart';
 import 'recording_card.dart';
 import 'recording_editor.dart';
@@ -70,7 +73,15 @@ class QueueTab extends StatefulWidget {
     this.onAppendRecording,
     this.onAppendNote,
     this.onAppendUpload,
+    this.density = QueueDensity.compact,
+    this.onDensityChanged,
   });
+
+  /// Row height in the master list. Owned by settings; the toolbar's toggle
+  /// writes back through [onDensityChanged], and a host that passes none
+  /// draws no toggle.
+  final QueueDensity density;
+  final ValueChanged<QueueDensity>? onDensityChanged;
 
   final RecordingsController controller;
   final ProjectsController? projects;
@@ -172,6 +183,18 @@ class _QueueTabState extends State<QueueTab> {
 
   bool _isSyncing = false;
 
+  /// The master list's scroll position. Owned here, not by the list, so
+  /// choosing a row — which rebuilds the whole tab — never moves the list.
+  final ScrollController _masterScroll = ScrollController();
+
+  /// Attached to the selected row only, so a keyboard move can bring it into
+  /// view without the list having to know row heights.
+  final GlobalKey _selectedRowKey = GlobalKey(debugLabel: 'queue-selected-row');
+
+  /// What the last build showed, in order. Read by Mark done so the selection
+  /// can step to the neighbour of a row the Desk filter is about to remove.
+  List<Recording> _visible = const <Recording>[];
+
   /// Every visible capture's summed cost, refreshed once per [build] from
   /// `widget.usageRepository` — a single grouped query rather than one lookup
   /// per row. `_buildCard`/`_buildMobileRow` read it by id; a capture absent
@@ -231,15 +254,21 @@ class _QueueTabState extends State<QueueTab> {
     searchController.dispose();
     searchFocus.dispose();
     listFocus.dispose();
+    _masterScroll.dispose();
     super.dispose();
   }
 
   /// Moves the selection by [delta] through what is currently *visible*, so
   /// arrowing never lands on a row the active filters exclude.
-  void _moveFocus(List<Recording> visible, int delta) {
+  ///
+  /// [from] names the row the move starts at when it is not [focusedId] —
+  /// the master–detail layout shows the first row as selected before the user
+  /// has chosen anything, and the first press must move *off* it.
+  void _moveFocus(List<Recording> visible, int delta, {String? from}) {
     if (visible.isEmpty) return;
+    final String? origin = from ?? focusedId;
     final int current = visible.indexWhere(
-      (Recording item) => item.id == focusedId,
+      (Recording item) => item.id == origin,
     );
     // No selection yet: the first press takes the end the user is moving
     // towards rather than jumping to the middle of the list.
@@ -247,20 +276,34 @@ class _QueueTabState extends State<QueueTab> {
         ? (delta > 0 ? 0 : visible.length - 1)
         : (current + delta).clamp(0, visible.length - 1);
     setState(() => focusedId = visible[next].id);
+    _revealSelectedRow(delta > 0);
   }
 
-  /// Runs [action] against the selected row, if there is one. Every shortcut
-  /// goes through here so a key press with nothing selected is a no-op rather
-  /// than an action on a guessed item.
-  void _onFocused(List<Recording> visible, void Function(Recording) action) {
-    final String? id = focusedId;
-    if (id == null) return;
+  /// Scrolls the master list just far enough to show the selected row. A
+  /// no-op in the card layouts, where the key is attached to nothing.
+  void _revealSelectedRow(bool downwards) {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      final BuildContext? row = _selectedRowKey.currentContext;
+      if (row == null || !row.mounted) return;
+      Scrollable.ensureVisible(
+        row,
+        duration: const Duration(milliseconds: 120),
+        alignmentPolicy: downwards
+            ? ScrollPositionAlignmentPolicy.keepVisibleAtEnd
+            : ScrollPositionAlignmentPolicy.keepVisibleAtStart,
+      );
+    });
+  }
+
+  /// The row the master–detail layout shows: the user's choice while it is
+  /// still visible, otherwise the first row — so the panel is never empty
+  /// while the list is not.
+  String? _selectedIdIn(List<Recording> visible) {
+    if (visible.isEmpty) return null;
     for (final Recording item in visible) {
-      if (item.id == id) {
-        action(item);
-        return;
-      }
+      if (item.id == focusedId) return item.id;
     }
+    return visible.first.id;
   }
 
   @override
@@ -279,12 +322,32 @@ class _QueueTabState extends State<QueueTab> {
         ? projectFilterId
         : null;
     final List<Recording> visible = _filter(all, effectiveProjectFilterId);
+    _visible = visible;
     final int reviewedCount = all
         .where((Recording item) => item.isProcessedByUser)
         .length;
     return LayoutBuilder(
       builder: (BuildContext context, BoxConstraints constraints) {
         final bool compact = constraints.maxWidth < Console.compactBreakpoint;
+        final bool masterDetail =
+            constraints.maxWidth >= Console.masterDetailBreakpoint;
+        // Every shortcut goes through [onSelected], so a key press with
+        // nothing selected is a no-op rather than an action on a guessed item.
+        // In master–detail a row is always shown as selected, so there the
+        // shortcuts act on that row even before the user has picked one.
+        final String? selectedId = masterDetail
+            ? _selectedIdIn(visible)
+            : focusedId;
+        void onSelected(void Function(Recording) action) {
+          if (selectedId == null) return;
+          for (final Recording item in visible) {
+            if (item.id == selectedId) {
+              action(item);
+              return;
+            }
+          }
+        }
+
         // Counted before the search is applied: the chips describe the queue,
         // not the current query — otherwise every count would collapse to
         // whatever the user last typed.
@@ -312,20 +375,19 @@ class _QueueTabState extends State<QueueTab> {
           focusNode: listFocus,
           // Rebuilt with the current `visible` list on every frame, so a shortcut
           // can never act on a row that the filters have since removed.
-          onNext: () => _moveFocus(visible, 1),
-          onPrevious: () => _moveFocus(visible, -1),
-          onEdit: () => _onFocused(visible, (Recording item) {
+          onNext: () => _moveFocus(visible, 1, from: selectedId),
+          onPrevious: () => _moveFocus(visible, -1, from: selectedId),
+          onEdit: () => onSelected((Recording item) {
             setState(() => editingId = item.id);
           }),
-          onToggleProcessed: () => _onFocused(visible, _toggleProcessed),
-          onTogglePlay: () => _onFocused(
-            visible,
+          onToggleProcessed: () => onSelected(_toggleProcessed),
+          onTogglePlay: () => onSelected(
             (Recording item) => controller.togglePlayback(item.id),
           ),
-          onRoute: () => _onFocused(visible, (Recording item) {
+          onRoute: () => onSelected((Recording item) {
             if (controller.canRoute(item)) controller.route(item.id);
           }),
-          onHandoff: () => _onFocused(visible, (Recording item) {
+          onHandoff: () => onSelected((Recording item) {
             if (controller.canHandoff(item)) _openHandoff(item);
           }),
           // `Ctrl+F` and `/` have to reveal the box before they can focus it —
@@ -334,7 +396,7 @@ class _QueueTabState extends State<QueueTab> {
             setState(() => searchPanelOpen = true);
             searchFocus.requestFocus();
           },
-          onOpen: () => _onFocused(visible, _openFocus),
+          onOpen: () => onSelected(_openFocus),
           onClearFocus: () => setState(() => focusedId = null),
           child: Stack(
             children: <Widget>[
@@ -348,7 +410,7 @@ class _QueueTabState extends State<QueueTab> {
                     // first capture was drawn, and Queue is the tab the app opens
                     // on. The four other tabs keep theirs — they are destinations
                     // the user navigated to, and each needs to say what it is.
-                    if (!compact)
+                    if (!compact && !masterDetail)
                       Padding(
                         padding: const EdgeInsets.fromLTRB(20, 14, 20, 0),
                         child: ConsoleHeader(
@@ -485,8 +547,37 @@ class _QueueTabState extends State<QueueTab> {
                           onStatusChanged: (RecordingFilter value) {
                             setState(() => selectedFilter = value);
                           },
+                          leading: masterDetail
+                              ? _ToolbarTitle(
+                                  total: all.length,
+                                  reviewed: reviewedCount,
+                                )
+                              : null,
+                          trailing: masterDetail
+                              ? <Widget>[
+                                  if (widget.onDensityChanged != null)
+                                    _DensityToggle(
+                                      value: widget.density,
+                                      onChanged: widget.onDensityChanged!,
+                                    ),
+                                  _SyncButton(
+                                    syncing: _isSyncing,
+                                    onPressed: () =>
+                                        _handleSync(context, controller),
+                                  ),
+                                ]
+                              : const <Widget>[],
                         ),
                       ),
+                    if (masterDetail && visible.isNotEmpty)
+                      Expanded(
+                        child: _buildMasterDetail(
+                          visible,
+                          selectedId!,
+                          constraints.maxWidth,
+                        ),
+                      )
+                    else
                     Expanded(
                       child: RefreshIndicator(
                         onRefresh: () => _handleSync(context, controller),
@@ -512,72 +603,6 @@ class _QueueTabState extends State<QueueTab> {
                                   ),
                                 ],
                               )
-                            : constraints.maxWidth >=
-                                    Console.wideDesktopBreakpoint
-                                ? ListView.builder(
-                                    padding: _listPadding(compact),
-                                    itemCount: (visible.length + 1) ~/ 2,
-                                    itemBuilder: (
-                                      BuildContext context,
-                                      int rowIndex,
-                                    ) {
-                                      final int first = rowIndex * 2;
-                                      final int second = first + 1;
-                                      final Recording left = visible[first];
-                                      final Recording? right =
-                                          second < visible.length
-                                              ? visible[second]
-                                              : null;
-                                      return Padding(
-                                        padding: const EdgeInsets.fromLTRB(
-                                          4,
-                                          0,
-                                          4,
-                                          10,
-                                        ),
-                                        child: Row(
-                                          crossAxisAlignment:
-                                              CrossAxisAlignment.start,
-                                          children: <Widget>[
-                                            Expanded(
-                                              child: AnimatedSize(
-                                                duration: const Duration(
-                                                  milliseconds: 220,
-                                                ),
-                                                curve: Curves.easeOutCubic,
-                                                alignment: Alignment.topCenter,
-                                                child: left.id == editingId
-                                                    ? _buildEditor(left)
-                                                    : _buildCard(left),
-                                              ),
-                                            ),
-                                            const SizedBox(width: 10),
-                                            Expanded(
-                                              child: right != null
-                                                  ? AnimatedSize(
-                                                      duration: const Duration(
-                                                        milliseconds: 220,
-                                                      ),
-                                                      curve:
-                                                          Curves.easeOutCubic,
-                                                      alignment:
-                                                          Alignment.topCenter,
-                                                      child:
-                                                          right.id == editingId
-                                                              ? _buildEditor(
-                                                                  right,
-                                                                )
-                                                              : _buildCard(
-                                                                  right,
-                                                                ),
-                                                    )
-                                                  : const SizedBox.shrink(),
-                                            ),
-                                          ],
-                                        ),
-                                      );
-                                    },
-                                  )
                                 : ListView.builder(
                                     padding: _listPadding(compact),
                                     itemCount: visible.length,
@@ -805,6 +830,111 @@ class _QueueTabState extends State<QueueTab> {
     );
   }
 
+  /// The wide layout: a column of rows to scan beside the selected capture.
+  ///
+  /// The list is a `CustomScrollView` of one group per day, each a pinned
+  /// header over a lazily built `SliverList` — the pin is scoped to its group,
+  /// so `TODAY` gives way to `YESTERDAY` instead of stacking under it, and only
+  /// the rows in the viewport are built, as in the card layouts.
+  Widget _buildMasterDetail(
+    List<Recording> visible,
+    String selectedId,
+    double width,
+  ) {
+    final RecordingsController controller = widget.controller;
+    final double listWidth = (width * .45).clamp(
+      Console.masterListMinWidth,
+      Console.masterListMaxWidth,
+    );
+    final Recording selected = visible.firstWhere(
+      (Recording item) => item.id == selectedId,
+    );
+    final List<QueueDayGroup> groups = groupByDay(visible, DateTime.now());
+
+    final Widget list = CustomScrollView(
+      controller: _masterScroll,
+      slivers: <Widget>[
+        for (final QueueDayGroup group in groups)
+          SliverMainAxisGroup(
+            slivers: <Widget>[
+              SliverPersistentHeader(
+                pinned: true,
+                delegate: _DayHeaderDelegate(group.label),
+              ),
+              SliverList.builder(
+                itemCount: group.items.length,
+                itemBuilder: (BuildContext context, int index) {
+                  final Recording item = group.items[index];
+                  final bool isSelected = item.id == selectedId;
+                  return QueueListRow(
+                    key: isSelected
+                        ? _selectedRowKey
+                        : ValueKey<String>(item.id),
+                    recording: item,
+                    selected: isSelected,
+                    isEnriching: controller.isEnriching(item.id),
+                    density: widget.density,
+                    projectName: _projectName(item.projectId),
+                    onTap: () {
+                      setState(() => focusedId = item.id);
+                      // A click lands focus on the row's ink, which is outside
+                      // nothing the shortcut layer owns; hand it back so j/k
+                      // keep working after a mouse pick.
+                      listFocus.requestFocus();
+                    },
+                  );
+                },
+              ),
+            ],
+          ),
+        const SliverToBoxAdapter(child: SizedBox(height: 120)),
+      ],
+    );
+
+    final Widget detail = selected.id == editingId
+        ? SingleChildScrollView(
+            padding: const EdgeInsets.fromLTRB(32, 24, 32, 48),
+            child: Align(
+              alignment: Alignment.topLeft,
+              child: ConstrainedBox(
+                constraints: const BoxConstraints(maxWidth: 960),
+                child: _buildEditor(selected),
+              ),
+            ),
+          )
+        : CaptureDetailPanel(
+            // Keyed by id so each capture opens at the top of its text rather
+            // than at the previous one's scroll offset.
+            key: ValueKey<String>('detail-${selected.id}'),
+            controller: controller,
+            recording: selected,
+            projectName: _projectName(selected.projectId),
+            showMetaColumn: width >= Console.detailMetaBreakpoint,
+            onEdit: () => setState(() => editingId = selected.id),
+            onToggleProcessed: () => _toggleProcessed(selected),
+            isMarkingDone: markingDoneIds.contains(selected.id),
+            onConfigureModels: widget.onConfigureModels,
+            costUsd: _costTotals[selected.id],
+          );
+
+    return Padding(
+      padding: const EdgeInsets.only(top: 12),
+      child: DecoratedBox(
+        decoration: BoxDecoration(
+          border: Border(top: BorderSide(color: Console.border)),
+        ),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: <Widget>[
+            SizedBox(width: listWidth, child: list),
+            VerticalDivider(width: 1, thickness: 1, color: Console.border),
+            Expanded(child: detail),
+          ],
+        ),
+      ),
+    );
+  }
+
   /// Opens the capture in expanded inline edit mode.
   void _openFocus(Recording recording) {
     setState(() {
@@ -853,8 +983,21 @@ class _QueueTabState extends State<QueueTab> {
     }
 
     if (!mounted) return;
+    // The Desk filter is about to drop this row. If it was the selection,
+    // step to the row after it (or before, at the end) so the detail panel
+    // moves on rather than falling back to the top of the list.
+    String? next;
+    if (focusedId == recording.id && reviewFilter == ReviewFilter.desk) {
+      final int index = _visible.indexWhere(
+        (Recording item) => item.id == recording.id,
+      );
+      if (index >= 0 && _visible.length > 1) {
+        next = _visible[index + 1 < _visible.length ? index + 1 : index - 1].id;
+      }
+    }
     setState(() {
       markingDoneIds.remove(recording.id);
+      if (next != null) focusedId = next;
       if (sequence == _doneFeedbackSequence) {
         doneFeedback = _DoneFeedbackState(
           id: recording.id,
@@ -1156,6 +1299,8 @@ class _QueueShortcuts extends StatelessWidget {
         const SingleActivator(LogicalKeyboardKey.keyK): onPrevious,
         const SingleActivator(LogicalKeyboardKey.keyE): onEdit,
         const SingleActivator(LogicalKeyboardKey.keyD): onToggleProcessed,
+        // `x` as in a checkbox — the master–detail design's spelling of done.
+        const SingleActivator(LogicalKeyboardKey.keyX): onToggleProcessed,
         const SingleActivator(LogicalKeyboardKey.keyR): onRoute,
         // `A` for agent. `H` would have read as "handoff" for both of these,
         // and the two destinations must not share a mnemonic.
@@ -1241,4 +1386,147 @@ String _emptyLabel(
     RecordingFilter.failed => 'No failed jobs.',
     RecordingFilter.raw => 'Nothing waiting to be queued.',
   };
+}
+
+class _DayHeaderDelegate extends SliverPersistentHeaderDelegate {
+  _DayHeaderDelegate(this.label);
+
+  final String label;
+
+  @override
+  double get minExtent => QueueDayHeader.height;
+
+  @override
+  double get maxExtent => QueueDayHeader.height;
+
+  @override
+  Widget build(
+    BuildContext context,
+    double shrinkOffset,
+    bool overlapsContent,
+  ) => QueueDayHeader(label: label);
+
+  // Always rebuilt: the header paints palette colours, and a theme swap must
+  // reach it even though its label did not change.
+  @override
+  bool shouldRebuild(_DayHeaderDelegate oldDelegate) => true;
+}
+
+/// `Queue` and its counter, on the toolbar line in the master–detail layout.
+class _ToolbarTitle extends StatelessWidget {
+  _ToolbarTitle({required this.total, required this.reviewed});
+
+  final int total;
+  final int reviewed;
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      crossAxisAlignment: CrossAxisAlignment.baseline,
+      textBaseline: TextBaseline.alphabetic,
+      children: <Widget>[
+        Text('Queue', style: ConsoleText.cardTitle.copyWith(fontSize: 18)),
+        const SizedBox(width: 10),
+        Text('$total · $reviewed clear', style: ConsoleText.counter),
+      ],
+    );
+  }
+}
+
+class _DensityToggle extends StatelessWidget {
+  _DensityToggle({required this.value, required this.onChanged});
+
+  final QueueDensity value;
+  final ValueChanged<QueueDensity> onChanged;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.all(3),
+      decoration: BoxDecoration(
+        color: Console.surfaceRaised,
+        borderRadius: BorderRadius.circular(8),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: <Widget>[
+          for (final QueueDensity option in QueueDensity.values)
+            Semantics(
+              button: true,
+              selected: option == value,
+              label: '${option.label} rows',
+              excludeSemantics: true,
+              child: InkWell(
+                onTap: () => onChanged(option),
+                borderRadius: BorderRadius.circular(6),
+                child: Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 10,
+                    vertical: 5,
+                  ),
+                  decoration: BoxDecoration(
+                    color: option == value
+                        ? Console.surface
+                        : Colors.transparent,
+                    borderRadius: BorderRadius.circular(6),
+                  ),
+                  child: Text(
+                    option.label,
+                    style: ConsoleText.body.copyWith(
+                      fontSize: 12,
+                      color: option == value ? Console.text : Console.muted,
+                    ),
+                  ),
+                ),
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+}
+
+/// Sync as a quiet outlined button; the state is a dot, not a green slab.
+class _SyncButton extends StatelessWidget {
+  _SyncButton({required this.syncing, required this.onPressed});
+
+  final bool syncing;
+  final VoidCallback onPressed;
+
+  @override
+  Widget build(BuildContext context) {
+    return OutlinedButton(
+      onPressed: syncing ? null : onPressed,
+      style: OutlinedButton.styleFrom(
+        foregroundColor: Console.text,
+        disabledForegroundColor: Console.muted,
+        side: BorderSide(color: Console.border),
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+        minimumSize: const Size(0, 32),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: <Widget>[
+          if (syncing)
+            SyncSpinIcon(isSyncing: true, size: 12, color: Console.accent)
+          else
+            Container(
+              width: 7,
+              height: 7,
+              decoration: BoxDecoration(
+                color: Console.green,
+                shape: BoxShape.circle,
+              ),
+            ),
+          const SizedBox(width: 8),
+          Text(
+            syncing ? 'Syncing…' : 'Sync cloud',
+            style: ConsoleText.body.copyWith(fontSize: 12),
+          ),
+        ],
+      ),
+    );
+  }
 }

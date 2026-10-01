@@ -13,6 +13,8 @@ import 'package:augustyniak_capture/features/costs/domain/usage_event.dart';
 import 'package:augustyniak_capture/features/recordings/domain/capture_category.dart';
 import 'package:augustyniak_capture/features/recordings/domain/capture_type.dart';
 import 'package:augustyniak_capture/features/recordings/domain/recording.dart';
+import 'package:augustyniak_capture/features/recordings/presentation/capture_focus_view.dart';
+import 'package:augustyniak_capture/features/recordings/presentation/queue_list_row.dart';
 import 'package:augustyniak_capture/features/recordings/presentation/queue_tab.dart';
 import 'package:augustyniak_capture/features/recordings/presentation/queue_toolbar.dart';
 import 'package:augustyniak_capture/features/recordings/presentation/recording_card.dart';
@@ -1500,10 +1502,10 @@ void main() {
     expect(find.text('Meeting audio'), findsNothing);
   });
 
-  testWidgets('QueueTab cards expand to full available width on wide viewports', (
+  testWidgets('QueueTab cards expand to full available width below the master–detail breakpoint', (
     WidgetTester tester,
   ) async {
-    tester.view.physicalSize = const Size(1400, 900);
+    tester.view.physicalSize = const Size(1200, 900);
     tester.view.devicePixelRatio = 1.0;
     addTearDown(() {
       tester.view.resetPhysicalSize();
@@ -1528,12 +1530,12 @@ void main() {
     expect(cardFinder, findsOneWidget);
 
     final Size cardSize = tester.getSize(cardFinder);
-    // On 1400px viewport, list padding is 16 on each side, card padding is 4 on each side,
-    // so total width = 1400 - (16*2 + 4*2) = 1360px (> 880px).
-    expect(cardSize.width, greaterThan(1300));
+    // Below the master–detail breakpoint the card keeps the full width:
+    // 1200 - (16*2 + 4*2) = 1160px (> 880px).
+    expect(cardSize.width, greaterThan(1100));
   });
 
-  testWidgets('QueueTab renders cards in 2 columns on wide viewports >= 1600px', (
+  testWidgets('wide viewports show rows beside the selected capture', (
     WidgetTester tester,
   ) async {
     tester.view.physicalSize = const Size(1800, 1000);
@@ -1547,38 +1549,118 @@ void main() {
       appDir,
       seed: <Recording>[
         makeRecording(
-          id: 'wide-card-1',
+          id: 'wide-1',
           title: 'First capture',
           transcript: 'First transcript',
           type: CaptureType.text,
-          status: RecordingStatus.completed,
         ),
         makeRecording(
-          id: 'wide-card-2',
+          id: 'wide-2',
           title: 'Second capture',
           transcript: 'Second transcript',
           type: CaptureType.text,
-          status: RecordingStatus.completed,
         ),
       ],
     );
     await pumpQueue(tester, controller);
 
-    final Finder cards = find.byType(RecordingCard);
-    expect(cards, findsNWidgets(2));
+    // Rows, not cards, and no selection asked for: the first row is shown.
+    expect(find.byType(RecordingCard), findsNothing);
+    expect(find.byType(QueueListRow), findsNWidgets(2));
+    final Finder panel = find.byType(CaptureDetailPanel);
+    expect(panel, findsOneWidget);
+    expect(
+      find.descendant(of: panel, matching: find.text('First transcript')),
+      findsOneWidget,
+    );
 
-    final Offset pos1 = tester.getTopLeft(cards.at(0));
-    final Offset pos2 = tester.getTopLeft(cards.at(1));
-    final Size size1 = tester.getSize(cards.at(0));
-    final Size size2 = tester.getSize(cards.at(1));
+    // The panel sits beside the list, not under it.
+    expect(
+      tester.getTopLeft(panel).dx,
+      greaterThanOrEqualTo(Console.masterListMinWidth),
+    );
 
-    // Both cards should be side-by-side in row 0
-    expect(pos1.dy, closeTo(pos2.dy, 2.0));
-    expect(pos2.dx, greaterThan(pos1.dx + size1.width / 2));
-    expect(size1.width, lessThan(950));
-    expect(size1.width, greaterThan(750));
-    expect(size2.width, lessThan(950));
-    expect(size2.width, greaterThan(750));
+    // A click selects.
+    await tester.tap(find.byType(QueueListRow).at(1));
+    await tester.pump();
+    expect(
+      find.descendant(of: panel, matching: find.text('Second transcript')),
+      findsOneWidget,
+    );
+
+    // `k` moves off the selection — the implied first row counts as one.
+    await tester.sendKeyEvent(LogicalKeyboardKey.keyK);
+    await tester.pump();
+    expect(
+      find.descendant(of: panel, matching: find.text('First transcript')),
+      findsOneWidget,
+    );
   });
+
+  testWidgets('x marks the selected capture done and the panel moves on', (
+    WidgetTester tester,
+  ) async {
+    tester.view.physicalSize = const Size(1800, 1000);
+    tester.view.devicePixelRatio = 1.0;
+    addTearDown(() {
+      tester.view.resetPhysicalSize();
+      tester.view.resetDevicePixelRatio();
+    });
+
+    final RecordingsController controller = await buildRecordingsController(
+      appDir,
+      seed: <Recording>[
+        makeRecording(
+          id: 'x-1',
+          title: 'First capture',
+          transcript: 'First transcript',
+          type: CaptureType.text,
+        ),
+        makeRecording(
+          id: 'x-2',
+          title: 'Second capture',
+          transcript: 'Second transcript',
+          type: CaptureType.text,
+        ),
+        makeRecording(
+          id: 'x-3',
+          title: 'Third capture',
+          transcript: 'Third transcript',
+          type: CaptureType.text,
+        ),
+      ],
+    );
+    await pumpQueue(tester, controller);
+    // The middle row: falling back to the top would show the first, so only
+    // stepping to the neighbour shows the third.
+    await tester.tap(find.byType(QueueListRow).at(1));
+    await tester.pump();
+
+    await tester.sendKeyEvent(LogicalKeyboardKey.keyX);
+    await tester.runAsync(
+      () => Future<void>.delayed(const Duration(milliseconds: 50)),
+    );
+    await tester.pump();
+
+    expect(
+      controller.recordings
+          .firstWhere((Recording r) => r.id == 'x-2')
+          .isProcessedByUser,
+      isTrue,
+    );
+    // The Desk filter dropped it, and the panel took the next row rather
+    // than leaving the selection on a capture that is no longer listed.
+    expect(find.byType(QueueListRow), findsNWidgets(2));
+    expect(
+      find.descendant(
+        of: find.byType(CaptureDetailPanel),
+        matching: find.text('Third transcript'),
+      ),
+      findsOneWidget,
+    );
+    // Let the done-feedback timer run out before the test ends.
+    await tester.pump(const Duration(seconds: 2));
+  });
+
 }
 

@@ -9,6 +9,7 @@ import '../../timer/domain/timer_defaults.dart';
 import 'app_theme_mode.dart';
 import 'audio_config.dart';
 import 'provider_profile.dart';
+import 'queue_density.dart';
 import 'token_cipher.dart';
 
 class AppSettings {
@@ -20,6 +21,7 @@ class AppSettings {
     this.audio = AudioConfig.defaults,
     this.themeMode = AppThemeMode.system,
     this.textScale = defaultTextScale,
+    this.queueDensity = QueueDensity.compact,
     this.vaultPath,
     this.vaultFolder = VaultDefaults.folder,
     this.vaultCopySources = true,
@@ -78,6 +80,10 @@ class AppSettings {
   final AudioConfig audio;
   final AppThemeMode themeMode;
   final double textScale;
+
+  /// Row height in the Queue's master list. Written only when it is not the
+  /// default, so a file that never touched it serialises exactly as before.
+  final QueueDensity queueDensity;
   final String? vaultPath;
   final String vaultFolder;
   final bool vaultCopySources;
@@ -156,6 +162,7 @@ class AppSettings {
     AppThemeMode? themeMode,
     double? textScale,
     bool resetTextScale = false,
+    QueueDensity? queueDensity,
     String? vaultPath,
     bool clearVaultPath = false,
     String? vaultFolder,
@@ -189,6 +196,7 @@ class AppSettings {
       textScale: resetTextScale
           ? defaultTextScale
           : (textScale != null ? clampTextScale(textScale) : this.textScale),
+      queueDensity: queueDensity ?? this.queueDensity,
       vaultPath: clearVaultPath ? null : (vaultPath ?? this.vaultPath),
       vaultFolder: vaultFolder ?? this.vaultFolder,
       vaultCopySources: vaultCopySources ?? this.vaultCopySources,
@@ -220,6 +228,8 @@ class AppSettings {
       'audio': audio.toJson(),
       'themeMode': themeMode.name,
       if (textScale != defaultTextScale) 'textScale': textScale,
+      if (queueDensity != QueueDensity.compact)
+        'queueDensity': queueDensity.name,
       'timerMinutes': timerMinutes,
       'timerAlarm': timerAlarm.name,
       if (commandBaseUrl != null) 'commandBaseUrl': commandBaseUrl,
@@ -313,6 +323,9 @@ class AppSettings {
       textScale: json['textScale'] is num
           ? AppSettings.clampTextScale((json['textScale'] as num).toDouble())
           : AppSettings.defaultTextScale,
+      queueDensity: QueueDensity.fromName(
+        json['queueDensity'] is String ? json['queueDensity'] as String : null,
+      ),
       vaultPath: json['vaultPath'] is String
           ? json['vaultPath'] as String
           : null,

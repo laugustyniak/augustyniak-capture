@@ -1090,6 +1090,8 @@ class _RecordingsPageState extends State<RecordingsPage>
                                   onConfigureModels: () => setState(
                                     () => navigationIndex = modelsIndex,
                                   ),
+                                    density: settings.queueDensity,
+                                    onDensityChanged: settings.setQueueDensity,
                                   onAppendRecording: (String id) =>
                                       _startRecording(appendTo: id),
                                   onAppendNote: (String id) =>
