@@ -6,15 +6,19 @@ import 'package:flutter/services.dart';
 
 import '../../../app/markdown_view.dart';
 import '../../../app/ui_kit.dart';
+import '../../projects/domain/project.dart';
+import '../domain/capture_category.dart';
 import '../domain/capture_type.dart';
 import '../domain/note_vault.dart';
 import '../domain/recording.dart';
 import 'audio_waveform_visualizer.dart';
 import 'card_parts.dart';
 import 'handoff_sheet.dart';
+import 'inline_edit.dart';
 import 'inline_video_player.dart';
 import 'recording_card.dart';
 import 'recordings_controller.dart';
+import 'tag_editor.dart';
 
 /// Opens the capture in a dedicated reading view.
 ///
@@ -1000,11 +1004,19 @@ class CaptureDetailPanel extends StatelessWidget {
     this.costUsd,
     this.scrollController,
     this.compact = false,
+    this.projects = const <Project>[],
+    this.tagSuggestions = const <String>[],
   });
 
   final RecordingsController controller;
   final Recording recording;
   final String? projectName;
+
+  /// What the project badge offers when clicked. Empty hides the picker.
+  final List<Project> projects;
+
+  /// Tags used on other captures, offered by the inline tag editor.
+  final List<String> tagSuggestions;
 
   /// True at [Console.detailMetaBreakpoint] and above: the facts move out of
   /// the reading column into a fixed one beside it.
@@ -1046,13 +1058,24 @@ class CaptureDetailPanel extends StatelessWidget {
             controller: controller,
             recording: recording,
             projectName: projectName,
+            projects: projects,
           ),
           const SizedBox(height: 14),
-          Text(
-            displayNameFor(recording),
-            style: ConsoleText.cardTitle.copyWith(
-              fontSize: compact ? 22 : 26,
-              height: 1.2,
+          // Every field below is edited where it is read: a click turns it
+          // into a field, and leaving the field writes it through the same
+          // controller method the editor uses.
+          InlineEditText(
+            value: recording.title ?? '',
+            semanticLabel: 'Edit title',
+            hintText: File(recording.filePath).uri.pathSegments.last,
+            fontSize: compact ? 20 : 22,
+            onCommit: (String value) => controller.setTitle(recording.id, value),
+            display: Text(
+              displayNameFor(recording),
+              style: ConsoleText.cardTitle.copyWith(
+                fontSize: compact ? 22 : 26,
+                height: 1.2,
+              ),
             ),
           ),
           const SizedBox(height: 8),
@@ -1110,51 +1133,80 @@ class CaptureDetailPanel extends StatelessWidget {
             ),
             const SizedBox(height: 22),
           ],
-          if (summary.isNotEmpty) ...<Widget>[
-            _PanelSectionLabel(label: 'Summary'),
-            const SizedBox(height: 8),
-            SimpleMarkdown(
-              text: summary,
-              baseStyle: ConsoleText.body.copyWith(
-                fontSize: 16,
-                height: 1.6,
-                color: Console.text,
-              ),
-              accentColor: Console.accent,
-              mutedColor: Console.muted,
-              borderColor: Console.border,
-            ),
-            const SizedBox(height: 24),
-          ],
+          _PanelSectionLabel(label: 'Summary'),
+          const SizedBox(height: 8),
+          InlineEditText(
+            value: summary,
+            semanticLabel: 'Edit summary',
+            hintText: 'Summary / paraphrase',
+            multiline: true,
+            fontSize: 16,
+            onCommit: (String value) =>
+                controller.setSummary(recording.id, value),
+            display: summary.isEmpty
+                ? Text(
+                    'Add a summary',
+                    style: ConsoleText.body.copyWith(
+                      fontSize: 15,
+                      color: Console.muted,
+                    ),
+                  )
+                : SimpleMarkdown(
+                    text: summary,
+                    baseStyle: ConsoleText.body.copyWith(
+                      fontSize: 16,
+                      height: 1.6,
+                      color: Console.text,
+                    ),
+                    accentColor: Console.accent,
+                    mutedColor: Console.muted,
+                    borderColor: Console.border,
+                  ),
+          ),
+          const SizedBox(height: 24),
           _PanelSectionLabel(
             label: transcript.isEmpty
                 ? 'Transcript'
                 : 'Transcript · $wordCount words',
           ),
           const SizedBox(height: 8),
-          if (transcript.isEmpty)
-            Text(
-              _emptyTextFor(recording),
-              style: ConsoleText.body.copyWith(
-                fontSize: 15,
-                color: Console.muted,
-              ),
-            )
-          else
-            SimpleMarkdown(
-              text: transcript,
-              baseStyle: ConsoleText.body.copyWith(
-                fontSize: 15,
-                height: 1.65,
-                color: Console.textSoft,
-              ),
-              accentColor: Console.accent,
-              mutedColor: Console.muted,
-              borderColor: Console.border,
+          InlineEditText(
+            value: transcript,
+            semanticLabel: 'Edit transcript',
+            hintText: 'Transcript / OCR text / note',
+            multiline: true,
+            allowEmpty: false,
+            onCommit: (String value) =>
+                controller.editTranscript(recording.id, value),
+            display: transcript.isEmpty
+                ? Text(
+                    _emptyTextFor(recording),
+                    style: ConsoleText.body.copyWith(
+                      fontSize: 15,
+                      color: Console.muted,
+                    ),
+                  )
+                : SimpleMarkdown(
+                    text: transcript,
+                    baseStyle: ConsoleText.body.copyWith(
+                      fontSize: 15,
+                      height: 1.65,
+                      color: Console.textSoft,
+                    ),
+                    accentColor: Console.accent,
+                    mutedColor: Console.muted,
+                    borderColor: Console.border,
+                  ),
+          ),
+          const SizedBox(height: 24),
+          InlineEditTags(
+            editor: TagEditor(
+              tags: recording.tags,
+              suggestions: tagSuggestions,
+              onChanged: (List<String> values) =>
+                  controller.setTags(recording.id, values),
             ),
-          if (recording.tags.isNotEmpty) ...<Widget>[
-            const SizedBox(height: 24),
-            Wrap(
+            display: Wrap(
               spacing: 6,
               runSpacing: 6,
               crossAxisAlignment: WrapCrossAlignment.center,
@@ -1177,16 +1229,25 @@ class CaptureDetailPanel extends StatelessWidget {
                       ),
                     ),
                   ),
-                CopyButton(
-                  text: tagsClipboardText(recording.tags),
-                  tooltip: 'Copy tags',
-                  semanticLabel: 'Copy tags to clipboard',
-                  size: 26,
-                  iconSize: 13,
-                ),
+                if (recording.tags.isEmpty)
+                  Text(
+                    'Add tags',
+                    style: ConsoleText.body.copyWith(
+                      fontSize: 13,
+                      color: Console.muted,
+                    ),
+                  )
+                else
+                  CopyButton(
+                    text: tagsClipboardText(recording.tags),
+                    tooltip: 'Copy tags',
+                    semanticLabel: 'Copy tags to clipboard',
+                    size: 26,
+                    iconSize: 13,
+                  ),
               ],
             ),
-          ],
+          ),
           if (recording.routes.isNotEmpty) ...<Widget>[
             const SizedBox(height: 18),
             Row(
@@ -1277,11 +1338,16 @@ class _PanelBadges extends StatelessWidget {
     required this.controller,
     required this.recording,
     required this.projectName,
+    required this.projects,
   });
 
   final RecordingsController controller;
   final Recording recording;
   final String? projectName;
+  final List<Project> projects;
+
+  /// Menu value for "none": a null item would read as a dismissed menu.
+  static const String _none = '';
 
   @override
   Widget build(BuildContext context) {
@@ -1291,12 +1357,30 @@ class _PanelBadges extends StatelessWidget {
       runSpacing: 6,
       crossAxisAlignment: WrapCrossAlignment.center,
       children: <Widget>[
-        if (recording.category != null)
-          StatusPill(
-            label: recording.category!.label,
-            color: categoryColorFor(recording.category),
-            outlined: true,
+        _BadgeMenu(
+          tooltip: 'Set category',
+          selected: recording.category?.name ?? _none,
+          options: <(String, String)>[
+            (_none, '—'),
+            for (final CaptureCategory value in CaptureCategory.values)
+              (value.name, value.label),
+          ],
+          onSelected: (String name) => controller.setCategory(
+            recording.id,
+            name == _none ? null : CaptureCategory.fromName(name),
           ),
+          child: recording.category != null
+              ? StatusPill(
+                  label: recording.category!.label,
+                  color: categoryColorFor(recording.category),
+                  outlined: true,
+                )
+              : StatusPill(
+                  label: '+ CATEGORY',
+                  color: Console.muted,
+                  outlined: true,
+                ),
+        ),
         if (enriching)
           StatusPill(label: 'ANALYZING', color: Console.accent, pulse: true)
         else
@@ -1322,7 +1406,26 @@ class _PanelBadges extends StatelessWidget {
             ),
             RecordingStatus.completed => const SizedBox.shrink(),
           },
-        if (projectName != null)
+        if (projects.isNotEmpty)
+          _BadgeMenu(
+            tooltip: 'Set project',
+            selected: recording.projectId ?? _none,
+            options: <(String, String)>[
+              (_none, '—'),
+              for (final Project project in projects)
+                (project.id, project.name),
+            ],
+            onSelected: (String id) =>
+                controller.setProject(recording.id, id == _none ? null : id),
+            child: Text(
+              projectName ?? '+ project',
+              style: ConsoleText.body.copyWith(
+                fontSize: 13,
+                color: Console.muted,
+              ),
+            ),
+          )
+        else if (projectName != null)
           Text(
             projectName!,
             style: ConsoleText.body.copyWith(
@@ -1331,6 +1434,53 @@ class _PanelBadges extends StatelessWidget {
             ),
           ),
       ],
+    );
+  }
+}
+
+/// A badge that opens a pick-one menu. The choice writes on the tap, like a
+/// chip in the editor.
+class _BadgeMenu extends StatelessWidget {
+  _BadgeMenu({
+    required this.tooltip,
+    required this.selected,
+    required this.options,
+    required this.onSelected,
+    required this.child,
+  });
+
+  final String tooltip;
+  final String selected;
+
+  /// `(value, label)` pairs, in display order.
+  final List<(String, String)> options;
+  final ValueChanged<String> onSelected;
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) {
+    return PopupMenuButton<String>(
+      tooltip: tooltip,
+      initialValue: selected,
+      color: Console.surface,
+      onSelected: (String value) {
+        if (value != selected) onSelected(value);
+      },
+      itemBuilder: (BuildContext context) => <PopupMenuEntry<String>>[
+        for (final (String value, String label) in options)
+          PopupMenuItem<String>(
+            value: value,
+            height: 36,
+            child: Text(
+              label,
+              style: ConsoleText.body.copyWith(
+                fontSize: 13,
+                color: value == selected ? Console.accent : Console.text,
+              ),
+            ),
+          ),
+      ],
+      child: MouseRegion(cursor: SystemMouseCursors.click, child: child),
     );
   }
 }

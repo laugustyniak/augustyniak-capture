@@ -121,7 +121,11 @@ class RecordingsController extends ChangeNotifier {
     // user. Null keeps the media slot out entirely, like the seven above.
     MediaObjectStore Function(String ownerId)? mediaStoreResolver,
     Duration recorderTimeout = const Duration(seconds: 8),
+    // How long a hand edit waits before it is pushed, so a burst of field
+    // edits is one sync run rather than one per blur.
+    Duration editSyncDelay = const Duration(seconds: 2),
   }) : _recorderTimeout = recorderTimeout,
+       _editSyncDelay = editSyncDelay,
        _repository = repository,
        _commandClient = commandClient,
        _commandBaseUrl = commandBaseUrl,
@@ -228,6 +232,8 @@ class RecordingsController extends ChangeNotifier {
 
   CloudSyncReport? _lastCloudSyncReport;
   Future<CloudSyncReport>? _cloudSyncInFlight;
+  final Duration _editSyncDelay;
+  Timer? _editSyncTimer;
 
   CloudSyncReport? get lastCloudSyncReport => _lastCloudSyncReport;
 
@@ -712,6 +718,28 @@ class RecordingsController extends ChangeNotifier {
     });
     _cloudSyncInFlight = guarded;
     return guarded;
+  }
+
+  /// Pushes a hand edit without waiting for SYNC NOW or the next launch.
+  /// Debounced, and only while signed in: signed out there is nothing to push
+  /// to, and a run per edit would only log "not configured". Best-effort like
+  /// every other sink — `syncCloud` never throws, and a failed run leaves the
+  /// edit in the outbox for the next one.
+  void _scheduleEditSync() {
+    if (_authGateway?.currentIdentity == null) return;
+    _editSyncTimer?.cancel();
+    _editSyncTimer = Timer(_editSyncDelay, () => unawaited(_runEditSync()));
+  }
+
+  Future<void> _runEditSync() async {
+    _editSyncTimer = null;
+    // A run already in flight took its snapshot before this edit, so joining
+    // it would push nothing; wait it out and start a fresh one.
+    while (_cloudSyncInFlight != null && !_disposed) {
+      await _cloudSyncInFlight;
+    }
+    if (_disposed) return;
+    await syncCloud();
   }
 
   Future<CloudSyncReport> _performCloudSync() async {
@@ -3606,6 +3634,7 @@ class RecordingsController extends ChangeNotifier {
         _mirrorsField(before, _recordings[index])) {
       await _mirrorToVault(id);
     }
+    if (source == RevisionSource.user) _scheduleEditSync();
     // Notifying does not. `_processOne` awaits a processor, so dispose can land
     // inside that gap; a disposed ChangeNotifier throws from notifyListeners,
     // and the drain runs unawaited, so the error would surface as an unhandled
@@ -3650,6 +3679,7 @@ class RecordingsController extends ChangeNotifier {
   void dispose() {
     _disposed = true; // lets an in-flight drain loop exit at the next boundary
     _timer?.cancel();
+    _editSyncTimer?.cancel();
     _processingTickerTimer?.cancel();
     _processingTickerTimer = null;
     unawaited(_amplitudeSub?.cancel());

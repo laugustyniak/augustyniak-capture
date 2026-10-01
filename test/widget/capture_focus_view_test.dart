@@ -170,6 +170,99 @@ void main() {
     },
   );
 
+  group('inline edit in the open capture', () {
+    Future<RecordingsController> openOnPhone(WidgetTester tester) async {
+      final RecordingsController controller = await buildRecordingsController(
+        appDir,
+        seed: <Recording>[
+          makeRecording(
+            id: 'inline',
+            title: 'Kitchen rebuild',
+            summary: 'Chase the worktop.',
+            transcript: 'Ring the joiner about the worktop.',
+          ),
+        ],
+      );
+      await pumpQueue(tester, controller, surface: const Size(393, 852));
+      await tester.tap(find.text('Kitchen rebuild'));
+      await tester.pumpAndSettle();
+      return controller;
+    }
+
+    Finder inPanel(Finder matching) =>
+        find.descendant(of: find.byType(CaptureDetailPanel), matching: matching);
+
+    Future<void> settleWrite(WidgetTester tester) async {
+      await tester.runAsync(
+        () => Future<void>.delayed(const Duration(milliseconds: 50)),
+      );
+      await tester.pump();
+    }
+
+    testWidgets('a clicked title becomes a field and saves on blur', (
+      WidgetTester tester,
+    ) async {
+      final RecordingsController controller = await openOnPhone(tester);
+
+      await tester.tap(inPanel(find.text('Kitchen rebuild')));
+      await tester.pump();
+      await tester.pump();
+      final Finder field = inPanel(find.byType(TextField));
+      expect(field, findsOneWidget);
+      await tester.enterText(field, 'Bathroom rebuild');
+      expect(controller.recordings.single.title, 'Kitchen rebuild');
+
+      // A click anywhere outside the field is the blur that writes it.
+      await tester.tap(inPanel(find.text('SUMMARY')));
+      await tester.pump();
+      await settleWrite(tester);
+
+      expect(inPanel(find.byType(TextField)), findsNothing);
+      expect(controller.recordings.single.title, 'Bathroom rebuild');
+      expect(inPanel(find.text('Bathroom rebuild')), findsOneWidget);
+    });
+
+    testWidgets('Escape abandons the pending edit', (
+      WidgetTester tester,
+    ) async {
+      final RecordingsController controller = await openOnPhone(tester);
+
+      await tester.tap(inPanel(find.text('Chase the worktop.')));
+      await tester.pump();
+      await tester.pump();
+      await tester.enterText(inPanel(find.byType(TextField)), 'Not this');
+      await tester.sendKeyEvent(LogicalKeyboardKey.escape);
+      await tester.pump();
+      await settleWrite(tester);
+
+      expect(inPanel(find.byType(TextField)), findsNothing);
+      expect(controller.recordings.single.summary, 'Chase the worktop.');
+    });
+
+    testWidgets('an emptied transcript is refused and put back', (
+      WidgetTester tester,
+    ) async {
+      final RecordingsController controller = await openOnPhone(tester);
+
+      await tester.tap(
+        inPanel(find.text('Ring the joiner about the worktop.')),
+      );
+      await tester.pump();
+      await tester.pump();
+      await tester.enterText(inPanel(find.byType(TextField)), '   ');
+      await tester.tap(inPanel(find.text('SUMMARY')));
+      await tester.pump();
+      await settleWrite(tester);
+
+      expect(
+        controller.recordings.single.transcript,
+        'Ring the joiner about the worktop.',
+      );
+      expect(find.textContaining('cannot be empty'), findsOneWidget);
+      await tester.pump(const Duration(seconds: 4));
+    });
+  });
+
   testWidgets('a phone row marks done from its check without opening', (
     WidgetTester tester,
   ) async {
