@@ -9,6 +9,7 @@ class RailDestination {
     required this.label,
     this.count,
     this.warn = false,
+    this.progress,
   });
 
   final IconData icon;
@@ -21,6 +22,10 @@ class RailDestination {
   /// Draws the amber dot the bottom navigation puts on Models while no provider
   /// profile is active, so "transcription is off" stays visible in both layouts.
   final bool warn;
+
+  /// Drawn as a ring around the icon in the collapsed rail — the Queue's
+  /// handed-off ratio, which the expanded rail prints as `CLEAR n / m`.
+  final double? progress;
 }
 
 /// The design's 216 px left rail: wordmark, destinations, review progress and
@@ -43,6 +48,8 @@ class ConsoleNavRail extends StatelessWidget {
     required this.onRecord,
     required this.onCapture,
     required this.busy,
+    this.expanded = true,
+    this.onToggleExpanded,
   });
 
   final List<RailDestination> destinations;
@@ -65,8 +72,18 @@ class ConsoleNavRail extends StatelessWidget {
   /// disappearing, so the column does not resize under the pointer.
   final bool busy;
 
+  /// Labels and the `CLEAR` strip at [Console.railWidth], or icons only at
+  /// [Console.railCollapsedWidth]. The collapsed form gives the Queue's
+  /// master list the 150 px the labels cost.
+  final bool expanded;
+
+  /// Null hides the toggle, which keeps the rail as it was for a host that
+  /// does not persist the choice.
+  final VoidCallback? onToggleExpanded;
+
   @override
   Widget build(BuildContext context) {
+    if (!expanded) return _buildCollapsed();
     return Container(
       width: Console.railWidth,
       decoration: BoxDecoration(
@@ -89,12 +106,298 @@ class ConsoleNavRail extends StatelessWidget {
                   onTap: () => onSelected(i),
                 ),
               const Spacer(),
+              if (onToggleExpanded != null) ...<Widget>[
+                Align(
+                  alignment: Alignment.centerLeft,
+                  child: _ToggleButton(expanded: true, onTap: onToggleExpanded!),
+                ),
+                const SizedBox(height: 8),
+              ],
               _ReviewProgress(reviewed: reviewed, total: total),
               const SizedBox(height: 10),
               _SecondaryButton(onTap: busy ? null : onCapture),
               const SizedBox(height: 8),
               _RecordButton(onTap: busy ? null : onRecord, busy: busy),
             ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildCollapsed() {
+    return Container(
+      width: Console.railCollapsedWidth,
+      decoration: BoxDecoration(
+        color: Console.surfaceDeep,
+        border: Border(right: BorderSide(color: Console.track)),
+      ),
+      child: SafeArea(
+        right: false,
+        child: Padding(
+          padding: const EdgeInsets.symmetric(vertical: 14),
+          child: Column(
+            children: <Widget>[
+              _Monogram(),
+              const SizedBox(height: 14),
+              for (int i = 0; i < destinations.length; i++)
+                _RailIconButton(
+                  destination: destinations[i],
+                  selected: i == selectedIndex,
+                  onTap: () => onSelected(i),
+                ),
+              const Spacer(),
+              if (onToggleExpanded != null)
+                _ToggleButton(expanded: false, onTap: onToggleExpanded!),
+              const SizedBox(height: 6),
+              _RoundButton(
+                tooltip: 'Note / upload',
+                semanticLabel: 'New note or upload',
+                onTap: busy ? null : onCapture,
+                child: Icon(
+                  Icons.add_rounded,
+                  size: 20,
+                  color: busy ? Console.dim : Console.mutedSoft,
+                ),
+              ),
+              const SizedBox(height: 8),
+              _RoundButton(
+                tooltip: 'Record',
+                semanticLabel: busy ? 'Saving capture' : 'Start recording',
+                filled: !busy,
+                onTap: busy ? null : onRecord,
+                child: busy
+                    ? SizedBox.square(
+                        dimension: 16,
+                        child: CircularProgressIndicator(
+                          strokeWidth: 2,
+                          color: Console.accent,
+                        ),
+                      )
+                    : Container(
+                        width: 12,
+                        height: 12,
+                        decoration: BoxDecoration(
+                          color: Console.ink,
+                          shape: BoxShape.circle,
+                        ),
+                      ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// The wordmark's tile on its own, for the collapsed rail.
+class _Monogram extends StatelessWidget {
+  _Monogram();
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: 36,
+      height: 36,
+      alignment: Alignment.center,
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(10),
+        gradient: LinearGradient(
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+          colors: <Color>[Console.accentDeep, Console.accent],
+        ),
+      ),
+      child: Text(
+        'A',
+        style: TextStyle(
+          fontFamily: ConsoleFont.display,
+          fontSize: 16,
+          fontWeight: FontWeight.w700,
+          color: Console.ink,
+        ),
+      ),
+    );
+  }
+}
+
+/// `231`, `3k` — a count that has to fit a 44 px button's corner.
+String _compactCount(int value) =>
+    value < 1000 ? '$value' : '${(value / 1000).floor()}k';
+
+class _RailIconButton extends StatelessWidget {
+  _RailIconButton({
+    required this.destination,
+    required this.selected,
+    required this.onTap,
+  });
+
+  final RailDestination destination;
+  final bool selected;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final double? progress = destination.progress;
+    return Tooltip(
+      message: destination.label,
+      waitDuration: const Duration(milliseconds: 300),
+      child: Semantics(
+        button: true,
+        selected: selected,
+        label: destination.count == null
+            ? destination.label
+            : '${destination.label}, ${destination.count}',
+        excludeSemantics: true,
+        child: Padding(
+          padding: const EdgeInsets.only(bottom: 6),
+          child: InkWell(
+            onTap: onTap,
+            borderRadius: BorderRadius.circular(10),
+            child: Container(
+              width: 44,
+              height: 44,
+              decoration: BoxDecoration(
+                color: selected
+                    ? Console.accent.withValues(alpha: .15)
+                    : Colors.transparent,
+                borderRadius: BorderRadius.circular(10),
+              ),
+              child: Stack(
+                alignment: Alignment.center,
+                clipBehavior: Clip.none,
+                children: <Widget>[
+                  if (progress != null)
+                    SizedBox.square(
+                      dimension: 34,
+                      child: CircularProgressIndicator(
+                        value: progress.clamp(0, 1),
+                        strokeWidth: 2,
+                        color: progress >= 1 ? Console.green : Console.accent,
+                        backgroundColor: Console.track,
+                      ),
+                    ),
+                  Icon(
+                    destination.icon,
+                    size: progress != null ? 16 : 20,
+                    color: selected ? Console.accent : Console.muted,
+                  ),
+                  if (destination.count != null)
+                    Positioned(
+                      top: 1,
+                      right: -2,
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 4,
+                          vertical: 1,
+                        ),
+                        decoration: BoxDecoration(
+                          color: Console.surfaceRaised,
+                          borderRadius: BorderRadius.circular(6),
+                        ),
+                        child: Text(
+                          _compactCount(destination.count!),
+                          style: ConsoleText.micro.copyWith(
+                            fontSize: 9,
+                            color: Console.dimText,
+                          ),
+                        ),
+                      ),
+                    ),
+                  if (destination.warn)
+                    Positioned(
+                      top: 6,
+                      right: 6,
+                      child: Container(
+                        width: 6,
+                        height: 6,
+                        decoration: BoxDecoration(
+                          color: Console.amber,
+                          shape: BoxShape.circle,
+                        ),
+                      ),
+                    ),
+                ],
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _RoundButton extends StatelessWidget {
+  _RoundButton({
+    required this.tooltip,
+    required this.semanticLabel,
+    required this.onTap,
+    required this.child,
+    this.filled = false,
+  });
+
+  final String tooltip;
+  final String semanticLabel;
+  final VoidCallback? onTap;
+  final Widget child;
+  final bool filled;
+
+  @override
+  Widget build(BuildContext context) {
+    return Tooltip(
+      message: tooltip,
+      child: Semantics(
+        button: true,
+        label: semanticLabel,
+        excludeSemantics: true,
+        child: InkWell(
+          onTap: onTap,
+          customBorder: const CircleBorder(),
+          child: Container(
+            width: 44,
+            height: 44,
+            alignment: Alignment.center,
+            decoration: BoxDecoration(
+              shape: BoxShape.circle,
+              color: filled ? Console.accent : Console.surface,
+              border: filled ? null : Border.all(color: Console.border),
+            ),
+            child: child,
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _ToggleButton extends StatelessWidget {
+  _ToggleButton({required this.expanded, required this.onTap});
+
+  final bool expanded;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final String label = expanded ? 'Collapse sidebar' : 'Expand sidebar';
+    return Tooltip(
+      message: label,
+      child: Semantics(
+        button: true,
+        label: label,
+        excludeSemantics: true,
+        child: InkWell(
+          onTap: onTap,
+          borderRadius: BorderRadius.circular(10),
+          child: SizedBox.square(
+            dimension: 44,
+            child: Icon(
+              expanded
+                  ? Icons.keyboard_double_arrow_left_rounded
+                  : Icons.keyboard_double_arrow_right_rounded,
+              size: 18,
+              color: Console.muted,
+            ),
           ),
         ),
       ),

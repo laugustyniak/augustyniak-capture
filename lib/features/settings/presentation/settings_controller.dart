@@ -20,6 +20,7 @@ import '../domain/app_settings.dart';
 import '../domain/app_theme_mode.dart';
 import '../domain/audio_config.dart';
 import '../domain/provider_profile.dart';
+import '../domain/queue_density.dart';
 import '../domain/token_cipher.dart';
 
 /// Owns runtime settings: transcription provider profiles and capture
@@ -102,6 +103,17 @@ class SettingsController extends ChangeNotifier {
 
   /// Text and font scale across the app.
   double get textScale => _settings.textScale;
+
+  /// Row height in the Queue's master list.
+  QueueDensity get queueDensity => _settings.queueDensity;
+
+  /// Whether the wide shell's rail is expanded to show labels.
+  bool get navRailExpanded => _settings.navRailExpanded;
+
+  Future<void> setNavRailExpanded(bool value) async {
+    if (value == _settings.navRailExpanded) return;
+    await _persist(_settings.copyWith(navRailExpanded: value));
+  }
 
   /// Never null: an untouched install resolves to the shipped default.
   String get enrichmentInstructions => _settings.enrichmentInstructions;
@@ -618,6 +630,13 @@ class SettingsController extends ChangeNotifier {
   Future<void> setThemeMode(AppThemeMode mode) async {
     if (mode == _settings.themeMode) return;
     await _persist(_settings.copyWith(themeMode: mode));
+  }
+
+  /// Set from the Queue toolbar and from the Config tab; both read it back
+  /// through [queueDensity], so the two toggles cannot disagree.
+  Future<void> setQueueDensity(QueueDensity value) async {
+    if (value == _settings.queueDensity) return;
+    await _persist(_settings.copyWith(queueDensity: value));
   }
 
   /// Change the font and UI text scale across the app.

@@ -9,6 +9,7 @@ import 'package:augustyniak_capture/features/recordings/domain/note_vault.dart';
 import 'package:augustyniak_capture/features/recordings/domain/recording.dart';
 import 'package:augustyniak_capture/features/recordings/presentation/audio_waveform_visualizer.dart';
 import 'package:augustyniak_capture/features/recordings/presentation/capture_focus_view.dart';
+import 'package:augustyniak_capture/features/recordings/presentation/queue_list_row.dart';
 import 'package:augustyniak_capture/features/recordings/presentation/queue_tab.dart';
 import 'package:augustyniak_capture/features/recordings/presentation/recording_card.dart';
 import 'package:augustyniak_capture/features/recordings/presentation/recording_editor.dart';
@@ -127,7 +128,7 @@ void main() {
   });
 
   testWidgets(
-    'tapping a compact card shows full summary and opens inline editing',
+    'on a phone a row opens the capture on its own page, editable there',
     (WidgetTester tester) async {
       final RecordingsController controller = await buildRecordingsController(
         appDir,
@@ -142,16 +143,53 @@ void main() {
       );
       await pumpQueue(tester, controller, surface: const Size(393, 852));
 
-      expect(find.byType(RecordingCard), findsOneWidget);
-      // The compact card displays the summary concisely.
+      // Rows, not cards: title and one summary line, nothing to act on.
+      expect(find.byType(RecordingCard), findsNothing);
+      expect(find.byType(QueueListRow), findsOneWidget);
       expect(find.text('Chase the worktop.'), findsOneWidget);
+      expect(find.text('Ring the joiner about the worktop.'), findsNothing);
 
       await tester.tap(find.text('Kitchen rebuild'));
       await tester.pumpAndSettle();
 
+      final Finder panel = find.byType(CaptureDetailPanel);
+      expect(panel, findsOneWidget);
+      expect(
+        find.descendant(
+          of: panel,
+          matching: find.text('Ring the joiner about the worktop.'),
+        ),
+        findsOneWidget,
+      );
+      // The keyboard legend is a desktop thing.
+      expect(find.textContaining('j / k'), findsNothing);
+
+      await tester.tap(find.bySemanticsLabel('Edit title and text'));
+      await tester.pumpAndSettle();
       expect(find.byType(RecordingEditor), findsOneWidget);
     },
   );
+
+  testWidgets('a phone detail page closes itself when its capture is deleted', (
+    WidgetTester tester,
+  ) async {
+    final RecordingsController controller = await buildRecordingsController(
+      appDir,
+      seed: <Recording>[
+        makeRecording(id: 'gone', title: 'Short-lived', transcript: 'x'),
+      ],
+    );
+    await pumpQueue(tester, controller, surface: const Size(393, 852));
+    await tester.tap(find.text('Short-lived'));
+    await tester.pumpAndSettle();
+    expect(find.byType(CaptureDetailPanel), findsOneWidget);
+
+    await tester.runAsync(() => controller.deleteRecording('gone'));
+    await tester.pumpAndSettle();
+
+    expect(find.byType(CaptureDetailPanel), findsNothing);
+    expect(find.text('Nothing captured yet.'), findsOneWidget);
+  });
 
   testWidgets('the focus view renders the capture as markdown', (
     WidgetTester tester,

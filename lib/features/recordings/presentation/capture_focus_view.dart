@@ -1,6 +1,8 @@
+import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
 import '../../../app/markdown_view.dart';
 import '../../../app/ui_kit.dart';
@@ -288,53 +290,15 @@ class _FocusBody extends StatelessWidget {
                     const SizedBox(height: 14),
                   ],
                   if (recording.error != null) ...<Widget>[
-                    Container(
-                      width: double.infinity,
-                      padding: const EdgeInsets.all(10),
-                      decoration: BoxDecoration(
-                        color: Console.red.withValues(alpha: .08),
-                        borderRadius: BorderRadius.circular(10),
-                        border: Border.all(
-                          color: Console.red.withValues(alpha: .35),
-                        ),
-                      ),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: <Widget>[
-                          Text(
-                            recording.error!,
-                            style: ConsoleText.micro.copyWith(
-                              color: Console.redSoft,
-                            ),
-                          ),
-                          if (onConfigureModels != null &&
-                              recording.error!
-                                  .toLowerCase()
-                                  .contains('not configured')) ...<Widget>[
-                            const SizedBox(height: 8),
-                            TextButton.icon(
-                              onPressed: () {
-                                Navigator.of(context).pop();
-                                onConfigureModels!();
-                              },
-                              style: TextButton.styleFrom(
-                                padding: const EdgeInsets.symmetric(
-                                  horizontal: 10,
-                                  vertical: 6,
-                                ),
-                                minimumSize: Size.zero,
-                                tapTargetSize:
-                                    MaterialTapTargetSize.shrinkWrap,
-                              ),
-                              icon: const Icon(Icons.tune, size: 15),
-                              label: const Text(
-                                'SET UP A MODEL',
-                                style: TextStyle(fontSize: 12),
-                              ),
-                            ),
-                          ],
-                        ],
-                      ),
+                    _ErrorBox(
+                      error: recording.error!,
+                      // Leaves first: the Models tab is behind this dialog.
+                      onConfigureModels: onConfigureModels == null
+                          ? null
+                          : () {
+                              Navigator.of(context).pop();
+                              onConfigureModels!();
+                            },
                     ),
                     const SizedBox(height: 14),
                   ],
@@ -435,6 +399,57 @@ String _emptyTextFor(Recording recording) => switch (recording.status) {
     'Processing failed. The source file is intact — retry below.',
   RecordingStatus.completed => 'This capture produced no text.',
 };
+
+/// Why processing failed, with the one fix the app can offer in place when
+/// the cause is a missing model.
+class _ErrorBox extends StatelessWidget {
+  _ErrorBox({required this.error, this.onConfigureModels});
+
+  final String error;
+  final VoidCallback? onConfigureModels;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(10),
+      decoration: BoxDecoration(
+        color: Console.red.withValues(alpha: .08),
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(color: Console.red.withValues(alpha: .35)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: <Widget>[
+          Text(
+            error,
+            style: ConsoleText.micro.copyWith(color: Console.redSoft),
+          ),
+          if (onConfigureModels != null &&
+              error.toLowerCase().contains('not configured')) ...<Widget>[
+            const SizedBox(height: 8),
+            TextButton.icon(
+              onPressed: onConfigureModels,
+              style: TextButton.styleFrom(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 10,
+                  vertical: 6,
+                ),
+                minimumSize: Size.zero,
+                tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+              ),
+              icon: const Icon(Icons.tune, size: 15),
+              label: const Text(
+                'SET UP A MODEL',
+                style: TextStyle(fontSize: 12),
+              ),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+}
 
 class _Header extends StatelessWidget {
   _Header({
@@ -959,7 +974,682 @@ class _AudioPlaybackBarState extends State<_AudioPlaybackBar> {
       ),
     );
   }
+
 }
 
+/// The selected capture, drawn whole beside the master list of the wide Queue.
+///
+/// The same surface as the focus dialog, laid out for a column that is always
+/// on screen: no close control, a labelled action bar instead of a row of
+/// icons, the text held to a reading measure, and the file facts in a column
+/// of their own when there is width for one. It reads through [controller]
+/// for the reason the dialog does — the item keeps moving while it is shown —
+/// and adds no capture logic: every control calls the controller entry point
+/// the card calls.
+class CaptureDetailPanel extends StatelessWidget {
+  CaptureDetailPanel({
+    super.key,
+    required this.controller,
+    required this.recording,
+    required this.projectName,
+    required this.showMetaColumn,
+    required this.onEdit,
+    required this.onToggleProcessed,
+    this.isMarkingDone = false,
+    this.onConfigureModels,
+    this.costUsd,
+    this.scrollController,
+    this.compact = false,
+  });
 
+  final RecordingsController controller;
+  final Recording recording;
+  final String? projectName;
 
+  /// True at [Console.detailMetaBreakpoint] and above: the facts move out of
+  /// the reading column into a fixed one beside it.
+  final bool showMetaColumn;
+  final VoidCallback onEdit;
+
+  /// Routed through the queue rather than straight to the controller, so the
+  /// panel's Mark done gets the same saving/done feedback the card's does.
+  final VoidCallback onToggleProcessed;
+  final bool isMarkingDone;
+  final VoidCallback? onConfigureModels;
+  final double? costUsd;
+  final ScrollController? scrollController;
+
+  /// The phone's full-screen page: tighter gutters and a smaller title, the
+  /// same content in the same order.
+  final bool compact;
+
+  /// The reading measure: about 72 characters of 15 px text.
+  static const double readingWidth = 680;
+
+  @override
+  Widget build(BuildContext context) {
+    final String transcript = (recording.transcript ?? '').trim();
+    final String summary = (recording.summary ?? '').trim();
+    final int wordCount = transcript.isEmpty
+        ? 0
+        : transcript
+              .split(RegExp(r'\s+'))
+              .where((String s) => s.isNotEmpty)
+              .length;
+
+    final Widget article = ConstrainedBox(
+      constraints: const BoxConstraints(maxWidth: readingWidth),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: <Widget>[
+          _PanelBadges(
+            controller: controller,
+            recording: recording,
+            projectName: projectName,
+          ),
+          const SizedBox(height: 14),
+          Text(
+            displayNameFor(recording),
+            style: ConsoleText.cardTitle.copyWith(
+              fontSize: compact ? 22 : 26,
+              height: 1.2,
+            ),
+          ),
+          const SizedBox(height: 8),
+          Text(
+            metaLineFor(
+              recording,
+              File(recording.filePath).uri.pathSegments.last,
+            ),
+            style: ConsoleText.cardMeta.copyWith(fontSize: 13),
+          ),
+          const SizedBox(height: 20),
+          if (recording.type.isPlayableAudio &&
+              recording.filePath.isNotEmpty) ...<Widget>[
+            _AudioPlaybackBar(controller: controller, recording: recording),
+            const SizedBox(height: 16),
+          ],
+          if (recording.type == CaptureType.video &&
+              recording.filePath.isNotEmpty) ...<Widget>[
+            InlineVideoPlayer.forRecording(
+              recording: recording,
+              onOpenExternal: () => controller.openSource(recording.id),
+            ),
+            const SizedBox(height: 16),
+          ],
+          if (recording.type == CaptureType.image &&
+              recording.filePath.isNotEmpty) ...<Widget>[
+            _SourceImagePreview(file: File(recording.filePath)),
+            const SizedBox(height: 16),
+          ],
+          _PanelActions(
+            controller: controller,
+            recording: recording,
+            projectName: projectName,
+            onEdit: onEdit,
+            onToggleProcessed: onToggleProcessed,
+            isMarkingDone: isMarkingDone,
+          ),
+          const SizedBox(height: 24),
+          if (recording.error != null) ...<Widget>[
+            _ErrorBox(
+              error: recording.error!,
+              onConfigureModels: onConfigureModels,
+            ),
+            const SizedBox(height: 22),
+          ],
+          if (controller.isEnriching(recording.id)) ...<Widget>[
+            ProcessingStrip(enriching: true, type: recording.type),
+            const SizedBox(height: 22),
+          ] else if (recording.status ==
+              RecordingStatus.transcribing) ...<Widget>[
+            ProcessingStrip(
+              enriching: false,
+              type: recording.type,
+              elapsed: controller.processingElapsedFor(recording.id),
+            ),
+            const SizedBox(height: 22),
+          ],
+          if (summary.isNotEmpty) ...<Widget>[
+            _PanelSectionLabel(label: 'Summary'),
+            const SizedBox(height: 8),
+            SimpleMarkdown(
+              text: summary,
+              baseStyle: ConsoleText.body.copyWith(
+                fontSize: 16,
+                height: 1.6,
+                color: Console.text,
+              ),
+              accentColor: Console.accent,
+              mutedColor: Console.muted,
+              borderColor: Console.border,
+            ),
+            const SizedBox(height: 24),
+          ],
+          _PanelSectionLabel(
+            label: transcript.isEmpty
+                ? 'Transcript'
+                : 'Transcript · $wordCount words',
+          ),
+          const SizedBox(height: 8),
+          if (transcript.isEmpty)
+            Text(
+              _emptyTextFor(recording),
+              style: ConsoleText.body.copyWith(
+                fontSize: 15,
+                color: Console.muted,
+              ),
+            )
+          else
+            SimpleMarkdown(
+              text: transcript,
+              baseStyle: ConsoleText.body.copyWith(
+                fontSize: 15,
+                height: 1.65,
+                color: Console.textSoft,
+              ),
+              accentColor: Console.accent,
+              mutedColor: Console.muted,
+              borderColor: Console.border,
+            ),
+          if (recording.tags.isNotEmpty) ...<Widget>[
+            const SizedBox(height: 24),
+            Wrap(
+              spacing: 6,
+              runSpacing: 6,
+              crossAxisAlignment: WrapCrossAlignment.center,
+              children: <Widget>[
+                for (final String tag in recording.tags)
+                  Container(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 9,
+                      vertical: 3,
+                    ),
+                    decoration: BoxDecoration(
+                      color: Console.surfaceRaised,
+                      borderRadius: BorderRadius.circular(6),
+                    ),
+                    child: Text(
+                      '#$tag',
+                      style: ConsoleText.body.copyWith(
+                        fontSize: 12,
+                        color: Console.muted,
+                      ),
+                    ),
+                  ),
+                CopyButton(
+                  text: tagsClipboardText(recording.tags),
+                  tooltip: 'Copy tags',
+                  semanticLabel: 'Copy tags to clipboard',
+                  size: 26,
+                  iconSize: 13,
+                ),
+              ],
+            ),
+          ],
+          if (recording.routes.isNotEmpty) ...<Widget>[
+            const SizedBox(height: 18),
+            Row(
+              children: <Widget>[
+                Icon(
+                  Icons.subdirectory_arrow_right_rounded,
+                  size: 14,
+                  color: Console.green,
+                ),
+                const SizedBox(width: 6),
+                Expanded(
+                  child: Text(
+                    recording.routes.last.target,
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                    style: ConsoleText.micro.copyWith(color: Console.green),
+                  ),
+                ),
+              ],
+            ),
+          ],
+        ],
+      ),
+    );
+
+    final Widget meta = _PanelMeta(
+      controller: controller,
+      recording: recording,
+      costUsd: costUsd,
+      showKeys: !compact,
+    );
+
+    return SelectionArea(
+      child: ListView(
+        controller: scrollController,
+        padding: compact
+            ? const EdgeInsets.fromLTRB(16, 16, 16, 32)
+            : const EdgeInsets.fromLTRB(48, 36, 48, 48),
+        children: <Widget>[
+          if (showMetaColumn)
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: <Widget>[
+                Expanded(
+                  child: Align(alignment: Alignment.topLeft, child: article),
+                ),
+                const SizedBox(width: 48),
+                SizedBox(width: Console.detailMetaWidth, child: meta),
+              ],
+            )
+          else ...<Widget>[
+            article,
+            const SizedBox(height: 32),
+            ConstrainedBox(
+              constraints: const BoxConstraints(maxWidth: readingWidth),
+              child: meta,
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+}
+
+class _PanelSectionLabel extends StatelessWidget {
+  _PanelSectionLabel({required this.label});
+
+  final String label;
+
+  @override
+  Widget build(BuildContext context) {
+    return Text(
+      label.toUpperCase(),
+      style: ConsoleText.micro.copyWith(
+        fontSize: 11,
+        letterSpacing: 1.3,
+        color: Console.muted,
+      ),
+    );
+  }
+}
+
+/// Category first — it is the one coloured label, and the only place besides
+/// the list's dot that the category colour is spent — then the project, then
+/// whatever the pipeline is doing.
+class _PanelBadges extends StatelessWidget {
+  _PanelBadges({
+    required this.controller,
+    required this.recording,
+    required this.projectName,
+  });
+
+  final RecordingsController controller;
+  final Recording recording;
+  final String? projectName;
+
+  @override
+  Widget build(BuildContext context) {
+    final bool enriching = controller.isEnriching(recording.id);
+    return Wrap(
+      spacing: 8,
+      runSpacing: 6,
+      crossAxisAlignment: WrapCrossAlignment.center,
+      children: <Widget>[
+        if (recording.category != null)
+          StatusPill(
+            label: recording.category!.label,
+            color: categoryColorFor(recording.category),
+            outlined: true,
+          ),
+        if (enriching)
+          StatusPill(label: 'ANALYZING', color: Console.accent, pulse: true)
+        else
+          switch (recording.status) {
+            RecordingStatus.saved => StatusPill(
+              label: 'RAW',
+              color: Console.muted,
+            ),
+            RecordingStatus.pendingTranscription => StatusPill(
+              label: 'QUEUED',
+              color: Console.amber,
+            ),
+            RecordingStatus.transcribing => StatusPill(
+              label: recording.type == CaptureType.image
+                  ? 'EXTRACTING'
+                  : 'TRANSCRIBING',
+              color: Console.accent,
+              pulse: true,
+            ),
+            RecordingStatus.failed => StatusPill(
+              label: 'FAILED',
+              color: Console.red,
+            ),
+            RecordingStatus.completed => const SizedBox.shrink(),
+          },
+        if (projectName != null)
+          Text(
+            projectName!,
+            style: ConsoleText.body.copyWith(
+              fontSize: 13,
+              color: Console.muted,
+            ),
+          ),
+      ],
+    );
+  }
+}
+
+/// Every action the card offers, spelled out. Enrich leads because it is the
+/// one that changes what the list shows; Mark done sits apart at the end
+/// because it is the one that takes the capture off the desk.
+class _PanelActions extends StatelessWidget {
+  _PanelActions({
+    required this.controller,
+    required this.recording,
+    required this.projectName,
+    required this.onEdit,
+    required this.onToggleProcessed,
+    required this.isMarkingDone,
+  });
+
+  final RecordingsController controller;
+  final Recording recording;
+  final String? projectName;
+  final VoidCallback onEdit;
+  final VoidCallback onToggleProcessed;
+  final bool isMarkingDone;
+
+  @override
+  Widget build(BuildContext context) {
+    final bool canRetry =
+        recording.status == RecordingStatus.failed ||
+        recording.awaitsProcessing;
+    final bool canCancel =
+        recording.status == RecordingStatus.transcribing ||
+        recording.status == RecordingStatus.pendingTranscription;
+    final bool reviewed = recording.isProcessedByUser;
+    final String transcript = (recording.transcript ?? '').trim();
+    final bool hasTranscript = transcript.isNotEmpty;
+    final bool isEnriching = controller.isEnriching(recording.id);
+    final bool isPlaying = controller.playingId == recording.id;
+
+    final List<Widget> leading = <Widget>[
+      if (canCancel)
+        _PanelButton(
+          icon: Icons.close_rounded,
+          label: 'Cancel',
+          onPressed: () => controller.cancelProcessing(recording.id),
+        ),
+      if (canRetry)
+        _PanelButton(
+          icon: Icons.refresh_rounded,
+          label: 'Retry',
+          primary: true,
+          onPressed: () => controller.retryTranscription(recording.id),
+        ),
+      if (hasTranscript)
+        _PanelButton(
+          icon: Icons.auto_awesome_outlined,
+          label: 'Enrich',
+          primary: !canRetry,
+          semanticLabel: 'Run LLM enrichment',
+          onPressed: isEnriching
+              ? null
+              : () => controller.retryEnrichment(recording.id),
+        ),
+      if (recording.type.isPlayableAudio)
+        _PanelButton(
+          icon: isPlaying ? Icons.stop_rounded : Icons.play_arrow_rounded,
+          label: isPlaying ? 'Stop' : 'Play',
+          semanticLabel: isPlaying ? 'Stop playback' : 'Play recording',
+          onPressed: () => controller.togglePlayback(recording.id),
+        )
+      else if (recording.type == CaptureType.video)
+        _PanelButton(
+          icon: Icons.open_in_new_rounded,
+          label: 'Open',
+          semanticLabel: RecordingCard.openVideoLabel,
+          onPressed: () => controller.openSource(recording.id),
+        ),
+      if (controller.canHandoff(recording) && !reviewed)
+        _PanelButton(
+          icon: Icons.smart_toy_outlined,
+          label: 'Agent',
+          semanticLabel: RecordingCard.handoffLabel,
+          onPressed: () => showHandoffSheet(
+            context,
+            controller: controller,
+            recording: recording,
+            projectName: projectName,
+          ),
+        ),
+      if (controller.canRoute(recording) && !reviewed)
+        _PanelButton(
+          icon: Icons.outbound_outlined,
+          label: 'Route',
+          semanticLabel: RecordingCard.routeLabel,
+          onPressed: () => controller.route(recording.id),
+        ),
+      if (controller.mirrorsToVault && hasTranscript)
+        _PanelButton(
+          icon: Icons.folder_shared_outlined,
+          label: 'Vault',
+          semanticLabel: 'Sync to Obsidian vault',
+          onPressed: () => controller.retryVaultMirror(recording.id),
+        ),
+      _PanelButton(
+        icon: Icons.edit_outlined,
+        label: 'Edit',
+        semanticLabel: 'Edit title and text',
+        onPressed: onEdit,
+      ),
+      if (hasTranscript) _PanelCopyButton(text: transcript),
+    ];
+
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: <Widget>[
+        Expanded(child: Wrap(spacing: 6, runSpacing: 6, children: leading)),
+        const SizedBox(width: 12),
+        _PanelButton(
+          icon: reviewed
+              ? Icons.check_circle_rounded
+              : Icons.check_circle_outline_rounded,
+          label: reviewed ? 'Reopen' : 'Mark done',
+          semanticLabel: reviewed ? 'Reopen capture' : 'Mark reviewed',
+          outlined: true,
+          onPressed: isMarkingDone ? null : onToggleProcessed,
+        ),
+      ],
+    );
+  }
+}
+
+class _PanelButton extends StatelessWidget {
+  _PanelButton({
+    required this.icon,
+    required this.label,
+    required this.onPressed,
+    this.semanticLabel,
+    this.primary = false,
+    this.outlined = false,
+  });
+
+  final IconData icon;
+  final String label;
+  final VoidCallback? onPressed;
+  final String? semanticLabel;
+  final bool primary;
+  final bool outlined;
+
+  @override
+  Widget build(BuildContext context) {
+    final Color foreground = primary ? Console.ink : Console.text;
+    final ButtonStyle style = TextButton.styleFrom(
+      foregroundColor: foreground,
+      backgroundColor: primary ? Console.accent : Colors.transparent,
+      disabledForegroundColor: Console.muted,
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+      minimumSize: const Size(0, 34),
+      textStyle: ConsoleText.body.copyWith(
+        fontSize: 13,
+        fontWeight: FontWeight.w600,
+      ),
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(8),
+        side: outlined || !primary
+            ? BorderSide(color: Console.border)
+            : BorderSide.none,
+      ),
+    );
+    final Widget button = TextButton.icon(
+      onPressed: onPressed,
+      style: style,
+      icon: Icon(icon, size: 16),
+      label: Text(label),
+    );
+    if (semanticLabel == null) return button;
+    return Semantics(
+      label: semanticLabel,
+      button: true,
+      excludeSemantics: true,
+      enabled: onPressed != null,
+      onTap: onPressed,
+      child: button,
+    );
+  }
+}
+
+/// Copy with a label that answers. The app uses no snackbars, so the button
+/// itself says `Copied` for a moment, the way [CopyButton] morphs its icon.
+class _PanelCopyButton extends StatefulWidget {
+  const _PanelCopyButton({required this.text});
+
+  final String text;
+
+  @override
+  State<_PanelCopyButton> createState() => _PanelCopyButtonState();
+}
+
+class _PanelCopyButtonState extends State<_PanelCopyButton> {
+  bool _copied = false;
+  Timer? _reset;
+
+  @override
+  void dispose() {
+    _reset?.cancel();
+    super.dispose();
+  }
+
+  Future<void> _copy() async {
+    await Clipboard.setData(ClipboardData(text: widget.text));
+    if (!mounted) return;
+    setState(() => _copied = true);
+    _reset?.cancel();
+    _reset = Timer(const Duration(milliseconds: 1400), () {
+      if (mounted) setState(() => _copied = false);
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return _PanelButton(
+      icon: _copied ? Icons.check_rounded : Icons.copy_rounded,
+      label: _copied ? 'Copied' : 'Copy',
+      semanticLabel: 'Copy full text to clipboard',
+      onPressed: _copy,
+    );
+  }
+}
+
+/// The facts the card used to print in its footer, one per line.
+class _PanelMeta extends StatelessWidget {
+  _PanelMeta({
+    required this.controller,
+    required this.recording,
+    required this.costUsd,
+    required this.showKeys,
+  });
+
+  final RecordingsController controller;
+  final Recording recording;
+  final double? costUsd;
+
+  /// The shortcut legend, which means nothing on a phone.
+  final bool showKeys;
+
+  @override
+  Widget build(BuildContext context) {
+    final List<(String, Widget)> rows = <(String, Widget)>[
+      ('File', _value('verified')),
+      ('Size', _value(formatBytes(recording.totalSizeBytes) ?? '—')),
+      ('Cost', _value(costUsd == null ? '—' : formatUsd(costUsd!))),
+      ('Saved', _value(formatDateTime(recording.createdAt))),
+      ('Index', _value('persisted')),
+      ('Status', _value(_statusLabel())),
+      if (recording.segments.isNotEmpty)
+        ('Segments', _value('${recording.segments.length}')),
+      if (controller.mirrorsToVault &&
+          (recording.transcript ?? '').trim().isNotEmpty)
+        (
+          'Vault',
+          _VaultSyncBadge(controller: controller, recordingId: recording.id),
+        ),
+    ];
+    return Container(
+      decoration: BoxDecoration(
+        border: Border(top: BorderSide(color: Console.border)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: <Widget>[
+          for (final (String key, Widget value) in rows)
+            Container(
+              padding: const EdgeInsets.symmetric(vertical: 10),
+              decoration: BoxDecoration(
+                border: Border(bottom: BorderSide(color: Console.border)),
+              ),
+              child: Row(
+                children: <Widget>[
+                  Text(
+                    key,
+                    style: ConsoleText.body.copyWith(
+                      fontSize: 13,
+                      color: Console.muted,
+                    ),
+                  ),
+                  const Spacer(),
+                  value,
+                ],
+              ),
+            ),
+          if (showKeys) ...<Widget>[
+          const SizedBox(height: 16),
+          Text(
+            'j / k  move · enter  edit\n'
+            'space  play · d / x  done\n'
+            'r  route · a  agent · /  search',
+            style: ConsoleText.micro.copyWith(
+              height: 1.7,
+              color: Console.muted,
+            ),
+          ),
+          ],
+        ],
+      ),
+    );
+  }
+
+  Widget _value(String text) => Text(
+    text,
+    style: ConsoleText.cardMeta.copyWith(fontSize: 13, color: Console.text),
+  );
+
+  String _statusLabel() {
+    if (controller.isEnriching(recording.id)) return 'analyzing';
+    return switch (recording.status) {
+      RecordingStatus.saved => 'raw',
+      RecordingStatus.pendingTranscription => 'queued',
+      RecordingStatus.transcribing => 'transcribing',
+      RecordingStatus.failed => 'failed',
+      RecordingStatus.completed =>
+        recording.category == null ? 'ready' : 'enriched',
+    };
+  }
+}

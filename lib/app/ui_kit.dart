@@ -256,10 +256,28 @@ class Console {
   /// insets the page beside it, so the two cannot drift apart.
   static const double railWidth = 216;
 
-  /// At and above this width, the Queue splits captures into a responsive
-  /// two-column layout on wide desktop displays, maintaining comfortable
-  /// line lengths and visual density.
-  static const double wideDesktopBreakpoint = 1600;
+  /// The rail's icon-only width, its default on desktop.
+  static const double railCollapsedWidth = 64;
+
+  /// At and above this width the Queue is master–detail: a column of one-line
+  /// rows to scan, and the selected capture drawn whole beside it. Measured
+  /// on the Queue's own constraints, not the window, so the rail's width is
+  /// already spent by the time it is compared. It replaced the two-column
+  /// card grid that used to start at 1600.
+  static const double masterDetailBreakpoint = 1280;
+
+  /// The master list's width bounds. The lower one is what a row needs to
+  /// keep its title, three tags, project and two mono columns on one line;
+  /// the upper one stops a 4K window turning each row into a sentence the eye
+  /// has to travel across.
+  static const double masterListMinWidth = 560;
+  static const double masterListMaxWidth = 820;
+
+  /// At and above this Queue width the detail panel splits into the reading
+  /// column and a fixed meta column beside it; below it the meta facts sit
+  /// under the text.
+  static const double detailMetaBreakpoint = 2200;
+  static const double detailMetaWidth = 300;
 
   /// Returns an automatic display scaling multiplier for desktop viewports.
   /// On high-resolution displays (e.g. 4K, 1440p) where devicePixelRatio

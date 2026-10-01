@@ -4,6 +4,7 @@ import 'package:augustyniak_capture/features/settings/domain/app_settings.dart';
 import 'package:augustyniak_capture/features/settings/domain/app_theme_mode.dart';
 import 'package:augustyniak_capture/features/settings/domain/audio_config.dart';
 import 'package:augustyniak_capture/features/settings/domain/provider_profile.dart';
+import 'package:augustyniak_capture/features/settings/domain/queue_density.dart';
 import 'package:augustyniak_capture/features/settings/presentation/settings_controller.dart';
 import 'package:augustyniak_capture/features/enrichment/data/http_chat_enrichment_service.dart';
 import 'package:augustyniak_capture/features/enrichment/domain/enrichment_defaults.dart';
@@ -393,6 +394,50 @@ void main() {
       expect(
         AppSettings.fromJson(<String, dynamic>{'themeMode': 7}).themeMode,
         AppThemeMode.system,
+      );
+    });
+
+    test('queue density survives a round-trip and defaults to compact', () {
+      const AppSettings original = AppSettings(
+        queueDensity: QueueDensity.comfortable,
+      );
+
+      expect(
+        AppSettings.fromJson(original.toJson()).queueDensity,
+        QueueDensity.comfortable,
+      );
+      // The default is not written, so a file that never touched the toggle
+      // serialises exactly as it did before the field existed.
+      expect(const AppSettings().toJson().containsKey('queueDensity'), isFalse);
+      expect(
+        AppSettings.fromJson(<String, dynamic>{}).queueDensity,
+        QueueDensity.compact,
+      );
+      expect(
+        AppSettings.fromJson(<String, dynamic>{
+          'queueDensity': 'spacious',
+        }).queueDensity,
+        QueueDensity.compact,
+      );
+      expect(
+        original.copyWith(themeMode: AppThemeMode.dark).queueDensity,
+        QueueDensity.comfortable,
+      );
+    });
+
+    test('rail expansion survives a round-trip and defaults to collapsed', () {
+      const AppSettings original = AppSettings(navRailExpanded: true);
+      expect(AppSettings.fromJson(original.toJson()).navRailExpanded, isTrue);
+      expect(
+        const AppSettings().toJson().containsKey('navRailExpanded'),
+        isFalse,
+      );
+      expect(AppSettings.fromJson(<String, dynamic>{}).navRailExpanded, isFalse);
+      expect(
+        AppSettings.fromJson(<String, dynamic>{
+          'navRailExpanded': 'yes',
+        }).navRailExpanded,
+        isFalse,
       );
     });
 
