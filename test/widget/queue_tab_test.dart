@@ -1597,6 +1597,68 @@ void main() {
     );
   });
 
+  testWidgets("a row's check marks it done without selecting it", (
+    WidgetTester tester,
+  ) async {
+    tester.view.physicalSize = const Size(1800, 1000);
+    tester.view.devicePixelRatio = 1.0;
+    addTearDown(() {
+      tester.view.resetPhysicalSize();
+      tester.view.resetDevicePixelRatio();
+    });
+
+    final RecordingsController controller = await buildRecordingsController(
+      appDir,
+      seed: <Recording>[
+        makeRecording(
+          id: 'c-1',
+          title: 'First capture',
+          transcript: 'First transcript',
+          type: CaptureType.text,
+        ),
+        makeRecording(
+          id: 'c-2',
+          title: 'Second capture',
+          transcript: 'Second transcript',
+          type: CaptureType.text,
+        ),
+        makeRecording(
+          id: 'c-3',
+          title: 'Third capture',
+          transcript: 'Third transcript',
+          type: CaptureType.text,
+        ),
+      ],
+    );
+    await pumpQueue(tester, controller);
+
+    // One check per row.
+    expect(find.bySemanticsLabel('Mark capture done'), findsNWidgets(3));
+    await tester.tap(find.bySemanticsLabel('Mark capture done').at(1));
+    await tester.runAsync(
+      () => Future<void>.delayed(const Duration(milliseconds: 50)),
+    );
+    await tester.pump();
+
+    expect(
+      controller.recordings
+          .firstWhere((Recording r) => r.id == 'c-2')
+          .isProcessedByUser,
+      isTrue,
+    );
+    // The Desk filter dropped it; the panel never moved off the first row,
+    // because the check is not a click on the row.
+    expect(find.byType(QueueListRow), findsNWidgets(2));
+    expect(
+      find.descendant(
+        of: find.byType(CaptureDetailPanel),
+        matching: find.text('First transcript'),
+      ),
+      findsOneWidget,
+    );
+    await tester.pump(const Duration(seconds: 2));
+  });
+
   testWidgets('x marks the selected capture done and the panel moves on', (
     WidgetTester tester,
   ) async {

@@ -877,6 +877,8 @@ class _QueueTabState extends State<QueueTab> {
                     isEnriching: controller.isEnriching(item.id),
                     density: widget.density,
                     projectName: _projectName(item.projectId),
+                    onToggleDone: () => _toggleProcessed(item),
+                    isMarkingDone: markingDoneIds.contains(item.id),
                     onTap: () {
                       setState(() => focusedId = item.id);
                       // A click lands focus on the row's ink, which is outside
@@ -970,6 +972,8 @@ class _QueueTabState extends State<QueueTab> {
                       density: widget.density,
                       projectName: _projectName(item.projectId),
                       narrow: true,
+                      onToggleDone: () => _toggleProcessed(item),
+                      isMarkingDone: markingDoneIds.contains(item.id),
                       onTap: () => _openDetailPage(item),
                     );
                   },

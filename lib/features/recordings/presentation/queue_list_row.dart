@@ -8,9 +8,11 @@ import 'card_parts.dart';
 
 /// One capture in the master list of the wide Queue.
 ///
-/// A row is for *finding* a capture, never for acting on it: every action, the
-/// transcript, the durability line and the copy buttons live in the detail
-/// panel beside the list. What stays is exactly what tells two neighbours
+/// A row is for *finding* a capture. The one action it carries is the done
+/// check at its end — closing captures is what the list is worked through
+/// for, and opening each one to reach Mark done made that a two-step chore.
+/// Every other action, the transcript, the durability line and the copy
+/// buttons live in the detail panel beside the list. What stays is exactly what tells two neighbours
 /// apart at a glance — the category dot, the title, up to three tags, one
 /// summary line, the project and two mono columns of time.
 ///
@@ -27,6 +29,8 @@ class QueueListRow extends StatelessWidget {
     required this.onTap,
     this.projectName,
     this.narrow = false,
+    this.onToggleDone,
+    this.isMarkingDone = false,
   });
 
   final Recording recording;
@@ -40,6 +44,13 @@ class QueueListRow extends StatelessWidget {
   /// keep the width a 393 px screen can spare. Both facts are one tap away
   /// in the detail page.
   final bool narrow;
+
+  /// Marks the capture done, or reopens it. Null draws no check, which keeps
+  /// the row as it was for a host that offers no such action.
+  final VoidCallback? onToggleDone;
+
+  /// The done write is in flight: the check shows a spinner and ignores taps.
+  final bool isMarkingDone;
 
   /// Rendered instead of the summary while the model reads the capture, so a
   /// row that is about to change says so instead of showing a stale line.
@@ -61,109 +72,130 @@ class QueueListRow extends StatelessWidget {
       color: Console.muted,
     );
 
-    return Semantics(
-      button: true,
-      selected: selected,
-      label: displayNameFor(recording),
-      excludeSemantics: true,
-      child: Material(
-        color: selected
-            ? Console.accent.withValues(alpha: .10)
-            : Colors.transparent,
-        child: InkWell(
-          onTap: onTap,
-          hoverColor: Console.surfaceRaised,
-          child: Container(
-            padding: EdgeInsets.symmetric(
-              horizontal: narrow ? 12 : 16,
-              // 10 px on a phone, not 8: two lines plus this clears the 44 px
-              // touch target the row has to be.
-              vertical: comfortable ? 14 : (narrow ? 10 : 8),
-            ),
-            decoration: BoxDecoration(
-              border: selected
-                  ? Border.all(color: Console.accent.withValues(alpha: .30))
-                  : Border(
-                      bottom: BorderSide(
-                        color: Console.border.withValues(alpha: .6),
-                      ),
+    return Material(
+      color: selected
+          ? Console.accent.withValues(alpha: .10)
+          : Colors.transparent,
+      child: InkWell(
+        onTap: onTap,
+        hoverColor: Console.surfaceRaised,
+        child: Container(
+          padding: EdgeInsets.symmetric(
+            horizontal: narrow ? 12 : 16,
+            // 10 px on a phone, not 8: two lines plus this clears the 44 px
+            // touch target the row has to be.
+            vertical: comfortable ? 14 : (narrow ? 10 : 8),
+          ),
+          decoration: BoxDecoration(
+            border: selected
+                ? Border.all(color: Console.accent.withValues(alpha: .30))
+                : Border(
+                    bottom: BorderSide(
+                      color: Console.border.withValues(alpha: .6),
                     ),
-            ),
-            child: Row(
-              crossAxisAlignment: CrossAxisAlignment.center,
-              children: <Widget>[
-                _Dot(
-                  // State outranks label, as on the phone row: a failure or a
-                  // job still running is the thing that changes, so it takes
-                  // the one colour this row spends.
-                  color: failed
-                      ? Console.red
-                      : processing ||
-                            recording.status != RecordingStatus.completed
-                      ? Console.accent
-                      : categoryColorFor(recording.category),
-                  pulse: processing,
-                ),
-                const SizedBox(width: _gap),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    mainAxisSize: MainAxisSize.min,
+                  ),
+          ),
+          child: Row(
+            children: <Widget>[
+              Expanded(
+                // The row's own semantics cover its content only, so the
+                // check beside it stays a separate control for a screen
+                // reader rather than being swallowed into the row's label.
+                child: Semantics(
+                  button: true,
+                  selected: selected,
+                  label: displayNameFor(recording),
+                  excludeSemantics: true,
+                  onTap: onTap,
+                  child: Row(
+                    crossAxisAlignment: CrossAxisAlignment.center,
                     children: <Widget>[
-                      // No tags on a phone: at 393 px they can only be
-                      // bought with the title, which is what tells rows apart.
-                      _TitleLine(recording: recording, showTags: !narrow),
-                      const SizedBox(height: 3),
-                      Text(
-                        _secondLine(),
-                        maxLines: comfortable ? 2 : 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: ConsoleText.body.copyWith(
-                          fontSize: 13,
-                          height: 1.45,
-                          color: failed ? Console.redSoft : Console.muted,
+                      _Dot(
+                        // State outranks label, as on the phone row: a failure or a
+                        // job still running is the thing that changes, so it takes
+                        // the one colour this row spends.
+                        color: failed
+                            ? Console.red
+                            : processing ||
+                                  recording.status != RecordingStatus.completed
+                            ? Console.accent
+                            : categoryColorFor(recording.category),
+                        pulse: processing,
+                      ),
+                      const SizedBox(width: _gap),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          mainAxisSize: MainAxisSize.min,
+                          children: <Widget>[
+                            // No tags on a phone: at 393 px they can only be
+                            // bought with the title, which is what tells rows apart.
+                            _TitleLine(recording: recording, showTags: !narrow),
+                            const SizedBox(height: 3),
+                            Text(
+                              _secondLine(),
+                              maxLines: comfortable ? 2 : 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: ConsoleText.body.copyWith(
+                                fontSize: 13,
+                                height: 1.45,
+                                color: failed ? Console.redSoft : Console.muted,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                      if (!narrow) ...<Widget>[
+                        const SizedBox(width: _gap),
+                        SizedBox(
+                          width: _projectWidth,
+                          child: Text(
+                            projectName ?? '—',
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: ConsoleText.body.copyWith(
+                              fontSize: 12,
+                              color: Console.muted,
+                            ),
+                          ),
+                        ),
+                        const SizedBox(width: _gap),
+                        SizedBox(
+                          width: _durationWidth,
+                          child: Text(
+                            _duration(),
+                            textAlign: TextAlign.right,
+                            maxLines: 1,
+                            style: monoStyle,
+                          ),
+                        ),
+                      ],
+                      const SizedBox(width: _gap),
+                      SizedBox(
+                        width: _timeWidth,
+                        child: Text(
+                          formatTimeOfDay(recording.createdAt),
+                          textAlign: TextAlign.right,
+                          maxLines: 1,
+                          style: monoStyle,
                         ),
                       ),
                     ],
                   ),
                 ),
-                if (!narrow) ...<Widget>[
-                  const SizedBox(width: _gap),
-                  SizedBox(
-                    width: _projectWidth,
-                    child: Text(
-                      projectName ?? '—',
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: ConsoleText.body.copyWith(
-                        fontSize: 12,
-                        color: Console.muted,
-                      ),
-                    ),
-                  ),
-                  const SizedBox(width: _gap),
-                  SizedBox(
-                    width: _durationWidth,
-                    child: Text(
-                      _duration(),
-                      textAlign: TextAlign.right,
-                      maxLines: 1,
-                      style: monoStyle,
-                    ),
-                  ),
-                ],
-                const SizedBox(width: _gap),
-                SizedBox(
-                  width: _timeWidth,
-                  child: Text(
-                    formatTimeOfDay(recording.createdAt),
-                    textAlign: TextAlign.right,
-                    maxLines: 1,
-                    style: monoStyle,
-                  ),
+              ),
+              if (onToggleDone != null) ...<Widget>[
+                SizedBox(width: narrow ? 4 : 8),
+                _DoneCheck(
+                  done: recording.isProcessedByUser,
+                  busy: isMarkingDone,
+                  // 44 px on a phone, the touch-target floor; a pointer
+                  // needs less and the desktop row is denser.
+                  size: narrow ? 44 : 32,
+                  onTap: onToggleDone!,
                 ),
               ],
-            ),
+            ],
           ),
         ),
       ),
@@ -202,6 +234,63 @@ class QueueListRow extends StatelessWidget {
       return '';
     }
     return formatDuration(Duration(milliseconds: recording.totalDurationMs));
+  }
+}
+
+/// The row's done toggle. Its own tap target: the gesture arena gives the tap
+/// to this, the deepest recogniser, so checking a row never also selects or
+/// opens it.
+class _DoneCheck extends StatelessWidget {
+  _DoneCheck({
+    required this.done,
+    required this.busy,
+    required this.size,
+    required this.onTap,
+  });
+
+  final bool done;
+  final bool busy;
+  final double size;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return Tooltip(
+      message: done ? 'Reopen' : 'Mark done',
+      waitDuration: const Duration(milliseconds: 400),
+      child: Semantics(
+        button: true,
+        checked: done,
+        label: done ? 'Reopen capture' : 'Mark capture done',
+        excludeSemantics: true,
+        child: SizedBox.square(
+          dimension: size,
+          child: InkResponse(
+            onTap: busy ? null : onTap,
+            radius: size / 2,
+            child: Center(
+              child: busy
+                  ? SizedBox.square(
+                      dimension: 16,
+                      child: CircularProgressIndicator(
+                        strokeWidth: 2,
+                        color: Console.green,
+                      ),
+                    )
+                  : Icon(
+                      done
+                          ? Icons.check_circle_rounded
+                          : Icons.radio_button_unchecked_rounded,
+                      size: 20,
+                      // dimText, not dim: an empty circle is the control, and
+                      // it has to be findable at rest.
+                      color: done ? Console.green : Console.dimText,
+                    ),
+            ),
+          ),
+        ),
+      ),
+    );
   }
 }
 

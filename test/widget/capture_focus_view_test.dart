@@ -170,6 +170,35 @@ void main() {
     },
   );
 
+  testWidgets('a phone row marks done from its check without opening', (
+    WidgetTester tester,
+  ) async {
+    final RecordingsController controller = await buildRecordingsController(
+      appDir,
+      seed: <Recording>[
+        makeRecording(id: 'tick', title: 'Call the joiner', transcript: 'x'),
+      ],
+    );
+    await pumpQueue(tester, controller, surface: const Size(393, 852));
+
+    // The check is its own 44 px target, not part of the row's tap.
+    expect(
+      tester.getSize(find.bySemanticsLabel('Mark capture done')),
+      const Size(44, 44),
+    );
+    await tester.tap(find.bySemanticsLabel('Mark capture done'));
+    await tester.runAsync(
+      () => Future<void>.delayed(const Duration(milliseconds: 50)),
+    );
+    await tester.pump();
+
+    expect(controller.recordings.single.isProcessedByUser, isTrue);
+    // Checked, not opened.
+    expect(find.byType(CaptureDetailPanel), findsNothing);
+    // Let the done-feedback timer run out before the test ends.
+    await tester.pump(const Duration(seconds: 2));
+  });
+
   testWidgets('a phone detail page closes itself when its capture is deleted', (
     WidgetTester tester,
   ) async {
