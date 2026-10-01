@@ -26,6 +26,7 @@ class QueueListRow extends StatelessWidget {
     required this.density,
     required this.onTap,
     this.projectName,
+    this.narrow = false,
   });
 
   final Recording recording;
@@ -34,6 +35,11 @@ class QueueListRow extends StatelessWidget {
   final QueueDensity density;
   final VoidCallback onTap;
   final String? projectName;
+
+  /// The phone form: no project, duration or tags, so the title and summary
+  /// keep the width a 393 px screen can spare. Both facts are one tap away
+  /// in the detail page.
+  final bool narrow;
 
   /// Rendered instead of the summary while the model reads the capture, so a
   /// row that is about to change says so instead of showing a stale line.
@@ -69,8 +75,10 @@ class QueueListRow extends StatelessWidget {
           hoverColor: Console.surfaceRaised,
           child: Container(
             padding: EdgeInsets.symmetric(
-              horizontal: 16,
-              vertical: comfortable ? 14 : 8,
+              horizontal: narrow ? 12 : 16,
+              // 10 px on a phone, not 8: two lines plus this clears the 44 px
+              // touch target the row has to be.
+              vertical: comfortable ? 14 : (narrow ? 10 : 8),
             ),
             decoration: BoxDecoration(
               border: selected
@@ -102,7 +110,9 @@ class QueueListRow extends StatelessWidget {
                     crossAxisAlignment: CrossAxisAlignment.start,
                     mainAxisSize: MainAxisSize.min,
                     children: <Widget>[
-                      _TitleLine(recording: recording),
+                      // No tags on a phone: at 393 px they can only be
+                      // bought with the title, which is what tells rows apart.
+                      _TitleLine(recording: recording, showTags: !narrow),
                       const SizedBox(height: 3),
                       Text(
                         _secondLine(),
@@ -117,29 +127,31 @@ class QueueListRow extends StatelessWidget {
                     ],
                   ),
                 ),
-                const SizedBox(width: _gap),
-                SizedBox(
-                  width: _projectWidth,
-                  child: Text(
-                    projectName ?? '—',
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: ConsoleText.body.copyWith(
-                      fontSize: 12,
-                      color: Console.muted,
+                if (!narrow) ...<Widget>[
+                  const SizedBox(width: _gap),
+                  SizedBox(
+                    width: _projectWidth,
+                    child: Text(
+                      projectName ?? '—',
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: ConsoleText.body.copyWith(
+                        fontSize: 12,
+                        color: Console.muted,
+                      ),
                     ),
                   ),
-                ),
-                const SizedBox(width: _gap),
-                SizedBox(
-                  width: _durationWidth,
-                  child: Text(
-                    _duration(),
-                    textAlign: TextAlign.right,
-                    maxLines: 1,
-                    style: monoStyle,
+                  const SizedBox(width: _gap),
+                  SizedBox(
+                    width: _durationWidth,
+                    child: Text(
+                      _duration(),
+                      textAlign: TextAlign.right,
+                      maxLines: 1,
+                      style: monoStyle,
+                    ),
                   ),
-                ),
+                ],
                 const SizedBox(width: _gap),
                 SizedBox(
                   width: _timeWidth,
@@ -194,13 +206,14 @@ class QueueListRow extends StatelessWidget {
 }
 
 class _TitleLine extends StatelessWidget {
-  _TitleLine({required this.recording});
+  _TitleLine({required this.recording, this.showTags = true});
 
   final Recording recording;
+  final bool showTags;
 
   @override
   Widget build(BuildContext context) {
-    final List<String> tags = recording.tags;
+    final List<String> tags = showTags ? recording.tags : const <String>[];
     final String tagLine = <String>[
       for (final String tag in tags.take(3)) '#$tag',
       if (tags.length > 3) '+${tags.length - 3}',

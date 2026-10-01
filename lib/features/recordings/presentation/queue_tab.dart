@@ -577,6 +577,8 @@ class _QueueTabState extends State<QueueTab> {
                           constraints.maxWidth,
                         ),
                       )
+                    else if (compact && visible.isNotEmpty)
+                      Expanded(child: _buildPhoneList(visible))
                     else
                     Expanded(
                       child: RefreshIndicator(
@@ -935,6 +937,99 @@ class _QueueTabState extends State<QueueTab> {
     );
   }
 
+  /// The phone form of the same idea: the day-grouped rows, full width, and a
+  /// tap opens the capture on a page of its own rather than beside the list.
+  /// Pull-to-refresh still syncs, as it did over the cards.
+  Widget _buildPhoneList(List<Recording> visible) {
+    final RecordingsController controller = widget.controller;
+    final List<QueueDayGroup> groups = groupByDay(visible, DateTime.now());
+    return RefreshIndicator(
+      onRefresh: () => _handleSync(context, controller),
+      color: Console.accent,
+      backgroundColor: Console.surface,
+      child: CustomScrollView(
+        controller: _masterScroll,
+        physics: const AlwaysScrollableScrollPhysics(),
+        slivers: <Widget>[
+          for (final QueueDayGroup group in groups)
+            SliverMainAxisGroup(
+              slivers: <Widget>[
+                SliverPersistentHeader(
+                  pinned: true,
+                  delegate: _DayHeaderDelegate(group.label),
+                ),
+                SliverList.builder(
+                  itemCount: group.items.length,
+                  itemBuilder: (BuildContext context, int index) {
+                    final Recording item = group.items[index];
+                    return QueueListRow(
+                      key: ValueKey<String>(item.id),
+                      recording: item,
+                      selected: item.id == focusedId,
+                      isEnriching: controller.isEnriching(item.id),
+                      density: widget.density,
+                      projectName: _projectName(item.projectId),
+                      narrow: true,
+                      onTap: () => _openDetailPage(item),
+                    );
+                  },
+                ),
+              ],
+            ),
+          const SliverToBoxAdapter(child: SizedBox(height: 24)),
+        ],
+      ),
+    );
+  }
+
+  /// Pushes the capture's detail page. It resolves the item by id on every
+  /// notification, like the dialog it replaced on a phone, and closes itself
+  /// when the capture is deleted.
+  Future<void> _openDetailPage(Recording recording) async {
+    setState(() => focusedId = recording.id);
+    final RecordingsController controller = widget.controller;
+    await Navigator.of(context).push<void>(
+      MaterialPageRoute<void>(
+        builder: (BuildContext context) => ConsolePaletteScope(
+          builder: (BuildContext context) => _CaptureDetailPage(
+            controller: controller,
+            recordingId: recording.id,
+            panelBuilder: (Recording item, VoidCallback onEdit) =>
+                CaptureDetailPanel(
+                  controller: controller,
+                  recording: item,
+                  projectName: _projectName(item.projectId),
+                  showMetaColumn: false,
+                  compact: true,
+                  onEdit: onEdit,
+                  onToggleProcessed: () => _toggleProcessed(item),
+                  isMarkingDone: markingDoneIds.contains(item.id),
+                  onConfigureModels: widget.onConfigureModels == null
+                      ? null
+                      : () {
+                          Navigator.of(context).pop();
+                          widget.onConfigureModels!();
+                        },
+                  costUsd: _costTotals[item.id],
+                ),
+            // `editingId` is set while the page edits, so the filters keep
+            // the row — the exemption [_filter] documents — even though the
+            // editor is drawn on the page, not in the list.
+            onEditingChanged: (bool editing) {
+              if (!mounted) return;
+              setState(() => editingId = editing ? recording.id : null);
+            },
+            editorBuilder: (Recording item, VoidCallback onDone) =>
+                _buildEditor(item, onDone: onDone),
+          ),
+        ),
+      ),
+    );
+    if (mounted && editingId == recording.id) {
+      setState(() => editingId = null);
+    }
+  }
+
   /// Opens the capture in expanded inline edit mode.
   void _openFocus(Recording recording) {
     setState(() {
@@ -1037,7 +1132,7 @@ class _QueueTabState extends State<QueueTab> {
   /// editor's own state (its text controllers, its dirty flags) belong to *this
   /// item* — without it, editing one row and then another would inherit the
   /// first row's fields.
-  Widget _buildEditor(Recording recording) {
+  Widget _buildEditor(Recording recording, {VoidCallback? onDone}) {
     final RecordingsController controller = widget.controller;
     return RecordingEditor(
       key: ValueKey<String>('editor-${recording.id}'),
@@ -1058,7 +1153,7 @@ class _QueueTabState extends State<QueueTab> {
       onProjectChanged: (String? value) =>
           controller.setProject(recording.id, value),
       onDelete: () => _confirmDelete(recording),
-      onDone: () => setState(() => editingId = null),
+      onDone: onDone ?? () => setState(() => editingId = null),
       onAppendRecording: widget.onAppendRecording == null
           ? null
           : () => widget.onAppendRecording!(recording.id),
@@ -1527,6 +1622,90 @@ class _SyncButton extends StatelessWidget {
           ),
         ],
       ),
+    );
+  }
+}
+
+/// A capture on a phone, full screen: the detail panel, or the editor while
+/// editing. Reads through [controller] by id so it follows the capture as it
+/// moves, and pops itself once the id stops resolving.
+class _CaptureDetailPage extends StatefulWidget {
+  const _CaptureDetailPage({
+    required this.controller,
+    required this.recordingId,
+    required this.panelBuilder,
+    required this.editorBuilder,
+    required this.onEditingChanged,
+  });
+
+  final RecordingsController controller;
+  final String recordingId;
+  final Widget Function(Recording, VoidCallback onEdit) panelBuilder;
+  final Widget Function(Recording, VoidCallback onDone) editorBuilder;
+  final ValueChanged<bool> onEditingChanged;
+
+  @override
+  State<_CaptureDetailPage> createState() => _CaptureDetailPageState();
+}
+
+class _CaptureDetailPageState extends State<_CaptureDetailPage> {
+  bool _editing = false;
+  bool _popped = false;
+
+  void _setEditing(bool value) {
+    setState(() => _editing = value);
+    widget.onEditingChanged(value);
+  }
+
+  Recording? _resolve() {
+    for (final Recording item in widget.controller.recordings) {
+      if (item.id == widget.recordingId) return item;
+    }
+    return null;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AnimatedBuilder(
+      animation: widget.controller,
+      builder: (BuildContext context, Widget? _) {
+        final Recording? recording = _resolve();
+        if (recording == null) {
+          if (!_popped) {
+            _popped = true;
+            WidgetsBinding.instance.addPostFrameCallback((_) {
+              if (mounted && Navigator.of(context).canPop()) {
+                Navigator.of(context).pop();
+              }
+            });
+          }
+          return Scaffold(backgroundColor: Console.background);
+        }
+        return Scaffold(
+          backgroundColor: Console.background,
+          appBar: AppBar(
+            backgroundColor: Console.background,
+            foregroundColor: Console.text,
+            elevation: 0,
+            scrolledUnderElevation: 0,
+            titleSpacing: 0,
+            title: Text(
+              _editing ? 'Edit capture' : 'Queue',
+              style: ConsoleText.cardTitle.copyWith(fontSize: 16),
+            ),
+            shape: Border(bottom: BorderSide(color: Console.border)),
+          ),
+          body: _editing
+              ? SingleChildScrollView(
+                  padding: const EdgeInsets.fromLTRB(10, 12, 10, 32),
+                  child: widget.editorBuilder(
+                    recording,
+                    () => _setEditing(false),
+                  ),
+                )
+              : widget.panelBuilder(recording, () => _setEditing(true)),
+        );
+      },
     );
   }
 }

@@ -5,6 +5,7 @@ import 'package:augustyniak_capture/features/recordings/domain/capture_category.
 import 'package:augustyniak_capture/features/recordings/domain/capture_type.dart';
 import 'package:augustyniak_capture/features/recordings/domain/recording.dart';
 import 'package:augustyniak_capture/features/recordings/presentation/card_parts.dart';
+import 'package:augustyniak_capture/features/recordings/presentation/queue_list_row.dart';
 import 'package:augustyniak_capture/features/recordings/presentation/queue_toolbar.dart';
 import 'package:augustyniak_capture/features/recordings/presentation/queue_tab.dart';
 import 'package:augustyniak_capture/features/recordings/presentation/recording_card.dart';
@@ -40,13 +41,14 @@ void main() {
     return controller;
   }
 
-  testWidgets('queue renders recording cards in both compact and wide modes', (
+  testWidgets('a phone gets rows and a tablet keeps cards', (
     WidgetTester tester,
   ) async {
     addTearDown(tester.view.reset);
     await pumpQueueAtWidth(tester, 599);
 
-    expect(find.byType(RecordingCard), findsOneWidget);
+    expect(find.byType(QueueListRow), findsOneWidget);
+    expect(find.byType(RecordingCard), findsNothing);
 
     tester.view.physicalSize = const Size(600, 900);
     await tester.pump();
@@ -305,7 +307,7 @@ void main() {
       expect(find.byType(TextField), findsOneWidget);
     });
 
-    testWidgets('the badge takes the category colour, not a flat accent', (
+    testWidgets('the row dot takes the category colour, not a flat accent', (
       WidgetTester tester,
     ) async {
       await pumpQueue(
@@ -319,14 +321,20 @@ void main() {
         ],
       );
 
-      final StatusPill pill = tester.widget<StatusPill>(
-        find.ancestor(
-          of: find.text('AGENT TASK'),
-          matching: find.byType(StatusPill),
-        ),
-      );
-      expect(pill.color, categoryColorFor(CaptureCategory.agentTask));
-      expect(pill.color, isNot(Console.accent));
+      // The dot is the one circle the row draws; colour is spent nowhere else.
+      final Iterable<Color?> dots = tester
+          .widgetList<Container>(
+            find.descendant(
+              of: find.byType(QueueListRow),
+              matching: find.byType(Container),
+            ),
+          )
+          .map((Container c) => c.decoration)
+          .whereType<BoxDecoration>()
+          .where((BoxDecoration d) => d.shape == BoxShape.circle)
+          .map((BoxDecoration d) => d.color);
+      expect(dots, <Color?>[categoryColorFor(CaptureCategory.agentTask)]);
+      expect(dots.single, isNot(Console.accent));
     });
 
     testWidgets('ProcessingStrip renders image -> text and EXTRACTING for image capture', (

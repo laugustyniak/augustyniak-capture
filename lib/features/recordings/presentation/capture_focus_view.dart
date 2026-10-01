@@ -999,6 +999,7 @@ class CaptureDetailPanel extends StatelessWidget {
     this.onConfigureModels,
     this.costUsd,
     this.scrollController,
+    this.compact = false,
   });
 
   final RecordingsController controller;
@@ -1017,6 +1018,10 @@ class CaptureDetailPanel extends StatelessWidget {
   final VoidCallback? onConfigureModels;
   final double? costUsd;
   final ScrollController? scrollController;
+
+  /// The phone's full-screen page: tighter gutters and a smaller title, the
+  /// same content in the same order.
+  final bool compact;
 
   /// The reading measure: about 72 characters of 15 px text.
   static const double readingWidth = 680;
@@ -1045,7 +1050,10 @@ class CaptureDetailPanel extends StatelessWidget {
           const SizedBox(height: 14),
           Text(
             displayNameFor(recording),
-            style: ConsoleText.cardTitle.copyWith(fontSize: 26, height: 1.2),
+            style: ConsoleText.cardTitle.copyWith(
+              fontSize: compact ? 22 : 26,
+              height: 1.2,
+            ),
           ),
           const SizedBox(height: 8),
           Text(
@@ -1208,12 +1216,15 @@ class CaptureDetailPanel extends StatelessWidget {
       controller: controller,
       recording: recording,
       costUsd: costUsd,
+      showKeys: !compact,
     );
 
     return SelectionArea(
       child: ListView(
         controller: scrollController,
-        padding: const EdgeInsets.fromLTRB(48, 36, 48, 48),
+        padding: compact
+            ? const EdgeInsets.fromLTRB(16, 16, 16, 32)
+            : const EdgeInsets.fromLTRB(48, 36, 48, 48),
         children: <Widget>[
           if (showMetaColumn)
             Row(
@@ -1553,11 +1564,15 @@ class _PanelMeta extends StatelessWidget {
     required this.controller,
     required this.recording,
     required this.costUsd,
+    required this.showKeys,
   });
 
   final RecordingsController controller;
   final Recording recording;
   final double? costUsd;
+
+  /// The shortcut legend, which means nothing on a phone.
+  final bool showKeys;
 
   @override
   Widget build(BuildContext context) {
@@ -1604,6 +1619,7 @@ class _PanelMeta extends StatelessWidget {
                 ],
               ),
             ),
+          if (showKeys) ...<Widget>[
           const SizedBox(height: 16),
           Text(
             'j / k  move · enter  edit\n'
@@ -1614,6 +1630,7 @@ class _PanelMeta extends StatelessWidget {
               color: Console.muted,
             ),
           ),
+          ],
         ],
       ),
     );
