@@ -844,7 +844,7 @@ class _QueueTabState extends State<QueueTab> {
     double width,
   ) {
     final RecordingsController controller = widget.controller;
-    final double listWidth = (width * .45).clamp(
+    final double listWidth = (width * .52).clamp(
       Console.masterListMinWidth,
       Console.masterListMaxWidth,
     );
