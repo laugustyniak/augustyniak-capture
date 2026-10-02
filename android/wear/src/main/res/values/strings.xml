@@ -1,0 +1,4 @@
+<resources>
+    <string name="app_title">CAPTURE</string>
+    <string name="microphone_permission_required">Microphone permission required</string>
+</resources>
