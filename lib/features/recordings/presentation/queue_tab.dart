@@ -12,6 +12,8 @@ import '../../costs/domain/usage_event.dart';
 import '../../projects/domain/project.dart';
 import '../../projects/presentation/projects_controller.dart';
 import '../../settings/domain/queue_density.dart';
+import '../../sync/domain/media_sync.dart';
+import '../../sync/domain/sync_snapshot.dart';
 import '../domain/agent_artifact.dart';
 import '../domain/capture_category.dart';
 import '../domain/capture_type.dart';
@@ -182,6 +184,8 @@ class _QueueTabState extends State<QueueTab> {
   final FocusNode listFocus = FocusNode(debugLabel: 'queue-shortcuts');
 
   bool _isSyncing = false;
+  CloudSyncProgress? _syncProgress;
+  Timer? _syncStatusTimer;
 
   /// The master list's scroll position. Owned here, not by the list, so
   /// choosing a row — which rebuilds the whole tab — never moves the list.
@@ -207,14 +211,29 @@ class _QueueTabState extends State<QueueTab> {
     RecordingsController controller,
   ) async {
     if (_isSyncing) return;
-    setState(() => _isSyncing = true);
+    _syncStatusTimer?.cancel();
+    setState(() {
+      _isSyncing = true;
+      _syncProgress = const CloudSyncProgress(CloudSyncStage.checking);
+    });
     try {
       // Pull-to-refresh is one of the two moments Command outcomes are read
       // back — the other is the app coming to the foreground. Never a timer:
       // nothing here is worth a wake-up, and a phone polling a homelab on a
       // schedule spends battery with nobody waiting on the answer.
       unawaited(controller.refreshCommandOutcomes());
-      final CloudSyncReport report = await controller.syncCloud();
+      final CloudSyncReport report = await controller.syncCloud(
+        onProgress: (CloudSyncProgress progress) {
+          if (mounted) setState(() => _syncProgress = progress);
+        },
+      );
+      if (mounted) {
+        setState(() => _syncProgress = CloudSyncProgress(
+          CloudSyncStage.complete,
+          supabase: report.supabase,
+          media: report.media,
+        ));
+      }
       if (context.mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
@@ -228,7 +247,12 @@ class _QueueTabState extends State<QueueTab> {
         );
       }
     } finally {
-      if (mounted) setState(() => _isSyncing = false);
+      if (mounted) {
+        setState(() => _isSyncing = false);
+        _syncStatusTimer = Timer(const Duration(seconds: 12), () {
+          if (mounted) setState(() => _syncProgress = null);
+        });
+      }
     }
   }
 
@@ -250,6 +274,7 @@ class _QueueTabState extends State<QueueTab> {
 
   @override
   void dispose() {
+    _syncStatusTimer?.cancel();
     _doneFeedbackTimer?.cancel();
     searchController.dispose();
     searchFocus.dispose();
@@ -568,6 +593,16 @@ class _QueueTabState extends State<QueueTab> {
                                 ]
                               : const <Widget>[],
                         ),
+                      ),
+                    if (_syncProgress case final CloudSyncProgress progress)
+                      Padding(
+                        padding: EdgeInsets.fromLTRB(
+                          compact ? 12 : 20,
+                          8,
+                          compact ? 12 : 20,
+                          0,
+                        ),
+                        child: _CloudSyncStatus(progress: progress),
                       ),
                     if (masterDetail && visible.isNotEmpty)
                       Expanded(
@@ -1587,6 +1622,134 @@ class _DensityToggle extends StatelessWidget {
         ],
       ),
     );
+  }
+}
+
+class _CloudSyncStatus extends StatelessWidget {
+  const _CloudSyncStatus({required this.progress});
+
+  final CloudSyncProgress progress;
+
+  @override
+  Widget build(BuildContext context) {
+    final bool complete = progress.stage == CloudSyncStage.complete;
+    final bool metadataActive = progress.stage == CloudSyncStage.metadata;
+    final bool storageActive = progress.stage == CloudSyncStage.storage;
+    final bool metadataPassed =
+        progress.stage.index > CloudSyncStage.metadata.index;
+    final bool storagePassed = complete;
+    final SupabaseSyncResult? metadata = progress.supabase;
+    final MediaSyncResult? storage = progress.media;
+    final String title = switch (progress.stage) {
+      CloudSyncStage.checking => 'Checking sync setup…',
+      CloudSyncStage.metadata => 'Checking notes and changes…',
+      CloudSyncStage.storage => 'Checking files…',
+      CloudSyncStage.complete =>
+        metadata == null && storage == null
+            ? 'Cloud sync is not configured'
+            : metadata?.success == false || storage?.success == false
+            ? 'Sync finished with issues'
+            : 'Sync complete',
+    };
+
+    return Semantics(
+      liveRegion: true,
+      label: title,
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+        decoration: BoxDecoration(
+          color: Console.surface,
+          borderRadius: BorderRadius.circular(10),
+          border: Border.all(color: Console.border),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          mainAxisSize: MainAxisSize.min,
+          children: <Widget>[
+            AnimatedSwitcher(
+              duration: const Duration(milliseconds: 220),
+              child: Text(
+                title,
+                key: ValueKey<String>(title),
+                style: ConsoleText.body.copyWith(fontSize: 12),
+              ),
+            ),
+            const SizedBox(height: 8),
+            Row(
+              children: <Widget>[
+                Expanded(
+                  child: _stepBar(
+                    metadataActive,
+                    metadataPassed,
+                    metadata?.success,
+                  ),
+                ),
+                const SizedBox(width: 4),
+                Expanded(
+                  child: _stepBar(
+                    storageActive,
+                    storagePassed,
+                    storage?.success,
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 7),
+            Text(
+              'NOTES · ${_metadataStatus(metadata, metadataActive, metadataPassed)}',
+              style: ConsoleText.chip.copyWith(color: Console.muted),
+            ),
+            const SizedBox(height: 3),
+            Text(
+              'FILES · ${_storageStatus(storage, storageActive, storagePassed)}',
+              style: ConsoleText.chip.copyWith(color: Console.muted),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _stepBar(bool active, bool passed, bool? success) {
+    if (active) {
+      return SizedBox(
+        height: 4,
+        child: LinearProgressIndicator(
+          color: Console.accent,
+          backgroundColor: Console.track,
+        ),
+      );
+    }
+    return AnimatedContainer(
+      duration: const Duration(milliseconds: 220),
+      height: 4,
+      decoration: BoxDecoration(
+        color: !passed
+            ? Console.track
+            : success == false
+            ? Console.red
+            : success == null
+            ? Console.muted
+            : Console.green,
+        borderRadius: BorderRadius.circular(4),
+      ),
+    );
+  }
+
+  String _metadataStatus(SupabaseSyncResult? result, bool active, bool passed) {
+    if (active) return 'checking';
+    if (!passed) return 'waiting';
+    if (result == null) return 'not configured';
+    if (!result.success) return result.failureReason ?? 'failed';
+    return '${result.pushed} sent · ${result.pulled} received';
+  }
+
+  String _storageStatus(MediaSyncResult? result, bool active, bool passed) {
+    if (active) return 'checking';
+    if (!passed) return 'waiting';
+    if (result == null) return 'not configured';
+    if (!result.success) return result.failureReason ?? 'failed';
+    return '${result.uploaded} uploaded · ${result.downloaded} downloaded';
   }
 }
 
