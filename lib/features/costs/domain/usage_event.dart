@@ -6,16 +6,18 @@
 enum UsageStage {
   transcription,
   ocr,
-  enrichment;
+  enrichment,
+  connections;
 
   static UsageStage? fromName(String? name) =>
       name == null ? null : UsageStage.values.asNameMap()[name];
 
-  /// Section label in the editor's COST panel.
+  /// Label for the recorded model stage.
   String get label => switch (this) {
     UsageStage.transcription => 'TRANSCRIPTION',
     UsageStage.ocr => 'OCR',
     UsageStage.enrichment => 'ENRICHMENT',
+    UsageStage.connections => 'DAILY CONNECTIONS',
   };
 }
 
@@ -86,10 +88,9 @@ class UsageTotal {
 
 /// One API call, what it consumed, and what it cost.
 ///
-/// One capture produces several of these: a long recording is split into N
-/// transcription requests, a retry runs the whole pass again, and enrichment is
-/// its own request after the transcript lands. The cost of a capture is a sum
-/// over this list, never a single field.
+/// A capture may produce several calls. Daily connection reviews use a
+/// `daily-connections:<date>` synthetic capture id so overall costs include
+/// them without assigning their charge to one source capture.
 class UsageEvent {
   const UsageEvent({
     required this.id,

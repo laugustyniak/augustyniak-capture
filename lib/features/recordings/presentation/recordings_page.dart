@@ -29,6 +29,7 @@ import '../../costs/domain/model_price.dart';
 import '../../costs/domain/price_book.dart';
 import '../../costs/domain/usage_event.dart';
 import '../../costs/domain/usage_model_keys.dart';
+import '../../connections/data/http_daily_connections_service.dart';
 import '../../enrichment/data/composed_enrichment_context_source.dart';
 import '../../logs/data/log_store.dart';
 import '../../logs/domain/log_event.dart';
@@ -194,6 +195,7 @@ class _RecordingsPageState extends State<RecordingsPage>
   String? _appVersion;
   late final RecordingUsageSink usageSink;
   late final SettingsController settings;
+  late final HttpDailyConnectionsService dailyConnectionsService;
   late final LogStore logs;
   late final GamificationController gamification;
   late final RecordingsController controller;
@@ -297,6 +299,10 @@ class _RecordingsPageState extends State<RecordingsPage>
       // model needs 16 kHz mono float PCM, and an engine with no decoder is an
       // engine that would be fed the AAC container unchanged.
       localEngine: WhisperFfiEngine(decoder: _buildAudioDecoder()),
+    );
+    dailyConnectionsService = HttpDailyConnectionsService(
+      activeProfile: () => settings.activeEnrichmentProfile,
+      recordUsage: usageSink.recordConnections,
     );
     gamification = GamificationController();
     // One launcher, two entry points: the project card starts a session with no
@@ -954,6 +960,7 @@ class _RecordingsPageState extends State<RecordingsPage>
     projects.dispose();
     timer.dispose();
     momentum.dispose();
+    dailyConnectionsService.close();
     settings.dispose();
     logs.dispose();
     super.dispose();
@@ -1072,6 +1079,7 @@ class _RecordingsPageState extends State<RecordingsPage>
                               children: <Widget>[
                                 QueueTab(
                                   controller: controller,
+                                  dailyConnectionsService: dailyConnectionsService,
                                   projects: projects,
                                   initialProjectId:
                                       activeQueueProjectFilterId,
