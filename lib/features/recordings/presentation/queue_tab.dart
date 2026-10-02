@@ -950,6 +950,16 @@ class _QueueTabState extends State<QueueTab> {
             projectName: _projectName(selected.projectId),
             showMetaColumn: width >= Console.detailMetaBreakpoint,
             onEdit: () => setState(() => editingId = selected.id),
+            onAppendRecording: widget.onAppendRecording == null
+                ? null
+                : () => widget.onAppendRecording!(selected.id),
+            onAppendNote: widget.onAppendNote == null
+                ? null
+                : () => widget.onAppendNote!(selected.id),
+            onAppendUpload: widget.onAppendUpload == null
+                ? null
+                : (CaptureType type) =>
+                    widget.onAppendUpload!(selected.id, type),
             onToggleProcessed: () => _toggleProcessed(selected),
             isMarkingDone: markingDoneIds.contains(selected.id),
             onConfigureModels: widget.onConfigureModels,
@@ -1043,6 +1053,19 @@ class _QueueTabState extends State<QueueTab> {
                   showMetaColumn: false,
                   compact: true,
                   onEdit: onEdit,
+                  onAppendRecording: widget.onAppendRecording == null
+                      ? null
+                      : () {
+                          Navigator.of(context).pop();
+                          widget.onAppendRecording!(item.id);
+                        },
+                  onAppendNote: widget.onAppendNote == null
+                      ? null
+                      : () => widget.onAppendNote!(item.id),
+                  onAppendUpload: widget.onAppendUpload == null
+                      ? null
+                      : (CaptureType type) =>
+                          widget.onAppendUpload!(item.id, type),
                   onToggleProcessed: () => _toggleProcessed(item),
                   isMarkingDone: markingDoneIds.contains(item.id),
                   onConfigureModels: widget.onConfigureModels == null
@@ -1063,7 +1086,16 @@ class _QueueTabState extends State<QueueTab> {
               setState(() => editingId = editing ? recording.id : null);
             },
             editorBuilder: (Recording item, VoidCallback onDone) =>
-                _buildEditor(item, onDone: onDone),
+                _buildEditor(
+                  item,
+                  onDone: onDone,
+                  onAppendRecording: widget.onAppendRecording == null
+                      ? null
+                      : () {
+                          Navigator.of(context).pop();
+                          widget.onAppendRecording!(item.id);
+                        },
+                ),
           ),
         ),
       ),
@@ -1175,7 +1207,11 @@ class _QueueTabState extends State<QueueTab> {
   /// editor's own state (its text controllers, its dirty flags) belong to *this
   /// item* — without it, editing one row and then another would inherit the
   /// first row's fields.
-  Widget _buildEditor(Recording recording, {VoidCallback? onDone}) {
+  Widget _buildEditor(
+    Recording recording, {
+    VoidCallback? onDone,
+    VoidCallback? onAppendRecording,
+  }) {
     final RecordingsController controller = widget.controller;
     return RecordingEditor(
       key: ValueKey<String>('editor-${recording.id}'),
@@ -1197,9 +1233,10 @@ class _QueueTabState extends State<QueueTab> {
           controller.setProject(recording.id, value),
       onDelete: () => _confirmDelete(recording),
       onDone: onDone ?? () => setState(() => editingId = null),
-      onAppendRecording: widget.onAppendRecording == null
-          ? null
-          : () => widget.onAppendRecording!(recording.id),
+      onAppendRecording: onAppendRecording ??
+          (widget.onAppendRecording == null
+              ? null
+              : () => widget.onAppendRecording!(recording.id)),
       onAppendNote: widget.onAppendNote == null
           ? null
           : () => widget.onAppendNote!(recording.id),

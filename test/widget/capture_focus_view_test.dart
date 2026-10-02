@@ -39,16 +39,53 @@ void main() {
     WidgetTester tester,
     RecordingsController controller, {
     Size surface = const Size(1200, 900),
+    ValueChanged<String>? onAppendRecording,
   }) async {
     tester.view.physicalSize = surface;
     tester.view.devicePixelRatio = 1;
     addTearDown(tester.view.resetPhysicalSize);
     addTearDown(tester.view.resetDevicePixelRatio);
     await tester.pumpWidget(
-      hostTab(() => QueueTab(controller: controller), listenable: controller),
+      hostTab(
+        () => QueueTab(
+          controller: controller,
+          onAppendRecording: onAppendRecording,
+        ),
+        listenable: controller,
+      ),
     );
     await tester.pump();
   }
+
+  testWidgets('phone detail offers a fragment without entering edit mode', (
+    WidgetTester tester,
+  ) async {
+    final RecordingsController controller = await buildRecordingsController(
+      appDir,
+      seed: <Recording>[
+        makeRecording(id: 'voice-1', title: 'Voice note'),
+      ],
+    );
+    String? appendedId;
+    await pumpQueue(
+      tester,
+      controller,
+      surface: const Size(393, 852),
+      onAppendRecording: (String id) => appendedId = id,
+    );
+
+    await tester.tap(find.text('Voice note'));
+    await tester.pumpAndSettle();
+    expect(find.byType(RecordingEditor), findsNothing);
+    await tester.tap(find.text('+ Fragment'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.widgetWithText(ListTile, 'RECORDING'));
+    await tester.pumpAndSettle();
+
+    expect(appendedId, 'voice-1');
+    expect(find.byType(RecordingEditor), findsNothing);
+    expect(find.byType(CaptureDetailPanel), findsNothing);
+  });
 
   Future<void> pumpFocusView(
     WidgetTester tester,
