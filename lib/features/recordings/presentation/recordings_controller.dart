@@ -232,6 +232,8 @@ class RecordingsController extends ChangeNotifier {
 
   CloudSyncReport? _lastCloudSyncReport;
   Future<CloudSyncReport>? _cloudSyncInFlight;
+  CloudSyncProgress? _currentCloudSyncProgress;
+  final List<void Function(CloudSyncProgress)> _cloudSyncObservers = [];
   final Duration _editSyncDelay;
   Timer? _editSyncTimer;
 
@@ -708,16 +710,34 @@ class RecordingsController extends ChangeNotifier {
   bool _hasRecording(String id) => _recordings.any((Recording r) => r.id == id);
 
   /// Runs every configured cloud backend and keeps each outcome visible.
-  Future<CloudSyncReport> syncCloud() {
+  Future<CloudSyncReport> syncCloud({void Function(CloudSyncProgress)? onProgress}) {
     final Future<CloudSyncReport>? active = _cloudSyncInFlight;
+    if (onProgress != null) {
+      _cloudSyncObservers.add(onProgress);
+      if (active != null && _currentCloudSyncProgress != null) {
+        onProgress(_currentCloudSyncProgress!);
+      }
+    }
     if (active != null) return active;
 
+    _emitCloudSyncProgress(const CloudSyncProgress(CloudSyncStage.checking));
     late final Future<CloudSyncReport> guarded;
-    guarded = _performCloudSync().whenComplete(() {
-      if (identical(_cloudSyncInFlight, guarded)) _cloudSyncInFlight = null;
+    guarded = _performCloudSync(onProgress: _emitCloudSyncProgress).whenComplete(() {
+      if (identical(_cloudSyncInFlight, guarded)) {
+        _cloudSyncInFlight = null;
+        _currentCloudSyncProgress = null;
+        _cloudSyncObservers.clear();
+      }
     });
     _cloudSyncInFlight = guarded;
     return guarded;
+  }
+
+  void _emitCloudSyncProgress(CloudSyncProgress progress) {
+    _currentCloudSyncProgress = progress;
+    for (final void Function(CloudSyncProgress) observer in _cloudSyncObservers) {
+      observer(progress);
+    }
   }
 
   /// Pushes a hand edit without waiting for SYNC NOW or the next launch.
@@ -742,7 +762,9 @@ class RecordingsController extends ChangeNotifier {
     await syncCloud();
   }
 
-  Future<CloudSyncReport> _performCloudSync() async {
+  Future<CloudSyncReport> _performCloudSync({
+    void Function(CloudSyncProgress)? onProgress,
+  }) async {
     final AppDatabase db = await AppDatabase.getInstance();
     // Every one of the seven has to be wired for Supabase sync to run at
     // all — an unconfigured install, or one where Supabase was never
@@ -835,7 +857,7 @@ class RecordingsController extends ChangeNotifier {
           : null,
     );
 
-    _lastCloudSyncReport = await coordinator.sync();
+    _lastCloudSyncReport = await coordinator.sync(onProgress: onProgress);
     // A pulled row that was mid-pipeline on the device that made it can now
     // be processed here; the funnel filters everything else out by status.
     if ((_lastCloudSyncReport!.media?.downloaded ?? 0) > 0) {

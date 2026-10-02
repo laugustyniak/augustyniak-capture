@@ -4,6 +4,33 @@ import 'package:augustyniak_capture/features/sync/domain/sync_snapshot.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {
+  test('reports real stages and outcomes in order', () async {
+    final List<CloudSyncProgress> progress = <CloudSyncProgress>[];
+    await CloudSyncCoordinator(
+      syncSupabase: () async => const SupabaseSyncResult(pushed: 2),
+      syncMedia: () async => const MediaSyncResult(downloaded: 1),
+    ).sync(onProgress: progress.add);
+
+    expect(progress.map((CloudSyncProgress p) => p.stage), <CloudSyncStage>[
+      CloudSyncStage.metadata,
+      CloudSyncStage.storage,
+      CloudSyncStage.complete,
+    ]);
+    expect(progress[1].supabase?.pushed, 2);
+    expect(progress[2].media?.downloaded, 1);
+  });
+
+  test('skips unconfigured stages without claiming they ran', () async {
+    final List<CloudSyncProgress> progress = <CloudSyncProgress>[];
+    await const CloudSyncCoordinator().sync(onProgress: progress.add);
+
+    expect(progress.map((CloudSyncProgress p) => p.stage), <CloudSyncStage>[
+      CloudSyncStage.complete,
+    ]);
+    expect(progress.single.supabase, isNull);
+    expect(progress.single.media, isNull);
+  });
+
   test('storage runs after the supabase metadata slot and reports its counts', () async {
     final List<String> order = <String>[];
     final CloudSyncReport report = await CloudSyncCoordinator(

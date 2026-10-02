@@ -8,6 +8,8 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:path/path.dart' as p;
 import 'package:sqlite3/sqlite3.dart';
 import 'package:augustyniak_capture/app/ui_kit.dart';
+import 'package:augustyniak_capture/core/database/app_database.dart';
+import 'package:augustyniak_capture/core/sync/cloud_sync_coordinator.dart';
 import 'package:augustyniak_capture/features/costs/data/usage_repository.dart';
 import 'package:augustyniak_capture/features/costs/domain/usage_event.dart';
 import 'package:augustyniak_capture/features/recordings/domain/capture_category.dart';
@@ -121,6 +123,38 @@ void main() {
 
     expect(find.text('Nothing captured yet.'), findsOneWidget);
     expect(find.text('0 captures'), findsOneWidget);
+  });
+
+  testWidgets('sync status shows skipped stages when cloud is not configured', (
+    WidgetTester tester,
+  ) async {
+    AppDatabase.resetForTesting();
+    final Database db = sqlite3.openInMemory();
+    await AppDatabase.getInstance(overrideDb: db);
+    addTearDown(() {
+      AppDatabase.resetForTesting();
+      db.close();
+    });
+    final RecordingsController controller = await buildRecordingsController(appDir);
+    final Future<CloudSyncReport> active = controller.syncCloud();
+    final List<CloudSyncStage> joinedStages = <CloudSyncStage>[];
+    final Future<CloudSyncReport> joined = controller.syncCloud(
+      onProgress: (CloudSyncProgress progress) => joinedStages.add(progress.stage),
+    );
+    expect(identical(active, joined), isTrue);
+    await joined;
+    expect(joinedStages, <CloudSyncStage>[
+      CloudSyncStage.checking,
+      CloudSyncStage.complete,
+    ]);
+    await pumpQueue(tester, controller);
+
+    await tester.tap(find.text('SYNC CLOUD'));
+    await settleIo(tester);
+
+    expect(find.text('Cloud sync is not configured'), findsOneWidget);
+    expect(find.text('NOTES · not configured'), findsOneWidget);
+    expect(find.text('FILES · not configured'), findsOneWidget);
   });
 
   testWidgets('the default All filter lists every item', (
@@ -1725,4 +1759,3 @@ void main() {
   });
 
 }
-

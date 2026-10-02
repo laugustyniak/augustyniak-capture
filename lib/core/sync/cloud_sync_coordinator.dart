@@ -1,6 +1,16 @@
 import '../../features/sync/domain/media_sync.dart';
 import '../../features/sync/domain/sync_snapshot.dart';
 
+enum CloudSyncStage { checking, metadata, storage, complete }
+
+class CloudSyncProgress {
+  const CloudSyncProgress(this.stage, {this.supabase, this.media});
+
+  final CloudSyncStage stage;
+  final SupabaseSyncResult? supabase;
+  final MediaSyncResult? media;
+}
+
 class CloudSyncReport {
   const CloudSyncReport({required this.completedAt, this.supabase, this.media});
 
@@ -65,11 +75,14 @@ class CloudSyncCoordinator {
   final Future<SupabaseSyncResult> Function()? syncSupabase;
   final Future<MediaSyncResult> Function()? syncMedia;
 
-  Future<CloudSyncReport> sync() async {
+  Future<CloudSyncReport> sync({
+    void Function(CloudSyncProgress)? onProgress,
+  }) async {
     SupabaseSyncResult? supabase;
     MediaSyncResult? media;
 
     if (syncSupabase != null) {
+      onProgress?.call(const CloudSyncProgress(CloudSyncStage.metadata));
       try {
         supabase = await syncSupabase!();
       } catch (error) {
@@ -82,6 +95,9 @@ class CloudSyncCoordinator {
     // After the metadata pull, which is what adds the rows whose media this
     // slot fetches.
     if (syncMedia != null) {
+      onProgress?.call(
+        CloudSyncProgress(CloudSyncStage.storage, supabase: supabase),
+      );
       try {
         media = await syncMedia!();
       } catch (error) {
@@ -91,6 +107,13 @@ class CloudSyncCoordinator {
       }
     }
 
+    onProgress?.call(
+      CloudSyncProgress(
+        CloudSyncStage.complete,
+        supabase: supabase,
+        media: media,
+      ),
+    );
     return CloudSyncReport(
       completedAt: DateTime.now(),
       supabase: supabase,
