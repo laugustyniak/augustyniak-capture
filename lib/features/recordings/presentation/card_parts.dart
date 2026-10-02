@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 
 import '../../../app/ui_kit.dart';
 import '../domain/capture_category.dart';
+import '../domain/capture_priority.dart';
 import '../domain/capture_type.dart';
 import '../domain/recording.dart';
 import '../domain/route_record.dart';
@@ -205,6 +206,15 @@ Color categoryColorFor(CaptureCategory? category) => switch (category) {
   CaptureCategory.note => Console.muted,
   CaptureCategory.capture => Console.dimText,
   null => Console.accent,
+};
+
+/// Hot to cold: only the two ranks that ask for action get a warm colour, so a
+/// queue of p2/p3 items stays quiet.
+Color priorityColorFor(CapturePriority priority) => switch (priority) {
+  CapturePriority.p0 => Console.red,
+  CapturePriority.p1 => Console.amber,
+  CapturePriority.p2 => Console.muted,
+  CapturePriority.p3 => Console.dimText,
 };
 
 String typeLabelFor(CaptureType type) => switch (type) {

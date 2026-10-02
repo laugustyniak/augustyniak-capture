@@ -11,6 +11,7 @@ import '../../projects/domain/project.dart';
 import '../domain/capture_segment.dart';
 import '../domain/capture_type.dart';
 import '../domain/capture_category.dart';
+import '../domain/capture_priority.dart';
 import '../domain/recording.dart';
 import '../domain/recording_revision.dart';
 import 'card_parts.dart';
@@ -51,6 +52,7 @@ class RecordingEditor extends StatefulWidget {
     this.onSummaryChanged,
     required this.onTextChanged,
     required this.onCategoryChanged,
+    this.onPriorityChanged,
     required this.onTagsChanged,
     required this.onDone,
     this.onDelete,
@@ -80,6 +82,10 @@ class RecordingEditor extends StatefulWidget {
   final ValueChanged<String>? onSummaryChanged;
   final ValueChanged<String> onTextChanged;
   final ValueChanged<CaptureCategory?> onCategoryChanged;
+
+  /// Null hides the PRIORITY row, so a host with no way to persist a rank
+  /// renders the editor exactly as before.
+  final ValueChanged<CapturePriority?>? onPriorityChanged;
   final ValueChanged<List<String>> onTagsChanged;
   final VoidCallback onDone;
 
@@ -385,6 +391,47 @@ class _RecordingEditorState extends State<RecordingEditor> {
                   ],
                 ),
               ),
+              if (widget.onPriorityChanged != null)
+                _Field(
+                  label: 'PRIORITY',
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: <Widget>[
+                      Wrap(
+                        spacing: 6,
+                        runSpacing: 6,
+                        children: <Widget>[
+                          // `—` is "never ranked", which asks the next
+                          // enrichment run for a rank; P3 is "ranked low".
+                          ConsoleChip(
+                            label: '—',
+                            selected: recording.priority == null,
+                            onSelected: () => widget.onPriorityChanged!(null),
+                          ),
+                          for (final CapturePriority value
+                              in CapturePriority.values)
+                            ConsoleChip(
+                              label: value.label,
+                              selected: recording.priority == value,
+                              onSelected: () =>
+                                  widget.onPriorityChanged!(value),
+                            ),
+                        ],
+                      ),
+                      if (recording.priorityReason != null) ...<Widget>[
+                        const SizedBox(height: 6),
+                        Text(
+                          recording.priorityReason!,
+                          style: TextStyle(
+                            color: Console.mutedSoft,
+                            fontSize: 11,
+                            height: 1.4,
+                          ),
+                        ),
+                      ],
+                    ],
+                  ),
+                ),
               if (widget.projects.isNotEmpty && widget.onProjectChanged != null)
                 _Field(
                   label: 'PROJECT',
