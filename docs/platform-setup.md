@@ -107,7 +107,21 @@ icon sizes and a `.desktop` entry.
 ```bash
 tool/deploy.sh          # build and install for this host
 tool/deploy.sh --run    # …and launch it when the install lands
+tool/deploy.sh --android  # release APK onto every adb device, `install -r`
 ```
+
+**`tool/deploy-all.sh` (and the `/deploy` project command that runs it) does
+every target in turn**: this host, every attached Android device, and, from
+Linux, the Mac over ssh (`DEPLOY_MAC_HOST`, default `macbook-pro`;
+`DEPLOY_MAC_REPO` for its clone). Each target ends as OK, SKIP or FAIL, so an
+asleep Mac or an absent phone does not stop the others. The Mac builds the
+commit, not the working tree: `HEAD` has to be on `origin`, and it is checked
+out in `.worktrees/deploy` on the Mac so that clone's own checkout never moves.
+**The Android step never uninstalls.** A phone holding a build signed with a
+different key answers `INSTALL_FAILED_UPDATE_INCOMPATIBLE`, and the only way
+past that is an uninstall, which deletes the container and the recordings in it.
+So the device is reported and skipped, and replacing it takes a backup plus a
+manual uninstall.
 
 **Nothing in it is a literal.** The Linux launcher names the application
 identifier in six places, none of them compiled, so a stale copy costs the dock
