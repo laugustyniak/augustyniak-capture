@@ -6,6 +6,7 @@ import 'package:path/path.dart' as p;
 
 import '../../enrichment/domain/enrichment_context.dart';
 import '../domain/agent_artifact.dart';
+import '../domain/capture_priority.dart';
 import '../domain/connection_reasoner.dart';
 import '../domain/note_vault.dart';
 import '../domain/untrusted_markdown.dart';
@@ -30,6 +31,8 @@ class VaultConnectionAnalyzer {
     required String sourcePath,
     required ConnectionReasoner reasoner,
     required EnrichmentContext context,
+    CapturePriority? priority,
+    String? priorityReason,
   }) async {
     if (!RegExp(r'^[a-zA-Z0-9_-]+$').hasMatch(note.id)) {
       throw const FormatException('Capture id is unsafe for a vault path.');
@@ -51,6 +54,8 @@ class VaultConnectionAnalyzer {
       text: note.body,
       candidates: candidates,
       context: context,
+      priority: priority,
+      priorityReason: priorityReason,
     );
     final String body = _render(vault, note, sourcePath, candidates, advice);
     final String hash = await _hash(body);
