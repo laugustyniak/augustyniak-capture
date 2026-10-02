@@ -377,20 +377,7 @@ class _QueueTabState extends State<QueueTab> {
           // can never act on a row that the filters have since removed.
           onNext: () => _moveFocus(visible, 1, from: selectedId),
           onPrevious: () => _moveFocus(visible, -1, from: selectedId),
-          onEdit: () => onSelected((Recording item) {
-            setState(() => editingId = item.id);
-          }),
-          onToggleProcessed: () => onSelected(_toggleProcessed),
-          onTogglePlay: () => onSelected(
-            (Recording item) => controller.togglePlayback(item.id),
-          ),
-          onRoute: () => onSelected((Recording item) {
-            if (controller.canRoute(item)) controller.route(item.id);
-          }),
-          onHandoff: () => onSelected((Recording item) {
-            if (controller.canHandoff(item)) _openHandoff(item);
-          }),
-          // `Ctrl+F` and `/` have to reveal the box before they can focus it —
+          // `Ctrl+F` has to reveal the box before it can focus it —
           // on a phone it is behind the header's search button.
           onSearch: () {
             setState(() => searchPanelOpen = true);
@@ -1358,20 +1345,11 @@ bool _matchesType(CaptureTypeFilter filter, Recording item) => switch (filter) {
 /// Escape fell into. `skipTraversal` keeps it out of the Tab order, so this
 /// node never becomes a stop the user has to press through.
 ///
-/// The single-letter bindings deliberately carry no modifier: they are scoped
-/// to this subtree, and the moment focus enters a text field the field consumes
-/// the key first, so `e` types an "e" in the search box and edits a row
-/// everywhere else.
 class _QueueShortcuts extends StatelessWidget {
   const _QueueShortcuts({
     required this.focusNode,
     required this.onNext,
     required this.onPrevious,
-    required this.onEdit,
-    required this.onToggleProcessed,
-    required this.onTogglePlay,
-    required this.onRoute,
-    required this.onHandoff,
     required this.onOpen,
     required this.onSearch,
     required this.onClearFocus,
@@ -1381,11 +1359,6 @@ class _QueueShortcuts extends StatelessWidget {
   final FocusNode focusNode;
   final VoidCallback onNext;
   final VoidCallback onPrevious;
-  final VoidCallback onEdit;
-  final VoidCallback onToggleProcessed;
-  final VoidCallback onTogglePlay;
-  final VoidCallback onRoute;
-  final VoidCallback onHandoff;
   final VoidCallback onOpen;
   final VoidCallback onSearch;
   final VoidCallback onClearFocus;
@@ -1397,25 +1370,11 @@ class _QueueShortcuts extends StatelessWidget {
       bindings: <ShortcutActivator, VoidCallback>{
         const SingleActivator(LogicalKeyboardKey.arrowDown): onNext,
         const SingleActivator(LogicalKeyboardKey.arrowUp): onPrevious,
-        // vi-style, for the same hands that never leave the home row.
-        const SingleActivator(LogicalKeyboardKey.keyJ): onNext,
-        const SingleActivator(LogicalKeyboardKey.keyK): onPrevious,
-        const SingleActivator(LogicalKeyboardKey.keyE): onEdit,
-        const SingleActivator(LogicalKeyboardKey.keyD): onToggleProcessed,
-        // `x` as in a checkbox — the master–detail design's spelling of done.
-        const SingleActivator(LogicalKeyboardKey.keyX): onToggleProcessed,
-        const SingleActivator(LogicalKeyboardKey.keyR): onRoute,
-        // `A` for agent. `H` would have read as "handoff" for both of these,
-        // and the two destinations must not share a mnemonic.
-        const SingleActivator(LogicalKeyboardKey.keyA): onHandoff,
-        const SingleActivator(LogicalKeyboardKey.space): onTogglePlay,
         // Reading a capture is what the list is *for*, so it takes the key a
         // list already means it with. `O` would have been a second mnemonic
         // for the one thing every row does.
         //
-        // Guarded, unlike every binding above it. The letters need no guard
-        // because a focused field consumes them as text — but a single-line
-        // field does not insert a newline, so `Enter` reaches this layer
+        // A single-line field does not insert a newline, so `Enter` reaches this layer
         // unhandled, and submitting a search query would have opened whatever
         // row the keyboard was last on.
         const SingleActivator(LogicalKeyboardKey.enter): _unlessTyping(onOpen),
@@ -1426,7 +1385,6 @@ class _QueueShortcuts extends StatelessWidget {
         // Both spellings: control on Linux/Windows, meta on macOS.
         const SingleActivator(LogicalKeyboardKey.keyF, control: true): onSearch,
         const SingleActivator(LogicalKeyboardKey.keyF, meta: true): onSearch,
-        const SingleActivator(LogicalKeyboardKey.slash): onSearch,
       },
       child: Focus(
         focusNode: focusNode,
