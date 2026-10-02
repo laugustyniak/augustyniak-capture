@@ -76,6 +76,9 @@ void main() {
       SyncSnapshot(recordings: [recording(id: 'a', title: 'mine', summary: 'mine')]),
     );
     expect(r.conflicts, 1);
+    expect(r.conflictDetails.single.table, 'recordings');
+    expect(r.conflictDetails.single.id, 'a');
+    expect(r.conflictDetails.single.overwrittenFields, containsAll(<String>['title', 'summary']));
     expect(applier.recordings['a']!.title, 'theirs');
     expect(applier.recordings['a']!.summary, 'base');
     expect(
@@ -340,6 +343,8 @@ void main() {
     await transport.push(SyncTable.segments, [{...seg, 'version': 1}]);
     final r1 = await engine.run(SyncSnapshot(recordings: [rec]));
     expect(r1.conflicts, 1);
+    expect(r1.conflictDetails.single.table, 'segments');
+    expect(r1.conflictDetails.single.resolution, SyncConflictResolution.serverAdopted);
     transport.pushes.clear();
     final r2 = await engine.run(SyncSnapshot(recordings: [rec]));
     expect(r2.conflicts, 0);
@@ -380,6 +385,7 @@ void main() {
       );
       final r1 = await engine.run(snapshot);
       expect(r1.conflicts, greaterThan(0));
+      expect(r1.conflictDetails.every((detail) => detail.isBookkeeping), isTrue);
       final int adoptedDeviceVersion =
           bookkeeping.loadTable('devices')['dev']!.serverVersion;
       final int adoptedSyncStateVersion =

@@ -8,8 +8,12 @@ import 'package:augustyniak_capture/features/auth/domain/auth_identity.dart';
 import 'package:augustyniak_capture/features/clipboard/data/clipboard_repository.dart';
 import 'package:augustyniak_capture/features/projects/data/projects_repository.dart';
 import 'package:augustyniak_capture/features/recordings/data/recordings_repository.dart';
+import 'package:augustyniak_capture/features/recordings/data/revisions_repository.dart';
 import 'package:augustyniak_capture/features/recordings/domain/recording.dart';
+import 'package:augustyniak_capture/features/recordings/domain/recording_revision.dart';
 import 'package:augustyniak_capture/features/recordings/presentation/recordings_controller.dart';
+import 'package:augustyniak_capture/features/sync/domain/sync_row_codec.dart';
+import 'package:augustyniak_capture/features/sync/domain/sync_table.dart';
 import 'package:augustyniak_capture/features/transcription/data/transcription_service.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -44,6 +48,20 @@ class _CountingRepository extends RecordingsRepository {
   Future<List<Recording>> loadAll() async {
     loadAllCalls++;
     return super.loadAll();
+  }
+}
+
+class _RevisionsRepository extends RevisionsRepository {
+  Map<String, List<RecordingRevision>> rows = <String, List<RecordingRevision>>{};
+
+  @override
+  Future<Map<String, List<RecordingRevision>>> load() async => rows;
+
+  @override
+  Future<void> append(List<RecordingRevision> revisions) async {
+    for (final RecordingRevision revision in revisions) {
+      rows.putIfAbsent(revision.recordingId, () => <RecordingRevision>[]).add(revision);
+    }
   }
 }
 
@@ -115,4 +133,42 @@ void main() {
       );
     },
   );
+
+  test('a Supabase run refreshes the editor history without a restart', () async {
+    final _RevisionsRepository revisions = _RevisionsRepository();
+    DateTime now = DateTime.utc(2026, 10, 2, 12);
+    final FakeSyncTransport transport = FakeSyncTransport(clock: () => now);
+    final RecordingRevision remoteRevision = RecordingRevision(
+      recordingId: 'capture-1',
+      at: now,
+      field: 'title',
+      from: 'local title',
+      to: 'server title',
+      source: RevisionSource.sync,
+    );
+    await transport.push(SyncTable.revisions, [SyncRowCodec.revision(remoteRevision)]);
+    now = now.add(const Duration(minutes: 1));
+    final RecordingsController controller = RecordingsController(
+      repository: _CountingRepository(dir),
+      transcriptionService: const DisabledTranscriptionService(),
+      revisionsRepository: revisions,
+      syncTransportResolver: () => transport,
+      authGateway: _FakeAuthGateway(),
+      projectsRepository: ProjectsRepository(directoryProvider: () async => dir),
+      clipboardRepository: LocalJsonClipboardRepository(
+        storageDirectoryProvider: () async => dir,
+      ),
+      syncDeviceId: () async => 'device-1',
+      applySyncedProjects: (_) async {},
+      applySyncedProjectDelete: (_) async {},
+    );
+    addTearDown(controller.dispose);
+    await controller.initialize();
+    expect(controller.revisionsFor('capture-1'), isEmpty);
+
+    final CloudSyncReport report = await controller.syncCloud();
+
+    expect(report.supabase?.pulled, 1);
+    expect(controller.revisionsFor('capture-1').single.from, 'local title');
+  });
 }

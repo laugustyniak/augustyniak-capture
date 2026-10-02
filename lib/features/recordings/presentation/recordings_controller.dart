@@ -858,6 +858,11 @@ class RecordingsController extends ChangeNotifier {
     );
 
     _lastCloudSyncReport = await coordinator.sync(onProgress: onProgress);
+    if (_revisionsRepository != null &&
+        ((_lastCloudSyncReport!.supabase?.pulled ?? 0) > 0 ||
+            (_lastCloudSyncReport!.supabase?.tombstonesApplied ?? 0) > 0)) {
+      await _history.loadRevisions();
+    }
     // A pulled row that was mid-pipeline on the device that made it can now
     // be processed here; the funnel filters everything else out by status.
     if ((_lastCloudSyncReport!.media?.downloaded ?? 0) > 0) {
