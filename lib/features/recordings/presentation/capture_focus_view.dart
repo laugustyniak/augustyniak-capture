@@ -17,6 +17,7 @@ import 'handoff_sheet.dart';
 import 'inline_edit.dart';
 import 'inline_video_player.dart';
 import 'recording_card.dart';
+import 'recording_editor.dart';
 import 'recordings_controller.dart';
 import 'tag_editor.dart';
 
@@ -999,6 +1000,9 @@ class CaptureDetailPanel extends StatelessWidget {
     required this.showMetaColumn,
     required this.onEdit,
     required this.onToggleProcessed,
+    this.onAppendRecording,
+    this.onAppendNote,
+    this.onAppendUpload,
     this.isMarkingDone = false,
     this.onConfigureModels,
     this.costUsd,
@@ -1022,6 +1026,9 @@ class CaptureDetailPanel extends StatelessWidget {
   /// the reading column into a fixed one beside it.
   final bool showMetaColumn;
   final VoidCallback onEdit;
+  final VoidCallback? onAppendRecording;
+  final VoidCallback? onAppendNote;
+  final ValueChanged<CaptureType>? onAppendUpload;
 
   /// Routed through the queue rather than straight to the controller, so the
   /// panel's Mark done gets the same saving/done feedback the card's does.
@@ -1110,6 +1117,9 @@ class CaptureDetailPanel extends StatelessWidget {
             recording: recording,
             projectName: projectName,
             onEdit: onEdit,
+            onAppendRecording: onAppendRecording,
+            onAppendNote: onAppendNote,
+            onAppendUpload: onAppendUpload,
             onToggleProcessed: onToggleProcessed,
             isMarkingDone: isMarkingDone,
           ),
@@ -1494,6 +1504,9 @@ class _PanelActions extends StatelessWidget {
     required this.recording,
     required this.projectName,
     required this.onEdit,
+    this.onAppendRecording,
+    this.onAppendNote,
+    this.onAppendUpload,
     required this.onToggleProcessed,
     required this.isMarkingDone,
   });
@@ -1502,6 +1515,9 @@ class _PanelActions extends StatelessWidget {
   final Recording recording;
   final String? projectName;
   final VoidCallback onEdit;
+  final VoidCallback? onAppendRecording;
+  final VoidCallback? onAppendNote;
+  final ValueChanged<CaptureType>? onAppendUpload;
   final VoidCallback onToggleProcessed;
   final bool isMarkingDone;
 
@@ -1582,6 +1598,19 @@ class _PanelActions extends StatelessWidget {
           label: 'Vault',
           semanticLabel: 'Sync to Obsidian vault',
           onPressed: () => controller.retryVaultMirror(recording.id),
+        ),
+      if (onAppendRecording != null ||
+          onAppendNote != null ||
+          onAppendUpload != null)
+        _PanelButton(
+          icon: Icons.add_rounded,
+          label: '+ Fragment',
+          onPressed: () => showAppendFragmentMenu(
+            context,
+            onAppendRecording: onAppendRecording,
+            onAppendNote: onAppendNote,
+            onAppendUpload: onAppendUpload,
+          ),
         ),
       _PanelButton(
         icon: Icons.edit_outlined,

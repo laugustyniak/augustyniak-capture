@@ -755,29 +755,12 @@ class _FragmentsSection extends StatelessWidget {
       onAppendUpload != null;
 
   Future<void> _openMenu(BuildContext context) async {
-    final _AppendAction? action = await showModalBottomSheet<_AppendAction>(
-      context: context,
-      builder: (BuildContext context) => ConsolePaletteScope(
-        builder: (BuildContext context) => _AppendMenuSheet(
-          canRecord: onAppendRecording != null,
-          canWrite: onAppendNote != null,
-          canUpload: onAppendUpload != null,
-        ),
-      ),
+    await showAppendFragmentMenu(
+      context,
+      onAppendRecording: onAppendRecording,
+      onAppendNote: onAppendNote,
+      onAppendUpload: onAppendUpload,
     );
-    if (action == null || !context.mounted) return;
-    switch (action) {
-      case _AppendAction.recording:
-        onAppendRecording?.call();
-      case _AppendAction.note:
-        onAppendNote?.call();
-      case _AppendAction.audio:
-        onAppendUpload?.call(CaptureType.audioUpload);
-      case _AppendAction.image:
-        onAppendUpload?.call(CaptureType.image);
-      case _AppendAction.video:
-        onAppendUpload?.call(CaptureType.video);
-    }
   }
 
   @override
@@ -873,6 +856,37 @@ class _FragmentTile extends StatelessWidget {
 }
 
 enum _AppendAction { recording, note, audio, image, video }
+
+Future<void> showAppendFragmentMenu(
+  BuildContext context, {
+  VoidCallback? onAppendRecording,
+  VoidCallback? onAppendNote,
+  ValueChanged<CaptureType>? onAppendUpload,
+}) async {
+  final _AppendAction? action = await showModalBottomSheet<_AppendAction>(
+    context: context,
+    builder: (BuildContext context) => ConsolePaletteScope(
+      builder: (BuildContext context) => _AppendMenuSheet(
+        canRecord: onAppendRecording != null,
+        canWrite: onAppendNote != null,
+        canUpload: onAppendUpload != null,
+      ),
+    ),
+  );
+  if (action == null || !context.mounted) return;
+  switch (action) {
+    case _AppendAction.recording:
+      onAppendRecording?.call();
+    case _AppendAction.note:
+      onAppendNote?.call();
+    case _AppendAction.audio:
+      onAppendUpload?.call(CaptureType.audioUpload);
+    case _AppendAction.image:
+      onAppendUpload?.call(CaptureType.image);
+    case _AppendAction.video:
+      onAppendUpload?.call(CaptureType.video);
+  }
+}
 
 class _AppendMenuSheet extends StatelessWidget {
   // Not `const`: paints palette colours.
