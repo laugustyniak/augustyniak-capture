@@ -1801,9 +1801,8 @@ class _PanelMeta extends StatelessWidget {
           if (showKeys) ...<Widget>[
           const SizedBox(height: 16),
           Text(
-            'j / k  move · enter  edit\n'
-            'space  play · d / x  done\n'
-            'r  route · a  agent · /  search',
+            '↑ / ↓  move · enter  open\n'
+            'Ctrl+F  search',
             style: ConsoleText.micro.copyWith(
               height: 1.7,
               color: Console.muted,

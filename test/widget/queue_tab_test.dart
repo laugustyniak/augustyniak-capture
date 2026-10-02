@@ -211,7 +211,7 @@ void main() {
     expect(find.text('zobaczmy czy nadal działa ładowanie'), findsOneWidget);
   });
 
-  testWidgets('arrow keys move a selection and D closes the selected row', (
+  testWidgets('arrow keys move a selection without letter actions', (
     WidgetTester tester,
   ) async {
     // The app ships system-wide global hotkeys, and until this existed the
@@ -248,13 +248,27 @@ void main() {
     await tester.pumpAndSettle();
     expect(cardFor('second').focused, isTrue);
 
-    await tester.sendKeyEvent(LogicalKeyboardKey.keyD);
-    await tester.pumpAndSettle();
+    for (final LogicalKeyboardKey key in <LogicalKeyboardKey>[
+      LogicalKeyboardKey.keyJ,
+      LogicalKeyboardKey.keyK,
+      LogicalKeyboardKey.keyE,
+      LogicalKeyboardKey.keyD,
+      LogicalKeyboardKey.keyX,
+      LogicalKeyboardKey.keyR,
+      LogicalKeyboardKey.keyA,
+      LogicalKeyboardKey.space,
+      LogicalKeyboardKey.slash,
+    ]) {
+      await tester.sendKeyEvent(key);
+      await tester.pump();
+    }
+    expect(cardFor('second').focused, isTrue);
+    expect(find.byType(RecordingEditor), findsNothing);
     expect(
       controller.recordings
           .firstWhere((Recording item) => item.id == 'second')
           .isProcessedByUser,
-      isTrue,
+      isFalse,
     );
   });
 
@@ -1622,8 +1636,8 @@ void main() {
       findsOneWidget,
     );
 
-    // `k` moves off the selection — the implied first row counts as one.
-    await tester.sendKeyEvent(LogicalKeyboardKey.keyK);
+    // Up moves off the selection — the implied first row counts as one.
+    await tester.sendKeyEvent(LogicalKeyboardKey.arrowUp);
     await tester.pump();
     expect(
       find.descendant(of: panel, matching: find.text('First transcript')),
@@ -1693,7 +1707,7 @@ void main() {
     await tester.pump(const Duration(seconds: 2));
   });
 
-  testWidgets('x marks the selected capture done and the panel moves on', (
+  testWidgets('row check marks the selected capture done and the panel moves on', (
     WidgetTester tester,
   ) async {
     tester.view.physicalSize = const Size(1800, 1000);
@@ -1732,7 +1746,7 @@ void main() {
     await tester.tap(find.byType(QueueListRow).at(1));
     await tester.pump();
 
-    await tester.sendKeyEvent(LogicalKeyboardKey.keyX);
+    await tester.tap(find.byTooltip('Mark done').at(1));
     await tester.runAsync(
       () => Future<void>.delayed(const Duration(milliseconds: 50)),
     );
