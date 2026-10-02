@@ -18,6 +18,7 @@ import '../../backup/data/zip_capture_archive.dart';
 import '../../backup/domain/capture_archive.dart';
 import '../../backup/presentation/backup_coordinator.dart';
 import '../../clipboard/data/clipboard_repository.dart';
+import '../../clipboard/data/clipboard_capture_reader.dart';
 import '../../clipboard/data/xdotool_auto_paste.dart';
 import '../../clipboard/domain/auto_paste.dart';
 import '../../clipboard/domain/clipboard_watcher_service.dart';
@@ -78,6 +79,7 @@ import '../../gamification/presentation/celebration_overlay.dart';
 import '../../gamification/presentation/gamification_controller.dart';
 import '../../clipboard/data/sqlite_clipboard_repository.dart';
 import '../data/foreground_capture_session.dart';
+import '../data/media_picker.dart';
 import '../data/markdown_note_vault.dart';
 import '../domain/capture_session.dart';
 import '../data/project_agent_handoff.dart';
@@ -93,8 +95,10 @@ import '../domain/recording.dart';
 import '../../sync/domain/media_sync.dart';
 import '../../sync/domain/sync_transport.dart';
 import 'capture_dock.dart';
+import 'capture_focus_view.dart';
 import 'capture_nav_bar.dart';
 import 'nav_rail.dart';
+import 'paste_capture_shortcut.dart';
 import 'queue_tab.dart';
 import 'recording_view.dart';
 import 'recordings_controller.dart';
@@ -931,6 +935,45 @@ class _RecordingsPageState extends State<RecordingsPage>
     }
   }
 
+  Future<void> _pasteCapture() async {
+    final pasted = await const ClipboardCaptureReader().read();
+    final Set<String> before = controller.recordings
+        .map((Recording item) => item.id).toSet();
+    if (pasted.file != null && pasted.type != null) {
+      final File file = pasted.file!;
+      try {
+        await controller.addImportedFile(
+          file,
+          pasted.type!,
+          mimeType: pasted.mimeType ?? FilePickerMediaPicker.mimeForPath(file.path),
+        );
+      } finally {
+        if (pasted.temporary) {
+          try {
+            await file.delete();
+          } on FileSystemException {
+            // Import already copied the image; temp cleanup is best effort.
+          }
+        }
+      }
+    } else if (pasted.text?.trim().isNotEmpty ?? false) {
+      await controller.addTextNote(pasted.text!);
+    } else {
+      return;
+    }
+    if (!mounted) return;
+    for (final Recording item in controller.recordings) {
+      if (before.contains(item.id)) continue;
+      setState(() => navigationIndex = 0);
+      await showCaptureFocusView(
+        context,
+        controller: controller,
+        recordingId: item.id,
+      );
+      return;
+    }
+  }
+
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     super.didChangeAppLifecycleState(state);
@@ -985,7 +1028,7 @@ class _RecordingsPageState extends State<RecordingsPage>
               // sizing its surface.
               final bool wide = constraints.maxWidth >= Console.railBreakpoint;
 
-              return CallbackShortcuts(
+              final Widget shell = CallbackShortcuts(
                 bindings: <ShortcutActivator, VoidCallback>{
                   // Zoom in: Ctrl/Cmd + = or +, plus keypad
                   const SingleActivator(LogicalKeyboardKey.equal, control: true):
@@ -1285,6 +1328,10 @@ class _RecordingsPageState extends State<RecordingsPage>
                 ),
               ),
             );
+              return PasteCaptureShortcut(
+                onPaste: () => unawaited(_pasteCapture()),
+                child: shell,
+              );
           },
           );
         },

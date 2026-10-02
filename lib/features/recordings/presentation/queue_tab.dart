@@ -57,7 +57,7 @@ enum RecordingFilter { all, queue, ready, failed, raw }
 enum ReviewFilter { desk, handedOff, all }
 
 /// The *capture type* axis — filters the queue by source media type.
-enum CaptureTypeFilter { all, audio, image, text, video }
+enum CaptureTypeFilter { all, audio, image, text, video, file }
 
 /// The original Phase-1 screen: header, review progress, search, status filters
 /// and the capture list. Owns only view state; every mutation goes through
@@ -1402,6 +1402,7 @@ bool _matchesType(CaptureTypeFilter filter, Recording item) => switch (filter) {
   CaptureTypeFilter.image => item.type == CaptureType.image,
   CaptureTypeFilter.text => item.type == CaptureType.text,
   CaptureTypeFilter.video => item.type == CaptureType.video,
+  CaptureTypeFilter.file => item.type == CaptureType.file,
 };
 
 /// Keyboard control for the queue.

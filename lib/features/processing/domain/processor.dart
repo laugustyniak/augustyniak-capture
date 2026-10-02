@@ -32,6 +32,20 @@ class TextPassthroughProcessor implements Processor {
   }
 }
 
+/// Attachments have no text extraction step. Verify the retained source and
+/// complete the capture without replacing the user's clipboard contents.
+class FileAttachmentProcessor implements Processor {
+  const FileAttachmentProcessor();
+
+  @override
+  Future<String> process(CaptureSegment segment) async {
+    if (!await File(segment.filePath).exists()) {
+      throw FileSystemException('Source file is missing.', segment.filePath);
+    }
+    return '';
+  }
+}
+
 /// Fallback for capture types whose processor needs a dependency this platform
 /// or build does not have (OCR on desktop, ffmpeg where it is unavailable).
 /// Mirrors `DisabledTranscriptionService`: the item fails cleanly and stays

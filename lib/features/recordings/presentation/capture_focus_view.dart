@@ -192,6 +192,22 @@ class _FocusBody extends StatelessWidget {
               child: ListView(
                 padding: const EdgeInsets.only(top: 14),
                 children: <Widget>[
+                  if (recording.type == CaptureType.file &&
+                      recording.filePath.isNotEmpty) ...<Widget>[
+                    _SectionLabel(
+                      label: 'SOURCE FILE',
+                      trailing: CopyButton(
+                        text: recording.filePath,
+                        tooltip: 'Copy file path',
+                        semanticLabel: 'Copy file path to clipboard',
+                        size: 26,
+                        iconSize: 13,
+                      ),
+                    ),
+                    const SizedBox(height: 6),
+                    Text(recording.title ?? filename),
+                    const SizedBox(height: 14),
+                  ],
                   if (recording.type == CaptureType.image &&
                       recording.filePath.isNotEmpty) ...<Widget>[
                     _SectionLabel(
@@ -672,7 +688,8 @@ class _Actions extends StatelessWidget {
     final bool hasTranscript = (recording.transcript ?? '').trim().isNotEmpty;
     final bool isEnriching = controller.isEnriching(recording.id);
     final bool isPlaying = controller.playingId == recording.id;
-    final bool openable = recording.type == CaptureType.video;
+    final bool openable = recording.type == CaptureType.video ||
+        recording.type == CaptureType.file;
 
     return Row(
       children: <Widget>[
@@ -735,9 +752,13 @@ class _Actions extends StatelessWidget {
                 )
               else if (openable)
                 ConsoleIconButton(
-                  icon: Icons.play_arrow_rounded,
+                  icon: recording.type == CaptureType.file
+                      ? Icons.open_in_new_rounded
+                      : Icons.play_arrow_rounded,
                   onTap: () => controller.openSource(recording.id),
-                  semanticLabel: RecordingCard.openVideoLabel,
+                  semanticLabel: recording.type == CaptureType.file
+                      ? RecordingCard.openFileLabel
+                      : RecordingCard.openVideoLabel,
                 ),
               if (controller.canHandoff(recording) && !reviewed)
                 ConsoleIconButton(
@@ -1566,11 +1587,14 @@ class _PanelActions extends StatelessWidget {
           semanticLabel: isPlaying ? 'Stop playback' : 'Play recording',
           onPressed: () => controller.togglePlayback(recording.id),
         )
-      else if (recording.type == CaptureType.video)
+      else if (recording.type == CaptureType.video ||
+          recording.type == CaptureType.file)
         _PanelButton(
           icon: Icons.open_in_new_rounded,
           label: 'Open',
-          semanticLabel: RecordingCard.openVideoLabel,
+          semanticLabel: recording.type == CaptureType.file
+              ? RecordingCard.openFileLabel
+              : RecordingCard.openVideoLabel,
           onPressed: () => controller.openSource(recording.id),
         ),
       if (controller.canHandoff(recording) && !reviewed)
