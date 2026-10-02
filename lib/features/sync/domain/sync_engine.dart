@@ -60,6 +60,7 @@ class SyncEngine {
     int skipped = 0;
     int pulled = 0;
     int tombstones = 0;
+    final List<SyncConflictDetail> conflictDetails = <SyncConflictDetail>[];
     // Shared with the pull loop below: a tombstone resolved while applying a
     // push conflict removes its id here so the same run's pull pass — which
     // may re-see the row inside the lag window — does not delete it twice.
@@ -97,6 +98,28 @@ class SyncEngine {
           tombstones += resolved.tombstones;
           skipped += resolved.skipped;
           redirtied.addAll(resolved.redirtied);
+          for (final Map<String, Object?> row in outcome.conflictRows) {
+            final String id = SyncRowCodec.rowId(outbox.table, row);
+            final List<SyncConflictDetail> matching = resolved.details
+                .where((SyncConflictDetail detail) => detail.id == id)
+                .toList();
+            conflictDetails.add(
+              matching.isNotEmpty
+                  ? matching.first
+                  : SyncConflictDetail(
+                      table: outbox.table.serverName,
+                      id: id,
+                      resolution:
+                          outbox.table == SyncTable.devices ||
+                              outbox.table == SyncTable.syncState ||
+                              outbox.table == SyncTable.segments
+                          ? SyncConflictResolution.serverAdopted
+                          : row['deleted_at'] != null
+                          ? SyncConflictResolution.serverDeleted
+                          : SyncConflictResolution.serverApplied,
+                    ),
+            );
+          }
         }
       }
 
@@ -106,6 +129,7 @@ class SyncEngine {
       tombstones += pull.tombstones;
       skipped += pull.skipped;
       redirtied.addAll(pull.redirtied);
+      conflictDetails.addAll(pull.details);
 
       if (redirtied.isNotEmpty) {
         // The transcript rule kept a local value the server tried to
@@ -123,12 +147,22 @@ class SyncEngine {
         pushed += again.applied;
         conflicts += again.conflicts;
         skipped += again.skipped;
+        for (final Map<String, Object?> row in again.conflictRows) {
+          conflictDetails.add(
+            SyncConflictDetail(
+              table: SyncTable.recordings.serverName,
+              id: SyncRowCodec.rowId(SyncTable.recordings, row),
+              resolution: SyncConflictResolution.retryNeeded,
+            ),
+          );
+        }
       }
     } catch (error) {
       return SupabaseSyncResult(
         pushed: pushed,
         pulled: pulled,
         conflicts: conflicts,
+        conflictDetails: conflictDetails,
         tombstonesApplied: tombstones,
         skipped: skipped,
         failureReason: '$error',
@@ -138,6 +172,7 @@ class SyncEngine {
       pushed: pushed,
       pulled: pulled,
       conflicts: conflicts,
+      conflictDetails: conflictDetails,
       tombstonesApplied: tombstones,
       skipped: skipped,
       failureReason: refusals.isEmpty ? null : refusals.join('; '),
@@ -525,6 +560,15 @@ class SyncEngine {
       });
       final _PushOutcome mirrored = await _pushTable(syncStateOutbox);
       total.conflicts += mirrored.conflicts;
+      for (final Map<String, Object?> row in mirrored.conflictRows) {
+        total.details.add(
+          SyncConflictDetail(
+            table: SyncTable.syncState.serverName,
+            id: SyncRowCodec.rowId(SyncTable.syncState, row),
+            resolution: SyncConflictResolution.serverAdopted,
+          ),
+        );
+      }
       if (mirrored.conflictRows.isNotEmpty) {
         await _resolvePushConflicts(
           SyncTable.syncState,
@@ -575,8 +619,19 @@ class SyncEngine {
         // Revisions before the delete — HISTORY must show what was thrown
         // away before the row (and its source file) are gone.
         if (dirty) {
+          out.conflicts++;
           final List<RecordingRevision> lost = _overwritten(mine, null);
           if (lost.isNotEmpty) await _applier.appendRevisions(lost);
+          out.details.add(
+            SyncConflictDetail(
+              table: SyncTable.recordings.serverName,
+              id: id,
+              resolution: SyncConflictResolution.serverDeleted,
+              overwrittenFields: [
+                for (final RecordingRevision revision in lost) revision.field,
+              ],
+            ),
+          );
         }
         await _applier.deleteRecording(id);
         _bookkeeping.remove(SyncTable.recordings.serverName, id);
@@ -609,7 +664,21 @@ class SyncEngine {
 
       if (mine != null && dirty) {
         out.conflicts++;
-        revisions.addAll(_overwritten(mine, next));
+        final List<RecordingRevision> overwritten = _overwritten(mine, next);
+        revisions.addAll(overwritten);
+        out.details.add(
+          SyncConflictDetail(
+            table: SyncTable.recordings.serverName,
+            id: id,
+            resolution: transcriptShrinks
+                ? SyncConflictResolution.localTranscriptKept
+                : SyncConflictResolution.serverApplied,
+            overwrittenFields: [
+              for (final RecordingRevision revision in overwritten)
+                revision.field,
+            ],
+          ),
+        );
       }
 
       final String hash;
@@ -817,6 +886,7 @@ class _PullOutcome {
   int tombstones = 0;
   int skipped = 0;
   final List<Recording> redirtied = <Recording>[];
+  final List<SyncConflictDetail> details = <SyncConflictDetail>[];
 
   /// `updated_at` of each row a decode failure skipped this run, across
   /// every table the shared instance sees — `_pullAll` slices out the

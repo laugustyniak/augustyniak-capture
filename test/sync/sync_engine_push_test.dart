@@ -159,6 +159,9 @@ void main() {
     ]);
     final r = await engine.run(SyncSnapshot(recordings: [recording(id: 'a', title: 'mine')]));
     expect(r.conflicts, 1);
+    expect(r.conflictDetails.single.id, 'a');
+    expect(r.conflictDetails.single.resolution, SyncConflictResolution.serverApplied);
+    expect(r.conflictDetails.single.overwrittenFields, <String>['title']);
     expect(transport.tables[SyncTable.recordings]!['a']!['title'], 'theirs');
   });
 
