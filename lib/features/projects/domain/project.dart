@@ -24,29 +24,71 @@ class AgentSettings {
   const AgentSettings({
     this.additionalArgs = const <String>[],
     this.initialPrompt,
+    this.skipPermissions = false,
   });
 
   final List<String> additionalArgs;
   final String? initialPrompt;
 
-  bool get isEmpty => additionalArgs.isEmpty && initialPrompt == null;
+  /// Start the agent without per-tool approval prompts.
+  ///
+  /// A switch rather than a free-text flag because every CLI spells it
+  /// differently, and the wrong spelling does not degrade — the CLI rejects it
+  /// and exits before reading the prompt, leaving a terminal open on a pane
+  /// that did nothing. The launcher maps it to the agent's own flag.
+  final bool skipPermissions;
+
+  bool get isEmpty =>
+      additionalArgs.isEmpty && initialPrompt == null && !skipPermissions;
+
+  /// Every spelling of "skip permission prompts" the supported CLIs accept.
+  ///
+  /// Lifted out of free-text arguments on load: a project saved before the
+  /// switch existed carries one of these, possibly the wrong agent's.
+  static const Set<String> knownPermissionFlags = <String>{
+    '--dangerously-skip-permissions',
+    '--dangerously-bypass-approvals-and-sandbox',
+  };
+
+  /// The first argument that looks like a permission flag, or null.
+  ///
+  /// Checked after [knownPermissionFlags] have been lifted out, so whatever is
+  /// left is a typo — and a typo fails at launch, not at save.
+  static String? permissionFlagLookalike(List<String> arguments) {
+    for (final String argument in arguments) {
+      if (argument.startsWith('--dangerously-skip') ||
+          argument.startsWith('--dangerously-bypass-approvals')) {
+        return argument;
+      }
+    }
+    return null;
+  }
 
   Map<String, dynamic> toJson() => <String, dynamic>{
     'additionalArgs': additionalArgs,
     'initialPrompt': initialPrompt,
+    // Absent when off, so a row without the switch serialises as before.
+    if (skipPermissions) 'skipPermissions': true,
   };
 
   factory AgentSettings.fromJson(Map<String, dynamic> json) {
     // `args` is accepted as an early/legacy spelling. Values are filtered so a
     // stray hand-edited number does not discard otherwise valid settings.
     final dynamic rawArgs = json['additionalArgs'] ?? json['args'];
+    final List<String> arguments = rawArgs is List<dynamic>
+        ? rawArgs.whereType<String>().toList(growable: false)
+        : const <String>[];
+    final bool legacyFlag = arguments.any(knownPermissionFlags.contains);
     return AgentSettings(
-      additionalArgs: rawArgs is List<dynamic>
-          ? rawArgs.whereType<String>().toList(growable: false)
-          : const <String>[],
+      additionalArgs: legacyFlag
+          ? arguments
+                .where((String a) => !knownPermissionFlags.contains(a))
+                .toList(growable: false)
+          : arguments,
       initialPrompt: json['initialPrompt'] is String
           ? json['initialPrompt'] as String
           : null,
+      skipPermissions: json['skipPermissions'] == true || legacyFlag,
     );
   }
 }

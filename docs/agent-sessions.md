@@ -81,6 +81,13 @@ manage its account, or provide its credentials.
 4. Choose Codex, Claude Code, or Antigravity as the default agent.
 5. Optionally set a Zellij session name, agent-specific arguments, and an initial
    prompt such as `Read AGENTS.md and pick up the first open task.`
+   To run an agent without per-tool approval prompts, turn on **Skip permission
+   prompts** in its section rather than typing the flag. Each CLI spells it
+   differently — Codex wants `--dangerously-bypass-approvals-and-sandbox`, Claude
+   Code and Antigravity `--dangerously-skip-permissions` — and a CLI handed the
+   wrong spelling exits before it reads the prompt. The editor refuses a typed
+   permission flag, and a project saved with one has it converted to the switch
+   on load.
 6. Save, then use the agent action on the project card.
 
 The first launch opens Ghostty, creates a named Zellij session rooted in the
@@ -160,8 +167,11 @@ version control instead of living in one provider's conversation history.
 - **Nothing opens:** confirm the terminal is installed — `Ghostty.app` on macOS,
   or one of the seven supported terminals on Linux — and that `zellij`
   is on `PATH`.
-- **The terminal opens but the agent fails:** run its executable directly and
-  finish installation or authentication.
+- **The terminal opens but the agent fails:** the Zellij pane shows the
+  agent's exit and its error above it. An `unexpected argument` or
+  `unknown option` means the project's additional arguments are wrong for that
+  CLI; otherwise run its executable directly and finish installation or
+  authentication.
 - **The wrong repository opens:** edit the project's repository path; it must be
   an existing local directory.
 - **A changed prompt is not used:** close the existing Zellij session first.

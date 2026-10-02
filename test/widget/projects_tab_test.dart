@@ -249,6 +249,107 @@ void main() {
     expect(saved.commandBoundAt, isNotNull);
   });
 
+  Future<void> openEditor(WidgetTester tester) async {
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: ThemeData.dark(useMaterial3: true),
+        home: Scaffold(
+          body: ListenableBuilder(
+            listenable: controller,
+            builder: (BuildContext context, Widget? child) =>
+                ProjectsTab(controller: controller),
+          ),
+        ),
+      ),
+    );
+    await tester.tap(find.byIcon(Icons.more_vert));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 300));
+    await tester.tap(find.text('Edit').last);
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 300));
+  }
+
+  Future<void> save(WidgetTester tester) async {
+    await tester.ensureVisible(
+      find.byKey(const ValueKey<String>('save-project')),
+    );
+    await tester.pump();
+    await tester.tap(find.byKey(const ValueKey<String>('save-project')));
+    await tester.pump();
+  }
+
+  testWidgets('skip permissions is a per-agent switch that saves', (
+    WidgetTester tester,
+  ) async {
+    await openEditor(tester);
+
+    await tester.scrollUntilVisible(
+      find.text('CODEX').last,
+      120,
+      scrollable: find.byType(Scrollable).last,
+    );
+    await tester.tap(find.text('CODEX').last);
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 300));
+    final Finder toggle = find.byKey(
+      const ValueKey<String>('skip-permissions-codex'),
+    );
+    await tester.ensureVisible(toggle);
+    await tester.pump();
+    await tester.tap(toggle);
+    await tester.pump();
+
+    await save(tester);
+    await _untilIo(
+      tester,
+      () => controller.projects.single
+          .settingsFor(AgentKind.codex)
+          .skipPermissions,
+    );
+
+    final Project saved = controller.projects.single;
+    expect(saved.settingsFor(AgentKind.codex).skipPermissions, isTrue);
+    expect(saved.settingsFor(AgentKind.claudeCode).skipPermissions, isFalse);
+  });
+
+  testWidgets('a misspelled permission flag is refused on save', (
+    WidgetTester tester,
+  ) async {
+    final Project original = controller.projects.single;
+    // Real file IO, which the fake-async zone does not pump.
+    await tester.runAsync(
+      () => controller.update(
+        project: original,
+        name: original.name,
+        repoPath: original.repoPath,
+        agentSettings: const <AgentKind, AgentSettings>{
+          AgentKind.claudeCode: AgentSettings(
+            additionalArgs: <String>['--dangerously-skip-premissions'],
+          ),
+        },
+      ),
+    );
+    await openEditor(tester);
+
+    // The saved typo opens its agent's section, so the error is on screen.
+    final Finder field = find.byKey(
+      const ValueKey<String>('agent-arguments-claudeCode'),
+    );
+    expect(field, findsOneWidget);
+
+    await save(tester);
+    expect(
+      find.textContaining('Remove --dangerously-skip-premissions'),
+      findsOneWidget,
+    );
+    expect(find.byKey(const ValueKey<String>('save-project')), findsOneWidget);
+
+    tester.state<NavigatorState>(find.byType(Navigator).first).pop();
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 300));
+  });
+
   testWidgets('an unconfigured control plane says so instead of hiding', (
     WidgetTester tester,
   ) async {

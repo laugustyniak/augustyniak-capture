@@ -165,6 +165,37 @@ void main() {
     ]);
   });
 
+  test('skip permissions passes each agent its own flag', () async {
+    final _CapturingLauncher launcher = _CapturingLauncher();
+    final ProjectsController controller = ProjectsController(
+      repository: repository,
+      launcher: launcher,
+    );
+    const Project project = Project(
+      id: 'p',
+      name: 'P',
+      repoPath: '/work/p',
+      agentSettings: <AgentKind, AgentSettings>{
+        AgentKind.codex: AgentSettings(
+          skipPermissions: true,
+          initialPrompt: 'Go.',
+        ),
+        AgentKind.claudeCode: AgentSettings(skipPermissions: true),
+      },
+    );
+
+    await controller.launch(project, AgentKind.codex);
+    await controller.launch(project, AgentKind.claudeCode);
+
+    expect(launcher.requests.first.arguments, <String>[
+      '--dangerously-bypass-approvals-and-sandbox',
+      'Go.',
+    ]);
+    expect(launcher.requests.last.arguments, <String>[
+      '--dangerously-skip-permissions',
+    ]);
+  });
+
   test('failed save does not replace in-memory state', () async {
     final ProjectsController controller = ProjectsController(
       repository: _FailingRepository(directory),
