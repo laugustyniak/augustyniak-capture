@@ -16,6 +16,7 @@ import '../../sync/domain/media_sync.dart';
 import '../../sync/domain/sync_snapshot.dart';
 import '../domain/agent_artifact.dart';
 import '../domain/capture_category.dart';
+import '../domain/capture_priority.dart';
 import '../domain/capture_type.dart';
 import '../domain/recording.dart';
 import '../domain/route_record.dart';
@@ -1214,6 +1215,8 @@ class _QueueTabState extends State<QueueTab> {
           controller.editTranscript(recording.id, value),
       onCategoryChanged: (CaptureCategory? value) =>
           controller.setCategory(recording.id, value),
+      onPriorityChanged: (CapturePriority? value) =>
+          controller.setPriority(recording.id, value),
       onTagsChanged: (List<String> values) =>
           controller.setTags(recording.id, values),
       onProjectChanged: (String? value) =>

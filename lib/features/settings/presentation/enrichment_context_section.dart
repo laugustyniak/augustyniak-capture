@@ -189,9 +189,10 @@ class _EnrichmentContextSectionState extends State<EnrichmentContextSection> {
                 children: <Widget>[
                   Expanded(
                     child: Text(
-                      'Who you are and what you collect. Sent with every '
-                      'capture so titles, categories and tags match how you '
-                      'actually file things.',
+                      'Your soul: who you are, what you collect, your goals '
+                      'and your priority rules. Sent with every capture so '
+                      'titles, categories, tags and priority match how you '
+                      'actually work.',
                       style: TextStyle(
                         color: Console.mutedSoft,
                         fontSize: 10,
@@ -226,7 +227,8 @@ class _EnrichmentContextSectionState extends State<EnrichmentContextSection> {
                     'e.g. I build offline-first Flutter apps and run a small '
                     'consultancy. I capture product ideas, meeting notes and '
                     'specs for coding agents. File anything with a repo name '
-                    'in it as an agent task.',
+                    'in it as an agent task. p0 is a client waiting; p3 is '
+                    'anything off my current goals.',
                 // Rebuilds the counter and the UNSAVED marker as the user
                 // types; the value itself is not written until blur.
                 onChanged: (String _) => setState(() {}),

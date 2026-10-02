@@ -220,6 +220,17 @@ class RecordingCard extends StatelessWidget {
           color: categoryColorFor(recording.category),
           outlined: true,
         ),
+      if (recording.priority != null)
+        // The reason is the point of a model-assigned rank — without it a P0
+        // is an assertion — so it rides a tooltip rather than costing a line.
+        Tooltip(
+          message: recording.priorityReason ?? 'Set by hand',
+          child: StatusPill(
+            label: recording.priority!.label,
+            color: priorityColorFor(recording.priority!),
+            outlined: true,
+          ),
+        ),
       AnimatedSwitcher(
         duration: const Duration(milliseconds: 260),
         child: visual == null

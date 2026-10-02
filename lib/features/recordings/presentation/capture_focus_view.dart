@@ -8,6 +8,7 @@ import '../../../app/markdown_view.dart';
 import '../../../app/ui_kit.dart';
 import '../../projects/domain/project.dart';
 import '../domain/capture_category.dart';
+import '../domain/capture_priority.dart';
 import '../domain/capture_type.dart';
 import '../domain/note_vault.dart';
 import '../domain/recording.dart';
@@ -1387,6 +1388,30 @@ class _PanelBadges extends StatelessWidget {
                 )
               : StatusPill(
                   label: '+ CATEGORY',
+                  color: Console.muted,
+                  outlined: true,
+                ),
+        ),
+        _BadgeMenu(
+          tooltip: recording.priorityReason ?? 'Set priority',
+          selected: recording.priority?.name ?? _none,
+          options: <(String, String)>[
+            (_none, '—'),
+            for (final CapturePriority value in CapturePriority.values)
+              (value.name, value.label),
+          ],
+          onSelected: (String name) => controller.setPriority(
+            recording.id,
+            CapturePriority.tryName(name),
+          ),
+          child: recording.priority != null
+              ? StatusPill(
+                  label: recording.priority!.label,
+                  color: priorityColorFor(recording.priority!),
+                  outlined: true,
+                )
+              : StatusPill(
+                  label: '+ PRIORITY',
                   color: Console.muted,
                   outlined: true,
                 ),

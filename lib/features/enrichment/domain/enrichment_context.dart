@@ -30,7 +30,11 @@ class EnrichmentContext {
   /// real `CLAUDE.md`: this one is over 20 000 characters, and sending that on
   /// every capture would cost more than the enrichment it is meant to improve.
   /// The profile is hand-typed, so a smaller bound is enough.
-  static const int maxProfileChars = 2000;
+  ///
+  /// The profile was raised from 2000 when it became the user's "soul": it now
+  /// carries goals and priority rules on top of the filing rules, and the
+  /// shipped default alone is close to the old bound.
+  static const int maxProfileChars = 4000;
   static const int maxProjectChars = 4000;
 
   bool get isEmpty =>

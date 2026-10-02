@@ -8,6 +8,7 @@ import '../../../core/http/provider_failure.dart';
 import '../../costs/domain/usage_parsing.dart';
 import '../../costs/domain/usage_sink.dart';
 import '../../recordings/domain/capture_category.dart';
+import '../../recordings/domain/capture_priority.dart';
 import '../domain/enrichment_context.dart';
 import '../domain/enrichment_prompt.dart';
 import '../domain/enrichment_result.dart';
@@ -55,6 +56,9 @@ class HttpChatEnrichmentService implements EnrichmentService {
   /// was already outside the contract.
   static const int maxTitleChars = 200;
   static const int maxSummaryChars = 600;
+
+  /// Same reasoning, for the reason the prompt asks to keep under 160.
+  static const int maxPriorityReasonChars = 400;
 
   @override
   Future<EnrichmentResult> enrich(
@@ -156,6 +160,9 @@ class HttpChatEnrichmentService implements EnrichmentService {
       throw const FormatException('Message content is not a JSON object.');
     }
 
+    final CapturePriority? priority = CapturePriority.tryName(
+      decoded['priority'],
+    );
     return EnrichmentResult(
       title: _cleanText(decoded['title'], limit: maxTitleChars),
       category: CaptureCategory.fromName(
@@ -163,6 +170,14 @@ class HttpChatEnrichmentService implements EnrichmentService {
       ),
       summary: _cleanText(decoded['summary'], limit: maxSummaryChars),
       tags: _cleanTags(decoded['tags']),
+      priority: priority,
+      // A reason for no rank explains nothing, so it is dropped with it.
+      priorityReason: priority == null
+          ? null
+          : _cleanText(
+              decoded['priorityReason'],
+              limit: maxPriorityReasonChars,
+            ),
     );
   }
 
