@@ -436,6 +436,10 @@ class _ProjectEditorSheetState extends State<_ProjectEditorSheet> {
   );
   late final Map<AgentKind, TextEditingController> _arguments;
   late final Map<AgentKind, TextEditingController> _prompts;
+  late final Map<AgentKind, bool> _skipPermissions = <AgentKind, bool>{
+    for (final AgentKind agent in AgentKind.values)
+      agent: widget.existing?.settingsFor(agent).skipPermissions ?? false,
+  };
   late AgentKind? _defaultAgent = widget.existing?.defaultAgent;
 
   /// The binding, held as the two strings that address work rather than as the
@@ -621,6 +625,15 @@ class _ProjectEditorSheetState extends State<_ProjectEditorSheet> {
               ...AgentKind.values.map(
                 (AgentKind agent) => ExpansionTile(
                   tilePadding: EdgeInsets.zero,
+                  // Kept built while collapsed so its validator still runs on
+                  // save, and opened when a saved argument would fail it.
+                  maintainState: true,
+                  initiallyExpanded:
+                      AgentSettings.permissionFlagLookalike(
+                        widget.existing?.settingsFor(agent).additionalArgs ??
+                            const <String>[],
+                      ) !=
+                      null,
                   childrenPadding: const EdgeInsets.only(bottom: 12),
                   title: Text(
                     _agentLabel(agent).toUpperCase(),
@@ -631,7 +644,19 @@ class _ProjectEditorSheetState extends State<_ProjectEditorSheet> {
                     style: ConsoleText.micro,
                   ),
                   children: <Widget>[
+                    SwitchListTile(
+                      key: ValueKey<String>('skip-permissions-${agent.name}'),
+                      contentPadding: EdgeInsets.zero,
+                      title: Text(
+                        'Skip permission prompts',
+                        style: ConsoleText.body,
+                      ),
+                      value: _skipPermissions[agent]!,
+                      onChanged: (bool value) =>
+                          setState(() => _skipPermissions[agent] = value),
+                    ),
                     TextFormField(
+                      key: ValueKey<String>('agent-arguments-${agent.name}'),
                       controller: _arguments[agent],
                       decoration: const InputDecoration(
                         labelText: 'Additional arguments — one per line',
@@ -639,6 +664,16 @@ class _ProjectEditorSheetState extends State<_ProjectEditorSheet> {
                       ),
                       minLines: 2,
                       maxLines: 4,
+                      validator: (String? _) {
+                        final String? flag =
+                            AgentSettings.permissionFlagLookalike(
+                              _argumentsFor(agent),
+                            );
+                        return flag == null
+                            ? null
+                            : 'Remove $flag and use the switch above — '
+                                  'each agent spells it differently.';
+                      },
                     ),
                     const SizedBox(height: 10),
                     TextFormField(
@@ -772,16 +807,18 @@ class _ProjectEditorSheetState extends State<_ProjectEditorSheet> {
     }
   }
 
+  List<String> _argumentsFor(AgentKind agent) => _arguments[agent]!.text
+      .split(RegExp(r'\r?\n'))
+      .map((String value) => value.trim())
+      .where((String value) => value.isNotEmpty)
+      .toList(growable: false);
+
   AgentSettings _settingsFor(AgentKind agent) {
-    final List<String> arguments = _arguments[agent]!.text
-        .split(RegExp(r'\r?\n'))
-        .map((String value) => value.trim())
-        .where((String value) => value.isNotEmpty)
-        .toList(growable: false);
     final String prompt = _prompts[agent]!.text.trim();
     return AgentSettings(
-      additionalArgs: arguments,
+      additionalArgs: _argumentsFor(agent),
       initialPrompt: prompt.isEmpty ? null : prompt,
+      skipPermissions: _skipPermissions[agent]!,
     );
   }
 

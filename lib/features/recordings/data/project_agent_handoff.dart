@@ -137,6 +137,7 @@ class ProjectAgentHandoff implements AgentHandoff {
         sessionName: project.sessionName,
         arguments: <String>[
           ...settings.additionalArgs,
+          if (settings.skipPermissions) ...target.skipPermissionsArguments,
           // The project's own `initialPrompt` is deliberately not appended. It
           // is the opening line for a session started *from the project card*,
           // with no particular task in hand; here there is a task, and two

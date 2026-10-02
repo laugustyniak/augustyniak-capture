@@ -24,6 +24,19 @@ enum ProjectAgent {
     };
   }
 
+  /// This CLI's spelling of "skip permission prompts".
+  ///
+  /// Codex rejects the spelling the other two share, so handing it the wrong
+  /// one opens a terminal on an agent that has already exited.
+  List<String> get skipPermissionsArguments => switch (this) {
+    ProjectAgent.codex => const <String>[
+      '--dangerously-bypass-approvals-and-sandbox',
+    ],
+    ProjectAgent.claude || ProjectAgent.antigravity => const <String>[
+      '--dangerously-skip-permissions',
+    ],
+  };
+
   /// A prompt that would otherwise be read as an option, made positional.
   ///
   /// The prompt *is* the capture's own text — a dictated note, or OCR off an

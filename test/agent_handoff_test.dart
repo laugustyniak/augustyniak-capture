@@ -217,6 +217,34 @@ void main() {
     ]);
   });
 
+  test('skip permissions reaches a handoff with the agent own flag', () async {
+    final _FakeLauncher launcher = _FakeLauncher();
+    final RecordingsController controller = await buildRecordingsController(
+      appDir,
+      seed: <Recording>[
+        makeRecording(id: 'r1', projectId: 'p1', transcript: 'Body.'),
+      ],
+      agentHandoff: handoffFor(
+        Project(
+          id: 'p1',
+          name: 'Acme',
+          repoPath: repo.path,
+          agentSettings: const <AgentKind, AgentSettings>{
+            AgentKind.codex: AgentSettings(skipPermissions: true),
+          },
+        ),
+        launcher,
+      ),
+    );
+
+    await controller.handoff('r1', agentId: AgentKind.codex.name);
+
+    expect(launcher.requests.single.arguments, <String>[
+      '--dangerously-bypass-approvals-and-sandbox',
+      'Body.',
+    ]);
+  });
+
   test('a multi-line capture reaches the agent whole', () async {
     final _FakeLauncher launcher = _FakeLauncher();
     // The shape the old pointer-prompt was built to avoid: newlines and quotes.

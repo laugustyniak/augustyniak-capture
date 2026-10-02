@@ -296,6 +296,8 @@ class ProjectsController extends ChangeNotifier {
     AgentSettings settings,
   ) => <String>[
     ...settings.additionalArgs,
+    if (settings.skipPermissions)
+      ..._launcherAgent(agent).skipPermissionsArguments,
     if (settings.initialPrompt case final String prompt)
       ..._launcherAgent(agent).promptArguments(prompt),
   ];
