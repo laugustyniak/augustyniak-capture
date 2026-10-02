@@ -112,7 +112,7 @@ class HttpChatEnrichmentService
           'Authorization': 'Bearer $bearerToken',
       },
       body: utf8.encode(jsonEncode(payload)),
-    );
+    ).timeout(const Duration(seconds: 45));
     if (response.statusCode < 200 || response.statusCode >= 300) {
       throw HttpException(
         describeProviderFailure(

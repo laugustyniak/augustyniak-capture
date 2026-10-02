@@ -164,6 +164,39 @@ Notes linked to capture-xyz.
       expect(artifacts.first.title, 'Connected Analysis');
       expect(artifacts.first.kind, AgentArtifactKind.connectedNote);
     });
+
+    test('keeps a vault connection analysis classified as a result', () async {
+      final Directory vault = Directory(p.join(tempDir.path, 'vault', 'Capture'));
+      final Directory analysis = Directory(p.join(vault.path, 'Analysis'));
+      await analysis.create(recursive: true);
+      final File result = File(p.join(analysis.path, 'cap-links.md'));
+      await result.writeAsString('''---
+parent-capture: cap-links
+analysis-hash: example
+---
+# Connections: Links
+
+[[Projects/Plan]]
+''');
+      final Project project = Project(
+        id: 'proj-links', name: 'Links', repoPath: tempDir.path,
+      );
+      final Recording recording = Recording(
+        id: 'cap-links',
+        filePath: p.join(tempDir.path, 'cap-links.txt'),
+        createdAt: DateTime.now(),
+        durationMs: 0,
+        status: RecordingStatus.completed,
+        projectId: project.id,
+      );
+
+      final List<AgentArtifact> found = await const AgentArtifactScanner()
+          .scanForCapture(recording: recording, project: project,
+              vaultDirectory: vault);
+
+      expect(found, hasLength(1));
+      expect(found.single.kind, AgentArtifactKind.resultNote);
+    });
   });
 
   group('RecordingsController Artifact Integration', () {
