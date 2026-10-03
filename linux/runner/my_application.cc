@@ -1,6 +1,8 @@
 #include "my_application.h"
 
 #include <flutter_linux/flutter_linux.h>
+#include <glib/gstdio.h>
+#include <unistd.h>
 #ifdef GDK_WINDOWING_X11
 #include <gdk/gdkx.h>
 #endif
@@ -13,6 +15,46 @@ struct _MyApplication {
 };
 
 G_DEFINE_TYPE(MyApplication, my_application, GTK_TYPE_APPLICATION)
+
+static void clipboard_method_cb(FlMethodChannel* channel, FlMethodCall* call,
+                                gpointer user_data) {
+  GtkClipboard* clipboard = gtk_clipboard_get(GDK_SELECTION_CLIPBOARD);
+  const gchar* method = fl_method_call_get_name(call);
+  g_autofree gchar* path = nullptr;
+
+  if (g_strcmp0(method, "getPasteFile") == 0) {
+    g_auto(GStrv) uris = gtk_clipboard_wait_for_uris(clipboard);
+    if (uris != nullptr) {
+      for (gchar** uri = uris; *uri != nullptr; ++uri) {
+        path = g_filename_from_uri(*uri, nullptr, nullptr);
+        if (path != nullptr) break;
+      }
+    }
+  } else if (g_strcmp0(method, "getPasteImage") == 0) {
+    g_autoptr(GdkPixbuf) image = gtk_clipboard_wait_for_image(clipboard);
+    if (image != nullptr) {
+      gint fd = g_file_open_tmp("augustyniak-paste-XXXXXX", &path, nullptr);
+      if (fd >= 0) {
+        close(fd);
+        if (!gdk_pixbuf_save(image, path, "png", nullptr, nullptr)) {
+          g_unlink(path);
+          g_clear_pointer(&path, g_free);
+        }
+      }
+    }
+  } else {
+    g_autoptr(FlMethodResponse) response = FL_METHOD_RESPONSE(
+        fl_method_not_implemented_response_new());
+    fl_method_call_respond(call, response, nullptr);
+    return;
+  }
+
+  g_autoptr(FlValue) value = path == nullptr ? fl_value_new_null()
+                                              : fl_value_new_string(path);
+  g_autoptr(FlMethodResponse) response =
+      FL_METHOD_RESPONSE(fl_method_success_response_new(value));
+  fl_method_call_respond(call, response, nullptr);
+}
 
 // Called when first Flutter frame received.
 static void first_frame_cb(MyApplication* self, FlView* view) {
@@ -106,6 +148,14 @@ static void my_application_activate(GApplication* application) {
   gtk_widget_realize(GTK_WIDGET(view));
 
   fl_register_plugins(FL_PLUGIN_REGISTRY(view));
+
+  g_autoptr(FlStandardMethodCodec) codec = fl_standard_method_codec_new();
+  g_autoptr(FlMethodChannel) clipboard_channel = fl_method_channel_new(
+      fl_engine_get_binary_messenger(fl_view_get_engine(view)),
+      "ai.augustyniak.capture/clipboard", FL_METHOD_CODEC(codec));
+  fl_method_channel_set_method_call_handler(clipboard_channel,
+                                            clipboard_method_cb, nullptr,
+                                            nullptr);
 
   gtk_widget_grab_focus(GTK_WIDGET(view));
 }

@@ -20,6 +20,13 @@ class MainFlutterWindow: NSWindow {
       guard let self = self else { return }
       if call.method == "getClipboardImage" {
         result(self.getClipboardImage())
+      } else if call.method == "getPasteFile" {
+        let urls = NSPasteboard.general.readObjects(
+          forClasses: [NSURL.self], options: [.urlReadingFileURLsOnly: true]
+        ) as? [NSURL]
+        result(urls?.first?.path)
+      } else if call.method == "getPasteImage" {
+        result(self.getClipboardImage(onlyIfChanged: false, temporary: true))
       } else if call.method == "getClipboardHistoryDirectory" {
         result(self.clipboardHistoryDirectory()?.path)
       } else if call.method == "copyImageToClipboard" {
@@ -54,9 +61,9 @@ class MainFlutterWindow: NSWindow {
     }
   }
 
-  private func getClipboardImage() -> String? {
+  private func getClipboardImage(onlyIfChanged: Bool = true, temporary: Bool = false) -> String? {
     let pasteboard = NSPasteboard.general
-    if pasteboard.changeCount == lastChangeCount {
+    if onlyIfChanged && pasteboard.changeCount == lastChangeCount {
       return nil
     }
 
@@ -72,7 +79,7 @@ class MainFlutterWindow: NSWindow {
       return nil
     }
 
-    lastChangeCount = pasteboard.changeCount
+    if !temporary { lastChangeCount = pasteboard.changeCount }
 
     let bitmapRep = NSBitmapImageRep(cgImage: cgImage)
     guard let pngData = bitmapRep.representation(using: .png, properties: [:]) else {
@@ -80,7 +87,9 @@ class MainFlutterWindow: NSWindow {
     }
 
     let documentsDir = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first!
-    let imagesDir = documentsDir.appendingPathComponent("AugustyniakCapture/images")
+    let imagesDir = temporary
+      ? URL(fileURLWithPath: NSTemporaryDirectory())
+      : documentsDir.appendingPathComponent("AugustyniakCapture/images")
     try? FileManager.default.createDirectory(at: imagesDir, withIntermediateDirectories: true)
 
     let filename = "clip_\(UUID().uuidString).png"

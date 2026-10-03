@@ -54,6 +54,7 @@ class RecordingCard extends StatelessWidget {
   /// It names the *destination* deliberately: unlike audio, this leaves the
   /// app. Public so a test cannot drift from the string it asserts on.
   static const String openVideoLabel = 'Open video externally';
+  static const String openFileLabel = 'Open file externally';
 
   /// Names the four fields the enrichment pass can fill, so the animation says
   /// *what* is being analysed rather than just that something is. Public for
@@ -205,7 +206,8 @@ class RecordingCard extends StatelessWidget {
     // Generic processor output: a transcription, OCR text or a note body.
     final String transcript = recording.transcript ?? '';
     final bool hasTranscript = transcript.trim().isNotEmpty;
-    final bool openable = recording.type == CaptureType.video;
+    final bool openable = recording.type == CaptureType.video ||
+        recording.type == CaptureType.file;
 
     final List<Widget> pillWidgets = <Widget>[
       if (projectName != null)
@@ -313,15 +315,16 @@ class RecordingCard extends StatelessWidget {
                 ),
                 const SizedBox(width: 7),
               ]
-              // A video leaves the app to play: there is no in-process video
-              // widget on the desktop targets, so this hands the file to
-              // whatever the user already has. Nothing to stop afterwards,
-              // hence no `active` state and a fixed icon.
+              // Video and attached files open in the system's chosen app.
               else if (openable) ...<Widget>[
                 ConsoleIconButton(
-                  icon: Icons.play_arrow_rounded,
+                  icon: recording.type == CaptureType.file
+                      ? Icons.open_in_new_rounded
+                      : Icons.play_arrow_rounded,
                   onTap: onOpen,
-                  semanticLabel: RecordingCard.openVideoLabel,
+                  semanticLabel: recording.type == CaptureType.file
+                      ? RecordingCard.openFileLabel
+                      : RecordingCard.openVideoLabel,
                   size: 30,
                   iconSize: 18,
                 ),
@@ -372,7 +375,9 @@ class RecordingCard extends StatelessWidget {
                     recording: recording,
                     failed: failed,
                     onOpen: openable ? onOpen : null,
-                    semanticLabel: RecordingCard.openVideoLabel,
+                    semanticLabel: recording.type == CaptureType.file
+                        ? RecordingCard.openFileLabel
+                        : RecordingCard.openVideoLabel,
                   ),
                   const SizedBox(width: 12),
                   Expanded(

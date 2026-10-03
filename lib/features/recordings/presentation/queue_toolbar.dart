@@ -316,6 +316,7 @@ class QueueTypeMenu extends StatelessWidget {
     CaptureTypeFilter.image => 'IMAGES',
     CaptureTypeFilter.text => 'NOTES',
     CaptureTypeFilter.video => 'VIDEOS',
+    CaptureTypeFilter.file => 'FILES',
   };
 
   @override
