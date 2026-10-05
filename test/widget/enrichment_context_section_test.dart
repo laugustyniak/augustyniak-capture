@@ -1,8 +1,10 @@
 import 'dart:io';
 
+import 'package:augustyniak_capture/features/projects/data/directory_picker.dart';
 import 'package:augustyniak_capture/features/projects/domain/project.dart';
 import 'package:augustyniak_capture/features/settings/presentation/enrichment_context_section.dart';
 import 'package:augustyniak_capture/features/settings/presentation/settings_controller.dart';
+import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 import '../support/harness.dart';
@@ -36,22 +38,32 @@ void main() {
     }
   }
 
-  Future<void> pumpSection(
+  Future<SettingsController> pumpSection(
     WidgetTester tester, {
     required List<Project> projects,
+    String? soulPath,
+    DirectoryPicker? picker,
   }) async {
+    // Hosted bare, not inside the Config tab's ListView, so the surface has to
+    // fit the whole section: the soul file row made it taller than 600 px.
+    tester.view.physicalSize = const Size(800, 1200);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
     final SettingsController controller = buildSettingsController();
     await controller.initialize();
+    if (soulPath != null) await controller.setSoulPath(soulPath);
     await tester.pumpWidget(
       hostTab(
         () => EnrichmentContextSection(
           controller: controller,
           projects: projects,
+          picker: picker ?? _FakeDirectoryPicker(),
         ),
         listenable: controller,
       ),
     );
     await tester.pump();
+    return controller;
   }
 
   testWidgets('an empty project list scans nothing and settles', (
@@ -109,4 +121,79 @@ void main() {
     // user can act on — at enrichment time the two are indistinguishable.
     expect(find.text('repository path not found'), findsOneWidget);
   });
+
+  group('soul file', () {
+    String soulPath() => '${repo.path}${Platform.pathSeparator}SOUL.md';
+
+    testWidgets('no soul path touches no disk and explains itself', (
+      WidgetTester tester,
+    ) async {
+      await pumpSection(tester, projects: const <Project>[]);
+      await tester.pumpAndSettle();
+
+      expect(find.textContaining('Optional. A markdown file'), findsOneWidget);
+      expect(find.text('PROFILE'), findsOneWidget);
+    });
+
+    testWidgets('a readable file is reported as the soul in use', (
+      WidgetTester tester,
+    ) async {
+      File(soulPath()).writeAsStringSync('Goal: ship the beta.');
+
+      await pumpSection(
+        tester,
+        projects: const <Project>[],
+        soulPath: soulPath(),
+      );
+      await settleIo(tester);
+
+      expect(find.text('USING SOUL.md · 20 chars'), findsOneWidget);
+      // The typed box is still there, and says what it now is.
+      expect(find.text('PROFILE · FALLBACK'), findsOneWidget);
+    });
+
+    testWidgets('a missing file is named, with the fallback it causes', (
+      WidgetTester tester,
+    ) async {
+      await pumpSection(
+        tester,
+        projects: const <Project>[],
+        soulPath: soulPath(),
+      );
+      await settleIo(tester);
+
+      expect(
+        find.text('SOUL.md MISSING — USING THE PROFILE BELOW'),
+        findsOneWidget,
+      );
+      expect(find.text('PROFILE'), findsOneWidget);
+    });
+
+    testWidgets('browse names SOUL.md in the chosen folder', (
+      WidgetTester tester,
+    ) async {
+      final SettingsController controller = await pumpSection(
+        tester,
+        projects: const <Project>[],
+        picker: _FakeDirectoryPicker(chosen: repo.path),
+      );
+
+      await tester.tap(find.byTooltip('Choose the folder holding SOUL.md'));
+      await settleIo(tester);
+
+      expect(controller.soulPath, soulPath());
+    });
+  });
+}
+
+class _FakeDirectoryPicker implements DirectoryPicker {
+  _FakeDirectoryPicker({this.chosen});
+
+  final String? chosen;
+
+  @override
+  bool get isAvailable => true;
+
+  @override
+  Future<String?> pick({String? initialDirectory}) async => chosen;
 }

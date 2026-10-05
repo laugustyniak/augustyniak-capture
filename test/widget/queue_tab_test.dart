@@ -1360,6 +1360,130 @@ void main() {
     expect(controller.recordings.single.priority, isNull);
   });
 
+  group('priority filter and sort', () {
+    List<Recording> rankedSeed() => <Recording>[
+      // Controller order, newest first: low, unranked, urgent.
+      makeRecording(
+        id: 'low',
+        title: 'Low item',
+      ).copyWith(priority: CapturePriority.p3),
+      makeRecording(id: 'none', title: 'Unranked item'),
+      makeRecording(
+        id: 'urgent',
+        title: 'Urgent item',
+      ).copyWith(priority: CapturePriority.p0),
+    ];
+
+    Future<void> openPriorityMenu(WidgetTester tester) async {
+      await tester.tap(find.byType(QueuePriorityMenu));
+      await tester.pumpAndSettle();
+    }
+
+    double top(WidgetTester tester, String title) =>
+        tester.getTopLeft(find.text(title)).dy;
+
+    testWidgets('a rank narrows the list, and unranked is its own bucket', (
+      WidgetTester tester,
+    ) async {
+      final RecordingsController controller = await buildRecordingsController(
+        appDir,
+        seed: rankedSeed(),
+      );
+      await pumpQueue(tester, controller);
+
+      await openPriorityMenu(tester);
+      // Counts describe the queue: one item per bucket here.
+      expect(find.text('P0 1'), findsOneWidget);
+      expect(find.text('P3 1'), findsOneWidget);
+      expect(find.text('UNRANKED 1'), findsOneWidget);
+      await tester.tap(find.text('P0 1'));
+      await tester.pumpAndSettle();
+
+      expect(find.text('Urgent item'), findsOneWidget);
+      expect(find.text('Low item'), findsNothing);
+      expect(find.text('Unranked item'), findsNothing);
+
+      await openPriorityMenu(tester);
+      await tester.tap(find.text('UNRANKED 1'));
+      await tester.pumpAndSettle();
+
+      expect(find.text('Unranked item'), findsOneWidget);
+      expect(find.text('Low item'), findsNothing);
+    });
+
+    testWidgets('sorting by priority reorders the list, newest stays default', (
+      WidgetTester tester,
+    ) async {
+      final RecordingsController controller = await buildRecordingsController(
+        appDir,
+        seed: rankedSeed(),
+      );
+      await pumpQueue(tester, controller);
+
+      // Default: the controller's order, untouched.
+      expect(top(tester, 'Low item'), lessThan(top(tester, 'Urgent item')));
+
+      await openPriorityMenu(tester);
+      await tester.tap(find.text(QueuePriorityMenu.sortLabel));
+      await tester.pumpAndSettle();
+
+      expect(top(tester, 'Urgent item'), lessThan(top(tester, 'Low item')));
+      expect(top(tester, 'Low item'), lessThan(top(tester, 'Unranked item')));
+
+      // The same entry turns it back off.
+      await openPriorityMenu(tester);
+      await tester.tap(find.text(QueuePriorityMenu.sortLabel));
+      await tester.pumpAndSettle();
+
+      expect(top(tester, 'Low item'), lessThan(top(tester, 'Urgent item')));
+    });
+
+    testWidgets('the single-line bar carries the icon-only form', (
+      WidgetTester tester,
+    ) async {
+      // Wide enough for the single line, below the master–detail breakpoint.
+      tester.view.physicalSize = const Size(1000, 900);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.reset);
+      final RecordingsController controller = await buildRecordingsController(
+        appDir,
+        seed: rankedSeed(),
+      );
+      await pumpQueue(tester, controller);
+
+      expect(tester.takeException(), isNull);
+      expect(
+        find.descendant(
+          of: find.byType(QueuePriorityMenu),
+          matching: find.byIcon(Icons.flag_outlined),
+        ),
+        findsOneWidget,
+      );
+
+      await openPriorityMenu(tester);
+      await tester.tap(find.text('P0 1'));
+      await tester.pumpAndSettle();
+      expect(find.text('Urgent item'), findsOneWidget);
+      expect(find.text('Low item'), findsNothing);
+    });
+
+    testWidgets('the menu sits on the master-detail toolbar too', (
+      WidgetTester tester,
+    ) async {
+      tester.view.physicalSize = const Size(1400, 900);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.reset);
+      final RecordingsController controller = await buildRecordingsController(
+        appDir,
+        seed: rankedSeed(),
+      );
+      await pumpQueue(tester, controller);
+
+      expect(find.byType(QueuePriorityMenu), findsOneWidget);
+      expect(tester.takeException(), isNull);
+    });
+  });
+
   testWidgets('deletion is only reachable from the editor', (
     WidgetTester tester,
   ) async {

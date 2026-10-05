@@ -680,6 +680,31 @@ void main() {
       expect(c.recordings.single.priorityReason, 'Client deadline tomorrow.');
     });
 
+    test('a rank records which soul it was judged against', () async {
+      final Directory dir = await _tmp();
+      addTearDown(() => dir.delete(recursive: true));
+      const EnrichmentContext soul = EnrichmentContext(
+        profile: 'Goal: ship the beta.',
+      );
+      final RecordingsController c = _controller(
+        _FakeRepo(dir),
+        enrichment: _FakeEnrichment(ranked),
+        contextSource: _FakeContextSource(soul),
+      );
+      addTearDown(c.dispose);
+
+      await c.addTextNote('zadzwonić do klienta');
+      await c.waitForProcessing();
+      final String id = c.recordings.single.id;
+
+      expect(c.recordings.single.priorityBasis, soul.profileBasis);
+      expect(c.recordings.single.priorityBasis, isNotNull);
+
+      // A hand-set rank was judged against no profile.
+      await c.setPriority(id, CapturePriority.p2);
+      expect(c.recordings.single.priorityBasis, isNull);
+    });
+
     test('an unranked verdict leaves the item unranked', () async {
       final Directory dir = await _tmp();
       addTearDown(() => dir.delete(recursive: true));

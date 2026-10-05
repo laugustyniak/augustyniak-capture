@@ -41,6 +41,7 @@ class Recording {
     this.summary,
     this.priority,
     this.priorityReason,
+    this.priorityBasis,
     this.tags = const <String>[],
     this.projectId,
     this.error,
@@ -122,6 +123,13 @@ class Recording {
   /// rule it applied. Null whenever the user set the rank by hand — the
   /// model's argument was for a different answer.
   final String? priorityReason;
+
+  /// Fingerprint of the profile ("soul") [priority] was judged against — see
+  /// `EnrichmentContext.profileBasis`. Null when the user set the rank by
+  /// hand, when no profile was sent, and on every row ranked before this
+  /// existed. Comparing it with the current fingerprint tells a rank made
+  /// under old goals from a current one.
+  final String? priorityBasis;
 
   /// The capture's tags: one normalized list, no provenance. Enrichment may
   /// propose it and the user may rewrite it — see [RecordingTags].
@@ -234,6 +242,8 @@ class Recording {
     bool clearPriority = false,
     String? priorityReason,
     bool clearPriorityReason = false,
+    String? priorityBasis,
+    bool clearPriorityBasis = false,
     List<String>? tags,
     String? projectId,
     bool clearProjectId = false,
@@ -265,6 +275,9 @@ class Recording {
       priorityReason: clearPriorityReason
           ? null
           : (priorityReason ?? this.priorityReason),
+      priorityBasis: clearPriorityBasis
+          ? null
+          : (priorityBasis ?? this.priorityBasis),
       tags: RecordingTags.normalize(tags ?? this.tags),
       projectId: clearProjectId ? null : (projectId ?? this.projectId),
       error: clearError ? null : (error ?? this.error),
@@ -295,6 +308,7 @@ class Recording {
     // every row never ranked since — serialises byte for byte as it did.
     if (priority != null) 'priority': priority!.name,
     if (priorityReason != null) 'priorityReason': priorityReason,
+    if (priorityBasis != null) 'priorityBasis': priorityBasis,
     'tags': tags,
     'projectId': projectId,
     'error': error,
@@ -349,6 +363,9 @@ class Recording {
       priority: CapturePriority.tryName(json['priority']),
       priorityReason: json['priorityReason'] is String
           ? json['priorityReason'] as String
+          : null,
+      priorityBasis: json['priorityBasis'] is String
+          ? json['priorityBasis'] as String
           : null,
       // Reads the plain string list *and* the retired `{value, source}` form,
       // which is already on disk. Invalid entries degrade individually rather

@@ -156,6 +156,59 @@ void main() {
     controller.dispose();
   });
 
+  test('pasted image bytes keep PNG identity without a filename', () async {
+    final File source = File(p.join(pickDir.path, 'clipboard-image'))
+      ..writeAsStringSync('PNGDATA');
+    final _FakeRepository repo = _FakeRepository(appDir);
+    final RecordingsController controller = buildController(repo);
+
+    await controller.addImportedFile(source, CaptureType.image,
+        mimeType: 'image/png');
+    await controller.waitForProcessing();
+
+    final Recording item = controller.recordings.single;
+    expect(item.sourceMimeType, 'image/png');
+    expect(p.basename(item.filePath), '${item.id}.png');
+    expect(repo.sourcePresentAtSave, isNotEmpty);
+    expect(repo.sourcePresentAtSave, everyElement(isTrue));
+    controller.dispose();
+  });
+
+  test('pasted PDF is retained as a named attachment without transcription',
+      () async {
+    final File source = File(p.join(pickDir.path, 'Research.PDF'))
+      ..writeAsStringSync('%PDF-1.7');
+    final _FakeRepository repo = _FakeRepository(appDir);
+    final RecordingsController controller = buildController(repo);
+
+    await controller.addImportedFile(source, CaptureType.file);
+    await controller.waitForProcessing();
+
+    final Recording item = controller.recordings.single;
+    expect(item.type, CaptureType.file);
+    expect(item.title, 'Research.PDF');
+    expect(item.status, RecordingStatus.completed);
+    expect(item.transcript, isEmpty);
+    expect(p.basename(item.filePath), '${item.id}.pdf');
+    expect(File(item.filePath).readAsStringSync(), '%PDF-1.7');
+    expect(repo.sourcePresentAtSave, everyElement(isTrue));
+    controller.dispose();
+  });
+
+  test('orphan recovery finds attachment files but ignores index JSON', () async {
+    const String id = '123e4567-e89b-42d3-a456-426614174000';
+    File(p.join(appDir.path, '$id.pdf')).writeAsStringSync('%PDF-1.7');
+    File(p.join(appDir.path, 'recordings.json')).writeAsStringSync('[]');
+    final RecordingsRepository repository = RecordingsRepository(
+      directoryProvider: () async => appDir,
+    );
+
+    final List<Recording> found = await repository.findOrphans(<Recording>[]);
+    expect(found, hasLength(1));
+    expect(found.single.id, id);
+    expect(found.single.type, CaptureType.file);
+  });
+
   test(
     'audio upload with no active provider fails as not-configured',
     () async {

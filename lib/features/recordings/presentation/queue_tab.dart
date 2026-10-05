@@ -28,6 +28,7 @@ import 'card_parts.dart';
 import 'compact_queue_header.dart';
 import 'handoff_sheet.dart';
 import 'queue_list_row.dart';
+import 'queue_priority.dart';
 import 'queue_toolbar.dart';
 import 'recording_card.dart';
 import 'recording_editor.dart';
@@ -60,7 +61,7 @@ enum RecordingFilter { all, queue, ready, failed, raw }
 enum ReviewFilter { desk, handedOff, all }
 
 /// The *capture type* axis — filters the queue by source media type.
-enum CaptureTypeFilter { all, audio, image, text, video }
+enum CaptureTypeFilter { all, audio, image, text, video, file }
 
 /// The original Phase-1 screen: header, review progress, search, status filters
 /// and the capture list. Owns only view state; every mutation goes through
@@ -140,6 +141,11 @@ class QueueTab extends StatefulWidget {
 class _QueueTabState extends State<QueueTab> {
   RecordingFilter selectedFilter = RecordingFilter.all;
   CaptureTypeFilter selectedTypeFilter = CaptureTypeFilter.all;
+  PriorityFilter priorityFilter = PriorityFilter.all;
+
+  /// In memory only, like every other queue filter: a restart opens the queue
+  /// newest first again.
+  QueueSort queueSort = QueueSort.newest;
   ReviewFilter reviewFilter = ReviewFilter.desk;
   String searchQuery = '';
   String? projectFilterId;
@@ -387,7 +393,12 @@ class _QueueTabState extends State<QueueTab> {
         projects.any((Project project) => project.id == projectFilterId)
         ? projectFilterId
         : null;
-    final List<Recording> visible = _filter(all, effectiveProjectFilterId);
+    // Sorted here, once, so the list, its section headers and the keyboard all
+    // walk the same order — `_visible` is what j/k and mark-done step through.
+    final List<Recording> visible = sortForQueue(
+      _filter(all, effectiveProjectFilterId),
+      queueSort,
+    );
     _visible = visible;
     final int reviewedCount = all
         .where((Recording item) => item.isProcessedByUser)
@@ -429,6 +440,12 @@ class _QueueTabState extends State<QueueTab> {
                 .where((Recording item) => _matchesType(filter, item))
                 .length,
         };
+        final Map<PriorityFilter, int> priorityCounts = <PriorityFilter, int>{
+          for (final PriorityFilter filter in PriorityFilter.values)
+            filter: all
+                .where((Recording item) => matchesPriority(filter, item))
+                .length,
+        };
         // A panel the user did not open, but cannot be allowed to miss: with the
         // control off screen its effect on the list is unexplainable.
         final bool searchOpen = searchPanelOpen || searchQuery.isNotEmpty;
@@ -436,6 +453,8 @@ class _QueueTabState extends State<QueueTab> {
             filterPanelOpen ||
             selectedFilter != RecordingFilter.all ||
             selectedTypeFilter != CaptureTypeFilter.all ||
+            priorityFilter != PriorityFilter.all ||
+            queueSort != QueueSort.newest ||
             effectiveProjectFilterId != null;
         return _QueueShortcuts(
           focusNode: listFocus,
@@ -566,6 +585,21 @@ class _QueueTabState extends State<QueueTab> {
                                 setState(() => selectedFilter = value);
                               },
                             ),
+                            const SizedBox(height: 10),
+                            Align(
+                              alignment: Alignment.centerLeft,
+                              child: QueuePriorityMenu(
+                                selected: priorityFilter,
+                                counts: priorityCounts,
+                                onSelected: (PriorityFilter value) {
+                                  setState(() => priorityFilter = value);
+                                },
+                                sort: queueSort,
+                                onSortChanged: (QueueSort value) {
+                                  setState(() => queueSort = value);
+                                },
+                              ),
+                            ),
                           ],
                         ),
                       )
@@ -599,6 +633,15 @@ class _QueueTabState extends State<QueueTab> {
                           counts: counts,
                           onStatusChanged: (RecordingFilter value) {
                             setState(() => selectedFilter = value);
+                          },
+                          priorityFilter: priorityFilter,
+                          priorityCounts: priorityCounts,
+                          onPriorityChanged: (PriorityFilter value) {
+                            setState(() => priorityFilter = value);
+                          },
+                          sort: queueSort,
+                          onSortChanged: (QueueSort value) {
+                            setState(() => queueSort = value);
                           },
                           leading: masterDetail
                               ? _ToolbarTitle(
@@ -814,12 +857,14 @@ class _QueueTabState extends State<QueueTab> {
         selectedFilter,
         reviewFilter,
         type: selectedTypeFilter,
+        priority: priorityFilter,
         hasAny: all.isNotEmpty,
       ),
       blurb: all.isEmpty
           ? 'Every capture is written to disk and verified before processing '
                 'is even attempted.'
-          : 'Adjust the review, status, type, project, or search filters to '
+          : 'Adjust the review, status, type, priority, project, or search '
+                'filters to '
                 'broaden the queue.',
     );
   }
@@ -848,6 +893,7 @@ class _QueueTabState extends State<QueueTab> {
       if (!_matchesReview(reviewFilter, item)) return false;
       if (!_matches(selectedFilter, item)) return false;
       if (!_matchesType(selectedTypeFilter, item)) return false;
+      if (!matchesPriority(priorityFilter, item)) return false;
       if (effectiveProjectFilterId != null &&
           item.projectId != effectiveProjectFilterId) {
         return false;
@@ -928,7 +974,7 @@ class _QueueTabState extends State<QueueTab> {
     final Recording selected = visible.firstWhere(
       (Recording item) => item.id == selectedId,
     );
-    final List<QueueDayGroup> groups = groupByDay(visible, DateTime.now());
+    final List<QueueDayGroup> groups = groupForQueue(visible, queueSort, DateTime.now());
 
     final Widget list = CustomScrollView(
       controller: _masterScroll,
@@ -1033,7 +1079,7 @@ class _QueueTabState extends State<QueueTab> {
   /// Pull-to-refresh still syncs, as it did over the cards.
   Widget _buildPhoneList(List<Recording> visible) {
     final RecordingsController controller = widget.controller;
-    final List<QueueDayGroup> groups = groupByDay(visible, DateTime.now());
+    final List<QueueDayGroup> groups = groupForQueue(visible, queueSort, DateTime.now());
     return RefreshIndicator(
       onRefresh: () => _handleSync(context, controller),
       color: Console.accent,
@@ -1459,6 +1505,7 @@ bool _matchesType(CaptureTypeFilter filter, Recording item) => switch (filter) {
   CaptureTypeFilter.image => item.type == CaptureType.image,
   CaptureTypeFilter.text => item.type == CaptureType.text,
   CaptureTypeFilter.video => item.type == CaptureType.video,
+  CaptureTypeFilter.file => item.type == CaptureType.file,
 };
 
 /// Keyboard control for the queue.
@@ -1553,10 +1600,11 @@ String _emptyLabel(
   RecordingFilter filter,
   ReviewFilter review, {
   CaptureTypeFilter type = CaptureTypeFilter.all,
+  PriorityFilter priority = PriorityFilter.all,
   required bool hasAny,
 }) {
   if (!hasAny) return 'Nothing captured yet.';
-  if (type != CaptureTypeFilter.all) {
+  if (type != CaptureTypeFilter.all || priority != PriorityFilter.all) {
     return 'Nothing matches the selected filters.';
   }
   if (filter != RecordingFilter.all && review != ReviewFilter.all) {
