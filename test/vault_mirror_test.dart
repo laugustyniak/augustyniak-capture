@@ -5,6 +5,9 @@ import 'package:augustyniak_capture/features/recordings/data/markdown_note_vault
 import 'package:augustyniak_capture/features/recordings/data/media_picker.dart';
 import 'package:augustyniak_capture/features/recordings/data/recordings_repository.dart';
 import 'package:augustyniak_capture/features/recordings/domain/capture_type.dart';
+import 'package:augustyniak_capture/features/recordings/domain/capture_priority.dart';
+import 'package:augustyniak_capture/features/recordings/domain/connection_reasoner.dart';
+import 'package:augustyniak_capture/features/enrichment/domain/enrichment_context.dart';
 import 'package:augustyniak_capture/features/recordings/domain/note_vault.dart';
 import 'package:augustyniak_capture/features/recordings/domain/recording.dart';
 import 'package:augustyniak_capture/features/recordings/presentation/recordings_controller.dart';
@@ -53,6 +56,18 @@ class _StubTranscription implements TranscriptionService {
   final String result;
   @override
   Future<String> transcribe(File audioFile) async => result;
+}
+
+class _FailingReasoner implements ConnectionReasoner {
+  @override
+  Future<ConnectionAdvice> assess({
+    required String title,
+    required String text,
+    required List<ConnectionCandidate> candidates,
+    required EnrichmentContext context,
+    CapturePriority? priority,
+    String? priorityReason,
+  }) async => throw StateError('model offline');
 }
 
 /// A vault whose every write fails — an unmounted drive, a read-only folder.
@@ -128,6 +143,8 @@ void main() {
     required NoteVault vault,
     TranscriptionService? transcription,
     PickedMedia? picked,
+    bool analyzeConnections = false,
+    ConnectionReasoner connectionReasoner = const ReviewConnectionReasoner(),
   }) {
     return RecordingsController(
       repository: _FakeRepository(appDir),
@@ -135,6 +152,8 @@ void main() {
           transcription ?? const DisabledTranscriptionService(),
       mediaPicker: _FakePicker(picked),
       noteVault: vault,
+      connectionVaultRoot: analyzeConnections ? () => vaultDir : null,
+      connectionReasoner: connectionReasoner,
       recorder: _FakeRecorder(),
       player: _FakePlayer(),
     );
@@ -168,6 +187,57 @@ void main() {
     expect(controller.recordings.single.status, RecordingStatus.completed);
     expect(notes(), hasLength(1));
     expect(notes().single.readAsStringSync(), contains('Treść nagrania.'));
+  });
+
+  test('a completed capture gains an analysis artifact without changing status',
+      () async {
+    final Directory knowledge = Directory(p.join(vaultDir.path, 'Knowledge'))
+      ..createSync();
+    File(p.join(knowledge.path, 'Plan.md')).writeAsStringSync(
+      '# Capture transcription plan\n\nCapture transcription and review workflow.\n',
+    );
+    final RecordingsController controller = build(
+      vault: realVault(),
+      transcription: _StubTranscription(
+        'Capture transcription and review workflow needs links.',
+      ),
+      picked: audioSource(),
+      analyzeConnections: true,
+    );
+
+    await controller.addUpload(CaptureType.audioUpload);
+    await controller.waitForProcessing();
+    await controller.waitForConnectionAnalysis();
+
+    final Recording capture = controller.recordings.single;
+    expect(capture.status, RecordingStatus.completed);
+    expect(capture.artifacts, hasLength(1));
+    expect(File(capture.artifacts.single.path).readAsStringSync(),
+        contains('[[Knowledge/Plan]]'));
+  });
+
+  test('analysis failure leaves the capture complete and can be retried', () async {
+    final RecordingsController controller = build(
+      vault: realVault(),
+      transcription: _StubTranscription('A useful captured thought.'),
+      picked: audioSource(),
+      analyzeConnections: true,
+      connectionReasoner: _FailingReasoner(),
+    );
+
+    await controller.addUpload(CaptureType.audioUpload);
+    await controller.waitForProcessing();
+    await controller.waitForConnectionAnalysis();
+    final String id = controller.recordings.single.id;
+    expect(controller.recordings.single.status, RecordingStatus.completed);
+    expect(controller.recordings.single.artifacts, isEmpty);
+    expect(controller.connectionAnalysisError(id), contains('model offline'));
+
+    controller.connectionReasoner = const ReviewConnectionReasoner();
+    await controller.retryConnectionAnalysis(id);
+    await controller.waitForConnectionAnalysis();
+    expect(controller.connectionAnalysisError(id), isNull);
+    expect(controller.recordings.single.artifacts, hasLength(1));
   });
 
   test('a failed capture writes no note', () async {

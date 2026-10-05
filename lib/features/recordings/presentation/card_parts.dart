@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 
 import '../../../app/ui_kit.dart';
 import '../domain/capture_category.dart';
+import '../domain/capture_priority.dart';
 import '../domain/capture_type.dart';
 import '../domain/recording.dart';
 import '../domain/route_record.dart';
@@ -207,12 +208,22 @@ Color categoryColorFor(CaptureCategory? category) => switch (category) {
   null => Console.accent,
 };
 
+/// Hot to cold: only the two ranks that ask for action get a warm colour, so a
+/// queue of p2/p3 items stays quiet.
+Color priorityColorFor(CapturePriority priority) => switch (priority) {
+  CapturePriority.p0 => Console.red,
+  CapturePriority.p1 => Console.amber,
+  CapturePriority.p2 => Console.muted,
+  CapturePriority.p3 => Console.dimText,
+};
+
 String typeLabelFor(CaptureType type) => switch (type) {
   CaptureType.audioRecording => 'Voice note',
   CaptureType.audioUpload => 'Audio file',
   CaptureType.image => 'Image',
   CaptureType.text => 'Text note',
   CaptureType.video => 'Video',
+  CaptureType.file => 'File',
 };
 
 /// `10:24 · m4a · 2026-07-27 12:00` — duration only when the type has one, so
@@ -339,6 +350,7 @@ IconData typeIconFor(CaptureType type) => switch (type) {
   CaptureType.image => Icons.image_outlined,
   CaptureType.text => Icons.description_outlined,
   CaptureType.video => Icons.movie_outlined,
+  CaptureType.file => Icons.insert_drive_file_outlined,
 };
 
 

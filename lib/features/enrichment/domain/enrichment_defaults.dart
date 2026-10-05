@@ -11,6 +11,11 @@
 /// repeating it here would send the same text twice and spend the profile's
 /// ceiling on it.
 ///
+/// It is the user's "soul" as much as a filing guide: besides who they are, it
+/// states the priority rules every capture is ranked against
+/// (`CapturePriority`). Those rules sit last, after the filing rules, because
+/// they are the part the user is expected to rewrite as their goals change.
+///
 /// The category rules carry the most weight. `CaptureCategory` values are
 /// routing destinations, and the boundary between `task` and `agentTask` — do I
 /// do this, or does an agent — is a personal convention no model can infer from
@@ -54,5 +59,14 @@ Tags name the THING a capture is about — never the activity performed on it
 two captures? If not, drop it. Lowercase, and English for technical terms
 though I dictate in Polish — "optimisation" and "optymalizacja" must not be
 two tags. Reuse: flutter, dart, macos, android, python, ai, llm, gpu, klient,
-oferta.''';
+oferta.
+
+Priority — rank against what I am trying to achieve, not by how loud it sounds:
+- p0: a client or a person is waiting, money is at stake, or a deadline falls
+  within two days. Also anything that blocks other work.
+- p1: moves a paid engagement or Augustyniak Capture forward this week.
+- p2: ideas, research and nice-to-haves with no date attached.
+- p3: off-goal curiosities, and anything I have said I am not doing now.
+A thought I keep re-recording matters more than one I said once. Name the rule
+you applied in priorityReason.''';
 }

@@ -8,10 +8,13 @@ import '../../../app/markdown_view.dart';
 import '../../../app/ui_kit.dart';
 import '../../projects/domain/project.dart';
 import '../domain/capture_category.dart';
+import '../domain/capture_priority.dart';
 import '../domain/capture_type.dart';
+import '../domain/agent_artifact.dart';
 import '../domain/note_vault.dart';
 import '../domain/recording.dart';
 import 'audio_waveform_visualizer.dart';
+import 'agent_artifact_viewer_modal.dart';
 import 'card_parts.dart';
 import 'handoff_sheet.dart';
 import 'inline_edit.dart';
@@ -155,6 +158,7 @@ class _FocusBody extends StatelessWidget {
     final String filename = File(recording.filePath).uri.pathSegments.last;
     final String transcript = (recording.transcript ?? '').trim();
     final String summary = (recording.summary ?? '').trim();
+    final AgentArtifact? connections = controller.connectionArtifactFor(recording);
     final int wordCount = transcript.isEmpty
         ? 0
         : transcript
@@ -192,6 +196,22 @@ class _FocusBody extends StatelessWidget {
               child: ListView(
                 padding: const EdgeInsets.only(top: 14),
                 children: <Widget>[
+                  if (recording.type == CaptureType.file &&
+                      recording.filePath.isNotEmpty) ...<Widget>[
+                    _SectionLabel(
+                      label: 'SOURCE FILE',
+                      trailing: CopyButton(
+                        text: recording.filePath,
+                        tooltip: 'Copy file path',
+                        semanticLabel: 'Copy file path to clipboard',
+                        size: 26,
+                        iconSize: 13,
+                      ),
+                    ),
+                    const SizedBox(height: 6),
+                    Text(recording.title ?? filename),
+                    const SizedBox(height: 14),
+                  ],
                   if (recording.type == CaptureType.image &&
                       recording.filePath.isNotEmpty) ...<Widget>[
                     _SectionLabel(
@@ -292,6 +312,37 @@ class _FocusBody extends StatelessWidget {
                         ),
                       ],
                     ),
+                    const SizedBox(height: 14),
+                  ],
+                  if (controller.mirrorsToVault && transcript.isNotEmpty) ...<Widget>[
+                    _SectionLabel(label: 'CONNECTIONS & NEXT STEP'),
+                    const SizedBox(height: 6),
+                    if (controller.isAnalyzingConnections(recording.id))
+                      const Text('Analyzing related notes…')
+                    else if (controller.connectionAnalysisError(recording.id) != null)
+                      Text('Analysis failed: ${controller.connectionAnalysisError(recording.id)}')
+                    else if (connections != null)
+                      Text(connections.snippet ?? 'Analysis saved in your vault.')
+                    else
+                      const Text('No analysis yet.'),
+                    Wrap(children: <Widget>[
+                      if (connections != null)
+                        TextButton(
+                          onPressed: () => showAgentArtifactViewer(
+                            context,
+                            controller: controller,
+                            recording: recording,
+                            artifact: connections,
+                          ),
+                          child: const Text('READ ANALYSIS'),
+                        ),
+                      TextButton(
+                        onPressed: controller.isAnalyzingConnections(recording.id)
+                            ? null
+                            : () => controller.retryConnectionAnalysis(recording.id),
+                        child: const Text('REFRESH CONNECTIONS'),
+                      ),
+                    ]),
                     const SizedBox(height: 14),
                   ],
                   if (recording.error != null) ...<Widget>[
@@ -672,7 +723,8 @@ class _Actions extends StatelessWidget {
     final bool hasTranscript = (recording.transcript ?? '').trim().isNotEmpty;
     final bool isEnriching = controller.isEnriching(recording.id);
     final bool isPlaying = controller.playingId == recording.id;
-    final bool openable = recording.type == CaptureType.video;
+    final bool openable = recording.type == CaptureType.video ||
+        recording.type == CaptureType.file;
 
     return Row(
       children: <Widget>[
@@ -735,9 +787,13 @@ class _Actions extends StatelessWidget {
                 )
               else if (openable)
                 ConsoleIconButton(
-                  icon: Icons.play_arrow_rounded,
+                  icon: recording.type == CaptureType.file
+                      ? Icons.open_in_new_rounded
+                      : Icons.play_arrow_rounded,
                   onTap: () => controller.openSource(recording.id),
-                  semanticLabel: RecordingCard.openVideoLabel,
+                  semanticLabel: recording.type == CaptureType.file
+                      ? RecordingCard.openFileLabel
+                      : RecordingCard.openVideoLabel,
                 ),
               if (controller.canHandoff(recording) && !reviewed)
                 ConsoleIconButton(
@@ -1391,6 +1447,30 @@ class _PanelBadges extends StatelessWidget {
                   outlined: true,
                 ),
         ),
+        _BadgeMenu(
+          tooltip: recording.priorityReason ?? 'Set priority',
+          selected: recording.priority?.name ?? _none,
+          options: <(String, String)>[
+            (_none, '—'),
+            for (final CapturePriority value in CapturePriority.values)
+              (value.name, value.label),
+          ],
+          onSelected: (String name) => controller.setPriority(
+            recording.id,
+            CapturePriority.tryName(name),
+          ),
+          child: recording.priority != null
+              ? StatusPill(
+                  label: recording.priority!.label,
+                  color: priorityColorFor(recording.priority!),
+                  outlined: true,
+                )
+              : StatusPill(
+                  label: '+ PRIORITY',
+                  color: Console.muted,
+                  outlined: true,
+                ),
+        ),
         if (enriching)
           StatusPill(label: 'ANALYZING', color: Console.accent, pulse: true)
         else
@@ -1566,11 +1646,14 @@ class _PanelActions extends StatelessWidget {
           semanticLabel: isPlaying ? 'Stop playback' : 'Play recording',
           onPressed: () => controller.togglePlayback(recording.id),
         )
-      else if (recording.type == CaptureType.video)
+      else if (recording.type == CaptureType.video ||
+          recording.type == CaptureType.file)
         _PanelButton(
           icon: Icons.open_in_new_rounded,
           label: 'Open',
-          semanticLabel: RecordingCard.openVideoLabel,
+          semanticLabel: recording.type == CaptureType.file
+              ? RecordingCard.openFileLabel
+              : RecordingCard.openVideoLabel,
           onPressed: () => controller.openSource(recording.id),
         ),
       if (controller.canHandoff(recording) && !reviewed)

@@ -1,5 +1,7 @@
 import 'dart:io';
 
+import 'package:path/path.dart' as p;
+
 import '../domain/capture_segment.dart';
 import '../domain/capture_type.dart';
 import '../domain/recording.dart';
@@ -33,10 +35,7 @@ class MediaImporter {
       );
     }
 
-    final String extension = RecordingsRepository.extensionFor(
-      type,
-      sourceMimeType: mimeType,
-    );
+    final String extension = _extension(type, source.path, mimeType);
     final File destination = await _repository.createSourceFile(id, extension);
     await source.copy(destination.path);
 
@@ -61,6 +60,7 @@ class MediaImporter {
       status: RecordingStatus.saved,
       type: type,
       sourceMimeType: mimeType,
+      title: type == CaptureType.file ? p.basename(source.path) : null,
     );
   }
 
@@ -84,10 +84,7 @@ class MediaImporter {
       );
     }
 
-    final String extension = RecordingsRepository.extensionFor(
-      type,
-      sourceMimeType: mimeType,
-    );
+    final String extension = _extension(type, source.path, mimeType);
     final File destination = await _repository.createSegmentFile(
       parentId,
       index,
@@ -113,5 +110,13 @@ class MediaImporter {
       createdAt: createdAt,
       sizeBytes: sizeBytes,
     );
+  }
+
+  static String _extension(CaptureType type, String path, String? mimeType) {
+    if (type == CaptureType.file) {
+      final String extension = p.extension(path).replaceFirst('.', '').toLowerCase();
+      if (RegExp(r'^[a-z0-9]{1,16}$').hasMatch(extension)) return extension;
+    }
+    return RecordingsRepository.extensionFor(type, sourceMimeType: mimeType);
   }
 }

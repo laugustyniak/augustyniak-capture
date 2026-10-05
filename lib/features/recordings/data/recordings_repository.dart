@@ -407,7 +407,11 @@ class RecordingsRepository {
       if (name.endsWith('.thumb.jpg')) continue;
       if (claimed.contains(name)) continue;
 
-      final CaptureType? type = typeForExtension(p.extension(name));
+      final CaptureType? type = typeForExtension(p.extension(name)) ??
+          (RegExp(r'^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$')
+                  .hasMatch(p.basenameWithoutExtension(name))
+              ? CaptureType.file
+              : null);
       if (type == null) continue;
 
       final FileStat stat = await entity.stat();

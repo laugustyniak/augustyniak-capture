@@ -18,6 +18,7 @@ class AppSettings {
     this.activeProfileId,
     this.activeEnrichmentProfileId,
     String? enrichmentInstructions,
+    this.soulPath,
     this.audio = AudioConfig.defaults,
     this.themeMode = AppThemeMode.system,
     this.textScale = defaultTextScale,
@@ -77,6 +78,13 @@ class AppSettings {
       _enrichmentInstructions ?? EnrichmentProfileDefaults.text;
 
   bool get hasCustomEnrichmentInstructions => _enrichmentInstructions != null;
+
+  /// A markdown file whose text replaces [enrichmentInstructions] as the
+  /// user's soul, or null for the typed profile alone. Device-local, like
+  /// [vaultPath]: a path means nothing on another machine. When the file is
+  /// missing or unreadable the typed profile still stands in, so clearing this
+  /// is never required to recover.
+  final String? soulPath;
 
   final AudioConfig audio;
   final AppThemeMode themeMode;
@@ -163,6 +171,8 @@ class AppSettings {
     bool clearActiveEnrichmentProfileId = false,
     String? enrichmentInstructions,
     bool resetEnrichmentInstructions = false,
+    String? soulPath,
+    bool clearSoulPath = false,
     AudioConfig? audio,
     AppThemeMode? themeMode,
     double? textScale,
@@ -197,6 +207,7 @@ class AppSettings {
       enrichmentInstructions: resetEnrichmentInstructions
           ? null
           : (enrichmentInstructions ?? _enrichmentInstructions),
+      soulPath: clearSoulPath ? null : (soulPath ?? this.soulPath),
       audio: audio ?? this.audio,
       themeMode: themeMode ?? this.themeMode,
       textScale: resetTextScale
@@ -250,6 +261,7 @@ class AppSettings {
       },
       if (_enrichmentInstructions != null)
         'enrichmentInstructions': _enrichmentInstructions,
+      if (soulPath != null) 'soulPath': soulPath,
       if (priceOverrides.isNotEmpty)
         'priceOverrides': <String, dynamic>{
           for (final MapEntry<String, ModelPrice> entry
@@ -335,6 +347,9 @@ class AppSettings {
         json['queueDensity'] is String ? json['queueDensity'] as String : null,
       ),
       navRailExpanded: json['navRailExpanded'] == true,
+      soulPath: json['soulPath'] is String
+          ? json['soulPath'] as String
+          : null,
       vaultPath: json['vaultPath'] is String
           ? json['vaultPath'] as String
           : null,

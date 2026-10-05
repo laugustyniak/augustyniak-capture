@@ -42,11 +42,14 @@ import '../data/revisions_repository.dart';
 import '../../projects/data/projects_repository.dart';
 import '../../projects/domain/project.dart';
 import '../data/agent_artifact_scanner.dart';
+import '../data/vault_connection_analyzer.dart';
 import '../data/capture_history.dart';
 import '../domain/agent_artifact.dart';
+import '../domain/connection_reasoner.dart';
 import '../data/source_content_hasher.dart';
 import '../domain/agent_handoff.dart';
 import '../domain/capture_category.dart';
+import '../domain/capture_priority.dart';
 import '../domain/capture_segment.dart';
 import '../domain/capture_type.dart';
 import '../domain/clipboard_sink.dart';
@@ -85,9 +88,12 @@ class RecordingsController extends ChangeNotifier {
     CaptureRouter captureRouter = const DisabledCaptureRouter(),
     AgentHandoff agentHandoff = const DisabledAgentHandoff(),
     NoteVault noteVault = const DisabledNoteVault(),
+    ConnectionReasoner connectionReasoner = const ReviewConnectionReasoner(),
+    VaultConnectionAnalyzer connectionAnalyzer = const VaultConnectionAnalyzer(),
     CaptureSession captureSession = const NoopCaptureSession(),
     Project? Function(String projectId)? projectById,
     Directory? Function()? vaultDirectory,
+    Directory? Function()? connectionVaultRoot,
     AgentArtifactScanner artifactScanner = const AgentArtifactScanner(),
     SourceContentHasher contentHasher = const SourceContentHasher(),
     RevisionsRepository? revisionsRepository,
@@ -159,9 +165,12 @@ class RecordingsController extends ChangeNotifier {
        _captureRouter = captureRouter,
        _agentHandoff = agentHandoff,
        _noteVault = noteVault,
+       _connectionReasoner = connectionReasoner,
+       _connectionAnalyzer = connectionAnalyzer,
        _captureSession = captureSession,
        _projectById = projectById,
        _vaultDirectory = vaultDirectory,
+       _connectionVaultRoot = connectionVaultRoot,
        _artifactScanner = artifactScanner,
        _contentHasher = contentHasher,
        _mediaPicker = mediaPicker ?? const FilePickerMediaPicker(),
@@ -271,12 +280,18 @@ class RecordingsController extends ChangeNotifier {
   bool _refreshingOutcomes = false;
   final AgentHandoff _agentHandoff;
   final NoteVault _noteVault;
+  ConnectionReasoner _connectionReasoner;
+  final VaultConnectionAnalyzer _connectionAnalyzer;
+  final Set<String> _analyzingConnections = <String>{};
+  final Set<Future<void>> _connectionJobs = <Future<void>>{};
+  final Map<String, String> _connectionErrors = <String, String>{};
 
   /// Keeps the OS off a running capture. Noop everywhere but Android; see
   /// [CaptureSession] for what it is holding back.
   final CaptureSession _captureSession;
   final Project? Function(String projectId)? _projectById;
   final Directory? Function()? _vaultDirectory;
+  final Directory? Function()? _connectionVaultRoot;
   final AgentArtifactScanner _artifactScanner;
   final SourceContentHasher _contentHasher;
   final MediaPicker _mediaPicker;
@@ -514,6 +529,30 @@ class RecordingsController extends ChangeNotifier {
   set enrichmentService(EnrichmentService value) {
     if (identical(_enrichmentService, value)) return;
     _enrichmentService = value;
+  }
+
+  set connectionReasoner(ConnectionReasoner value) => _connectionReasoner = value;
+
+  bool isAnalyzingConnections(String id) => _analyzingConnections.contains(id);
+  String? connectionAnalysisError(String id) => _connectionErrors[id];
+
+  AgentArtifact? connectionArtifactFor(Recording recording) {
+    final Directory? vault = _connectionVaultRoot?.call();
+    if (vault == null) return null;
+    for (final AgentArtifact artifact in recording.artifacts.reversed) {
+      if (p.isWithin(vault.path, artifact.path) &&
+          p.basename(artifact.path) == '${recording.id}.md' &&
+          p.basename(p.dirname(artifact.path)) == 'Analysis') {
+        return artifact;
+      }
+    }
+    return null;
+  }
+
+  Future<void> waitForConnectionAnalysis() async {
+    while (_connectionJobs.isNotEmpty) {
+      await Future.wait(_connectionJobs.toList());
+    }
   }
 
   /// Applied to the next image OCR attempt. A job already running keeps the
@@ -1888,6 +1927,7 @@ class RecordingsController extends ChangeNotifier {
     File file,
     CaptureType type, {
     String? appendTo,
+    String? mimeType,
   }) async {
     if (_isRecording || _isBusy) return;
     _isBusy = true;
@@ -1907,6 +1947,7 @@ class RecordingsController extends ChangeNotifier {
             index: next,
             type: type,
             source: file,
+            mimeType: mimeType,
             createdAt: DateTime.now(),
           ),
         );
@@ -1918,7 +1959,7 @@ class RecordingsController extends ChangeNotifier {
         id: id,
         type: type,
         source: file,
-        mimeType: null,
+        mimeType: mimeType,
         createdAt: DateTime.now(),
       );
       final Recording saved = imported.copyWith(projectId: activeProjectId);
@@ -2058,6 +2099,27 @@ class RecordingsController extends ChangeNotifier {
     );
     _logSink.log(
       trimmed.isEmpty ? 'Summary cleared.' : 'Summary updated.',
+      recordingId: id,
+    );
+  }
+
+  /// Set the rank by hand, or clear it with null — which asks the next
+  /// enrichment run to rank the item again. The model's reason is dropped
+  /// either way: it argued for a rank that is no longer the one shown.
+  Future<void> setPriority(String id, CapturePriority? priority) async {
+    await _update(
+      id,
+      (Recording item) => item.copyWith(
+        priority: priority,
+        clearPriority: priority == null,
+        clearPriorityReason: true,
+        // A hand-set rank was judged against no profile at all.
+        clearPriorityBasis: true,
+      ),
+      source: RevisionSource.user,
+    );
+    _logSink.log(
+      priority == null ? 'Priority cleared.' : 'Priority set to ${priority.label}.',
       recordingId: id,
     );
   }
@@ -3043,7 +3105,8 @@ class RecordingsController extends ChangeNotifier {
     CaptureType.audioRecording ||
     CaptureType.audioUpload ||
     CaptureType.video ||
-    CaptureType.text => UsageStage.transcription,
+    CaptureType.text ||
+    CaptureType.file => UsageStage.transcription,
   };
 
   /// Take the ambient usage scope, waiting for whoever holds it, and return the
@@ -3052,8 +3115,8 @@ class RecordingsController extends ChangeNotifier {
   /// `UsageSink.beginJob`/`endJob` are ambient state — one open job at a time,
   /// or an event lands against whichever capture the *other* job named — so
   /// every path that opens one has to be serialized against every other. There
-  /// are exactly two: [_processOne] (the drain) and [retryEnrichment] (the
-  /// ENRICH button). `_isDraining` covers only the first against itself.
+  /// are three: [_processOne] (the drain), [retryEnrichment] (the ENRICH
+  /// button), and connection assessment. `_isDraining` covers only the first.
   ///
   /// A `Completer` chain rather than a flag, because a refusal here is a silent
   /// no-op on a control the user just pressed: whoever asks second waits and
@@ -3065,7 +3128,7 @@ class RecordingsController extends ChangeNotifier {
   /// the vault mirror. None of those call back into `_processOne`,
   /// `retryEnrichment` or `_drainProcessingQueue` — `_enqueueProcessing` only
   /// appends to a list and kicks the drain *unawaited*, so a capture taken
-  /// while a job runs never blocks on the holder. Both call sites release from
+  /// while a job runs never blocks on the holder. All call sites release from
   /// a `finally`, so a throw cannot strand the chain either; a waiter that
   /// resumes after [dispose] checks `_disposed` and leaves.
   Future<void Function()> _acquireUsageScope() async {
@@ -3164,7 +3227,7 @@ class RecordingsController extends ChangeNotifier {
   }
 
   /// Hand the item's source file to the platform's own player/viewer. Used for
-  /// video, which has no in-app player on the desktop targets this ships on.
+  /// video and generic file attachments, which use the system viewer.
   ///
   /// Deliberately not gated on [CaptureType] here — the card decides what is
   /// openable, exactly as it does for [togglePlayback] — but a missing source
@@ -3241,7 +3304,7 @@ class RecordingsController extends ChangeNotifier {
     if ((item.transcript ?? '').trim().isEmpty) return;
 
     try {
-      await _mirrorOne(item);
+      await _mirrorOne(item, analyze: true);
     } catch (exception) {
       _logSink.log(
         'Vault mirror failed: $exception',
@@ -3254,30 +3317,29 @@ class RecordingsController extends ChangeNotifier {
   /// The write itself. Throws, so [mirrorAll] can count a failure and
   /// [_mirrorToVault] can swallow one — the two callers disagree about what a
   /// failure is worth, and neither should have to infer it from a null.
-  Future<VaultOutcome> _mirrorOne(Recording item) async {
-    final VaultWrite write = await _noteVault.mirror(
-      VaultNote(
-        id: item.id,
-        // The same resolved name the card and the router use, so a note in the
-        // vault can never disagree with the row it came from.
-        title: displayNameFor(item),
-        body: item.transcript ?? '',
-        capturedAt: item.createdAt,
-        type: item.type,
-        summary: item.summary,
-        category: item.category,
-        tags: item.tags,
-        projectId: item.projectId,
-        durationMs: item.durationMs,
-        // Every segment, in order. A text segment attaches nothing — it is the
-        // body printed above it, so attaching it puts the same words in the
-        // vault twice.
-        sourcePaths: <String>[
-          for (final CaptureSegment segment in item.segments)
-            if (segment.type != CaptureType.text) segment.filePath,
-        ],
-      ),
+  Future<VaultOutcome> _mirrorOne(Recording item, {bool analyze = false}) async {
+    final VaultNote note = VaultNote(
+      id: item.id,
+      // The same resolved name the card and the router use, so a note in the
+      // vault can never disagree with the row it came from.
+      title: displayNameFor(item),
+      body: item.transcript ?? '',
+      capturedAt: item.createdAt,
+      type: item.type,
+      summary: item.summary,
+      category: item.category,
+      tags: item.tags,
+      projectId: item.projectId,
+      durationMs: item.durationMs,
+      // Every segment, in order. A text segment attaches nothing — it is the
+      // body printed above it, so attaching it puts the same words in the
+      // vault twice.
+      sourcePaths: <String>[
+        for (final CaptureSegment segment in item.segments)
+          if (segment.type != CaptureType.text) segment.filePath,
+      ],
     );
+    final VaultWrite write = await _noteVault.mirror(note);
 
     switch (write.outcome) {
       case VaultOutcome.created:
@@ -3296,8 +3358,69 @@ class RecordingsController extends ChangeNotifier {
       case VaultOutcome.unchanged:
         break; // Nothing happened; a log line per pipeline tick would be noise.
     }
+    final Directory? vault = _connectionVaultRoot?.call();
+    if (analyze && vault != null && write.path != null) {
+      _startConnectionAnalysis(item, note, vault, write.path!);
+    }
     return write.outcome;
   }
+
+  void _startConnectionAnalysis(
+    Recording item, VaultNote note, Directory vault, String sourcePath,
+  ) {
+    if (!_analyzingConnections.add(item.id)) return;
+    _connectionErrors.remove(item.id);
+    if (!_disposed) notifyListeners();
+    late final Future<void> job;
+    job = () async {
+      try {
+        final EnrichmentContext context = await _resolveEnrichmentContext(item.id);
+        final AgentArtifact artifact = await _connectionAnalyzer.analyze(
+          vault: vault,
+          note: note,
+          sourcePath: sourcePath,
+          reasoner: _UsageScopedConnectionReasoner(
+            delegate: _connectionReasoner,
+            acquire: _acquireUsageScope,
+            begin: () => _beginUsageJob(item.id, UsageStage.enrichment),
+            end: _endUsageJob,
+          ),
+          context: context,
+          priority: item.priority,
+          priorityReason: item.priorityReason,
+        );
+        if (_disposed || !_recordings.any((Recording row) => row.id == item.id)) {
+          return;
+        }
+        await _update(
+          item.id,
+          (Recording current) => current.copyWith(
+            artifacts: <AgentArtifact>[
+              ...current.artifacts.where(
+                (AgentArtifact old) => old.path != artifact.path,
+              ),
+              artifact,
+            ],
+          ),
+        );
+        _logSink.log('Connection analysis saved to vault.', recordingId: item.id);
+      } catch (error) {
+        _connectionErrors[item.id] = error.toString();
+        _logSink.log(
+          'Connection analysis failed: $error',
+          level: LogLevel.warn,
+          recordingId: item.id,
+        );
+      } finally {
+        _analyzingConnections.remove(item.id);
+        _connectionJobs.remove(job);
+        if (!_disposed) notifyListeners();
+      }
+    }();
+    _connectionJobs.add(job);
+  }
+
+  Future<void> retryConnectionAnalysis(String id) => _mirrorToVault(id);
 
   /// Ask the enrichment model to name and classify freshly derived text.
   ///
@@ -3336,6 +3459,15 @@ class RecordingsController extends ChangeNotifier {
           title: (item.title ?? '').trim().isEmpty ? result.title : null,
           category: item.category ?? result.category,
           summary: result.summary,
+          // Fill-only, like `category`: a rank the user set is theirs. The
+          // reason travels with the rank it argues for, never alone.
+          priority: item.priority ?? result.priority,
+          priorityReason: item.priority == null ? result.priorityReason : null,
+          // Which soul the rank was judged against. Only when this run is the
+          // one supplying the rank — a kept rank keeps its own basis.
+          priorityBasis: item.priority == null && result.priority != null
+              ? context.profileBasis
+              : null,
           // Fill-only, like `title` and `category`, now that a tag carries no
           // owner: with nothing marking which tags came from a model, a refresh
           // could only refresh *all* of them, and a re-run would keep
@@ -3717,5 +3849,45 @@ class RecordingsController extends ChangeNotifier {
     // notification outlives the app that posted it.
     if (_isRecording) _endCaptureSession();
     super.dispose();
+  }
+}
+
+class _UsageScopedConnectionReasoner implements ConnectionReasoner {
+  const _UsageScopedConnectionReasoner({
+    required this.delegate,
+    required this.acquire,
+    required this.begin,
+    required this.end,
+  });
+
+  final ConnectionReasoner delegate;
+  final Future<void Function()> Function() acquire;
+  final void Function() begin;
+  final void Function() end;
+
+  @override
+  Future<ConnectionAdvice> assess({
+    required String title,
+    required String text,
+    required List<ConnectionCandidate> candidates,
+    required EnrichmentContext context,
+    CapturePriority? priority,
+    String? priorityReason,
+  }) async {
+    final void Function() release = await acquire();
+    try {
+      begin();
+      return await delegate.assess(
+        title: title,
+        text: text,
+        candidates: candidates,
+        context: context,
+        priority: priority,
+        priorityReason: priorityReason,
+      );
+    } finally {
+      end();
+      release();
+    }
   }
 }

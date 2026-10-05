@@ -82,6 +82,13 @@ class SyncRowCodec {
       'artifacts': json['artifacts'],
       if (json.containsKey('segments'))
         'segments': _basenameSegmentPaths(json['segments']),
+      // No column of their own, and absent while unranked — the same rule as
+      // `Recording.toJson`, so an unranked row hashes as it did before.
+      if (json.containsKey('priority')) 'priority': json['priority'],
+      if (json.containsKey('priorityReason'))
+        'priorityReason': json['priorityReason'],
+      if (json.containsKey('priorityBasis'))
+        'priorityBasis': json['priorityBasis'],
     };
     return <String, Object?>{
       'id': r.id,
@@ -164,6 +171,9 @@ class SyncRowCodec {
       'error': row['failure_reason'],
       'isProcessedByUser': row['is_processed_by_user'] == true,
       'processedAt': row['processed_at'],
+      'priority': payload['priority'],
+      'priorityReason': payload['priorityReason'],
+      'priorityBasis': payload['priorityBasis'],
       'routes': payload['routes'] ?? <Object?>[],
       'artifacts': payload['artifacts'] ?? <Object?>[],
       if (payload.containsKey('segments'))

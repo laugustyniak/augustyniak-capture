@@ -128,7 +128,9 @@ class AgentArtifactScanner {
         return await _parseMarkdownArtifact(
           file: file,
           captureId: captureId,
-          defaultKind: AgentArtifactKind.connectedNote,
+          defaultKind: content.contains('analysis-hash: ')
+              ? AgentArtifactKind.resultNote
+              : AgentArtifactKind.connectedNote,
         );
       }
     } catch (_) {}

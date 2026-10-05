@@ -5,6 +5,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:augustyniak_capture/app/ui_kit.dart';
 import 'package:augustyniak_capture/features/recordings/domain/capture_type.dart';
+import 'package:augustyniak_capture/features/recordings/domain/agent_artifact.dart';
 import 'package:augustyniak_capture/features/recordings/domain/note_vault.dart';
 import 'package:augustyniak_capture/features/recordings/domain/recording.dart';
 import 'package:augustyniak_capture/features/recordings/presentation/audio_waveform_visualizer.dart';
@@ -116,6 +117,47 @@ void main() {
     await tester.tap(find.text('OPEN'));
     await tester.pumpAndSettle();
   }
+
+  testWidgets('focus view shows saved connections and opens their analysis',
+      (WidgetTester tester) async {
+    final File analysis = File('${appDir.path}/Analysis/focus-links.md');
+    analysis.parent.createSync();
+    analysis.writeAsStringSync('# Connections\n\n[[Projects/Plan]]\n');
+    final Recording seeded = makeRecording(
+      id: 'focus-links',
+      title: 'Connect the notes',
+      transcript: 'A short captured thought.',
+    ).copyWith(artifacts: <AgentArtifact>[
+      AgentArtifact(
+        id: analysis.path,
+        captureId: 'focus-links',
+        title: 'Connections and next step',
+        path: analysis.path,
+        updatedAt: DateTime.now(),
+        snippet: 'Related to the project plan.',
+      ),
+    ]);
+    final RecordingsController controller = await buildRecordingsController(
+      appDir,
+      seed: <Recording>[seeded],
+      noteVault: _FakeTestVault(),
+      connectionVaultRoot: () => appDir,
+    );
+
+    await pumpFocusView(tester, controller, 'focus-links');
+    expect(inFocusView(find.text('CONNECTIONS & NEXT STEP')), findsOneWidget);
+    expect(inFocusView(find.text('Related to the project plan.')), findsOneWidget);
+    await tester.tap(inFocusView(find.text('READ ANALYSIS')));
+    await tester.pump();
+    for (int attempt = 0; attempt < 10; attempt++) {
+      await tester.runAsync(() async {
+        await Future<void>.delayed(const Duration(milliseconds: 20));
+      });
+      await tester.pump(const Duration(milliseconds: 20));
+      if (find.textContaining('[[Projects/Plan]]').evaluate().isNotEmpty) break;
+    }
+    expect(find.textContaining('[[Projects/Plan]]'), findsOneWidget);
+  });
 
   testWidgets('tapping the card body opens inline editing directly', (
     WidgetTester tester,

@@ -1,5 +1,6 @@
 import 'agent_artifact.dart';
 import 'capture_category.dart';
+import 'capture_priority.dart';
 import 'capture_segment.dart';
 import 'capture_type.dart';
 import 'route_record.dart';
@@ -38,6 +39,9 @@ class Recording {
     this.title,
     this.category,
     this.summary,
+    this.priority,
+    this.priorityReason,
+    this.priorityBasis,
     this.tags = const <String>[],
     this.projectId,
     this.error,
@@ -107,6 +111,25 @@ class Recording {
 
   /// One-line gist from the enrichment stage. Null until enriched.
   final String? summary;
+
+  /// How much this matters against the user's goals. Null means never ranked,
+  /// which is a different fact from [CapturePriority.p3] — see the enum.
+  ///
+  /// Fill-only for enrichment, like [title] and [category]: a rank the user
+  /// set is never overwritten by a re-run, and clearing it asks for a new one.
+  final CapturePriority? priority;
+
+  /// The model's one-line justification for [priority], citing the goal or
+  /// rule it applied. Null whenever the user set the rank by hand — the
+  /// model's argument was for a different answer.
+  final String? priorityReason;
+
+  /// Fingerprint of the profile ("soul") [priority] was judged against — see
+  /// `EnrichmentContext.profileBasis`. Null when the user set the rank by
+  /// hand, when no profile was sent, and on every row ranked before this
+  /// existed. Comparing it with the current fingerprint tells a rank made
+  /// under old goals from a current one.
+  final String? priorityBasis;
 
   /// The capture's tags: one normalized list, no provenance. Enrichment may
   /// propose it and the user may rewrite it — see [RecordingTags].
@@ -215,6 +238,12 @@ class Recording {
     bool clearCategory = false,
     String? summary,
     bool clearSummary = false,
+    CapturePriority? priority,
+    bool clearPriority = false,
+    String? priorityReason,
+    bool clearPriorityReason = false,
+    String? priorityBasis,
+    bool clearPriorityBasis = false,
     List<String>? tags,
     String? projectId,
     bool clearProjectId = false,
@@ -242,6 +271,13 @@ class Recording {
       title: clearTitle ? null : (title ?? this.title),
       category: clearCategory ? null : (category ?? this.category),
       summary: clearSummary ? null : (summary ?? this.summary),
+      priority: clearPriority ? null : (priority ?? this.priority),
+      priorityReason: clearPriorityReason
+          ? null
+          : (priorityReason ?? this.priorityReason),
+      priorityBasis: clearPriorityBasis
+          ? null
+          : (priorityBasis ?? this.priorityBasis),
       tags: RecordingTags.normalize(tags ?? this.tags),
       projectId: clearProjectId ? null : (projectId ?? this.projectId),
       error: clearError ? null : (error ?? this.error),
@@ -268,6 +304,11 @@ class Recording {
     'title': title,
     'category': category?.name,
     'summary': summary,
+    // Omitted while unranked, so a row written before priority existed — and
+    // every row never ranked since — serialises byte for byte as it did.
+    if (priority != null) 'priority': priority!.name,
+    if (priorityReason != null) 'priorityReason': priorityReason,
+    if (priorityBasis != null) 'priorityBasis': priorityBasis,
     'tags': tags,
     'projectId': projectId,
     'error': error,
@@ -317,6 +358,15 @@ class Recording {
           ? CaptureCategory.fromName(json['category'] as String)
           : null,
       summary: json['summary'] is String ? json['summary'] as String : null,
+      // Absent on every row written before ranking existed; an unknown name
+      // from a newer build stays unranked rather than guessing a rank.
+      priority: CapturePriority.tryName(json['priority']),
+      priorityReason: json['priorityReason'] is String
+          ? json['priorityReason'] as String
+          : null,
+      priorityBasis: json['priorityBasis'] is String
+          ? json['priorityBasis'] as String
+          : null,
       // Reads the plain string list *and* the retired `{value, source}` form,
       // which is already on disk. Invalid entries degrade individually rather
       // than taking down the index.

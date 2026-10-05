@@ -11,6 +11,7 @@ import 'package:augustyniak_capture/features/processing/domain/processor.dart';
 import 'package:augustyniak_capture/features/processing/domain/processor_registry.dart';
 import 'package:augustyniak_capture/features/recordings/data/recordings_repository.dart';
 import 'package:augustyniak_capture/features/recordings/domain/capture_category.dart';
+import 'package:augustyniak_capture/features/recordings/domain/capture_priority.dart';
 import 'package:augustyniak_capture/features/recordings/domain/capture_type.dart';
 import 'package:augustyniak_capture/features/recordings/domain/recording.dart';
 import 'package:augustyniak_capture/features/recordings/presentation/recordings_controller.dart';
@@ -597,5 +598,127 @@ void main() {
     await c.setCategory(c.recordings.single.id, null);
 
     expect(c.recordings.single.category, isNull);
+  });
+
+  group('priority', () {
+    const EnrichmentResult ranked = EnrichmentResult(
+      title: 'Notatka o kliencie',
+      category: CaptureCategory.task,
+      priority: CapturePriority.p1,
+      priorityReason: 'Serves the Q4 goal.',
+    );
+
+    test('enrichment ranks an unranked item', () async {
+      final Directory dir = await _tmp();
+      addTearDown(() => dir.delete(recursive: true));
+      final _FakeRepo repo = _FakeRepo(dir);
+      final RecordingsController c = _controller(
+        repo,
+        enrichment: _FakeEnrichment(ranked),
+      );
+      addTearDown(c.dispose);
+
+      await c.addTextNote('zadzwonić do klienta');
+      await c.waitForProcessing();
+
+      expect(c.recordings.single.priority, CapturePriority.p1);
+      expect(c.recordings.single.priorityReason, 'Serves the Q4 goal.');
+      expect(repo.saved.single.priority, CapturePriority.p1);
+    });
+
+    test('a re-run never overwrites a user-set priority', () async {
+      final Directory dir = await _tmp();
+      addTearDown(() => dir.delete(recursive: true));
+      final _FakeEnrichment enrichment = _FakeEnrichment(ranked);
+      final RecordingsController c = _controller(
+        _FakeRepo(dir),
+        enrichment: enrichment,
+      );
+      addTearDown(c.dispose);
+
+      await c.addTextNote('zadzwonić do klienta');
+      await c.waitForProcessing();
+      final String id = c.recordings.single.id;
+
+      await c.setPriority(id, CapturePriority.p3);
+      // The model's reason argued for p1; it explains nothing about p3.
+      expect(c.recordings.single.priorityReason, isNull);
+
+      await c.retryEnrichment(id);
+      await c.waitForProcessing();
+
+      expect(enrichment.calls, 2);
+      expect(c.recordings.single.priority, CapturePriority.p3);
+      expect(c.recordings.single.priorityReason, isNull);
+    });
+
+    test('a cleared priority is ranked again by the next run', () async {
+      final Directory dir = await _tmp();
+      addTearDown(() => dir.delete(recursive: true));
+      final _FakeEnrichment enrichment = _FakeEnrichment(ranked);
+      final RecordingsController c = _controller(
+        _FakeRepo(dir),
+        enrichment: enrichment,
+      );
+      addTearDown(c.dispose);
+
+      await c.addTextNote('zadzwonić do klienta');
+      await c.waitForProcessing();
+      final String id = c.recordings.single.id;
+
+      await c.setPriority(id, null);
+      expect(c.recordings.single.priority, isNull);
+
+      enrichment.result = const EnrichmentResult(
+        priority: CapturePriority.p0,
+        priorityReason: 'Client deadline tomorrow.',
+      );
+      await c.retryEnrichment(id);
+      await c.waitForProcessing();
+
+      expect(c.recordings.single.priority, CapturePriority.p0);
+      expect(c.recordings.single.priorityReason, 'Client deadline tomorrow.');
+    });
+
+    test('a rank records which soul it was judged against', () async {
+      final Directory dir = await _tmp();
+      addTearDown(() => dir.delete(recursive: true));
+      const EnrichmentContext soul = EnrichmentContext(
+        profile: 'Goal: ship the beta.',
+      );
+      final RecordingsController c = _controller(
+        _FakeRepo(dir),
+        enrichment: _FakeEnrichment(ranked),
+        contextSource: _FakeContextSource(soul),
+      );
+      addTearDown(c.dispose);
+
+      await c.addTextNote('zadzwonić do klienta');
+      await c.waitForProcessing();
+      final String id = c.recordings.single.id;
+
+      expect(c.recordings.single.priorityBasis, soul.profileBasis);
+      expect(c.recordings.single.priorityBasis, isNotNull);
+
+      // A hand-set rank was judged against no profile.
+      await c.setPriority(id, CapturePriority.p2);
+      expect(c.recordings.single.priorityBasis, isNull);
+    });
+
+    test('an unranked verdict leaves the item unranked', () async {
+      final Directory dir = await _tmp();
+      addTearDown(() => dir.delete(recursive: true));
+      final RecordingsController c = _controller(
+        _FakeRepo(dir),
+        enrichment: _FakeEnrichment(verdict),
+      );
+      addTearDown(c.dispose);
+
+      await c.addTextNote('spotkanie');
+      await c.waitForProcessing();
+
+      expect(c.recordings.single.priority, isNull);
+      expect(c.recordings.single.priorityReason, isNull);
+    });
   });
 }
