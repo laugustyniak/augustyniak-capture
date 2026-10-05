@@ -2113,6 +2113,8 @@ class RecordingsController extends ChangeNotifier {
         priority: priority,
         clearPriority: priority == null,
         clearPriorityReason: true,
+        // A hand-set rank was judged against no profile at all.
+        clearPriorityBasis: true,
       ),
       source: RevisionSource.user,
     );
@@ -3461,6 +3463,11 @@ class RecordingsController extends ChangeNotifier {
           // reason travels with the rank it argues for, never alone.
           priority: item.priority ?? result.priority,
           priorityReason: item.priority == null ? result.priorityReason : null,
+          // Which soul the rank was judged against. Only when this run is the
+          // one supplying the rank — a kept rank keeps its own basis.
+          priorityBasis: item.priority == null && result.priority != null
+              ? context.profileBasis
+              : null,
           // Fill-only, like `title` and `category`, now that a tag carries no
           // owner: with nothing marking which tags came from a model, a refresh
           // could only refresh *all* of them, and a re-run would keep

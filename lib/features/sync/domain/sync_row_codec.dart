@@ -87,6 +87,8 @@ class SyncRowCodec {
       if (json.containsKey('priority')) 'priority': json['priority'],
       if (json.containsKey('priorityReason'))
         'priorityReason': json['priorityReason'],
+      if (json.containsKey('priorityBasis'))
+        'priorityBasis': json['priorityBasis'],
     };
     return <String, Object?>{
       'id': r.id,
@@ -171,6 +173,7 @@ class SyncRowCodec {
       'processedAt': row['processed_at'],
       'priority': payload['priority'],
       'priorityReason': payload['priorityReason'],
+      'priorityBasis': payload['priorityBasis'],
       'routes': payload['routes'] ?? <Object?>[],
       'artifacts': payload['artifacts'] ?? <Object?>[],
       if (payload.containsKey('segments'))

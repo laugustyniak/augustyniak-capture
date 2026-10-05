@@ -1,6 +1,7 @@
 import '../../projects/data/project_context_reader.dart';
 import '../../projects/domain/project.dart';
 import '../domain/enrichment_context.dart';
+import 'soul_reader.dart';
 
 /// Builds the enrichment context out of the two places it actually lives: the
 /// user's profile in `settings.json`, and the project's own repository.
@@ -13,12 +14,22 @@ class ComposedEnrichmentContextSource implements EnrichmentContextSource {
   ComposedEnrichmentContextSource({
     required String? Function() profile,
     required Project? Function(String projectId) projectById,
+    String? Function()? soulPath,
     ProjectContextReader reader = const ProjectContextReader(),
+    SoulReader soulReader = const SoulReader(),
   }) : _profile = profile,
+       _soulPath = soulPath ?? (() => null),
        _projectById = projectById,
-       _reader = reader;
+       _reader = reader,
+       _soulReader = soulReader;
 
   final String? Function() _profile;
+
+  /// Where the user's `SOUL.md` lives, read per call so a Config change
+  /// reaches the next capture. Null or blank means the typed [_profile] is the
+  /// soul, exactly as before this existed.
+  final String? Function() _soulPath;
+  final SoulReader _soulReader;
   final Project? Function(String projectId) _projectById;
   final ProjectContextReader _reader;
 
@@ -31,17 +42,45 @@ class ComposedEnrichmentContextSource implements EnrichmentContextSource {
   @override
   Future<EnrichmentContext> contextFor(String? projectId) async {
     lastError = null;
-    final String? profile = _profile();
+    final ResolvedSoul soul = await _soulReader.resolve(
+      path: _soulPath(),
+      typed: _profile() ?? '',
+    );
+    // A configured file that failed is reported, never thrown: the typed
+    // profile stands in, and the capture is ranked against that instead.
+    if (soul.origin.isFallback) {
+      lastError =
+          'Soul file ${soul.fileName} ${soul.origin.name}'
+          '${soul.error == null ? '' : ': ${soul.error}'}'
+          ' — using the typed profile';
+    }
+    final String profile = soul.text;
+    final String? profileSource = soul.origin == SoulOrigin.file
+        ? soul.fileName
+        : null;
+    final String? profileFallback = soul.origin.isFallback
+        ? '${soul.fileName} ${soul.origin.name}'
+        : null;
 
     if (projectId == null || projectId.isEmpty) {
-      return EnrichmentContext(profile: profile);
+      return EnrichmentContext(
+        profile: profile,
+        profileSource: profileSource,
+        profileFallback: profileFallback,
+      );
     }
 
     // A project that was deleted after the capture was filed leaves a dangling
     // id on the item — the same shape as a dangling `activeProfileId`. The
     // profile layer still applies.
     final Project? project = _projectById(projectId);
-    if (project == null) return EnrichmentContext(profile: profile);
+    if (project == null) {
+      return EnrichmentContext(
+        profile: profile,
+        profileSource: profileSource,
+        profileFallback: profileFallback,
+      );
+    }
 
     try {
       final ProjectContextDocument? document = await _reader.read(
@@ -49,6 +88,8 @@ class ComposedEnrichmentContextSource implements EnrichmentContextSource {
       );
       return EnrichmentContext(
         profile: profile,
+        profileSource: profileSource,
+        profileFallback: profileFallback,
         // The project's own `description` is the fallback, not the primary:
         // it is a one-line label typed once, while the repository file is
         // maintained as the work changes. Using it when no file is found is
@@ -62,6 +103,8 @@ class ComposedEnrichmentContextSource implements EnrichmentContextSource {
       lastError = 'Project context unreadable: $exception';
       return EnrichmentContext(
         profile: profile,
+        profileSource: profileSource,
+        profileFallback: profileFallback,
         project: project.description,
         projectSource: project.description == null
             ? null

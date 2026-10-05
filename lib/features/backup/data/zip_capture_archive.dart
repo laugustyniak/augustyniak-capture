@@ -608,6 +608,7 @@ class ZipCaptureArchive implements CaptureArchive {
       summary: recording.summary,
       priority: recording.priority,
       priorityReason: recording.priorityReason,
+      priorityBasis: recording.priorityBasis,
       tags: recording.tags,
       projectId: recording.projectId,
       error: recording.error,
