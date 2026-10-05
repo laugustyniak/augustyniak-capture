@@ -55,6 +55,29 @@ void main() {
     expect(event.unpricedReason, isNull);
   });
 
+  test('daily review enters overall costs without changing a capture job', () {
+    sink.beginJob('cap-1', UsageStage.enrichment);
+    sink.recordConnections(
+      day: DateTime(2026, 10, 3),
+      provider: 'api.openai.com',
+      model: 'gpt-5.6-luna',
+      usage: const MeasuredUsage(inputTokens: 1000000, outputTokens: 1000000),
+    );
+    sink.record(
+      provider: 'api.openai.com',
+      model: 'gpt-5.6-luna',
+      usage: const MeasuredUsage(inputTokens: 1000000, outputTokens: 1000000),
+    );
+    sink.endJob();
+
+    final UsageEvent review =
+        repository.forCapture('daily-connections:2026-10-03').single;
+    expect(review.stage, UsageStage.connections);
+    expect(review.costUsd, closeTo(1.40, 1e-9));
+    expect(repository.forCapture('cap-1').single.stage, UsageStage.enrichment);
+    expect(repository.totalAll().amountUsd, closeTo(2.80, 1e-9));
+  });
+
   test('a transcription with no reported duration falls back to the capture', () {
     sink.beginJob(
       'cap-2',

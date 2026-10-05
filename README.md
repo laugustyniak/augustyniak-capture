@@ -152,13 +152,23 @@ later and press retry.
 
 | Tab | What it is for |
 | --- | --- |
-| **Queue** | every capture, review progress, search, filters, playback, inline editing |
+| **Queue** | every capture, review progress, search, filters, playback, inline editing, manual daily connection review |
 | **Timer** | a focus session — countdown dial, session goal, alarm at zero — plus what got finished lately |
 | **Projects** | repository contexts, active project, per-project captures, one-click coding-agent sessions |
 | **Clipboard** | clipboard history, searchable, with a preview pane and in-place editing |
 | **Models** | provider profiles — transcription and enrichment, add / edit / activate |
 | **Logs** | live pipeline events (persist, queue, transcribe, errors) with a level filter |
 | **Config** | appearance, audio parameters, global shortcuts, enrichment profile, note vault, keyring status |
+
+**Daily connections:** In Queue, choose **REVIEW CONNECTIONS**, pick a date,
+then run **REVIEW DAY**. The active enrichment model reviews every capture from
+that local calendar day with processed text, using its title, summary and text
+excerpts. It suggests overlapping topics, complementary ideas, different
+perspectives and app improvements, with links back to the original captures.
+The report stays in the open dialog; closing it discards the suggestions. The
+review never edits or merges captures. Model-provider charges may apply; review
+calls appear in overall model costs rather than on a capture card. Missing usage
+or pricing remains unpriced.
 
 ### A queue row, annotated
 

@@ -6,6 +6,8 @@ import 'package:flutter/services.dart';
 
 import '../../../app/ui_kit.dart';
 import '../../../core/sync/cloud_sync_coordinator.dart';
+import '../../connections/domain/daily_connections.dart';
+import '../../connections/presentation/daily_connections_dialog.dart';
 import '../../costs/data/usage_repository.dart';
 import '../../costs/domain/price_book.dart';
 import '../../costs/domain/usage_event.dart';
@@ -79,6 +81,7 @@ class QueueTab extends StatefulWidget {
     this.onAppendUpload,
     this.density = QueueDensity.compact,
     this.onDensityChanged,
+    this.dailyConnectionsService,
   });
 
   /// Row height in the master list. Owned by settings; the toolbar's toggle
@@ -88,6 +91,7 @@ class QueueTab extends StatefulWidget {
   final ValueChanged<QueueDensity>? onDensityChanged;
 
   final RecordingsController controller;
+  final DailyConnectionsService? dailyConnectionsService;
   final ProjectsController? projects;
   final String? initialProjectId;
 
@@ -167,6 +171,42 @@ class _QueueTabState extends State<QueueTab> {
   /// re-sorts and re-filters under the user, and an index would silently move
   /// the selection onto whatever item slid into that slot.
   String? focusedId;
+
+  Future<void> _openDailyConnections() async {
+    final DailyConnectionsService? service = widget.dailyConnectionsService;
+    if (service == null) return;
+    final Map<String, String> projectNames = <String, String>{
+      for (final Project project in widget.projects?.projects ?? <Project>[])
+        project.id: project.name,
+    };
+    await showDialog<void>(
+      context: context,
+      builder: (BuildContext context) => DailyConnectionsDialog(
+        service: service,
+        captures: () => widget.controller.recordings,
+        projectNames: projectNames,
+        onOpenCapture: (Recording capture) {
+          final double width = this.context.size?.width ??
+              MediaQuery.sizeOf(this.context).width;
+          if (width >= Console.masterDetailBreakpoint) {
+            setState(() {
+              reviewFilter = ReviewFilter.all;
+              selectedFilter = RecordingFilter.all;
+              selectedTypeFilter = CaptureTypeFilter.all;
+              projectFilterId = null;
+              searchQuery = '';
+              searchController.clear();
+              focusedId = capture.id;
+            });
+          } else if (width < Console.compactBreakpoint) {
+            _openDetailPage(capture);
+          } else {
+            _openFocus(capture);
+          }
+        },
+      ),
+    );
+  }
 
   /// Desktop completion feedback has to outlive the card: the default Desk
   /// filter removes a capture the moment its durable review write lands. The
@@ -623,6 +663,20 @@ class _QueueTabState extends State<QueueTab> {
                                   ),
                                 ]
                               : const <Widget>[],
+                        ),
+                      ),
+                    if (widget.dailyConnectionsService != null)
+                      Align(
+                        alignment: Alignment.centerRight,
+                        child: Padding(
+                          padding: EdgeInsets.symmetric(
+                            horizontal: compact ? 12 : 20,
+                          ),
+                          child: TextButton.icon(
+                            onPressed: _openDailyConnections,
+                            icon: const Icon(Icons.hub_outlined, size: 18),
+                            label: const Text('REVIEW CONNECTIONS'),
+                          ),
                         ),
                       ),
                     if (_syncProgress case final CloudSyncProgress progress)
