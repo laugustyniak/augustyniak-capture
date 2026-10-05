@@ -60,6 +60,7 @@ class RecordingService : Service() {
             candidate.setOutputFormat(MediaRecorder.OutputFormat.MPEG_4)
             candidate.setAudioEncoder(MediaRecorder.AudioEncoder.AAC)
             candidate.setAudioEncodingBitRate(64000)
+            candidate.setAudioSamplingRate(16000)
             candidate.setOutputFile(file.absolutePath)
             candidate.prepare()
             candidate.start()
