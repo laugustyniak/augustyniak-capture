@@ -35,6 +35,11 @@
 #   tool/deploy.sh --run               # …and launch it when the install lands
 #   tool/deploy.sh --defines path.json # seed dart-defines into the build
 #   tool/deploy.sh --skip-build        # reinstall the bundle already built
+#   tool/deploy.sh --android           # release APK onto every adb device
+#
+# `--android` replaces the host install rather than adding to it: one target
+# per run, so a failure names the platform it belongs to. `tool/deploy-all.sh`
+# is the entry point that does every target in turn.
 set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -44,6 +49,7 @@ defines_file=""
 defines_explicit=0
 skip_build=0
 run_after=0
+target_android=0
 
 while [ $# -gt 0 ]; do
   case "$1" in
@@ -55,6 +61,7 @@ while [ $# -gt 0 ]; do
       ;;
     --skip-build) skip_build=1; shift ;;
     --run) run_after=1; shift ;;
+    --android) target_android=1; shift ;;
     -h|--help)
       awk 'NR>1 && /^#/ { sub(/^# ?/, ""); print; next } NR>1 { exit }' \
         "${BASH_SOURCE[0]}"
@@ -270,6 +277,80 @@ install_macos() {
     open -a "/Applications/$display_name.app"
   fi
 }
+
+# Every attached device in state `device`, reinstalled in place.
+#
+# **Never uninstalls, and never offers to.** `adb install -r` keeps the app's
+# data; an uninstall deletes the container the recordings live in, which is
+# the one loss this app exists to prevent. The case that tempts it is a
+# signature mismatch — a build signed with a different key than the installed
+# one, usually debug versus release — and that device is reported and skipped.
+# The way through is a backup from the app's own Config tab, then an
+# uninstall the user runs by hand.
+install_android() {
+  local apk="build/app/outputs/flutter-apk/app-release.apk"
+  local adb=""
+  local candidate
+  for candidate in "$(command -v adb 2>/dev/null || true)" \
+    "${ANDROID_HOME:-}/platform-tools/adb" \
+    "${ANDROID_SDK_ROOT:-}/platform-tools/adb" \
+    "$HOME/Android/Sdk/platform-tools/adb" \
+    "$HOME/Library/Android/sdk/platform-tools/adb"; do
+    if [ -n "$candidate" ] && [ -x "$candidate" ]; then
+      adb="$candidate"
+      break
+    fi
+  done
+  [ -n "$adb" ] || { echo "deploy: no adb found — install Android platform-tools" >&2; exit 3; }
+
+  local devices
+  devices="$("$adb" devices | awk 'NR>1 && $2 == "device" { print $1 }')"
+  [ -n "$devices" ] || {
+    echo "deploy: no Android device attached (adb devices lists none in state 'device')" >&2
+    exit 3
+  }
+
+  if [ "$skip_build" = 0 ]; then
+    flutter build apk "${build_args[@]}"
+  fi
+  [ -f "$apk" ] || { echo "deploy: no built APK at $apk — drop --skip-build" >&2; exit 1; }
+
+  # `CN=Android Debug` is the silent fallback when android/key.properties is
+  # missing — see docs/platform-setup.md. Reported, because it decides
+  # whether the install below can replace what is on the phone.
+  local apksigner
+  apksigner="$(ls -1 "$(dirname "$(dirname "$adb")")"/build-tools/*/apksigner 2>/dev/null | sort -V | tail -1 || true)"
+  if [ -n "$apksigner" ]; then
+    "$apksigner" verify --print-certs "$apk" 2>/dev/null \
+      | sed -n 's/^Signer #1 certificate DN: /deploy: APK signed by /p' || true
+  fi
+
+  local serial output failed=0
+  for serial in $devices; do
+    local model
+    model="$("$adb" -s "$serial" shell getprop ro.product.model 2>/dev/null | tr -d '\r')"
+    echo "deploy: installing on ${model:-unknown} ($serial)"
+    if output="$("$adb" -s "$serial" install -r "$apk" 2>&1)"; then
+      echo "deploy: installed on ${model:-$serial}"
+    else
+      failed=1
+      echo "$output" | tail -3 | sed 's/^/        /' >&2
+      case "$output" in
+        *INSTALL_FAILED_UPDATE_INCOMPATIBLE*)
+          echo "deploy: ${model:-$serial} has a build signed with a different key." >&2
+          echo "        NOT uninstalling — that deletes the recordings. Back up from" >&2
+          echo "        Config, then uninstall by hand if replacing it is intended." >&2
+          ;;
+      esac
+    fi
+  done
+  return "$failed"
+}
+
+if [ "$target_android" = 1 ]; then
+  install_android
+  exit $?
+fi
 
 case "$(uname -s)" in
   Linux) install_linux ;;

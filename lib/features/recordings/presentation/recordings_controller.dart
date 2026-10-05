@@ -47,6 +47,7 @@ import '../domain/agent_artifact.dart';
 import '../data/source_content_hasher.dart';
 import '../domain/agent_handoff.dart';
 import '../domain/capture_category.dart';
+import '../domain/capture_priority.dart';
 import '../domain/capture_segment.dart';
 import '../domain/capture_type.dart';
 import '../domain/clipboard_sink.dart';
@@ -2064,6 +2065,25 @@ class RecordingsController extends ChangeNotifier {
     );
   }
 
+  /// Set the rank by hand, or clear it with null — which asks the next
+  /// enrichment run to rank the item again. The model's reason is dropped
+  /// either way: it argued for a rank that is no longer the one shown.
+  Future<void> setPriority(String id, CapturePriority? priority) async {
+    await _update(
+      id,
+      (Recording item) => item.copyWith(
+        priority: priority,
+        clearPriority: priority == null,
+        clearPriorityReason: true,
+      ),
+      source: RevisionSource.user,
+    );
+    _logSink.log(
+      priority == null ? 'Priority cleared.' : 'Priority set to ${priority.label}.',
+      recordingId: id,
+    );
+  }
+
   /// Overwrite the model's verdict. Null clears it back to "unclassified" — a
   /// wrong category is worse than none, because an export will read this field.
   Future<void> setCategory(String id, CaptureCategory? category) async {
@@ -3339,6 +3359,10 @@ class RecordingsController extends ChangeNotifier {
           title: (item.title ?? '').trim().isEmpty ? result.title : null,
           category: item.category ?? result.category,
           summary: result.summary,
+          // Fill-only, like `category`: a rank the user set is theirs. The
+          // reason travels with the rank it argues for, never alone.
+          priority: item.priority ?? result.priority,
+          priorityReason: item.priority == null ? result.priorityReason : null,
           // Fill-only, like `title` and `category`, now that a tag carries no
           // owner: with nothing marking which tags came from a model, a refresh
           // could only refresh *all* of them, and a re-run would keep

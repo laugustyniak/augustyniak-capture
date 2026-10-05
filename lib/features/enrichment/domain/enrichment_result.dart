@@ -1,4 +1,5 @@
 import '../../recordings/domain/capture_category.dart';
+import '../../recordings/domain/capture_priority.dart';
 
 /// What the enrichment model returned, after validation.
 ///
@@ -12,6 +13,8 @@ class EnrichmentResult {
     this.category = CaptureCategory.capture,
     this.summary,
     this.tags = const <String>[],
+    this.priority,
+    this.priorityReason,
   });
 
   /// Null when the model returned nothing usable. The caller then leaves the
@@ -26,4 +29,11 @@ class EnrichmentResult {
 
   /// Lowercase, deduped, at most five.
   final List<String> tags;
+
+  /// Null when the model gave no usable rank. Unlike [category] there is no
+  /// fallback value: an invented rank would be a judgement nobody made.
+  final CapturePriority? priority;
+
+  /// Always null when [priority] is: a reason for no rank explains nothing.
+  final String? priorityReason;
 }

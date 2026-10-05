@@ -13,6 +13,7 @@ import 'package:augustyniak_capture/core/sync/cloud_sync_coordinator.dart';
 import 'package:augustyniak_capture/features/costs/data/usage_repository.dart';
 import 'package:augustyniak_capture/features/costs/domain/usage_event.dart';
 import 'package:augustyniak_capture/features/recordings/domain/capture_category.dart';
+import 'package:augustyniak_capture/features/recordings/domain/capture_priority.dart';
 import 'package:augustyniak_capture/features/recordings/domain/capture_type.dart';
 import 'package:augustyniak_capture/features/recordings/domain/recording.dart';
 import 'package:augustyniak_capture/features/recordings/presentation/capture_focus_view.dart';
@@ -1309,10 +1310,54 @@ void main() {
 
     await tester.tap(find.byIcon(Icons.edit_outlined));
     await tester.pump();
-    await tester.tap(find.text('—').last);
+    // The category row's own `—`: the PRIORITY row below carries one too.
+    final Finder categoryRow = find
+        .ancestor(of: find.text('AGENT TASK'), matching: find.byType(Wrap))
+        .first;
+    await tester.tap(
+      find.descendant(of: categoryRow, matching: find.text('—')),
+    );
     await settleIo(tester);
 
     expect(controller.recordings.single.category, isNull);
+  });
+
+  testWidgets('the inline editor sets and clears a priority by hand', (
+    WidgetTester tester,
+  ) async {
+    final RecordingsController controller = await buildRecordingsController(
+      appDir,
+      seed: <Recording>[
+        makeRecording(
+          id: 'rankable',
+          status: RecordingStatus.completed,
+          transcript: 'cokolwiek',
+        ),
+      ],
+    );
+    await pumpQueue(tester, controller);
+
+    await tester.tap(find.byIcon(Icons.edit_outlined));
+    await tester.pump();
+    expect(find.text('PRIORITY'), findsOneWidget);
+
+    // The editor fades in over 220 ms behind an IgnorePointer, and the row
+    // sits below the fold: wait it out and scroll, or the tap misses silently.
+    await tester.pump(const Duration(milliseconds: 300));
+    await tester.ensureVisible(find.text('P0'));
+    await tester.pump();
+    await tester.tap(find.text('P0'));
+    await settleIo(tester);
+    expect(controller.recordings.single.priority, CapturePriority.p0);
+
+    final Finder priorityRow = find
+        .ancestor(of: find.text('P3'), matching: find.byType(Wrap))
+        .first;
+    await tester.tap(
+      find.descendant(of: priorityRow, matching: find.text('—')),
+    );
+    await settleIo(tester);
+    expect(controller.recordings.single.priority, isNull);
   });
 
   testWidgets('deletion is only reachable from the editor', (
