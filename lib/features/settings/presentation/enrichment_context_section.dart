@@ -1,7 +1,11 @@
+import 'dart:io';
+
 import 'package:flutter/material.dart';
 
 import '../../../app/ui_kit.dart';
+import '../../enrichment/data/soul_reader.dart';
 import '../../enrichment/domain/enrichment_context.dart';
+import '../../projects/data/directory_picker.dart';
 import '../../projects/data/project_context_probe.dart';
 import '../../projects/data/project_context_reader.dart';
 import '../../projects/domain/project.dart';
@@ -18,9 +22,19 @@ class EnrichmentContextSection extends StatefulWidget {
     super.key,
     required this.controller,
     this.projects = const <Project>[],
+    this.picker = const FilePickerDirectoryPicker(),
+    this.soulReader = const SoulReader(),
   });
 
   final SettingsController controller;
+
+  /// Chooses the folder `SOUL.md` lives in. The same desktop-only seam as the
+  /// vault's: a widget test injects a fake, and mobile keeps the typed path.
+  final DirectoryPicker picker;
+
+  /// Reads the soul for the status line — the same reader enrichment uses, so
+  /// the line reports exactly what the next capture will be sent.
+  final SoulReader soulReader;
 
   /// Empty by default, and that default is what keeps this widget free of disk
   /// access: with no projects there is nothing to probe, so the existing Config
@@ -58,6 +72,21 @@ class _EnrichmentContextSectionState extends State<EnrichmentContextSection> {
   String get _stored => widget.controller.enrichmentInstructions;
   bool get _dirty => _field.text.trim() != _synced.trim();
 
+  late final TextEditingController _soulField = TextEditingController(
+    text: _storedSoulPath,
+  );
+  final FocusNode _soulFocus = FocusNode();
+  late String _syncedSoulPath = _storedSoulPath;
+
+  /// What the soul file resolves to right now. Null while unset or while the
+  /// check runs, and only ever probed with a path configured — which is what
+  /// keeps every existing Config test off the filesystem.
+  ResolvedSoul? _soul;
+  String? _pickerError;
+
+  String get _storedSoulPath => widget.controller.soulPath ?? '';
+  bool get _soulDirty => _soulField.text.trim() != _syncedSoulPath.trim();
+
   @override
   void initState() {
     super.initState();
@@ -69,6 +98,81 @@ class _EnrichmentContextSectionState extends State<EnrichmentContextSection> {
     _focus.addListener(() {
       if (!_focus.hasFocus && _dirty) _commit();
     });
+    _soulFocus.addListener(() {
+      if (!_soulFocus.hasFocus && _soulDirty) _commitSoulPath();
+    });
+    _probeSoul();
+  }
+
+  /// Kicked from `initState` and after a path change, never from `build`: it
+  /// reads the disk, the same rule as the project scan below.
+  Future<void> _probeSoul() async {
+    final String path = _syncedSoulPath.trim();
+    if (path.isEmpty) {
+      if (_soul != null && mounted) setState(() => _soul = null);
+      return;
+    }
+    final ResolvedSoul soul = await widget.soulReader.resolve(
+      path: path,
+      typed: _stored,
+    );
+    if (!mounted || path != _syncedSoulPath.trim()) return;
+    setState(() => _soul = soul);
+  }
+
+  Future<void> _commitSoulPath() async {
+    final String value = _soulField.text.trim();
+    setState(() {
+      _syncedSoulPath = value;
+      _soul = null;
+    });
+    await widget.controller.setSoulPath(value);
+    await _probeSoul();
+  }
+
+  /// Picks the folder and names `SOUL.md` in it: the seam chooses directories,
+  /// and one fixed file name is also what keeps the file findable later.
+  Future<void> _browseSoul() async {
+    setState(() => _pickerError = null);
+    try {
+      final String current = _syncedSoulPath.trim();
+      final String? folder = await widget.picker.pick(
+        initialDirectory: current.isEmpty ? null : File(current).parent.path,
+      );
+      if (folder == null || !mounted) return;
+      _soulField.text =
+          '$folder${Platform.pathSeparator}${SoulReader.defaultFileName}';
+      await _commitSoulPath();
+    } catch (exception) {
+      if (!mounted) return;
+      setState(() => _pickerError = exception.toString());
+    }
+  }
+
+  /// The line under the path: what the next capture will actually be sent.
+  Widget _soulStatus() {
+    final ResolvedSoul? soul = _soul;
+    final String? error = _pickerError;
+    final (String text, Color color) = switch (soul) {
+      _ when error != null => ('Browse failed: $error', Console.amber),
+      null when _syncedSoulPath.trim().isEmpty => (
+        'Optional. A markdown file you edit anywhere — it replaces the '
+            'profile below and is re-read for every capture.',
+        Console.mutedSoft,
+      ),
+      null => ('Checking…', Console.dimText),
+      ResolvedSoul(origin: SoulOrigin.file) => (
+        'USING ${soul.fileName} · ${soul.text.trim().length} chars'
+            '${soul.truncated ? ' · TRUNCATED WHEN SENT' : ''}',
+        soul.truncated ? Console.amber : Console.accent,
+      ),
+      ResolvedSoul() => (
+        '${soul.fileName} ${soul.origin.name.toUpperCase()} — '
+            'USING THE PROFILE BELOW',
+        Console.amber,
+      ),
+    };
+    return Text(text, style: ConsoleText.micro.copyWith(color: color));
   }
 
   @override
@@ -84,6 +188,11 @@ class _EnrichmentContextSectionState extends State<EnrichmentContextSection> {
     // deeply: the controller hands out a fresh unmodifiable list on every save,
     // so this fires exactly when something was actually written.
     if (!identical(oldWidget.projects, widget.projects)) _rescan();
+    if (_storedSoulPath != _syncedSoulPath && !_soulDirty) {
+      _syncedSoulPath = _storedSoulPath;
+      _soulField.text = _syncedSoulPath;
+      _probeSoul();
+    }
   }
 
   /// The mounted entry point: shows the scanning state, then scans.
@@ -126,6 +235,8 @@ class _EnrichmentContextSectionState extends State<EnrichmentContextSection> {
   void dispose() {
     _focus.dispose();
     _field.dispose();
+    _soulFocus.dispose();
+    _soulField.dispose();
     super.dispose();
   }
 
@@ -216,7 +327,37 @@ class _EnrichmentContextSectionState extends State<EnrichmentContextSection> {
                   ),
                 ],
               ),
-              const SizedBox(height: 10),
+              const SizedBox(height: 12),
+              Text('SOUL FILE', style: ConsoleText.fieldLabel),
+              const SizedBox(height: 6),
+              ConsoleField(
+                controller: _soulField,
+                focusNode: _soulFocus,
+                monospace: true,
+                fontSize: 12,
+                textInputAction: TextInputAction.done,
+                onSubmitted: (String _) => _commitSoulPath(),
+                onChanged: (String _) => setState(() {}),
+                hintText: '/Users/you/Notes/SOUL.md',
+                suffixIcon: widget.picker.isAvailable
+                    ? IconButton(
+                        onPressed: _browseSoul,
+                        icon: const Icon(Icons.folder_open, size: 18),
+                        tooltip: 'Choose the folder holding SOUL.md',
+                        color: Console.muted,
+                      )
+                    : null,
+              ),
+              const SizedBox(height: 6),
+              _soulStatus(),
+              const SizedBox(height: 12),
+              Text(
+                _soul?.origin == SoulOrigin.file
+                    ? 'PROFILE · FALLBACK'
+                    : 'PROFILE',
+                style: ConsoleText.fieldLabel,
+              ),
+              const SizedBox(height: 6),
               ConsoleField(
                 controller: _field,
                 focusNode: _focus,

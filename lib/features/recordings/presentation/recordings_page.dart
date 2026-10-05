@@ -366,6 +366,7 @@ class _RecordingsPageState extends State<RecordingsPage>
       // repoint a project at another repository, long after this runs.
       enrichmentContextSource: ComposedEnrichmentContextSource(
         profile: () => settings.enrichmentInstructions,
+        soulPath: () => settings.soulPath,
         projectById: _projectById,
       ),
       // The queue's only way out. Reads the project list live for the same

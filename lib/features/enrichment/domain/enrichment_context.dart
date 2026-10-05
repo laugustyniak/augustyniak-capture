@@ -1,3 +1,7 @@
+import 'dart:convert';
+
+import 'package:crypto/crypto.dart';
+
 /// Who the user is, and what the capture's project is about.
 ///
 /// The two layers are kept apart rather than pre-joined into one string because
@@ -6,13 +10,30 @@
 /// off disk* from a repository file the user did not necessarily write. The
 /// prompt labels them separately for that reason.
 class EnrichmentContext {
-  const EnrichmentContext({this.profile, this.project, this.projectSource});
+  const EnrichmentContext({
+    this.profile,
+    this.profileSource,
+    this.profileFallback,
+    this.project,
+    this.projectSource,
+  });
 
   static const EnrichmentContext none = EnrichmentContext();
 
   /// Free-form "this is me" text from the Config tab: goals, what gets
   /// captured, how it should be filed. Persisted in `settings.json`.
   final String? profile;
+
+  /// Which file [profile] came from (`SOUL.md`), or null when it is the text
+  /// typed in the Config tab. Named in the log for the same reason
+  /// [projectSource] is: otherwise "the soul file was used" is invisible.
+  final String? profileSource;
+
+  /// Why a configured soul file was **not** used (`SOUL.md missing`), when the
+  /// typed profile stood in for it. Carried here rather than only logged at
+  /// the read site, because the read site cannot log — and a soul file that
+  /// silently stopped being read is exactly the failure worth seeing.
+  final String? profileFallback;
 
   /// The active project's own description, read from its repository — see
   /// `ProjectContextReader`. Null when the capture has no project, the repo is
@@ -50,7 +71,11 @@ class EnrichmentContext {
   String? get sourceSummary {
     final EnrichmentContext resolved = normalized();
     final List<String> layers = <String>[
-      if (resolved.profile != null) 'profile',
+      if (resolved.profile != null)
+        resolved.profileSource ??
+            (resolved.profileFallback == null
+                ? 'profile'
+                : 'profile (${resolved.profileFallback})'),
       if (resolved.project != null) resolved.projectSource ?? 'project',
     ];
     return layers.isEmpty ? null : layers.join(' + ');
@@ -65,9 +90,24 @@ class EnrichmentContext {
   /// the tail is build flags and licence notes.
   EnrichmentContext normalized() => EnrichmentContext(
     profile: _clamp(defuseFenceMarkers(profile), maxProfileChars),
+    profileSource: _blankToNull(profileSource),
+    profileFallback: _blankToNull(profileFallback),
     project: _clamp(defuseFenceMarkers(project), maxProjectChars),
     projectSource: _blankToNull(projectSource),
   );
+
+  /// A short fingerprint of the profile **as sent** — after the ceiling and
+  /// the fence defusing — or null when no profile was sent.
+  ///
+  /// Stored beside a capture's priority, it answers "was this ranked under my
+  /// old goals?" without storing the goals themselves on every row. Eight hex
+  /// characters: it only has to tell versions of one person's profile apart,
+  /// not resist an adversary.
+  String? get profileBasis {
+    final String? sent = normalized().profile;
+    if (sent == null) return null;
+    return sha256.convert(utf8.encode(sent)).toString().substring(0, 8);
+  }
 
   /// A line shaped like one of the prompt's own fence markers, rewritten so it
   /// cannot close the block it sits inside.

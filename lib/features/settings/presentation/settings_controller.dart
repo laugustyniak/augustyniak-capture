@@ -520,6 +520,24 @@ class SettingsController extends ChangeNotifier {
     return id;
   }
 
+  /// The user's `SOUL.md`, or null when the typed profile is the soul.
+  String? get soulPath => _settings.soulPath;
+
+  /// Point the soul at a file, or clear it with a blank value. Stored as
+  /// typed, like [setVaultPath], and for the same reason: the enrichment reads
+  /// it per capture, so a file that appears later is picked up without
+  /// touching this again, and the Config tab reports what it finds.
+  Future<void> setSoulPath(String? value) async {
+    final String trimmed = value?.trim() ?? '';
+    if (trimmed.isEmpty) {
+      if (_settings.soulPath == null) return;
+      await _persist(_settings.copyWith(clearSoulPath: true));
+      return;
+    }
+    if (trimmed == _settings.soulPath) return;
+    await _persist(_settings.copyWith(soulPath: trimmed));
+  }
+
   /// Where captures are mirrored as markdown, or null when nothing is.
   String? get vaultPath => _settings.vaultPath;
   String get vaultFolder => _settings.vaultFolder;
