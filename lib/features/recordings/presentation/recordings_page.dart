@@ -31,6 +31,7 @@ import '../../costs/domain/price_book.dart';
 import '../../costs/domain/usage_event.dart';
 import '../../costs/domain/usage_model_keys.dart';
 import '../../enrichment/data/composed_enrichment_context_source.dart';
+import '../domain/connection_reasoner.dart';
 import '../../logs/data/log_store.dart';
 import '../../logs/domain/log_event.dart';
 import '../../logs/presentation/logs_tab.dart';
@@ -351,6 +352,10 @@ class _RecordingsPageState extends State<RecordingsPage>
           settings.vaultPath == null || settings.vaultPath!.trim().isEmpty
           ? null
           : Directory(p.join(settings.vaultPath!, settings.vaultFolder)),
+      connectionVaultRoot: () =>
+          settings.vaultPath == null || settings.vaultPath!.trim().isEmpty
+          ? null
+          : Directory(settings.vaultPath!),
       // Records what the enrichment model and hand edits overwrite. Left null
       // in tests, like the clipboard and media-opener seams, so the pure-Dart
       // suites never reach a platform channel.
@@ -798,6 +803,9 @@ class _RecordingsPageState extends State<RecordingsPage>
             audio: settings.audio,
           );
     controller.enrichmentService = settings.enrichmentService;
+    controller.connectionReasoner = settings.enrichmentService is ConnectionReasoner
+        ? settings.enrichmentService as ConnectionReasoner
+        : const ReviewConnectionReasoner();
     // OCR rides the enrichment profile (vision-capable chat endpoint) and has
     // no platform fallback behind it: with no profile active this is the
     // disabled service on desktop exactly as on mobile, so an image capture
