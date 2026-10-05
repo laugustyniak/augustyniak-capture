@@ -5,6 +5,7 @@ import 'package:augustyniak_capture/features/recordings/data/markdown_note_vault
 import 'package:augustyniak_capture/features/recordings/data/media_picker.dart';
 import 'package:augustyniak_capture/features/recordings/data/recordings_repository.dart';
 import 'package:augustyniak_capture/features/recordings/domain/capture_type.dart';
+import 'package:augustyniak_capture/features/recordings/domain/capture_priority.dart';
 import 'package:augustyniak_capture/features/recordings/domain/connection_reasoner.dart';
 import 'package:augustyniak_capture/features/enrichment/domain/enrichment_context.dart';
 import 'package:augustyniak_capture/features/recordings/domain/note_vault.dart';
@@ -64,6 +65,8 @@ class _FailingReasoner implements ConnectionReasoner {
     required String text,
     required List<ConnectionCandidate> candidates,
     required EnrichmentContext context,
+    CapturePriority? priority,
+    String? priorityReason,
   }) async => throw StateError('model offline');
 }
 

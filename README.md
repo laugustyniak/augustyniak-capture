@@ -409,6 +409,25 @@ no text yet. On desktop the directory field carries a browse button behind the
 same `DirectoryPicker` seam the project editor uses; the typed field stays
 authoritative everywhere.
 
+### Connections and next step
+
+After a new capture is mirrored, Capture searches Markdown notes in the vault
+for shared terms and selects up to five candidates. The configured enrichment
+model receives the capture text, the candidate titles and short excerpts, plus
+the existing profile/project context. It suggests whether to act now, keep the
+idea for later, or clarify it. An existing P0–P3 priority takes precedence
+over a contradictory suggestion. With no model configured, the decision stays
+`clarify`; keyword overlap alone is not a priority judgment.
+
+The result is a separate `Capture/Analysis/<capture-id>.md` note with Obsidian
+links and the shared terms behind each match. The capture detail view shows the
+assessment and has **READ ANALYSIS** and **REFRESH CONNECTIONS** controls. A
+failed analysis can be retried without affecting the capture or its vault note.
+Capture does not overwrite an analysis note you edited in Obsidian. The model
+only suggests a next step; it does not create a task or run an agent command.
+`MIRROR EVERYTHING` copies old captures without automatically requesting model
+analysis for the whole library.
+
 ### What lands in the vault
 
 ```

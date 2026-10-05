@@ -1,4 +1,5 @@
 import '../../enrichment/domain/enrichment_context.dart';
+import 'capture_priority.dart';
 
 enum ConnectionDecision { actNow, keepForLater, clarify }
 
@@ -34,6 +35,8 @@ abstract interface class ConnectionReasoner {
     required String text,
     required List<ConnectionCandidate> candidates,
     required EnrichmentContext context,
+    CapturePriority? priority,
+    String? priorityReason,
   });
 }
 
@@ -46,6 +49,8 @@ class ReviewConnectionReasoner implements ConnectionReasoner {
     required String text,
     required List<ConnectionCandidate> candidates,
     required EnrichmentContext context,
+    CapturePriority? priority,
+    String? priorityReason,
   }) async => const ConnectionAdvice(
     decision: ConnectionDecision.clarify,
     reason:

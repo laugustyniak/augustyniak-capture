@@ -3384,6 +3384,8 @@ class RecordingsController extends ChangeNotifier {
             end: _endUsageJob,
           ),
           context: context,
+          priority: item.priority,
+          priorityReason: item.priorityReason,
         );
         if (_disposed || !_recordings.any((Recording row) => row.id == item.id)) {
           return;
@@ -3862,6 +3864,8 @@ class _UsageScopedConnectionReasoner implements ConnectionReasoner {
     required String text,
     required List<ConnectionCandidate> candidates,
     required EnrichmentContext context,
+    CapturePriority? priority,
+    String? priorityReason,
   }) async {
     final void Function() release = await acquire();
     try {
@@ -3871,6 +3875,8 @@ class _UsageScopedConnectionReasoner implements ConnectionReasoner {
         text: text,
         candidates: candidates,
         context: context,
+        priority: priority,
+        priorityReason: priorityReason,
       );
     } finally {
       end();

@@ -68,6 +68,8 @@ class HttpChatEnrichmentService
     required String text,
     required List<ConnectionCandidate> candidates,
     required EnrichmentContext context,
+    CapturePriority? priority,
+    String? priorityReason,
   }) async {
     final EnrichmentContext safeContext = context.normalized();
     final Map<String, dynamic> payload = <String, dynamic>{
@@ -83,7 +85,9 @@ class HttpChatEnrichmentService
               'keepForLater, clarify), reason (one short sentence citing an '
               'actual goal or note, or stating that evidence is insufficient), '
               'nextStep (one concrete action). Do not claim a note proves more '
-              'than its excerpt shows. Never execute an action.',
+              'than its excerpt shows. Respect an existing capture priority: '
+              'p0 or p1 means act now, p2 or p3 means keep for later. Never execute '
+              'an action.',
         },
         <String, String>{
           'role': 'user',
@@ -92,6 +96,8 @@ class HttpChatEnrichmentService
             'project': safeContext.project,
             'captureTitle': title,
             'captureText': truncateForEnrichment(text),
+            'capturePriority': priority?.name,
+            'capturePriorityReason': priorityReason,
             'relatedNotes': <Map<String, Object>>[
               for (final ConnectionCandidate candidate in candidates)
                 <String, Object>{
@@ -138,18 +144,30 @@ class HttpChatEnrichmentService
     if (answer is! Map<String, dynamic>) {
       throw const FormatException('Connection advice is not a JSON object.');
     }
-    final ConnectionDecision decision = ConnectionDecision.values.firstWhere(
+    final ConnectionDecision suggested = ConnectionDecision.values.firstWhere(
       (ConnectionDecision item) => item.name == answer['decision'],
       orElse: () => ConnectionDecision.clarify,
     );
+    final ConnectionDecision decision = switch (priority) {
+      CapturePriority.p0 || CapturePriority.p1 => ConnectionDecision.actNow,
+      CapturePriority.p2 || CapturePriority.p3 =>
+        ConnectionDecision.keepForLater,
+      _ => suggested,
+    };
+    final bool corrected = decision != suggested;
     return ConnectionAdvice(
       decision: decision,
-      reason:
-          _cleanText(answer['reason'], limit: 400) ??
-          'Insufficient evidence to assess this capture.',
-      nextStep:
-          _cleanText(answer['nextStep'], limit: 300) ??
-          'Review the related notes.',
+      reason: corrected
+          ? (_cleanText(priorityReason, limit: 400) ??
+                'Existing ${priority?.label ?? 'capture'} priority determines this timing.')
+          : _cleanText(answer['reason'], limit: 400) ??
+                'Insufficient evidence to assess this capture.',
+      nextStep: corrected
+          ? (decision == ConnectionDecision.actNow
+                ? 'Review the related notes and act on this priority.'
+                : 'Keep this capture for a later review.')
+          : _cleanText(answer['nextStep'], limit: 300) ??
+                'Review the related notes.',
     );
   }
 

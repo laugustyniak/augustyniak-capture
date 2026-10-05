@@ -10,9 +10,11 @@ import '../../projects/domain/project.dart';
 import '../domain/capture_category.dart';
 import '../domain/capture_priority.dart';
 import '../domain/capture_type.dart';
+import '../domain/agent_artifact.dart';
 import '../domain/note_vault.dart';
 import '../domain/recording.dart';
 import 'audio_waveform_visualizer.dart';
+import 'agent_artifact_viewer_modal.dart';
 import 'card_parts.dart';
 import 'handoff_sheet.dart';
 import 'inline_edit.dart';
@@ -156,6 +158,7 @@ class _FocusBody extends StatelessWidget {
     final String filename = File(recording.filePath).uri.pathSegments.last;
     final String transcript = (recording.transcript ?? '').trim();
     final String summary = (recording.summary ?? '').trim();
+    final AgentArtifact? connections = controller.connectionArtifactFor(recording);
     final int wordCount = transcript.isEmpty
         ? 0
         : transcript
@@ -309,6 +312,37 @@ class _FocusBody extends StatelessWidget {
                         ),
                       ],
                     ),
+                    const SizedBox(height: 14),
+                  ],
+                  if (controller.mirrorsToVault && transcript.isNotEmpty) ...<Widget>[
+                    _SectionLabel(label: 'CONNECTIONS & NEXT STEP'),
+                    const SizedBox(height: 6),
+                    if (controller.isAnalyzingConnections(recording.id))
+                      const Text('Analyzing related notes…')
+                    else if (controller.connectionAnalysisError(recording.id) != null)
+                      Text('Analysis failed: ${controller.connectionAnalysisError(recording.id)}')
+                    else if (connections != null)
+                      Text(connections.snippet ?? 'Analysis saved in your vault.')
+                    else
+                      const Text('No analysis yet.'),
+                    Wrap(children: <Widget>[
+                      if (connections != null)
+                        TextButton(
+                          onPressed: () => showAgentArtifactViewer(
+                            context,
+                            controller: controller,
+                            recording: recording,
+                            artifact: connections,
+                          ),
+                          child: const Text('READ ANALYSIS'),
+                        ),
+                      TextButton(
+                        onPressed: controller.isAnalyzingConnections(recording.id)
+                            ? null
+                            : () => controller.retryConnectionAnalysis(recording.id),
+                        child: const Text('REFRESH CONNECTIONS'),
+                      ),
+                    ]),
                     const SizedBox(height: 14),
                   ],
                   if (recording.error != null) ...<Widget>[
