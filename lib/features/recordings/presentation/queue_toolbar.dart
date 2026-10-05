@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../../../app/ui_kit.dart';
 import '../../projects/domain/project.dart';
+import 'queue_priority.dart';
 import 'queue_tab.dart';
 import 'review_segments.dart';
 
@@ -84,6 +85,11 @@ class QueueToolbar extends StatelessWidget {
     required this.statusFilter,
     required this.counts,
     required this.onStatusChanged,
+    this.priorityFilter = PriorityFilter.all,
+    this.priorityCounts = const <PriorityFilter, int>{},
+    this.onPriorityChanged,
+    this.sort = QueueSort.newest,
+    this.onSortChanged,
     this.leading,
     this.trailing = const <Widget>[],
   });
@@ -93,6 +99,13 @@ class QueueToolbar extends StatelessWidget {
   /// selector claim a fixed share, and what is left has to stay wide enough to
   /// read a query back in.
   static const double singleLineWidth = 700;
+
+  /// What the icon-only [QueuePriorityMenu] adds to the single line. The bar
+  /// had no slack left at [singleLineWidth] — with a project selector the
+  /// search field was down to a few pixels — so the line is only kept when it
+  /// can pay for the extra control, and the labelled form goes to the second
+  /// row of the stacked layout instead.
+  static const double _compactPriorityWidth = 58;
   static const double _projectWidth = 144;
 
   final int total;
@@ -118,6 +131,15 @@ class QueueToolbar extends StatelessWidget {
   final RecordingFilter statusFilter;
   final Map<RecordingFilter, int> counts;
   final ValueChanged<RecordingFilter> onStatusChanged;
+
+  /// The priority filter and the sort share one button ([QueuePriorityMenu]).
+  /// Both callbacks null hides it, so a host that never wired priority renders
+  /// the bar exactly as before.
+  final PriorityFilter priorityFilter;
+  final Map<PriorityFilter, int> priorityCounts;
+  final ValueChanged<PriorityFilter>? onPriorityChanged;
+  final QueueSort sort;
+  final ValueChanged<QueueSort>? onSortChanged;
 
   /// The master–detail Queue's page title, drawn on the bar instead of above
   /// it. Null keeps the bar as it was.
@@ -172,6 +194,18 @@ class QueueToolbar extends StatelessWidget {
                   counts: counts,
                   onSelected: onStatusChanged,
                 );
+                final bool hasPriority =
+                    onPriorityChanged != null && onSortChanged != null;
+                Widget priorityMenu({bool compact = false}) =>
+                    QueuePriorityMenu(
+                      selected: priorityFilter,
+                      counts: priorityCounts,
+                      onSelected: onPriorityChanged!,
+                      sort: sort,
+                      onSortChanged: onSortChanged!,
+                      compact: compact,
+                    );
+                final Widget? priority = hasPriority ? priorityMenu() : null;
                 final Widget? project = projects.isEmpty
                     ? null
                     : QueueProjectFilter(
@@ -201,6 +235,10 @@ class QueueToolbar extends StatelessWidget {
                       type,
                       const SizedBox(width: 8),
                       status,
+                      if (priority != null) ...<Widget>[
+                        const SizedBox(width: 8),
+                        priority,
+                      ],
                       if (project != null) ...<Widget>[
                         const SizedBox(width: 8),
                         SizedBox(width: _projectWidth, child: project),
@@ -213,7 +251,9 @@ class QueueToolbar extends StatelessWidget {
                     ],
                   );
                 }
-                if (constraints.maxWidth >= singleLineWidth) {
+                if (constraints.maxWidth >=
+                    singleLineWidth +
+                        (hasPriority ? _compactPriorityWidth : 0)) {
                   return Row(
                     children: <Widget>[
                       // The only flex child: everything beside it is a control
@@ -226,6 +266,10 @@ class QueueToolbar extends StatelessWidget {
                       type,
                       const SizedBox(width: 8),
                       status,
+                      if (hasPriority) ...<Widget>[
+                        const SizedBox(width: 8),
+                        priorityMenu(compact: true),
+                      ],
                       if (project != null) ...<Widget>[
                         const SizedBox(width: 8),
                         SizedBox(width: _projectWidth, child: project),
@@ -257,6 +301,12 @@ class QueueToolbar extends StatelessWidget {
                             child: segments,
                           ),
                         ),
+                        // Second row, beside the segments: the first one
+                        // already spends its width on search, type and status.
+                        if (priority != null) ...<Widget>[
+                          const SizedBox(width: 8),
+                          priority,
+                        ],
                         if (project != null) ...<Widget>[
                           const SizedBox(width: 8),
                           SizedBox(width: _projectWidth, child: project),
@@ -377,6 +427,129 @@ class QueueTypeMenu extends StatelessWidget {
               '${labelFor(selected)} ${counts[selected] ?? 0}',
               style: ConsoleText.chip.copyWith(color: foreground),
             ),
+            const SizedBox(width: 4),
+            Icon(Icons.arrow_drop_down_rounded, size: 18, color: foreground),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+/// The priority buckets and the list order, as one button.
+///
+/// One button rather than two because the bar has no width left for a second
+/// (see [QueueToolbar]), and because the two answer the same question — "what
+/// matters now". The sort is the menu's last entry, a toggle under a divider;
+/// the button shows a sort glyph while it is on, since an ordering nobody can
+/// see is an ordering nobody can explain.
+class QueuePriorityMenu extends StatelessWidget {
+  QueuePriorityMenu({
+    super.key,
+    required this.selected,
+    required this.counts,
+    required this.onSelected,
+    required this.sort,
+    required this.onSortChanged,
+    this.compact = false,
+  });
+
+  /// Icon only, with the label moved into the tooltip — for the single-line
+  /// bar, which has no width for another labelled button. The accent still
+  /// marks a narrowed or re-sorted list, so the state is never invisible.
+  final bool compact;
+
+  final PriorityFilter selected;
+  final Map<PriorityFilter, int> counts;
+  final ValueChanged<PriorityFilter> onSelected;
+  final QueueSort sort;
+  final ValueChanged<QueueSort> onSortChanged;
+
+  /// Public so a test taps the same string the menu renders.
+  static const String sortLabel = 'SORT BY PRIORITY';
+
+  @override
+  Widget build(BuildContext context) {
+    final bool sorted = sort == QueueSort.priority;
+    final bool narrowed = selected != PriorityFilter.all || sorted;
+    final Color foreground = narrowed ? Console.accent : Console.chipLabel;
+
+    Widget entry(String label, {required bool checked}) => Row(
+      children: <Widget>[
+        SizedBox(
+          width: 22,
+          child: checked
+              ? Icon(Icons.check_rounded, size: 15, color: Console.accent)
+              : null,
+        ),
+        Text(
+          label,
+          style: ConsoleText.chip.copyWith(
+            color: checked ? Console.accent : Console.textSoft,
+          ),
+        ),
+      ],
+    );
+
+    return PopupMenuButton<Object>(
+      tooltip: compact
+          ? '${selected.label} ${counts[selected] ?? 0}'
+                '${sorted ? ' · sorted by priority' : ''}'
+          : 'Filter and sort by priority',
+      color: Console.surfaceRaised,
+      position: PopupMenuPosition.under,
+      onSelected: (Object value) {
+        if (value is PriorityFilter) onSelected(value);
+        if (value is QueueSort) onSortChanged(value);
+      },
+      itemBuilder: (BuildContext context) => <PopupMenuEntry<Object>>[
+        for (final PriorityFilter value in PriorityFilter.values)
+          PopupMenuItem<Object>(
+            value: value,
+            height: 38,
+            child: entry(
+              '${value.label} ${counts[value] ?? 0}',
+              checked: value == selected,
+            ),
+          ),
+        const PopupMenuDivider(),
+        PopupMenuItem<Object>(
+          value: sorted ? QueueSort.newest : QueueSort.priority,
+          height: 38,
+          child: entry(sortLabel, checked: sorted),
+        ),
+      ],
+      child: Container(
+        constraints: const BoxConstraints(minHeight: 40),
+        padding: const EdgeInsets.symmetric(horizontal: 11),
+        decoration: BoxDecoration(
+          color: narrowed
+              ? Console.accent.withValues(alpha: .12)
+              : Console.surfaceRaised,
+          borderRadius: BorderRadius.circular(10),
+          border: Border.all(
+            color: narrowed ? Console.accent.withValues(alpha: .4) : Console.border,
+          ),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: <Widget>[
+            if (compact)
+              Icon(
+                sorted ? Icons.sort_rounded : Icons.flag_outlined,
+                size: 16,
+                color: foreground,
+              )
+            else ...<Widget>[
+              if (sorted) ...<Widget>[
+                Icon(Icons.sort_rounded, size: 15, color: foreground),
+                const SizedBox(width: 5),
+              ],
+              Text(
+                '${selected.label} ${counts[selected] ?? 0}',
+                style: ConsoleText.chip.copyWith(color: foreground),
+              ),
+            ],
             const SizedBox(width: 4),
             Icon(Icons.arrow_drop_down_rounded, size: 18, color: foreground),
           ],
