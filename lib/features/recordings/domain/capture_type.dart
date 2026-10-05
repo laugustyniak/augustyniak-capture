@@ -18,7 +18,10 @@ enum CaptureType {
   text,
 
   /// Captured or picked video, `.mp4`/`.mov`.
-  video;
+  video,
+
+  /// A copied file without a media processor, such as a PDF or archive.
+  file;
 
   /// Legacy/forward-compatible defaulting point: `null` (old JSON) and any
   /// unknown name (JSON from a newer build) both restore as [audioRecording],
@@ -36,7 +39,8 @@ enum CaptureType {
   /// Whether a duration is meaningful for this type. Images and notes store
   /// `durationMs: 0`, and the card omits the segment rather than claiming a
   /// `00:00` runtime that no artifact actually has.
-  bool get hasDuration => this != CaptureType.image && this != CaptureType.text;
+  bool get hasDuration =>
+      this != CaptureType.image && this != CaptureType.text && this != CaptureType.file;
 }
 
 /// Storage extension policy: `<uuid>.<extensionFor(type)>` in the recordings
@@ -53,6 +57,7 @@ String extensionFor(CaptureType type, {String? mimeType}) {
     CaptureType.audioUpload => _fromMime(mimeType, fallback: 'm4a'),
     CaptureType.image => _fromMime(mimeType, fallback: 'jpg'),
     CaptureType.video => _fromMime(mimeType, fallback: 'mp4'),
+    CaptureType.file => 'bin',
   };
 }
 

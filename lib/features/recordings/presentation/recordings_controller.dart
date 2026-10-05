@@ -1889,6 +1889,7 @@ class RecordingsController extends ChangeNotifier {
     File file,
     CaptureType type, {
     String? appendTo,
+    String? mimeType,
   }) async {
     if (_isRecording || _isBusy) return;
     _isBusy = true;
@@ -1908,6 +1909,7 @@ class RecordingsController extends ChangeNotifier {
             index: next,
             type: type,
             source: file,
+            mimeType: mimeType,
             createdAt: DateTime.now(),
           ),
         );
@@ -1919,7 +1921,7 @@ class RecordingsController extends ChangeNotifier {
         id: id,
         type: type,
         source: file,
-        mimeType: null,
+        mimeType: mimeType,
         createdAt: DateTime.now(),
       );
       final Recording saved = imported.copyWith(projectId: activeProjectId);
@@ -3063,7 +3065,8 @@ class RecordingsController extends ChangeNotifier {
     CaptureType.audioRecording ||
     CaptureType.audioUpload ||
     CaptureType.video ||
-    CaptureType.text => UsageStage.transcription,
+    CaptureType.text ||
+    CaptureType.file => UsageStage.transcription,
   };
 
   /// Take the ambient usage scope, waiting for whoever holds it, and return the
@@ -3184,7 +3187,7 @@ class RecordingsController extends ChangeNotifier {
   }
 
   /// Hand the item's source file to the platform's own player/viewer. Used for
-  /// video, which has no in-app player on the desktop targets this ships on.
+  /// video and generic file attachments, which use the system viewer.
   ///
   /// Deliberately not gated on [CaptureType] here — the card decides what is
   /// openable, exactly as it does for [togglePlayback] — but a missing source

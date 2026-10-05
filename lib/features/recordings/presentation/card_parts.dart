@@ -223,6 +223,7 @@ String typeLabelFor(CaptureType type) => switch (type) {
   CaptureType.image => 'Image',
   CaptureType.text => 'Text note',
   CaptureType.video => 'Video',
+  CaptureType.file => 'File',
 };
 
 /// `10:24 · m4a · 2026-07-27 12:00` — duration only when the type has one, so
@@ -349,6 +350,7 @@ IconData typeIconFor(CaptureType type) => switch (type) {
   CaptureType.image => Icons.image_outlined,
   CaptureType.text => Icons.description_outlined,
   CaptureType.video => Icons.movie_outlined,
+  CaptureType.file => Icons.insert_drive_file_outlined,
 };
 
 

@@ -749,6 +749,7 @@ void main() {
         type: CaptureType.video,
         sourceMimeType: 'video/mp4',
       ),
+      capture('document', extension: 'pdf', type: CaptureType.file, durationMs: 0),
     ];
     await seed(source, library);
 
@@ -766,9 +767,9 @@ void main() {
       target,
     ).importFrom(zipPath());
 
-    expect(restored.added, 5);
+    expect(restored.added, 6);
     expect(restored.unreadable, 0);
-    expect(restored.filesRestored, 5);
+    expect(restored.filesRestored, 6);
 
     final List<Recording> rows = await repositoryFor(target).loadAll();
     expect(
