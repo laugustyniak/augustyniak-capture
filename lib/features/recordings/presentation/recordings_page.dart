@@ -8,6 +8,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:package_info_plus/package_info_plus.dart';
 import 'package:path/path.dart' as p;
+import 'package:path_provider/path_provider.dart';
 
 import '../../../app/ui_kit.dart';
 import '../../../core/database/app_database.dart';
@@ -81,6 +82,7 @@ import '../../gamification/presentation/celebration_overlay.dart';
 import '../../gamification/presentation/gamification_controller.dart';
 import '../../clipboard/data/sqlite_clipboard_repository.dart';
 import '../data/foreground_capture_session.dart';
+import '../data/inbox_drainer.dart';
 import '../data/media_picker.dart';
 import '../data/markdown_note_vault.dart';
 import '../domain/capture_session.dart';
@@ -204,6 +206,10 @@ class _RecordingsPageState extends State<RecordingsPage>
   late final LogStore logs;
   late final GamificationController gamification;
   late final RecordingsController controller;
+
+  /// Built on first use because the inbox lives under the application-support
+  /// directory, which is only known asynchronously.
+  InboxDrainer? _inboxDrainer;
   late final ProjectsController projects;
   late final FocusTimerController timer;
 
@@ -658,6 +664,29 @@ class _RecordingsPageState extends State<RecordingsPage>
     return summary;
   }
 
+  /// Moves notes that external producers (Siri, Android CREATE_NOTE) left in
+  /// the inbox into the queue. Only ever called once `controller.initialize()`
+  /// has finished: a drain before the load would persist a partial list. Skipped
+  /// while the index is unreadable, for the same reason every other write is.
+  Future<void> _drainInbox() async {
+    if (controller.isIndexUnreadable) return;
+    try {
+      InboxDrainer? drainer = _inboxDrainer;
+      if (drainer == null) {
+        final Directory support = await getApplicationSupportDirectory();
+        drainer = _inboxDrainer = InboxDrainer(
+          inbox: Directory(p.join(support.path, 'inbox')),
+          ingest: (String id, String body) =>
+              controller.addTextNote(body, id: id),
+          logSink: logs,
+        );
+      }
+      await drainer.drain();
+    } catch (exception) {
+      logs.log('Inbox drain failed: $exception', level: LogLevel.warn);
+    }
+  }
+
   Future<void> _bootstrap() async {
     await logs.initialize();
     // Best-effort and unrelated to everything else here: a Supabase sync
@@ -703,6 +732,7 @@ class _RecordingsPageState extends State<RecordingsPage>
     // it belongs to the shell that knows the directory is the real one. On a
     // healthy install it costs one listing and finds nothing.
     await controller.recoverOrphans();
+    await _drainInbox();
     // Both read real files, so they belong here for the same reason
     // `recoverOrphans` does: an in-memory repository fake cannot stand in for
     // them, and running either from `initialize` would send every widget test
@@ -995,6 +1025,7 @@ class _RecordingsPageState extends State<RecordingsPage>
     if (state == AppLifecycleState.resumed) {
       unawaited(controller.refreshCommandOutcomes());
       unawaited(controller.resumeInterruptedProcessing());
+      unawaited(_drainInbox());
     }
   }
 
