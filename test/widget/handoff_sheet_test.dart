@@ -3,7 +3,11 @@ import 'dart:io';
 import 'package:augustyniak_capture/features/projects/domain/agent_session_launcher.dart';
 import 'package:augustyniak_capture/features/projects/domain/project.dart';
 import 'package:augustyniak_capture/features/recordings/data/project_agent_handoff.dart';
+import 'package:augustyniak_capture/features/recordings/domain/assistant_target.dart';
+import 'package:augustyniak_capture/features/recordings/domain/capture_router.dart';
+import 'package:augustyniak_capture/features/recordings/domain/capture_sender.dart';
 import 'package:augustyniak_capture/features/recordings/domain/recording.dart';
+import 'package:augustyniak_capture/features/recordings/domain/route_record.dart';
 import 'package:augustyniak_capture/features/recordings/presentation/handoff_sheet.dart';
 import 'package:augustyniak_capture/features/recordings/presentation/recordings_controller.dart';
 import 'package:flutter/material.dart';
@@ -15,7 +19,8 @@ class _FakeLauncher implements AgentSessionLauncher {
   _FakeLauncher({this.attach = false});
 
   final bool attach;
-  final List<AgentSessionLaunchRequest> requests = <AgentSessionLaunchRequest>[];
+  final List<AgentSessionLaunchRequest> requests =
+      <AgentSessionLaunchRequest>[];
 
   @override
   Future<AgentSessionLaunchResult> launch(
@@ -25,6 +30,44 @@ class _FakeLauncher implements AgentSessionLauncher {
     return AgentSessionLaunchResult(
       sessionName: 'augustyniak-acme-p1-${request.agent.executable}',
       attachedToExistingSession: attach,
+    );
+  }
+}
+
+/// Offers a fixed list and records what it was asked to send.
+class _FakeSender implements CaptureSender {
+  _FakeSender({this.copied = false, this.fail = false});
+
+  final bool copied;
+  final bool fail;
+  final List<({SendTarget target, String prompt})> calls =
+      <({SendTarget target, String prompt})>[];
+
+  @override
+  Future<List<SendTarget>> availableTargets() async => <SendTarget>[
+    const AssistantSendTarget(AssistantTarget.claudeWeb),
+    const AssistantSendTarget(AssistantTarget.chatgpt),
+    const AssistantSendTarget(AssistantTarget.gemini),
+    const CopySendTarget(),
+  ];
+
+  @override
+  Future<SendOutcome?> send(
+    RoutedCapture capture,
+    SendTarget target,
+    String prompt,
+  ) async {
+    calls.add((target: target, prompt: prompt));
+    if (fail) {
+      throw const AssistantUnavailableException(AssistantTarget.chatgpt);
+    }
+    return SendOutcome(
+      record: RouteRecord(
+        at: DateTime.utc(2026, 10, 6),
+        kind: RouteKind.assistant,
+        target: 'ChatGPT · web',
+      ),
+      copiedToClipboard: copied,
     );
   }
 }
@@ -156,22 +199,24 @@ void main() {
     expect(launcher.requests.single.agent, ProjectAgent.claude);
   });
 
-  testWidgets('an attach keeps the sheet open and says the prompt did not land',
-      (WidgetTester tester) async {
-    final _FakeLauncher launcher = _FakeLauncher(attach: true);
-    final RecordingsController controller = await controllerWith(launcher);
+  testWidgets(
+    'an attach keeps the sheet open and says the prompt did not land',
+    (WidgetTester tester) async {
+      final _FakeLauncher launcher = _FakeLauncher(attach: true);
+      final RecordingsController controller = await controllerWith(launcher);
 
-    await openSheet(tester, controller);
-    await tester.tap(find.text('LAUNCH SESSION'));
-    await settleIo(tester);
+      await openSheet(tester, controller);
+      await tester.tap(find.text('LAUNCH SESSION'));
+      await settleIo(tester);
 
-    // The one outcome that looks like success and is not finished: the session
-    // was reattached, so the running agent never saw this prompt.
-    expect(find.text('That session was already running'), findsOneWidget);
-    expect(find.textContaining('never received this prompt'), findsOneWidget);
-    // Still open, with the prompt on hand to paste.
-    expect(find.text('DONE'), findsOneWidget);
-  });
+      // The one outcome that looks like success and is not finished: the session
+      // was reattached, so the running agent never saw this prompt.
+      expect(find.text('That session was already running'), findsOneWidget);
+      expect(find.textContaining('never received this prompt'), findsOneWidget);
+      // Still open, with the prompt on hand to paste.
+      expect(find.text('DONE'), findsOneWidget);
+    },
+  );
 
   testWidgets('an edited prompt is the one that launches', (
     WidgetTester tester,
@@ -192,16 +237,143 @@ void main() {
     ]);
   });
 
-  testWidgets('a capture with no project opens no sheet at all', (
+  Future<RecordingsController> projectless(CaptureSender sender) =>
+      buildRecordingsController(
+        appDir,
+        seed: <Recording>[
+          makeRecording(id: 'r1', transcript: 'Ask the assistant about this.'),
+        ],
+        captureSender: sender,
+      );
+
+  testWidgets('a capture with no project shows Web and Copy and no Terminal', (
+    WidgetTester tester,
+  ) async {
+    final RecordingsController controller = await projectless(_FakeSender());
+
+    await openSheet(tester, controller);
+
+    expect(find.text('Send to…'), findsOneWidget);
+    expect(find.text('TERMINAL'), findsNothing);
+    expect(find.text('LAUNCH SESSION'), findsNothing);
+    expect(find.text('WEB'), findsOneWidget);
+    expect(find.text('COPY'), findsOneWidget);
+    // The prompt is the capture's own text even with no handoff configured.
+    expect(find.text('Ask the assistant about this.'), findsOneWidget);
+    // Where it goes is on the button, and what it does on arrival with it.
+    expect(find.textContaining('chatgpt.com'), findsOneWidget);
+    expect(find.textContaining('sends immediately'), findsWidgets);
+    expect(find.textContaining('gemini.google.com'), findsOneWidget);
+  });
+
+  testWidgets(
+    'a web send keeps the sheet open with Mark done and Keep on desk',
+    (WidgetTester tester) async {
+      final _FakeSender sender = _FakeSender();
+      final RecordingsController controller = await projectless(sender);
+
+      await openSheet(tester, controller);
+      await tester.enterText(find.byType(TextField), 'Edited question');
+      await tester.tap(find.text('ChatGPT'));
+      await tester.pumpAndSettle();
+
+      expect(sender.calls.single.prompt, 'Edited question');
+      expect(find.text('Sent to ChatGPT · web'), findsOneWidget);
+      expect(find.textContaining('Prompt copied'), findsNothing);
+      expect(find.text('MARK DONE'), findsOneWidget);
+      expect(find.text('KEEP ON DESK'), findsOneWidget);
+      // Recorded, and still on the desk.
+      expect(
+        controller.recordings.single.routes.single.kind,
+        RouteKind.assistant,
+      );
+      expect(controller.recordings.single.isProcessedByUser, isFalse);
+    },
+  );
+
+  testWidgets('a send that needed the clipboard says to paste', (
+    WidgetTester tester,
+  ) async {
+    final RecordingsController controller = await projectless(
+      _FakeSender(copied: true),
+    );
+
+    await openSheet(tester, controller);
+    await tester.tap(find.text('Gemini'));
+    await tester.pumpAndSettle();
+
+    expect(
+      find.textContaining('Prompt copied — paste it into'),
+      findsOneWidget,
+    );
+  });
+
+  testWidgets('Mark done closes the item and the sheet', (
+    WidgetTester tester,
+  ) async {
+    final RecordingsController controller = await projectless(_FakeSender());
+
+    await openSheet(tester, controller);
+    await tester.tap(find.text('ChatGPT'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('MARK DONE'));
+    await tester.pumpAndSettle();
+
+    expect(controller.recordings.single.isProcessedByUser, isTrue);
+    expect(find.text('Send to…'), findsNothing);
+  });
+
+  testWidgets('Keep on desk closes only the sheet', (
+    WidgetTester tester,
+  ) async {
+    final RecordingsController controller = await projectless(_FakeSender());
+
+    await openSheet(tester, controller);
+    await tester.tap(find.text('ChatGPT'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('KEEP ON DESK'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Send to…'), findsNothing);
+    expect(controller.recordings.single.isProcessedByUser, isFalse);
+  });
+
+  testWidgets('a failed send shows the error and no Mark done', (
+    WidgetTester tester,
+  ) async {
+    final RecordingsController controller = await projectless(
+      _FakeSender(fail: true),
+    );
+
+    await openSheet(tester, controller);
+    await tester.tap(find.text('ChatGPT'));
+    await tester.pumpAndSettle();
+
+    expect(find.textContaining('Could not open ChatGPT'), findsOneWidget);
+    expect(find.text('MARK DONE'), findsNothing);
+    expect(controller.recordings.single.routes, isEmpty);
+  });
+
+  testWidgets('with a project the Terminal group sits beside the others', (
     WidgetTester tester,
   ) async {
     final RecordingsController controller = await buildRecordingsController(
       appDir,
-      seed: <Recording>[makeRecording(id: 'r1', transcript: 'Body.')],
+      seed: <Recording>[
+        makeRecording(id: 'r1', projectId: 'p1', transcript: 'Body.'),
+      ],
+      agentHandoff: ProjectAgentHandoff(
+        projectById: (String id) =>
+            Project(id: 'p1', name: 'Acme', repoPath: repo.path),
+        launcher: _FakeLauncher(),
+      ),
+      captureSender: _FakeSender(),
     );
 
     await openSheet(tester, controller);
 
-    expect(find.text('Hand off to an agent'), findsNothing);
+    expect(find.text('TERMINAL'), findsOneWidget);
+    expect(find.text('LAUNCH SESSION'), findsOneWidget);
+    expect(find.text('WEB'), findsOneWidget);
   });
 }
