@@ -1,7 +1,13 @@
 import 'dart:io';
 
 import 'package:augustyniak_capture/features/projects/data/directory_picker.dart';
+import 'package:augustyniak_capture/features/enrichment/domain/enrichment_context.dart';
+import 'package:augustyniak_capture/features/enrichment/domain/enrichment_result.dart';
+import 'package:augustyniak_capture/features/enrichment/domain/enrichment_service.dart';
 import 'package:augustyniak_capture/features/projects/domain/project.dart';
+import 'package:augustyniak_capture/features/recordings/domain/capture_priority.dart';
+import 'package:augustyniak_capture/features/recordings/domain/recording.dart';
+import 'package:augustyniak_capture/features/recordings/presentation/recordings_controller.dart';
 import 'package:augustyniak_capture/features/settings/presentation/enrichment_context_section.dart';
 import 'package:augustyniak_capture/features/settings/presentation/settings_controller.dart';
 import 'package:flutter/material.dart';
@@ -43,6 +49,7 @@ void main() {
     required List<Project> projects,
     String? soulPath,
     DirectoryPicker? picker,
+    RecordingsController? recordings,
   }) async {
     // Hosted bare, not inside the Config tab's ListView, so the surface has to
     // fit the whole section: the soul file row made it taller than 600 px.
@@ -58,6 +65,7 @@ void main() {
           controller: controller,
           projects: projects,
           picker: picker ?? _FakeDirectoryPicker(),
+          recordings: recordings,
         ),
         listenable: controller,
       ),
@@ -184,6 +192,87 @@ void main() {
       expect(controller.soulPath, soulPath());
     });
   });
+  group('re-rank', () {
+    const EnrichmentContext soul = EnrichmentContext(profile: 'Goal: beta.');
+
+    testWidgets('names the captures ranked under an older soul and re-ranks', (
+      WidgetTester tester,
+    ) async {
+      final RecordingsController recordings = await buildRecordingsController(
+        repo,
+        seed: <Recording>[
+          makeRecording(id: 'old', transcript: 'call the client').copyWith(
+            priority: CapturePriority.p3,
+            priorityBasis: 'old00000',
+          ),
+          makeRecording(id: 'hand', transcript: 'x').copyWith(
+            priority: CapturePriority.p1,
+          ),
+        ],
+        enrichmentService: _RankingEnrichment(),
+        enrichmentContextSource: _SoulSource(soul),
+      );
+
+      await pumpSection(
+        tester,
+        projects: const <Project>[],
+        recordings: recordings,
+      );
+      await settleIo(tester);
+
+      expect(
+        find.text('1 ranked under an older soul · one model call each'),
+        findsOneWidget,
+      );
+
+      await tester.tap(find.text('RE-RANK 1'));
+      await settleIo(tester);
+
+      final Recording old = recordings.recordings.firstWhere(
+        (Recording r) => r.id == 'old',
+      );
+      expect(old.priority, CapturePriority.p0);
+      expect(old.priorityBasis, soul.profileBasis);
+      expect(find.textContaining('ranked under an older soul'), findsNothing);
+    });
+
+    testWidgets('nothing stale means no row at all', (
+      WidgetTester tester,
+    ) async {
+      final RecordingsController recordings = await buildRecordingsController(
+        repo,
+        enrichmentContextSource: _SoulSource(soul),
+      );
+
+      await pumpSection(
+        tester,
+        projects: const <Project>[],
+        recordings: recordings,
+      );
+      await settleIo(tester);
+
+      expect(find.textContaining('RE-RANK'), findsNothing);
+    });
+  });
+}
+
+class _SoulSource implements EnrichmentContextSource {
+  _SoulSource(this.context);
+  final EnrichmentContext context;
+
+  @override
+  Future<EnrichmentContext> contextFor(String? projectId) async => context;
+}
+
+class _RankingEnrichment implements EnrichmentService {
+  @override
+  Future<EnrichmentResult> enrich(
+    String text, {
+    EnrichmentContext context = EnrichmentContext.none,
+  }) async => const EnrichmentResult(
+    priority: CapturePriority.p0,
+    priorityReason: 'p0 rule.',
+  );
 }
 
 class _FakeDirectoryPicker implements DirectoryPicker {

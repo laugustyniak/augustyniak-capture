@@ -9,6 +9,8 @@ import '../../projects/data/directory_picker.dart';
 import '../../projects/data/project_context_probe.dart';
 import '../../projects/data/project_context_reader.dart';
 import '../../projects/domain/project.dart';
+import '../../recordings/domain/stale_rank.dart';
+import '../../recordings/presentation/recordings_controller.dart';
 import 'settings_controller.dart';
 
 /// The "who I am" text handed to the enrichment model with every capture, plus
@@ -24,7 +26,13 @@ class EnrichmentContextSection extends StatefulWidget {
     this.projects = const <Project>[],
     this.picker = const FilePickerDirectoryPicker(),
     this.soulReader = const SoulReader(),
+    this.recordings,
   });
+
+  /// Counts and runs the re-rank of captures ranked under an older soul. Null
+  /// hides the row — every test that hosts this section bare, and any host
+  /// with no queue to re-rank.
+  final RecordingsController? recordings;
 
   final SettingsController controller;
 
@@ -84,6 +92,70 @@ class _EnrichmentContextSectionState extends State<EnrichmentContextSection> {
   ResolvedSoul? _soul;
   String? _pickerError;
 
+  /// Captures on the desk ranked under an older soul. Null until counted.
+  int? _staleCount;
+
+  /// Recounted after anything that can change the current soul or the ranks:
+  /// a path change, a profile save, a finished re-rank. Never from `build` —
+  /// resolving the soul reads the disk.
+  Future<void> _refreshStale() async {
+    final RecordingsController? recordings = widget.recordings;
+    if (recordings == null) return;
+    final int count = await recordings.staleRankCount();
+    if (!mounted) return;
+    setState(() => _staleCount = count);
+  }
+
+  Future<void> _rerank() async {
+    final RecordingsController? recordings = widget.recordings;
+    if (recordings == null) return;
+    await recordings.rerankStale();
+    await _refreshStale();
+  }
+
+  /// The re-rank row, rebuilt from the controller so its progress moves while
+  /// the rest of the section stays still.
+  Widget _rerankRow(RecordingsController recordings) {
+    return ListenableBuilder(
+      listenable: recordings,
+      builder: (BuildContext context, Widget? _) {
+        final RerankProgress? progress = recordings.rerankProgress;
+        if (progress != null) {
+          return Row(
+            children: <Widget>[
+              Expanded(
+                child: Text(
+                  'RE-RANKING ${progress.done} / ${progress.total}',
+                  style: ConsoleText.micro.copyWith(color: Console.accent),
+                ),
+              ),
+              TextButton(
+                onPressed: recordings.cancelRerank,
+                child: const Text('CANCEL'),
+              ),
+            ],
+          );
+        }
+        final int count = _staleCount ?? 0;
+        if (count == 0) return const SizedBox.shrink();
+        return Row(
+          children: <Widget>[
+            Expanded(
+              child: Text(
+                '$count ranked under an older soul · one model call each',
+                style: ConsoleText.micro.copyWith(color: Console.amber),
+              ),
+            ),
+            TextButton(
+              onPressed: _rerank,
+              child: Text('RE-RANK $count'),
+            ),
+          ],
+        );
+      },
+    );
+  }
+
   String get _storedSoulPath => widget.controller.soulPath ?? '';
   bool get _soulDirty => _soulField.text.trim() != _syncedSoulPath.trim();
 
@@ -102,6 +174,7 @@ class _EnrichmentContextSectionState extends State<EnrichmentContextSection> {
       if (!_soulFocus.hasFocus && _soulDirty) _commitSoulPath();
     });
     _probeSoul();
+    _refreshStale();
   }
 
   /// Kicked from `initState` and after a path change, never from `build`: it
@@ -128,6 +201,7 @@ class _EnrichmentContextSectionState extends State<EnrichmentContextSection> {
     });
     await widget.controller.setSoulPath(value);
     await _probeSoul();
+    await _refreshStale();
   }
 
   /// Picks the folder and names `SOUL.md` in it: the seam chooses directories,
@@ -244,6 +318,7 @@ class _EnrichmentContextSectionState extends State<EnrichmentContextSection> {
     final String value = _field.text.trim();
     setState(() => _synced = value);
     await widget.controller.setEnrichmentInstructions(value);
+    await _refreshStale();
   }
 
   void _revert() {
@@ -259,6 +334,7 @@ class _EnrichmentContextSectionState extends State<EnrichmentContextSection> {
   /// constant, so the field agrees with whatever settings actually resolved to.
   Future<void> _restoreDefault() async {
     await widget.controller.resetEnrichmentInstructions();
+    await _refreshStale();
     if (!mounted) return;
     setState(() {
       _synced = _stored;
@@ -350,6 +426,8 @@ class _EnrichmentContextSectionState extends State<EnrichmentContextSection> {
               ),
               const SizedBox(height: 6),
               _soulStatus(),
+              if (widget.recordings case final RecordingsController r)
+                _rerankRow(r),
               const SizedBox(height: 12),
               Text(
                 _soul?.origin == SoulOrigin.file

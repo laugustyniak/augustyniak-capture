@@ -542,6 +542,7 @@ class _ConfigTabState extends State<ConfigTab> {
       EnrichmentContextSection(
         controller: widget.controller,
         projects: widget.projects,
+        recordings: widget.recordingsController,
       ),
       const SizedBox(height: 22),
       VaultSection(

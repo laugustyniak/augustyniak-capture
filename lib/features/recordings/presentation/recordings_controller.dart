@@ -50,6 +50,7 @@ import '../data/source_content_hasher.dart';
 import '../domain/agent_handoff.dart';
 import '../domain/capture_category.dart';
 import '../domain/capture_priority.dart';
+import '../domain/stale_rank.dart';
 import '../domain/capture_segment.dart';
 import '../domain/capture_type.dart';
 import '../domain/clipboard_sink.dart';
@@ -2737,6 +2738,154 @@ class RecordingsController extends ChangeNotifier {
     } finally {
       _enrichmentRetries.remove(id);
     }
+  }
+
+  /// The fingerprint of the profile ("soul") the next capture would be sent —
+  /// what a rank is stale against. Resolved through the same context source
+  /// as enrichment, so a `SOUL.md` and its fallback count exactly as they do
+  /// there. Null when no profile would be sent.
+  Future<String?> currentProfileBasis() async {
+    try {
+      return (await _enrichmentContextSource.contextFor(null)).profileBasis;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  /// How many captures on the desk were ranked under an older soul.
+  Future<int> staleRankCount() async =>
+      staleRanks(_recordings, await currentProfileBasis()).length;
+
+  /// Non-null while [rerankStale] runs. In memory only, like
+  /// `_enrichingIds`: a re-rank is not a state anything resumes.
+  RerankProgress? get rerankProgress => _rerankProgress;
+  RerankProgress? _rerankProgress;
+  bool _rerankCancelled = false;
+
+  /// Stop a running [rerankStale] after the item in flight. The rank that
+  /// item is getting still lands; nothing after it is called.
+  void cancelRerank() {
+    if (_rerankProgress != null) _rerankCancelled = true;
+  }
+
+  /// Re-rank every capture on the desk whose priority was judged against an
+  /// older soul (see [isStaleRank]).
+  ///
+  /// A **ranking pass, not a re-enrichment**: only `priority`,
+  /// `priorityReason` and `priorityBasis` change. Title, category, summary and
+  /// tags stay as they are — the soul changing says nothing about what a
+  /// capture is called.
+  ///
+  /// Sequential, one model call per capture, each inside the usage scope like
+  /// [retryEnrichment], so the cost lands against the right capture. An item
+  /// is re-checked when its turn comes, and again inside the write: a rank the
+  /// user set by hand meanwhile clears its basis, stops being stale, and wins.
+  /// One failure is logged and the pass moves on. Single-flight: a second call
+  /// while one runs returns at once.
+  Future<RerankSummary> rerankStale() async {
+    if (_rerankProgress != null) return const RerankSummary();
+    final String? basis = await currentProfileBasis();
+    final List<String> ids = <String>[
+      for (final Recording item in staleRanks(_recordings, basis)) item.id,
+    ];
+    if (ids.isEmpty || _disposed) return const RerankSummary();
+
+    _rerankCancelled = false;
+    _rerankProgress = RerankProgress(done: 0, total: ids.length);
+    notifyListeners();
+    _logSink.log('Re-ranking ${ids.length} captures against the current soul.');
+
+    int reranked = 0;
+    int skipped = 0;
+    int failed = 0;
+    bool cancelled = false;
+    try {
+      for (final String id in ids) {
+        if (_disposed || _rerankCancelled) {
+          cancelled = _rerankCancelled;
+          break;
+        }
+        final void Function() releaseUsageScope = await _acquireUsageScope();
+        try {
+          if (_disposed) break;
+          final int index = _recordings.indexWhere((Recording i) => i.id == id);
+          final Recording? item = index < 0 ? null : _recordings[index];
+          final String text = item?.transcript ?? '';
+          // `add` is also the mutex against a retry or the drain enriching the
+          // same capture right now — the card's ANALYZING pill shows it too.
+          if (item == null ||
+              !isStaleRank(item, basis) ||
+              text.trim().isEmpty ||
+              !_enrichingIds.add(id)) {
+            skipped++;
+            continue;
+          }
+          if (!_disposed) notifyListeners();
+          try {
+            final EnrichmentContext context = await _resolveEnrichmentContext(
+              id,
+            );
+            _beginUsageJob(id, UsageStage.enrichment);
+            final EnrichmentResult result;
+            try {
+              result = await _enrichmentService.enrich(text, context: context);
+            } finally {
+              _endUsageJob();
+            }
+            final CapturePriority? priority = result.priority;
+            if (priority == null) {
+              skipped++;
+              continue;
+            }
+            bool wrote = false;
+            await _update(id, (Recording current) {
+              if (!isStaleRank(current, basis)) return current;
+              wrote = true;
+              return current.copyWith(
+                priority: priority,
+                priorityReason: result.priorityReason,
+                clearPriorityReason: result.priorityReason == null,
+                priorityBasis: context.profileBasis,
+                clearPriorityBasis: context.profileBasis == null,
+              );
+            }, source: RevisionSource.enrichment);
+            if (wrote) {
+              reranked++;
+              _logSink.log('Re-ranked · ${priority.label}', recordingId: id);
+            } else {
+              skipped++;
+            }
+          } finally {
+            _enrichingIds.remove(id);
+          }
+        } catch (exception) {
+          failed++;
+          _logSink.log(
+            'Re-rank failed: $exception',
+            level: LogLevel.warn,
+            recordingId: id,
+          );
+        } finally {
+          releaseUsageScope();
+          _rerankProgress = _rerankProgress?.advance();
+          if (!_disposed) notifyListeners();
+        }
+      }
+    } finally {
+      _rerankProgress = null;
+      _rerankCancelled = false;
+      if (!_disposed) notifyListeners();
+      _logSink.log(
+        'Re-rank ${cancelled ? 'cancelled' : 'done'} · $reranked re-ranked, '
+        '$skipped skipped, $failed failed',
+      );
+    }
+    return RerankSummary(
+      reranked: reranked,
+      skipped: skipped,
+      failed: failed,
+      cancelled: cancelled,
+    );
   }
 
   /// Resume jobs left non-terminal or interrupted (e.g. by app termination,
