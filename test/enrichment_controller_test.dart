@@ -14,6 +14,7 @@ import 'package:augustyniak_capture/features/recordings/domain/capture_category.
 import 'package:augustyniak_capture/features/recordings/domain/capture_priority.dart';
 import 'package:augustyniak_capture/features/recordings/domain/capture_type.dart';
 import 'package:augustyniak_capture/features/recordings/domain/recording.dart';
+import 'package:augustyniak_capture/features/recordings/domain/stale_rank.dart';
 import 'package:augustyniak_capture/features/recordings/presentation/recordings_controller.dart';
 import 'package:augustyniak_capture/features/transcription/data/transcription_service.dart';
 
@@ -721,4 +722,171 @@ void main() {
       expect(c.recordings.single.priorityReason, isNull);
     });
   });
+
+  group('rerankStale', () {
+    const EnrichmentContext soul = EnrichmentContext(profile: 'Goal: beta.');
+    const EnrichmentResult reranked = EnrichmentResult(
+      title: 'A NEW TITLE',
+      category: CaptureCategory.idea,
+      summary: 'A new summary.',
+      tags: <String>['new'],
+      priority: CapturePriority.p0,
+      priorityReason: 'p0 rule: the beta is due.',
+    );
+
+    Recording seeded(
+      Directory dir,
+      String id, {
+      CapturePriority? priority,
+      String? basis,
+      bool done = false,
+    }) => Recording(
+      id: id,
+      filePath: '${dir.path}/$id.txt',
+      createdAt: DateTime(2026, 10, 6),
+      durationMs: 0,
+      status: RecordingStatus.completed,
+      type: CaptureType.text,
+      transcript: 'body of $id',
+      title: 'Title $id',
+      category: CaptureCategory.task,
+      summary: 'Summary $id',
+      tags: const <String>['kept'],
+      priority: priority,
+      priorityReason: priority == null ? null : 'old reason',
+      priorityBasis: basis,
+      isProcessedByUser: done,
+    );
+
+    Future<RecordingsController> controllerWith(
+      Directory dir,
+      List<Recording> seed,
+      EnrichmentService enrichment,
+    ) async {
+      final _FakeRepo repo = _FakeRepo(dir)..saved = seed;
+      final RecordingsController c = _controller(
+        repo,
+        enrichment: enrichment,
+        contextSource: _FakeContextSource(soul),
+      );
+      addTearDown(c.dispose);
+      await c.initialize();
+      return c;
+    }
+
+    Recording byId(RecordingsController c, String id) =>
+        c.recordings.firstWhere((Recording r) => r.id == id);
+
+    test('re-ranks only stale desk items, and only their priority', () async {
+      final Directory dir = await _tmp();
+      addTearDown(() => dir.delete(recursive: true));
+      final _FakeEnrichment enrichment = _FakeEnrichment(reranked);
+      final RecordingsController c = await controllerWith(dir, <Recording>[
+        seeded(dir, 'stale', priority: CapturePriority.p3, basis: 'old00000'),
+        seeded(dir, 'hand', priority: CapturePriority.p1),
+        seeded(dir, 'current',
+            priority: CapturePriority.p2, basis: soul.profileBasis),
+        seeded(dir, 'unranked'),
+        seeded(dir, 'off',
+            priority: CapturePriority.p3, basis: 'old00000', done: true),
+      ], enrichment);
+
+      expect(await c.staleRankCount(), 1);
+      final RerankSummary summary = await c.rerankStale();
+
+      expect(summary.reranked, 1);
+      expect(enrichment.calls, 1);
+      final Recording stale = byId(c, 'stale');
+      expect(stale.priority, CapturePriority.p0);
+      expect(stale.priorityReason, 'p0 rule: the beta is due.');
+      expect(stale.priorityBasis, soul.profileBasis);
+      // A ranking pass, not a re-enrichment.
+      expect(stale.title, 'Title stale');
+      expect(stale.category, CaptureCategory.task);
+      expect(stale.summary, 'Summary stale');
+      expect(stale.tags, <String>['kept']);
+      // Everything else untouched.
+      expect(byId(c, 'hand').priority, CapturePriority.p1);
+      expect(byId(c, 'current').priority, CapturePriority.p2);
+      expect(byId(c, 'unranked').priority, isNull);
+      expect(byId(c, 'off').priority, CapturePriority.p3);
+      expect(await c.staleRankCount(), 0);
+      expect(c.rerankProgress, isNull);
+    });
+
+    test('a rank set by hand mid-pass wins', () async {
+      final Directory dir = await _tmp();
+      addTearDown(() => dir.delete(recursive: true));
+      final _GatedEnrichment enrichment = _GatedEnrichment(reranked);
+      final RecordingsController c = await controllerWith(dir, <Recording>[
+        seeded(dir, 'stale', priority: CapturePriority.p3, basis: 'old00000'),
+      ], enrichment);
+
+      final Future<RerankSummary> pass = c.rerankStale();
+      await enrichment.started.future;
+      expect(c.rerankProgress?.total, 1);
+      await c.setPriority('stale', CapturePriority.p2);
+      enrichment.release.complete();
+      final RerankSummary summary = await pass;
+
+      expect(summary.reranked, 0);
+      expect(summary.skipped, 1);
+      expect(byId(c, 'stale').priority, CapturePriority.p2);
+      expect(byId(c, 'stale').priorityBasis, isNull);
+    });
+
+    test('one failure is logged and the pass moves on', () async {
+      final Directory dir = await _tmp();
+      addTearDown(() => dir.delete(recursive: true));
+      final _FlakyEnrichment enrichment = _FlakyEnrichment(reranked);
+      final RecordingsController c = await controllerWith(dir, <Recording>[
+        seeded(dir, 'a', priority: CapturePriority.p3, basis: 'old00000'),
+        seeded(dir, 'b', priority: CapturePriority.p3, basis: 'old00000'),
+      ], enrichment);
+
+      final RerankSummary summary = await c.rerankStale();
+
+      expect(summary.failed, 1);
+      expect(summary.reranked, 1);
+      expect(c.rerankProgress, isNull);
+      expect(await c.staleRankCount(), 1); // the failed one is still stale
+    });
+
+    test('cancel stops the pass after the item in flight', () async {
+      final Directory dir = await _tmp();
+      addTearDown(() => dir.delete(recursive: true));
+      final _GatedEnrichment enrichment = _GatedEnrichment(reranked);
+      final RecordingsController c = await controllerWith(dir, <Recording>[
+        seeded(dir, 'a', priority: CapturePriority.p3, basis: 'old00000'),
+        seeded(dir, 'b', priority: CapturePriority.p3, basis: 'old00000'),
+      ], enrichment);
+
+      final Future<RerankSummary> pass = c.rerankStale();
+      await enrichment.started.future;
+      c.cancelRerank();
+      enrichment.release.complete();
+      final RerankSummary summary = await pass;
+
+      expect(summary.cancelled, isTrue);
+      expect(summary.reranked, 1);
+      expect(await c.staleRankCount(), 1);
+    });
+  });
+}
+
+/// Throws on the first call only, so a pass sees one failure and one success.
+class _FlakyEnrichment implements EnrichmentService {
+  _FlakyEnrichment(this.result);
+  final EnrichmentResult result;
+  int calls = 0;
+
+  @override
+  Future<EnrichmentResult> enrich(
+    String text, {
+    EnrichmentContext context = EnrichmentContext.none,
+  }) async {
+    calls++;
+    if (calls == 1) throw StateError('boom');
+    return result;
+  }
 }

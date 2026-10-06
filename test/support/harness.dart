@@ -6,6 +6,8 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:path/path.dart' as p;
 import 'package:record/record.dart';
 import 'package:augustyniak_capture/features/command/domain/command_client.dart';
+import 'package:augustyniak_capture/features/enrichment/domain/enrichment_context.dart';
+import 'package:augustyniak_capture/features/enrichment/domain/enrichment_service.dart';
 import 'package:augustyniak_capture/features/costs/domain/usage_sink.dart';
 import 'package:augustyniak_capture/features/logs/data/log_store.dart';
 import 'package:augustyniak_capture/features/gamification/presentation/gamification_controller.dart';
@@ -137,6 +139,9 @@ Future<RecordingsController> buildRecordingsController(
   GamificationController? gamificationController,
   CommandClient commandClient = const DisabledCommandClient(),
   String? Function()? commandBaseUrl,
+  EnrichmentService enrichmentService = const DisabledEnrichmentService(),
+  EnrichmentContextSource enrichmentContextSource =
+      const EmptyEnrichmentContextSource(),
 }) async {
   final RecordingsController controller = RecordingsController(
     repository: repository ?? FakeRecordingsRepository(appDir, seed: seed),
@@ -155,6 +160,8 @@ Future<RecordingsController> buildRecordingsController(
     gamificationController: gamificationController,
     commandClient: commandClient,
     commandBaseUrl: commandBaseUrl,
+    enrichmentService: enrichmentService,
+    enrichmentContextSource: enrichmentContextSource,
   );
   addTearDown(controller.dispose);
   await controller.initialize();
