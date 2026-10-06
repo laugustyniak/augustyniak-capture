@@ -474,6 +474,13 @@ class RecordingsController extends ChangeNotifier {
   /// refuses every write, so the queue is showing nothing rather than nothing
   /// being there — the UI must say so instead of looking empty.
   bool get isIndexUnreadable => _indexUnreadable;
+
+  bool _initialized = false;
+
+  /// True once [initialize] has read the index successfully. Until then the
+  /// in-memory list is empty rather than right, and any `saveAll` would
+  /// overwrite the history with it, so [addTextNote] refuses to run.
+  bool get isInitialized => _initialized;
   bool get isRecording => _isRecording;
   bool get isBusy => _isBusy;
 
@@ -599,6 +606,7 @@ class RecordingsController extends ChangeNotifier {
       notifyListeners();
       return;
     }
+    _initialized = true;
     _logSink.log('Loaded ${_recordings.length} captures from disk.');
 
     unawaited(
@@ -1782,6 +1790,12 @@ class RecordingsController extends ChangeNotifier {
     String? appendTo,
     String? id,
   }) async {
+    if (appendTo != null && id != null) {
+      throw ArgumentError('appendTo and id cannot be combined.');
+    }
+    // Before the first load the list is empty, not right: persisting now would
+    // overwrite recordings.json with just this note.
+    if (!_initialized) return false;
     if (id != null && _recordings.any((Recording r) => r.id == id)) return true;
     if (_isRecording || _isBusy) return false;
     final String trimmed = body.trim();

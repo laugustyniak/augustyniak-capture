@@ -28,7 +28,7 @@ class CreateNoteActivity : Activity() {
         val saved = try {
             save(intent)
         } catch (e: Exception) {
-            Toast.makeText(this, "Could not save note: ${e.message}", Toast.LENGTH_LONG).show()
+            Toast.makeText(this, "Could not save note.", Toast.LENGTH_LONG).show()
             false
         }
         if (saved) {

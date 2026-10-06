@@ -247,6 +247,7 @@ void main() {
       );
       addTearDown(controller.dispose);
 
+      await controller.initialize();
       await controller.addTextNote('a note');
       await controller.waitForProcessing();
 

@@ -107,7 +107,7 @@ void main() {
     expect(seen, <String>['old', 'new']);
   });
 
-  test('empty or whitespace content is logged and kept', () async {
+  test('empty or whitespace content is logged and deleted', () async {
     final File f = put('$idA.txt', '  \n ');
     final int n = await drainer((String id, String body) async {
       seen.add(id);
@@ -115,8 +115,16 @@ void main() {
     }).drain();
     expect(n, 0);
     expect(seen, isEmpty);
-    expect(f.existsSync(), isTrue);
+    expect(f.existsSync(), isFalse);
     expect(logs.messages, isNotEmpty);
+  });
+
+  test('a stale .tmp is deleted, a fresh one is left alone', () async {
+    final File stale = put('$idA.txt.tmp', 'half', ageSeconds: 2 * 3600);
+    final File fresh = put('$idB.txt.tmp', 'half', ageSeconds: 60);
+    await drainer((_, _) async => true).drain();
+    expect(stale.existsSync(), isFalse);
+    expect(fresh.existsSync(), isTrue);
   });
 
   test('unreadable (invalid utf8) content is logged and kept', () async {

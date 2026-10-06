@@ -4,7 +4,9 @@ import 'package:audioplayers/audioplayers.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:path/path.dart' as p;
 import 'package:record/record.dart';
+import 'package:augustyniak_capture/features/recordings/data/inbox_drainer.dart';
 import 'package:augustyniak_capture/features/recordings/data/media_picker.dart';
+import 'package:augustyniak_capture/features/logs/domain/log_event.dart';
 import 'package:augustyniak_capture/features/recordings/data/recordings_repository.dart';
 import 'package:augustyniak_capture/features/recordings/domain/capture_type.dart';
 import 'package:augustyniak_capture/features/recordings/domain/recording.dart';
@@ -19,6 +21,7 @@ class _FakeRepository extends RecordingsRepository {
   final Directory directory;
   List<Recording> saved = <Recording>[];
   bool failSave = false;
+  int saveCalls = 0;
 
   /// One entry per `saveAll`: was the newest item's source file already on disk
   /// when the index was written? This is what pins the ordering invariant —
@@ -35,6 +38,7 @@ class _FakeRepository extends RecordingsRepository {
 
   @override
   Future<void> saveAll(List<Recording> recordings) async {
+    saveCalls++;
     if (failSave) throw const FileSystemException('disk full');
     if (recordings.isNotEmpty) {
       sourcePresentAtSave.add(File(recordings.first.filePath).existsSync());
@@ -88,6 +92,7 @@ void main() {
   test('returns true and persists when idle', () async {
     final _FakeRepository repo = _FakeRepository(appDir);
     final RecordingsController controller = buildController(repo);
+    await controller.initialize();
 
     expect(await controller.addTextNote('hello'), isTrue);
     await controller.waitForProcessing();
@@ -99,6 +104,7 @@ void main() {
   test('uses the given id for the row and the source filename', () async {
     final _FakeRepository repo = _FakeRepository(appDir);
     final RecordingsController controller = buildController(repo);
+    await controller.initialize();
 
     expect(await controller.addTextNote('hello', id: id), isTrue);
     await controller.waitForProcessing();
@@ -112,6 +118,7 @@ void main() {
     () async {
       final _FakeRepository repo = _FakeRepository(appDir);
       final RecordingsController controller = buildController(repo);
+      await controller.initialize();
 
       expect(await controller.addTextNote('hello', id: id), isTrue);
       await controller.waitForProcessing();
@@ -126,6 +133,7 @@ void main() {
   test('empty body returns false and writes nothing', () async {
     final _FakeRepository repo = _FakeRepository(appDir);
     final RecordingsController controller = buildController(repo);
+    await controller.initialize();
 
     expect(await controller.addTextNote('   ', id: id), isFalse);
     expect(repo.saved, isEmpty);
@@ -135,6 +143,7 @@ void main() {
   test('a failing index write returns false', () async {
     final _FakeRepository repo = _FakeRepository(appDir)..failSave = true;
     final RecordingsController controller = buildController(repo);
+    await controller.initialize();
 
     expect(await controller.addTextNote('hello', id: id), isFalse);
     expect(controller.isBusy, isFalse);
@@ -144,6 +153,7 @@ void main() {
   test('returns false while another capture holds the busy lock', () async {
     final _FakeRepository repo = _FakeRepository(appDir);
     final RecordingsController controller = buildController(repo);
+    await controller.initialize();
 
     final Future<bool> first = controller.addTextNote('one');
     final bool second = await controller.addTextNote('two', id: id);
@@ -151,6 +161,50 @@ void main() {
     expect(await first, isTrue);
     await controller.waitForProcessing();
     expect(repo.saved, hasLength(1));
+    controller.dispose();
+  });
+
+  test('before initialize it returns false and never calls saveAll', () async {
+    final _FakeRepository repo = _FakeRepository(appDir);
+    final RecordingsController controller = buildController(repo);
+
+    expect(controller.isInitialized, isFalse);
+    expect(await controller.addTextNote('hello', id: id), isFalse);
+    expect(repo.saveCalls, 0);
+    controller.dispose();
+  });
+
+  test(
+    'a drainer driven by a pre-load controller keeps the inbox file',
+    () async {
+      final _FakeRepository repo = _FakeRepository(appDir);
+      final RecordingsController controller = buildController(repo);
+      final Directory inbox = Directory(p.join(appDir.path, 'inbox'))
+        ..createSync();
+      final File note = File(p.join(inbox.path, '$id.txt'))
+        ..writeAsStringSync('hello');
+
+      final int n = await InboxDrainer(
+        inbox: inbox,
+        ingest: (String i, String b) => controller.addTextNote(b, id: i),
+        logSink: const NoopLogSink(),
+      ).drain();
+      expect(n, 0);
+      expect(note.existsSync(), isTrue);
+      expect(repo.saveCalls, 0);
+      controller.dispose();
+    },
+  );
+
+  test('appendTo together with id is rejected', () async {
+    final _FakeRepository repo = _FakeRepository(appDir);
+    final RecordingsController controller = buildController(repo);
+    await controller.initialize();
+
+    expect(
+      () => controller.addTextNote('x', appendTo: 'a', id: id),
+      throwsArgumentError,
+    );
     controller.dispose();
   });
 }

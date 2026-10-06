@@ -210,6 +210,7 @@ class _RecordingsPageState extends State<RecordingsPage>
   /// Built on first use because the inbox lives under the application-support
   /// directory, which is only known asynchronously.
   InboxDrainer? _inboxDrainer;
+  Future<void>? _drainFuture;
   late final ProjectsController projects;
   late final FocusTimerController timer;
 
@@ -665,22 +666,26 @@ class _RecordingsPageState extends State<RecordingsPage>
   }
 
   /// Moves notes that external producers (Siri, Android CREATE_NOTE) left in
-  /// the inbox into the queue. Only ever called once `controller.initialize()`
-  /// has finished: a drain before the load would persist a partial list. Skipped
-  /// while the index is unreadable, for the same reason every other write is.
-  Future<void> _drainInbox() async {
-    if (controller.isIndexUnreadable) return;
+  /// the inbox into the queue. Runs only once the controller has loaded the
+  /// index: a drain before that would persist a partial list. Concurrent calls
+  /// (start-up and a resume) share one run.
+  Future<void> _drainInbox() {
+    if (!controller.isInitialized || controller.isIndexUnreadable) {
+      return Future<void>.value();
+    }
+    return _drainFuture ??= _runDrain().whenComplete(() => _drainFuture = null);
+  }
+
+  Future<void> _runDrain() async {
     try {
-      InboxDrainer? drainer = _inboxDrainer;
-      if (drainer == null) {
-        final Directory support = await getApplicationSupportDirectory();
-        drainer = _inboxDrainer = InboxDrainer(
-          inbox: Directory(p.join(support.path, 'inbox')),
-          ingest: (String id, String body) =>
-              controller.addTextNote(body, id: id),
-          logSink: logs,
-        );
-      }
+      final InboxDrainer drainer = _inboxDrainer ??= InboxDrainer(
+        inbox: Directory(
+          p.join((await getApplicationSupportDirectory()).path, 'inbox'),
+        ),
+        ingest: (String id, String body) =>
+            controller.addTextNote(body, id: id),
+        logSink: logs,
+      );
       await drainer.drain();
     } catch (exception) {
       logs.log('Inbox drain failed: $exception', level: LogLevel.warn);

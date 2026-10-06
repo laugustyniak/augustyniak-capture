@@ -29,6 +29,8 @@ class InboxDrainer {
     caseSensitive: false,
   );
 
+  static const Duration _staleTmp = Duration(hours: 1);
+
   bool _draining = false;
 
   /// Returns how many notes were persisted. A call made while another drain is
@@ -48,8 +50,16 @@ class InboxDrainer {
     final List<(File, DateTime)> files = <(File, DateTime)>[];
     try {
       await for (final FileSystemEntity e in inbox.list()) {
-        if (e is File && p.extension(e.path) == '.txt') {
-          files.add((e, await e.lastModified()));
+        if (e is! File) continue;
+        final DateTime modified = await e.lastModified();
+        if (p.extension(e.path) == '.txt') {
+          files.add((e, modified));
+        } else if (e.path.endsWith('.txt.tmp') &&
+            DateTime.now().difference(modified) > _staleTmp) {
+          // A producer that crashed mid-write; a live one renames within
+          // milliseconds.
+          await e.delete();
+          _log('Inbox: removed stale partial write ${p.basename(e.path)}');
         }
       }
     } on FileSystemException catch (exception) {
@@ -72,7 +82,8 @@ class InboxDrainer {
       try {
         final String body = utf8.decode(await file.readAsBytes());
         if (body.trim().isEmpty) {
-          _log('Inbox note is empty, kept: $id');
+          await file.delete();
+          _log('Inbox note was empty, deleted: $id');
           continue;
         }
         if (await ingest(id, body)) {
