@@ -81,7 +81,7 @@ CI is **live** (`.github/workflows/ci.yml`) and runs `flutter analyze` + `flutte
 
 ## Architecture
 
-Feature-first layout under `lib/features/<feature>/{domain,data,presentation}`. Seventeen features: `recordings`, `projects`, `transcription`, `processing`, `enrichment`, `settings`, `costs`, `logs`, `shortcuts`, `timer`, `clipboard`, `gamification`, `momentum`, `backup`, `command`, `auth`, `sync`. No state-management or DI package — plain `ChangeNotifier` + constructor injection. The one thing that is not feature-scoped is `core/database/app_database.dart` — see Persistence.
+Feature-first layout under `lib/features/<feature>/{domain,data,presentation}`. Eighteen features: `recordings`, `projects`, `transcription`, `processing`, `enrichment`, `settings`, `costs`, `logs`, `shortcuts`, `timer`, `clipboard`, `gamification`, `momentum`, `backup`, `command`, `auth`, `sync`, `mcp`. No state-management or DI package — plain `ChangeNotifier` + constructor injection. The one thing that is not feature-scoped is `core/database/app_database.dart` — see Persistence.
 
 **Deep reference lives under `docs/`, one file per area.** This file carries the invariants — the ordering rules, the durability rules and the seams. Open the matching reference before changing anything in its area; each is written to be read whole.
 
@@ -104,6 +104,7 @@ Feature-first layout under `lib/features/<feature>/{domain,data,presentation}`. 
 | `docs/architecture/persistence.md` | `recordings_repository.dart`, `app_database.dart`, any `*_repository.dart`, the JSON indexes or the SQLite mirror |
 | `docs/architecture/processing.md` | `features/processing/`, a `Processor`, `OcrService`, a video extractor, `provider_failure.dart` |
 | `docs/architecture/sync.md` | `features/sync/`, `sync_push`, `sync_rows`, the cursor |
+| `docs/architecture/mcp.md` | `bin/capture_mcp.dart`, `features/mcp/`, the MCP tools or the read-only reader |
 | `docs/architecture/testing.md` | writing or debugging any test, before trusting a green run |
 
 `docs/plans/` and `docs/superpowers/specs/` hold the design documents those files cite.
@@ -139,7 +140,7 @@ Neither rule is weakened by the two removal paths (`discardRecording`, `deleteRe
 
 ## The features
 
-Seventeen features, sixteen lines — `timer`/`momentum` share one. Read the pointer before changing anything in its area.
+Eighteen features, seventeen lines — `timer`/`momentum` share one. Read the pointer before changing anything in its area.
 
 - **`recordings`** — the queue, the capture screen, the editor, the controller that owns the pipeline. `docs/architecture/capture-pipeline.md`, `docs/architecture/ui.md`.
 - **`processing`** — `Processor` turns a segment's source into text. **The rule to enforce in review: a processor only ever reads the source — never writes, moves or deletes it.** `docs/architecture/processing.md`.
@@ -157,6 +158,7 @@ Seventeen features, sixteen lines — `timer`/`momentum` share one. Read the poi
 - **`logs`** — a `ChangeNotifier` ring buffer, newest-first, capacity 500. Read-only view; nothing in the Logs tab mutates recordings.
 - **`auth`** — optional Supabase bootstrap and OS-keyring session storage. Missing config or an unavailable keyring never blocks local capture. The cloud-data transport itself lives in `features/sync/`; the Turso/R2 path it replaced was removed in #202.
 - **`sync`** — Supabase metadata sync: push-then-pull over one version-gated RPC, applied through the controllers' own apply entry points, never a second repository writing underneath them. Runs from SYNC NOW, once at launch and 2 s after a hand edit, only when signed in; media follows through a private Storage bucket, and a download lands only after it hashes to the synced `contentHash`. `docs/architecture/sync.md`.
+- **`mcp`** — a separate, **read-only** stdio MCP server (`bin/capture_mcp.dart`) that lets coding agents search and read captures. SQLite opened `readOnly`, `recordings.db-stale` honoured, no file paths in output, and **no `package:flutter` in its import graph** (a test walks it). Writes belong behind `RecordingsController`, never here. `docs/architecture/mcp.md`.
 
 Not feature-scoped: `core/database/app_database.dart` (see Persistence), `core/http/provider_failure.dart`, `core/sync/`.
 
