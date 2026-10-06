@@ -244,11 +244,8 @@ void main() {
   });
 
   test('closing by hand records the kind of the last route', () async {
-    RouteRecord route(RouteKind kind) => RouteRecord(
-      at: DateTime.utc(2026, 10, 6),
-      kind: kind,
-      target: 'x',
-    );
+    RouteRecord route(RouteKind kind) =>
+        RouteRecord(at: DateTime.utc(2026, 10, 6), kind: kind, target: 'x');
     final Map<RouteKind?, ClosureKind> expected = <RouteKind?, ClosureKind>{
       null: ClosureKind.review,
       RouteKind.file: ClosureKind.route,
@@ -261,9 +258,7 @@ void main() {
         seed: <Recording>[
           makeRecording(
             id: 'r1',
-            routes: <RouteRecord>[
-              if (entry.key != null) route(entry.key!),
-            ],
+            routes: <RouteRecord>[if (entry.key != null) route(entry.key!)],
           ),
         ],
         closureLog: log,

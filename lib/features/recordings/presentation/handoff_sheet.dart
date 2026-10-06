@@ -108,20 +108,24 @@ class _HandoffSheetState extends State<_HandoffSheet> {
       _busy = true;
       _error = null;
     });
-    final SendOutcome? outcome = await widget.controller.send(
-      widget.recording.id,
-      target,
-      _instruction.text,
-    );
+    SendOutcome? outcome;
+    try {
+      outcome = await widget.controller.send(
+        widget.recording.id,
+        target,
+        _instruction.text,
+      );
+    } finally {
+      // Never leave the targets dead: whatever happened, the user can act.
+      if (mounted) setState(() => _busy = false);
+    }
     if (!mounted) return;
     setState(() {
-      _busy = false;
-      if (outcome != null) {
-        _sent = outcome;
-      } else if (widget.controller.error case final String message) {
-        // A dismissed share sheet leaves no error, and the sheet no message.
-        _error = message;
-      }
+      if (outcome != null) _sent = outcome;
+      // A failure, or a send that went out but could not be recorded — the
+      // controller reports both through its error. A dismissed share leaves
+      // none, and the controller clears it at the start of every send.
+      _error = widget.controller.error;
     });
   }
 

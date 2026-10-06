@@ -72,9 +72,9 @@ class RecordingCard extends StatelessWidget {
 
   /// The second destination, and the one that does something rather than
   /// filing something. It opens the Send to… sheet, which reaches a terminal
-  /// agent (when the project has one) and any assistant, so it names both. Kept distinct
-  /// from [routeLabel] in wording as well as icon: two controls that both said
-  /// "hand off" would be one control the user has to guess at.
+  /// agent (when the project has one) and any assistant, so it names both.
+  /// Kept distinct from [routeLabel] in wording as well as icon: two controls
+  /// that both said "hand off" would be one control the user has to guess at.
   static const String handoffLabel =
       'Send this capture to an assistant or agent';
 

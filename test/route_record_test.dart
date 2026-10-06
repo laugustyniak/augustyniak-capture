@@ -1,3 +1,5 @@
+import 'dart:convert';
+
 import 'package:augustyniak_capture/features/recordings/domain/route_record.dart';
 import 'package:flutter_test/flutter_test.dart';
 
@@ -38,5 +40,17 @@ void main() {
       }),
       isNull,
     );
+  });
+
+  test('a legacy row serialises byte for byte as it was read', () {
+    final Map<String, dynamic> legacy = <String, dynamic>{
+      'at': '2026-10-06T12:00:00.000Z',
+      'kind': 'agent',
+      'target': 'claude',
+    };
+
+    final RouteRecord? record = RouteRecord.fromJson(legacy);
+
+    expect(jsonEncode(record!.toJson()), jsonEncode(legacy));
   });
 }

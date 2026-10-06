@@ -40,6 +40,7 @@ class _FakeSender implements CaptureSender {
 
   final bool copied;
   final bool fail;
+  bool dismissNext = false;
   final List<({SendTarget target, String prompt})> calls =
       <({SendTarget target, String prompt})>[];
 
@@ -58,6 +59,10 @@ class _FakeSender implements CaptureSender {
     String prompt,
   ) async {
     calls.add((target: target, prompt: prompt));
+    if (dismissNext) {
+      dismissNext = false;
+      return null;
+    }
     if (fail) {
       throw const AssistantUnavailableException(AssistantTarget.chatgpt);
     }
@@ -352,6 +357,49 @@ void main() {
     expect(find.textContaining('Could not open ChatGPT'), findsOneWidget);
     expect(find.text('MARK DONE'), findsNothing);
     expect(controller.recordings.single.routes, isEmpty);
+  });
+
+  testWidgets('a send that could not be recorded still says it was sent', (
+    WidgetTester tester,
+  ) async {
+    final RecordingsController controller = await buildRecordingsController(
+      appDir,
+      repository: FakeRecordingsRepository(
+        appDir,
+        seed: <Recording>[makeRecording(id: 'r1', transcript: 'Body.')],
+        saveError: const FileSystemException('disk full'),
+      ),
+      captureSender: _FakeSender(),
+    );
+
+    await openSheet(tester, controller);
+    await tester.tap(find.text('ChatGPT'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Sent to ChatGPT · web'), findsOneWidget);
+    expect(find.textContaining('not recorded'), findsOneWidget);
+    // Not stuck busy: the targets still answer a tap.
+    await tester.tap(find.text('Claude'));
+    await tester.pumpAndSettle();
+    expect(find.text('Sent to ChatGPT · web'), findsOneWidget);
+  });
+
+  testWidgets('a dismissed share after a failure shows no error', (
+    WidgetTester tester,
+  ) async {
+    final _FakeSender sender = _FakeSender(fail: true);
+    final RecordingsController controller = await projectless(sender);
+
+    await openSheet(tester, controller);
+    await tester.tap(find.text('ChatGPT'));
+    await tester.pumpAndSettle();
+    expect(find.textContaining('Could not open ChatGPT'), findsOneWidget);
+
+    sender.dismissNext = true;
+    await tester.tap(find.text('Claude'));
+    await tester.pumpAndSettle();
+
+    expect(find.textContaining('Could not open'), findsNothing);
   });
 
   testWidgets('with a project the Terminal group sits beside the others', (
