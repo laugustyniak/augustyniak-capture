@@ -20,9 +20,11 @@ class _ToolFailure implements Exception {
 }
 
 class CaptureTools {
-  CaptureTools(this._source);
+  CaptureTools(this._source, {void Function(String)? log})
+    : _log = log ?? ((String _) {});
 
   final CaptureSource _source;
+  final void Function(String) _log;
 
   static const int _defaultLimit = 20;
   static const int _maxLimit = 100;
@@ -124,8 +126,13 @@ class CaptureTools {
       return _text(e.message, isError: true);
     } on InvalidParams {
       rethrow;
+    } on CaptureStoreUnavailable catch (e) {
+      // The detail names paths: stderr only, never the agent.
+      _log('$name: ${e.detail}');
+      return _text('Capture store unavailable.', isError: true);
     } catch (e) {
-      return _text(e.toString(), isError: true);
+      _log('$name failed: $e');
+      return _text('Internal error.', isError: true);
     }
   }
 
@@ -144,9 +151,7 @@ class CaptureTools {
     final String query = _string(args, 'query', required: true)!.toLowerCase();
     final String? projectRef = _string(args, 'project');
     final String? sinceRaw = _string(args, 'since');
-    final DateTime? since = sinceRaw == null
-        ? null
-        : DateTime.tryParse(sinceRaw);
+    final DateTime? since = sinceRaw == null ? null : _parseSince(sinceRaw);
     if (sinceRaw != null && since == null) {
       throw InvalidParams('since must be an ISO date, got "$sinceRaw"');
     }
@@ -160,7 +165,7 @@ class CaptureTools {
     return <Map<String, dynamic>>[
       for (final Recording r in rows)
         if ((project == null || r.projectId == project.id) &&
-            (since == null || !r.createdAt.isBefore(since)) &&
+            (since == null || !r.createdAt.toUtc().isBefore(since)) &&
             _matches(r, query))
           _capture(r, projects, snippet: true),
     ].take(limit).toList();
@@ -187,7 +192,7 @@ class CaptureTools {
     }
     final int limit = _limit(args);
     final List<Project> projects = await _source.projects();
-    final Project project = _resolve(projects, ref)!;
+    final Project project = _resolve(projects, ref);
     final List<Recording> rows = await _source.recordings();
     return <Map<String, dynamic>>[
       for (final Recording r in rows)
@@ -197,9 +202,16 @@ class CaptureTools {
     ].take(limit).toList();
   }
 
+  DateTime? _parseSince(String raw) {
+    // A bare date has no zone; read it as UTC midnight so the answer does not
+    // depend on the machine the server runs on.
+    final bool dateOnly = RegExp(r'^\d{4}-\d{2}-\d{2}$').hasMatch(raw);
+    return DateTime.tryParse(dateOnly ? '${raw}T00:00:00Z' : raw)?.toUtc();
+  }
+
   /// Throws a [_ToolFailure] rather than returning null: an unknown project
   /// must read as an error, not as "this project has no captures".
-  Project? _resolve(List<Project> projects, String ref) {
+  Project _resolve(List<Project> projects, String ref) {
     final String lower = ref.toLowerCase();
     for (final Project p in projects) {
       if (p.id == ref) return p;

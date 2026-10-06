@@ -2,6 +2,8 @@ import 'dart:async';
 import 'dart:convert';
 
 import 'package:augustyniak_capture/features/mcp/data/sqlite_capture_source.dart';
+import 'package:augustyniak_capture/features/mcp/domain/capture_source.dart';
+import 'package:augustyniak_capture/features/projects/domain/project.dart';
 import 'package:augustyniak_capture/features/mcp/domain/capture_tools.dart';
 import 'package:augustyniak_capture/features/mcp/domain/mcp_server.dart';
 import 'package:augustyniak_capture/features/recordings/domain/recording.dart';
@@ -315,4 +317,128 @@ void main() {
       );
     },
   );
+
+  test('invalid UTF-8 does not end the loop (serveBytes)', () async {
+    final List<String> out = <String>[];
+    final List<int> bad = <int>[
+      ...utf8.encode('{"x":"'),
+      0xff,
+      0xfe,
+      ...utf8.encode('"\n'),
+    ];
+    await server().serveBytes(
+      Stream<List<int>>.fromIterable(<List<int>>[
+        bad,
+        utf8.encode('${req(7, 'ping')}\n'),
+      ]),
+      out.add,
+    );
+    final List<Map<String, dynamic>> decoded = out
+        .map((String l) => jsonDecode(l) as Map<String, dynamic>)
+        .toList();
+    expect(decoded.last['id'], 7);
+    expect(decoded.last['result'], isNotNull);
+  });
+
+  test('client-facing errors carry no filesystem path', () async {
+    final List<String> logged = <String>[];
+    final List<String> out = <String>[];
+    await McpServer(
+      CaptureTools(
+        SqliteCaptureSource(
+          dbPath: '${fx.dir.path}/none.sqlite',
+          recordingsDir: '${fx.dir.path}/none',
+        ),
+        log: logged.add,
+      ),
+      log: logged.add,
+    ).serve(
+      Stream<String>.fromIterable(<String>[
+        call(1, 'get_capture', <String, dynamic>{'id': 'a'}),
+        call(2, 'search_captures', <String, dynamic>{'query': 'a'}),
+        call(3, 'list_project_captures', <String, dynamic>{'project': 'x'}),
+      ]),
+      out.add,
+    );
+    expect(out, hasLength(3));
+    for (final String line in out) {
+      expect(line, isNot(contains(fx.dir.path)));
+      expect(line, isNot(contains('/tmp')));
+    }
+    expect(
+      logged.join(),
+      contains(fx.dir.path),
+      reason: 'detail goes to the log',
+    );
+  });
+
+  test(
+    'an unexpected exception reaches the client as a generic error',
+    () async {
+      final List<String> logged = <String>[];
+      final List<String> out = <String>[];
+      await McpServer(
+        CaptureTools(_Exploding(), log: logged.add),
+        log: logged.add,
+      ).serve(
+        Stream<String>.fromIterable(<String>[
+          call(1, 'get_capture', <String, dynamic>{'id': 'a'}),
+        ]),
+        out.add,
+      );
+      expect(out.single, isNot(contains('/secret')));
+      expect(out.single, contains('Internal error'));
+      expect(logged.join(), contains('/secret'));
+    },
+  );
+
+  test('a throw that escapes the tools is a generic -32603', () async {
+    final List<String> logged = <String>[];
+    final List<String> out = <String>[];
+    await McpServer(_Throwing(), log: logged.add).serve(
+      Stream<String>.fromIterable(<String>[
+        call(1, 'get_capture', <String, dynamic>{'id': 'a'}),
+      ]),
+      out.add,
+    );
+    final Map<String, dynamic> error =
+        (jsonDecode(out.single) as Map<String, dynamic>)['error']
+            as Map<String, dynamic>;
+    expect(error['code'], -32603);
+    expect(out.single, isNot(contains('/secret')));
+    expect(logged.join(), contains('/secret'));
+  });
+
+  test('date-only since means UTC midnight, whatever the local zone', () async {
+    Future<List<dynamic>> since(String s) async =>
+        payload(
+              (await run(<String>[
+                call(1, 'search_captures', <String, dynamic>{
+                  'query': 'retry',
+                  'since': s,
+                }),
+              ])).single,
+            )['data']
+            as List<dynamic>;
+    // c1 was created at exactly 2026-03-01T00:00:00Z.
+    expect(await since('2026-03-01'), hasLength(1));
+    expect(await since('2026-03-02'), isEmpty);
+  });
+}
+
+class _Throwing extends CaptureTools {
+  _Throwing() : super(_Exploding());
+
+  @override
+  Future<Map<String, dynamic>> call(String name, Map<String, dynamic> args) =>
+      throw StateError('boom at /secret/place');
+}
+
+class _Exploding implements CaptureSource {
+  @override
+  Future<List<Recording>> recordings() async =>
+      throw StateError('boom at /secret/place');
+
+  @override
+  Future<List<Project>> projects() async => <Project>[];
 }

@@ -7,15 +7,30 @@ import 'capture_tools.dart';
 /// drives it without a process. Nothing here touches stdout: the caller owns
 /// the sink, because stdout carries protocol JSON and nothing else.
 class McpServer {
-  McpServer(this._tools);
+  McpServer(this._tools, {void Function(String)? log})
+    : _log = log ?? ((String _) {});
 
   final CaptureTools _tools;
+  final void Function(String) _log;
 
   static const List<String> _supportedVersions = <String>[
     '2025-06-18',
     '2025-03-26',
     '2024-11-05',
   ];
+
+  /// [serve] over raw bytes. Malformed UTF-8 becomes U+FFFD inside the line
+  /// that carries it — the strict decoder would throw and end the loop, and a
+  /// stdio server that dies on one bad byte takes the agent's tools with it.
+  Future<void> serveBytes(
+    Stream<List<int>> bytes,
+    void Function(String) write,
+  ) => serve(
+    bytes
+        .transform(const Utf8Decoder(allowMalformed: true))
+        .transform(const LineSplitter()),
+    write,
+  );
 
   /// Answers each line in order until [lines] ends. One bad line never ends
   /// the loop.
@@ -53,7 +68,9 @@ class McpServer {
     } on _UnknownMethod {
       return isNotification ? null : _error(id, -32601, 'Method not found');
     } catch (e) {
-      return isNotification ? null : _error(id, -32603, 'Internal error: $e');
+      // The detail may name a path; the client gets a fixed message.
+      _log('internal error handling $method: $e');
+      return isNotification ? null : _error(id, -32603, 'Internal error');
     }
   }
 

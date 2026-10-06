@@ -5,6 +5,8 @@ import 'package:path/path.dart' as p;
 import 'package:sqlite3/sqlite3.dart';
 
 import '../../projects/domain/project.dart';
+import '../../recordings/domain/capture_category.dart';
+import '../../recordings/domain/capture_type.dart';
 import '../../recordings/domain/recording.dart';
 import '../domain/capture_source.dart';
 
@@ -41,7 +43,7 @@ class SqliteCaptureSource implements CaptureSource {
     }
     if (_index.existsSync()) return _fromJsonIndex();
     if (!File(dbPath).existsSync() && !_stale.existsSync()) {
-      throw StateError(
+      throw CaptureStoreUnavailable(
         'No capture store found: $dbPath does not exist and neither does '
         '${_index.path}. Pass --db and --recordings-dir.',
       );
@@ -49,23 +51,47 @@ class SqliteCaptureSource implements CaptureSource {
     return <Recording>[];
   }
 
+  /// Mirrors `RecordingsRepository._loadFromDatabase`: null (ask the JSON
+  /// index) only when the select throws or returns no rows. A row whose
+  /// `json_payload` is NULL or unparseable is **rebuilt from the columns**, not
+  /// skipped, and a table of nothing but such rows still answers — it does not
+  /// fall through to the index. Rebuilt rows lack the transcript, so each is
+  /// replaced by its JSON-index version when the index has one.
   List<Recording>? _fromDatabase() {
     final Database? db = _open();
     if (db == null) return null;
     try {
-      final ResultSet results = db.select(
-        'SELECT id, json_payload FROM recordings ORDER BY created_at DESC;',
-      );
+      final ResultSet results = db.select('''
+        SELECT id, file_path, duration_ms, type, status, category, title,
+               summary, tags_json, created_at, is_processed_by_user,
+               project_id, failure_reason, json_payload
+        FROM recordings
+        ORDER BY created_at DESC;
+      ''');
+      if (results.isEmpty) return null;
       final List<Recording> rows = <Recording>[];
+      final Set<String> degraded = <String>{};
       for (final Row row in results) {
-        try {
-          rows.add(
-            Recording.fromJson(
-              jsonDecode(row['json_payload'] as String) as Map<String, dynamic>,
-            ),
-          );
-        } catch (_) {
-          _log('skipping unreadable row ${row['id']}');
+        final String? payload = row['json_payload'] as String?;
+        if (payload != null && payload.isNotEmpty) {
+          try {
+            rows.add(
+              Recording.fromJson(jsonDecode(payload) as Map<String, dynamic>),
+            );
+            continue;
+          } catch (_) {}
+        }
+        degraded.add(row['id'] as String);
+        _log('row ${row['id']} has no usable payload, rebuilt from columns');
+        rows.add(_fromColumns(row));
+      }
+      if (degraded.isNotEmpty) {
+        final Map<String, Recording> indexed = _indexRowsById();
+        for (int i = 0; i < rows.length; i++) {
+          final Recording? fromIndex = indexed[rows[i].id];
+          if (degraded.contains(rows[i].id) && fromIndex != null) {
+            rows[i] = fromIndex;
+          }
         }
       }
       return rows;
@@ -74,6 +100,57 @@ class SqliteCaptureSource implements CaptureSource {
       return null;
     } finally {
       db.close();
+    }
+  }
+
+  Recording _fromColumns(Row row) {
+    final dynamic rawTags = jsonDecode(row['tags_json'] as String? ?? '[]');
+    final String rawStatus = row['status'] as String? ?? 'completed';
+    RecordingStatus status = RecordingStatus.completed;
+    for (final RecordingStatus s in RecordingStatus.values) {
+      if (s.name == rawStatus) {
+        status = s;
+        break;
+      }
+    }
+    return Recording(
+      id: row['id'] as String,
+      filePath: row['file_path'] as String,
+      durationMs: row['duration_ms'] as int,
+      type: CaptureType.fromName(row['type'] as String?),
+      status: status,
+      category: row['category'] != null
+          ? CaptureCategory.fromName(row['category'] as String)
+          : null,
+      title: row['title'] as String?,
+      summary: row['summary'] as String?,
+      tags: rawTags is List<dynamic>
+          ? rawTags.map((dynamic e) => e.toString()).toList()
+          : <String>[],
+      createdAt: DateTime.fromMillisecondsSinceEpoch(row['created_at'] as int),
+      isProcessedByUser: (row['is_processed_by_user'] as int) == 1,
+      projectId: row['project_id'] as String?,
+      error: row['failure_reason'] as String?,
+    );
+  }
+
+  /// The JSON index keyed by id, or empty when it cannot be read. Silent, like
+  /// the repository's: it only repairs rows the table answered badly.
+  Map<String, Recording> _indexRowsById() {
+    try {
+      if (!_index.existsSync()) return <String, Recording>{};
+      final Object? decoded = jsonDecode(_index.readAsStringSync());
+      if (decoded is! List<dynamic>) return <String, Recording>{};
+      final Map<String, Recording> rows = <String, Recording>{};
+      for (final dynamic item in decoded) {
+        try {
+          final Recording r = Recording.fromJson(item as Map<String, dynamic>);
+          rows[r.id] = r;
+        } catch (_) {}
+      }
+      return rows;
+    } catch (_) {
+      return <String, Recording>{};
     }
   }
 
@@ -94,10 +171,14 @@ class SqliteCaptureSource implements CaptureSource {
       if (raw.trim().isEmpty) return <Recording>[];
       decoded = jsonDecode(raw);
     } catch (e) {
-      throw StateError('Recordings index ${_index.path} is unreadable: $e');
+      throw CaptureStoreUnavailable(
+        'Recordings index ${_index.path} is unreadable: $e',
+      );
     }
     if (decoded is! List<dynamic>) {
-      throw StateError('Recordings index ${_index.path} is not a JSON list.');
+      throw CaptureStoreUnavailable(
+        'Recordings index ${_index.path} is not a JSON list.',
+      );
     }
     final List<Recording> rows = <Recording>[];
     for (final dynamic item in decoded) {

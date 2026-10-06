@@ -1,4 +1,3 @@
-import 'dart:convert';
 import 'dart:io';
 
 import 'package:augustyniak_capture/features/mcp/data/default_paths.dart';
@@ -40,17 +39,17 @@ Future<void> main(List<String> args) async {
     'capture_mcp: db=${paths.dbPath} recordings=${paths.recordingsDir}',
   );
 
+  void log(String m) => stderr.writeln('capture_mcp: $m');
   final McpServer server = McpServer(
     CaptureTools(
       SqliteCaptureSource(
         dbPath: paths.dbPath,
         recordingsDir: paths.recordingsDir,
-        log: (String m) => stderr.writeln('capture_mcp: $m'),
+        log: log,
       ),
+      log: log,
     ),
+    log: log,
   );
-  await server.serve(
-    stdin.transform(utf8.decoder).transform(const LineSplitter()),
-    stdout.writeln,
-  );
+  await server.serveBytes(stdin, stdout.writeln);
 }

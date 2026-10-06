@@ -12,3 +12,14 @@ abstract class CaptureSource {
 
   Future<List<Project>> projects();
 }
+
+/// No store could be found or read at all. [detail] names paths and is for
+/// stderr only; what reaches the agent is a fixed message.
+class CaptureStoreUnavailable implements Exception {
+  CaptureStoreUnavailable(this.detail);
+
+  final String detail;
+
+  @override
+  String toString() => 'CaptureStoreUnavailable: $detail';
+}
