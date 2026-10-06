@@ -188,4 +188,34 @@ void main() {
     put('$idB.txt', 'later');
     expect(await d.drain(), 1);
   });
+
+  test(
+    'an entry that cannot be stat-ed does not stop the other files',
+    () async {
+      // A dangling link stands in for a producer renaming its .tmp between the
+      // directory listing and the stat: listed, then gone.
+      Link(
+        p.join(inbox.path, '$idA.txt.tmp'),
+      ).createSync(p.join(root.path, 'gone'));
+      put('$idB.txt', 'still ingested');
+      final int n = await drainer((String id, String body) async {
+        seen.add(body);
+        return true;
+      }).drain();
+      expect(n, 1);
+      expect(seen, <String>['still ingested']);
+    },
+  );
+
+  test('a file removed by an earlier ingest does not stop the pass', () async {
+    final File later = put('$idB.txt', 'gone by then', ageSeconds: 10);
+    put('$idA.txt', 'first', ageSeconds: 100);
+    final int n = await drainer((String id, String body) async {
+      if (id == idA) later.deleteSync();
+      seen.add(id);
+      return true;
+    }).drain();
+    expect(n, 1);
+    expect(seen, <String>[idA, idB].sublist(0, 1) + <String>[]);
+  });
 }

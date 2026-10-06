@@ -51,15 +51,20 @@ class InboxDrainer {
     try {
       await for (final FileSystemEntity e in inbox.list()) {
         if (e is! File) continue;
-        final DateTime modified = await e.lastModified();
-        if (p.extension(e.path) == '.txt') {
-          files.add((e, modified));
-        } else if (e.path.endsWith('.txt.tmp') &&
-            DateTime.now().difference(modified) > _staleTmp) {
-          // A producer that crashed mid-write; a live one renames within
-          // milliseconds.
-          await e.delete();
-          _log('Inbox: removed stale partial write ${p.basename(e.path)}');
+        // Per entry: a producer renaming its .tmp between the listing and the
+        // stat must cost that entry, not the whole pass.
+        try {
+          if (p.extension(e.path) == '.txt') {
+            files.add((e, await e.lastModified()));
+          } else if (e.path.endsWith('.txt.tmp') &&
+              DateTime.now().difference(await e.lastModified()) > _staleTmp) {
+            // A producer that crashed mid-write; a live one renames within
+            // milliseconds.
+            await e.delete();
+            _log('Inbox: removed stale partial write ${p.basename(e.path)}');
+          }
+        } on FileSystemException catch (exception) {
+          _log('Inbox entry skipped: ${p.basename(e.path)} · $exception');
         }
       }
     } on FileSystemException catch (exception) {

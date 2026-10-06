@@ -170,6 +170,20 @@ void main() {
 
     expect(controller.isInitialized, isFalse);
     expect(await controller.addTextNote('hello', id: id), isFalse);
+    expect(controller.error, isNotNull);
+    expect(repo.saveCalls, 0);
+    controller.dispose();
+  });
+
+  test('the pre-load refusal notifies listeners and sets an error', () async {
+    final _FakeRepository repo = _FakeRepository(appDir);
+    final RecordingsController controller = buildController(repo);
+    int notified = 0;
+    controller.addListener(() => notified++);
+
+    expect(await controller.addTextNote('hello'), isFalse);
+    expect(controller.error, contains('still loading'));
+    expect(notified, 1);
     expect(repo.saveCalls, 0);
     controller.dispose();
   });

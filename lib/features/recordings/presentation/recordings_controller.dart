@@ -1795,7 +1795,15 @@ class RecordingsController extends ChangeNotifier {
     }
     // Before the first load the list is empty, not right: persisting now would
     // overwrite recordings.json with just this note.
-    if (!_initialized) return false;
+    if (!_initialized) {
+      // Callers that ignore the result still show `error`, so say why nothing
+      // was saved. An unreadable-index message already explains more; keep it.
+      if (!_indexUnreadable) {
+        _error = 'Captures are still loading — try again.';
+        notifyListeners();
+      }
+      return false;
+    }
     if (id != null && _recordings.any((Recording r) => r.id == id)) return true;
     if (_isRecording || _isBusy) return false;
     final String trimmed = body.trim();
