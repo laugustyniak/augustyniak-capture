@@ -520,6 +520,13 @@ class SettingsController extends ChangeNotifier {
     return id;
   }
 
+  bool get autoCleanup => _settings.autoCleanup;
+
+  Future<void> setAutoCleanup(bool value) async {
+    if (value == _settings.autoCleanup) return;
+    await _persist(_settings.copyWith(autoCleanup: value));
+  }
+
   /// The user's `SOUL.md`, or null when the typed profile is the soul.
   String? get soulPath => _settings.soulPath;
 

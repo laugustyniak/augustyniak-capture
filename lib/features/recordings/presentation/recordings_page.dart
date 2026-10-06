@@ -31,6 +31,7 @@ import '../../costs/domain/price_book.dart';
 import '../../costs/domain/usage_event.dart';
 import '../../costs/domain/usage_model_keys.dart';
 import '../../connections/data/http_daily_connections_service.dart';
+import '../../enrichment/domain/transcript_cleaner.dart';
 import '../../enrichment/data/composed_enrichment_context_source.dart';
 import '../domain/connection_reasoner.dart';
 import '../../logs/data/log_store.dart';
@@ -813,6 +814,12 @@ class _RecordingsPageState extends State<RecordingsPage>
     controller.connectionReasoner = settings.enrichmentService is ConnectionReasoner
         ? settings.enrichmentService as ConnectionReasoner
         : const ReviewConnectionReasoner();
+    // Clean-up rides the enrichment profile too: the same chat endpoint, asked
+    // for plain text instead of JSON.
+    controller.transcriptCleaner = settings.enrichmentService is TranscriptCleaner
+        ? settings.enrichmentService as TranscriptCleaner
+        : const DisabledTranscriptCleaner();
+    controller.autoCleanup = settings.autoCleanup;
     // OCR rides the enrichment profile (vision-capable chat endpoint) and has
     // no platform fallback behind it: with no profile active this is the
     // disabled service on desktop exactly as on mobile, so an image capture

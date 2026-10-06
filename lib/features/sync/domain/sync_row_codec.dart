@@ -89,6 +89,10 @@ class SyncRowCodec {
         'priorityReason': json['priorityReason'],
       if (json.containsKey('priorityBasis'))
         'priorityBasis': json['priorityBasis'],
+      // A proposal rides `payload` like the rank: it is derived, but accepting
+      // it on another device is the point of syncing it. It is never put in
+      // the `transcript` column.
+      if (json.containsKey('cleanup')) 'cleanup': json['cleanup'],
     };
     return <String, Object?>{
       'id': r.id,
@@ -174,6 +178,7 @@ class SyncRowCodec {
       'priority': payload['priority'],
       'priorityReason': payload['priorityReason'],
       'priorityBasis': payload['priorityBasis'],
+      'cleanup': payload['cleanup'],
       'routes': payload['routes'] ?? <Object?>[],
       'artifacts': payload['artifacts'] ?? <Object?>[],
       if (payload.containsKey('segments'))
