@@ -83,7 +83,7 @@ void main() {
 
       expect(
         rig.launched.single.toString(),
-        'https://chatgpt.com/?q=hello+%26+goodbye',
+        'https://chatgpt.com/?q=hello%20%26%20goodbye',
       );
       expect(rig.clipboard.copied, isEmpty);
       expect(outcome!.copiedToClipboard, isFalse);

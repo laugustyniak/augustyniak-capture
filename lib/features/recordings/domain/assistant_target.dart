@@ -107,9 +107,9 @@ enum AssistantTarget {
     final bool bareOnly = !supportsPrefill;
     if (bareOnly) return (uri: bare, needsClipboard: true);
 
-    final Uri full = bare.replace(
-      queryParameters: <String, String>{'q': prompt},
-    );
+    // `Uri(queryParameters:)` writes a space as `+`, which not every service
+    // decodes in a prefill; `encodeComponent` writes `%20` and `%2B`.
+    final Uri full = bare.replace(query: 'q=${Uri.encodeComponent(prompt)}');
     final bool tooLong = isWeb
         ? full.toString().length > maxWebUrlLength
         : prompt.length > maxDesktopPromptLength;

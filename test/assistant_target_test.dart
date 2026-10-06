@@ -35,6 +35,19 @@ void main() {
       }
     });
 
+    test('spaces are %20 and a literal plus is %2B', () {
+      for (final AssistantTarget target in AssistantTarget.values) {
+        if (!target.supportsPrefill) continue;
+        final String url = target.launchFor('two words 1+1').uri.toString();
+        expect(url, contains('q=two%20words%201%2B1'), reason: target.name);
+        expect(url, isNot(contains('+')), reason: target.name);
+        expect(
+          target.launchFor('two words 1+1').uri.queryParameters['q'],
+          'two words 1+1',
+        );
+      }
+    });
+
     test('gemini has no prefill and always needs the clipboard', () {
       final AssistantLaunch launch = AssistantTarget.gemini.launchFor('hi');
       expect(AssistantTarget.gemini.supportsPrefill, isFalse);
