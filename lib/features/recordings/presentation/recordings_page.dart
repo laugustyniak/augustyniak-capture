@@ -84,6 +84,7 @@ import '../data/foreground_capture_session.dart';
 import '../data/media_picker.dart';
 import '../data/markdown_note_vault.dart';
 import '../domain/capture_session.dart';
+import '../data/plugin_capture_sender.dart';
 import '../data/project_agent_handoff.dart';
 import '../data/command_router.dart';
 import '../data/project_inbox_router.dart';
@@ -407,6 +408,12 @@ class _RecordingsPageState extends State<RecordingsPage>
       agentHandoff: launcher == null
           ? const DisabledAgentHandoff()
           : ProjectAgentHandoff(projectById: _projectById, launcher: launcher),
+      // The fourth way out, and the only one that needs no project: a
+      // capture's text goes to a web assistant, the share sheet or the
+      // clipboard. Never disabled — Web and Copy exist on every platform.
+      captureSender: createPluginCaptureSender(
+        clipboard: const SystemClipboardSink(),
+      ),
       // The second copy of every capture, as markdown. Reads its directory
       // through callbacks for the same reason the router reads its projects
       // live: the user can point it somewhere else at any time, and the very
