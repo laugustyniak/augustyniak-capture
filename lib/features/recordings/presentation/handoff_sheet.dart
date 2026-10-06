@@ -388,13 +388,19 @@ class _HandoffSheetState extends State<_HandoffSheet> {
   /// publishes the capture to a third party, so the destination is on the
   /// button, and a target that sends the moment it opens says so — the prompt
   /// field above is then the user's last chance to edit.
+  ///
+  /// Claude Desktop is named as the app it opens rather than by a domain: its
+  /// link never reaches a website, and "claude.ai" beside it read as a second
+  /// web button.
   static String _detailOf(SendTarget target) => switch (target) {
-    AssistantSendTarget(:final AssistantTarget target) =>
-      !target.supportsPrefill
-          ? '${target.domain} · you paste the prompt'
+    AssistantSendTarget(:final AssistantTarget target) => () {
+      final String where = target.isWeb ? target.domain : 'desktop app';
+      return !target.supportsPrefill
+          ? '$where · you paste the prompt'
           : target.autoSubmits
-          ? '${target.domain} · sends immediately'
-          : '${target.domain} · opens with the prompt filled in',
+          ? '$where · sends immediately'
+          : '$where · opens with the prompt filled in';
+    }(),
     ShareSendTarget() => 'Pick any app you have installed',
     CopySendTarget() => 'Nothing leaves this device',
   };
@@ -433,7 +439,13 @@ class _SentNotice extends StatelessWidget {
               const SizedBox(width: 6),
               Expanded(
                 child: Text(
-                  copyOnly ? 'Copied to clipboard' : 'Sent to $target',
+                  // A clipboard fallback opened a page and sent nothing, so
+                  // it must not read as a delivery.
+                  copyOnly
+                      ? 'Copied to clipboard'
+                      : outcome.copiedToClipboard
+                      ? 'Opened $target'
+                      : 'Sent to $target',
                   style: ConsoleText.micro.copyWith(color: Console.green),
                 ),
               ),

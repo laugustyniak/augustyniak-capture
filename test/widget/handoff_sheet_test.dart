@@ -46,6 +46,7 @@ class _FakeSender implements CaptureSender {
 
   @override
   Future<List<SendTarget>> availableTargets() async => <SendTarget>[
+    const AssistantSendTarget(AssistantTarget.claudeDesktop),
     const AssistantSendTarget(AssistantTarget.claudeWeb),
     const AssistantSendTarget(AssistantTarget.chatgpt),
     const AssistantSendTarget(AssistantTarget.gemini),
@@ -309,6 +310,23 @@ void main() {
 
     expect(
       find.textContaining('Prompt copied — paste it into'),
+      findsOneWidget,
+    );
+    // Nothing was sent: a page was opened and the prompt waits on the
+    // clipboard, so the headline must not claim a delivery.
+    expect(find.text('Opened ChatGPT · web'), findsOneWidget);
+    expect(find.textContaining('Sent to'), findsNothing);
+  });
+
+  testWidgets('the Claude Desktop tile names the app, not a website', (
+    WidgetTester tester,
+  ) async {
+    final RecordingsController controller = await projectless(_FakeSender());
+
+    await openSheet(tester, controller);
+
+    expect(
+      find.text('desktop app · opens with the prompt filled in'),
       findsOneWidget,
     );
   });
