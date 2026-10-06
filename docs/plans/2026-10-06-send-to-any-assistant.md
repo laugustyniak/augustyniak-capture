@@ -1,6 +1,6 @@
 # Plan: send any capture to any assistant
 
-Status: **proposed** · Owner: laugustyniak · Issue: #244 · Scope: one **Send
+Status: **proposed, spiked** · Owner: laugustyniak · Issue: #244 · Scope: one **Send
 to…** sheet that delivers a capture to Claude, ChatGPT, Perplexity, Gemini or
 any other assistant, through the browser, the system share sheet, the
 clipboard, or a terminal session on macOS, Linux and Windows — with or without a
@@ -68,8 +68,9 @@ grouped targets:
 | Group | Targets | Available when |
 | --- | --- | --- |
 | Terminal | Claude Code, Codex, Gemini CLI, Antigravity | desktop, a terminal resolves, project not Command-bound |
+| Claude Desktop | new chat, Claude Code session in a folder | desktop, a `claude://` handler is registered |
 | Web | Claude, ChatGPT, Perplexity, Gemini | always (`url_launcher` exists on every platform) |
-| Share | system share sheet | `share_plus` supports the platform (Android, iOS, macOS; Windows and Linux shown only if verified useful) |
+| Share | system share sheet | Android, iOS, macOS only — on Linux and Windows `share_plus` falls back to `mailto:`, which is not a share sheet |
 | Copy | copy prompt | always |
 
 Because Web and Copy are always available, **the button is shown on every
@@ -97,10 +98,13 @@ per service:
 
 | Value | Prefill URL | `supportsPrefill` |
 | --- | --- | --- |
-| `claude` | `https://claude.ai/new?q=<prompt>` | true |
-| `chatgpt` | `https://chatgpt.com/?q=<prompt>` | true |
-| `perplexity` | `https://www.perplexity.ai/search?q=<prompt>` | true |
-| `gemini` | `https://gemini.google.com/app` | false |
+| `claude` | `https://claude.ai/new?q=<prompt>` | true (may auto-submit) |
+| `chatgpt` | `https://chatgpt.com/?q=<prompt>` | true (auto-submits) |
+| `perplexity` | `https://www.perplexity.ai/search?q=<prompt>` | true (auto-submits) |
+| `gemini` | `https://gemini.google.com/app` | false (verified: `?q=` is ignored) |
+
+A target that auto-submits says so on its button ("Ask ChatGPT — sends immediately"),
+because the prompt field in the sheet is then the user's last chance to edit.
 
 None of these query parameters is a documented API. Keeping them in one enum
 means a service that drops prefill is a one-line change to `supportsPrefill`,
@@ -111,7 +115,7 @@ not a hunt through the UI.
 1. Build the URL with `Uri.https(..., {'q': prompt})` — never string
    concatenation, so encoding is the URI class's job.
 2. If `!supportsPrefill`, or the encoded URL is longer than
-   `maxPrefillUrlLength` (initial value 6000 characters, set by the spike), copy
+   `maxPrefillUrlLength` (8000 characters of the *encoded* URL — see Spike results), copy
    the prompt to the clipboard and open the bare page. The sheet then shows
    "Prompt copied — paste it into <service>". **A long transcript is never
    silently truncated by a URL limit.**
@@ -125,6 +129,28 @@ not a hunt through the UI.
 The sheet shows the destination domain before the user confirms. Sending to a
 web assistant publishes the capture's text to a third party; the user should
 see where it goes on the button itself, not discover it afterwards.
+
+### Claude Desktop deep links
+
+Claude Desktop registers `claude://` on macOS, Windows and Linux, and its
+documented links cover two of this plan's targets without a terminal:
+
+- `claude://claude.ai/new?q=<prompt>` — a new chat with the prompt **prefilled,
+  not sent**.
+- `claude://code/new?q=<prompt>&folder=<path>` — a Claude Code session in a
+  folder. Desktop asks the user to confirm the folder every time.
+
+`q` is truncated to roughly 14,000 characters by Desktop itself, so the same
+length rule as the web applies, measured on the decoded prompt (12,000
+characters, leaving margin). The `folder` link is the cheapest Windows answer
+in this plan: it needs no `wt.exe`, no PowerShell script and no
+`ExecutableResolver`, at the price of being Claude-only.
+
+Availability is "a handler is registered", answered without launching:
+`xdg-mime query default x-scheme-handler/claude` on Linux,
+`LSCopyDefaultHandlerForURLScheme` on macOS (via `canLaunchUrl`), the
+`HKCR\claude` key on Windows. `canLaunchUrl` alone is the first attempt; the
+platform-specific probe is only added if it proves unreliable.
 
 ### Share and copy
 
@@ -182,9 +208,10 @@ the agent writes there shows up on the card like a `.agent-tasks` result.
 
 `AgentKind.gemini` and `ProjectAgent.gemini('gemini')`, with
 `promptArguments` → `['-i', safe]` (interactive with an opening prompt) and
-`skipPermissionsArguments` → `['--yolo']`. Both spellings are verified against
-the installed CLI's `--help` in slice 2 before they are written down, the way
-Codex's was. An older build reading a project whose `defaultAgent` is
+`skipPermissionsArguments` → `['--yolo']`. Both spellings were verified
+against `gemini --help` of `@google/gemini-cli` 0.62.0 during the spike:
+`-i, --prompt-interactive` "Execute the provided prompt and continue in
+interactive mode", `-y, --yolo` "Automatically accept all actions". An older build reading a project whose `defaultAgent` is
 `gemini` gets null from `AgentKind.fromName`, which already degrades to no
 default.
 
@@ -231,7 +258,8 @@ first and seen red.
 ### Slice 1 — copy, share, web (all platforms, no project needed)
 
 - `capturePrompt` in the domain; `ProjectAgentHandoff.promptFor` delegates.
-- `WebAssistant`, `WebAssistantSender`, `ShareSender`, `CopySender`.
+- `WebAssistant`, `WebAssistantSender`, `ShareSender`, `CopySender`, and the
+  Claude Desktop chat link (`claude://claude.ai/new?q=`).
 - `RouteKind.assistant`, `RecordingsController.send`, Mark done / Keep on desk.
 - Sheet regrouped; button shown on every capture with text.
 - `share_plus` added to `pubspec.yaml`.
@@ -292,6 +320,48 @@ Half a day, no code merged:
    Share be hidden there?
 
 Results go into this file under **Spike results** before slice 1 starts.
+
+## Spike results
+
+Run 2026-10-06 on Linux (Ubuntu, Chrome 154, Claude Desktop installed). No
+Android device was attached, so the Android questions stay open.
+
+| Question | Result | Source |
+| --- | --- | --- |
+| Gemini prefill | **No.** `gemini.google.com/app?q=…` loads with an empty box (headless Chrome screenshot). Only third-party extensions add `?q=`/`?prompt=`. Clipboard fallback stays. | screenshot; [HN request](https://news.ycombinator.com/item?id=46761567) |
+| ChatGPT `?q=` | Prefills **and auto-submits**. `?prompt=` is an alias. After a 2025 prompt-injection report OpenAI gated auto-submit on `Sec-Fetch-Site`; a link opened from another app arrives as `none`, i.e. like a typed URL. | [Tenable TRA-2025-22](https://www.tenable.com/security/research/tra-2025-22), [OpenAI forum](https://community.openai.com/t/query-parameters-in-chatgpt/1027747) |
+| Claude.ai `?q=` | `claude.ai/new?q=` prefills; reports differ on whether it auto-submits. Treat as "may send". | [anthropics/claude-code#8827](https://github.com/anthropics/claude-code/issues/8827) |
+| Claude Desktop | `claude://claude.ai/new?q=` prefills **without sending**, truncated at ~14,000 characters; `claude://code/new?q=&folder=` opens a Claude Code session after a folder confirmation. Handler is registered on this machine (`com.anthropic.Claude.desktop`). | [Claude support](https://support.claude.com/en/articles/14729294-open-claude-desktop-with-a-link) |
+| Perplexity `?q=` | `perplexity.ai/search?q=` prefills **and auto-submits**. | [u2l.ai generator notes](https://u2l.ai/tools/perplexity-prompt-link-generator) |
+| Live check, ChatGPT / Claude.ai / Perplexity | **Not done by automation**: all three serve a Cloudflare bot challenge to headless Chrome. Needs one manual click per service in a real browser before slice 1 merges. | screenshots |
+| URL length | Cloudflare rejects request lines above ~16 KB, and every character outside ASCII costs 6 encoded characters (`ż` → `%C5%BC`). Threshold set at **8000 characters of the encoded URL** — about 1,300 Polish characters at worst, about 7,000 ASCII. Over it: clipboard + bare page. | Cloudflare limits; arithmetic |
+| `share_plus` on Linux / Windows | Text share opens a `mailto:` link, not a share sheet. **Share is hidden on Linux and Windows.** Current API is `SharePlus.instance.share(ShareParams(...))`, 13.3.x. | [pub.dev](https://pub.dev/packages/share_plus) |
+| Gemini CLI flags | `-i/--prompt-interactive` and `-y/--yolo` confirmed in 0.62.0. | `npx @google/gemini-cli --help` |
+| Android: does `chatgpt.com/?q=` reach the ChatGPT app with the prompt? | **Open.** OpenAI's forum still carries a request for intent support in the mobile app, which suggests the query is dropped. Until checked on a device, Android lists Share **first** and Web second. | [OpenAI forum](https://community.openai.com/t/support-custom-url-schemes-or-intent-handlers-to-trigger-specific-behaviors-in-the-chatgpt-mobile-app/1255168) |
+
+Consequences for the slices:
+
+- Slice 1 gains the **Claude Desktop** chat link (`claude://claude.ai/new?q=`);
+  it is the only target that is documented, prefills without sending, and
+  takes ~14k characters.
+- Slice 3 tries `claude://code/new?folder=` **before** the `wt.exe` +
+  PowerShell launcher. If Claude-only sessions on Windows are enough, the
+  PowerShell launcher is deferred.
+- Auto-submitting targets are labelled as such in the sheet.
+- OCR text from somebody else's image is the one input here that is not the
+  user's own words, and ChatGPT and Perplexity send it the moment the tab
+  opens. The prompt field in the sheet is the review point, so it is always
+  shown expanded for an image capture.
+
+Manual checks still owed before slice 1 merges (one click each, in a logged-in
+browser and on an Android phone):
+
+```bash
+xdg-open 'https://claude.ai/new?q=Say%20only%20OK'
+xdg-open 'https://chatgpt.com/?q=Say%20only%20OK'
+xdg-open 'https://www.perplexity.ai/search?q=Say%20only%20OK'
+xdg-open 'claude://claude.ai/new?q=Say%20only%20OK'
+```
 
 ## Open questions
 
