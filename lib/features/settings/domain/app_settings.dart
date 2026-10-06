@@ -19,6 +19,7 @@ class AppSettings {
     this.activeEnrichmentProfileId,
     String? enrichmentInstructions,
     this.soulPath,
+    this.autoCleanup = false,
     this.audio = AudioConfig.defaults,
     this.themeMode = AppThemeMode.system,
     this.textScale = defaultTextScale,
@@ -85,6 +86,11 @@ class AppSettings {
   /// missing or unreadable the typed profile still stands in, so clearing this
   /// is never required to recover.
   final String? soulPath;
+
+  /// Whether every finished speech or OCR capture gets a clean-up proposal
+  /// (#258). Off by default — it is one more model call per capture — and
+  /// written only when on, so a file that never touched it is unchanged.
+  final bool autoCleanup;
 
   final AudioConfig audio;
   final AppThemeMode themeMode;
@@ -173,6 +179,7 @@ class AppSettings {
     bool resetEnrichmentInstructions = false,
     String? soulPath,
     bool clearSoulPath = false,
+    bool? autoCleanup,
     AudioConfig? audio,
     AppThemeMode? themeMode,
     double? textScale,
@@ -208,6 +215,7 @@ class AppSettings {
           ? null
           : (enrichmentInstructions ?? _enrichmentInstructions),
       soulPath: clearSoulPath ? null : (soulPath ?? this.soulPath),
+      autoCleanup: autoCleanup ?? this.autoCleanup,
       audio: audio ?? this.audio,
       themeMode: themeMode ?? this.themeMode,
       textScale: resetTextScale
@@ -262,6 +270,7 @@ class AppSettings {
       if (_enrichmentInstructions != null)
         'enrichmentInstructions': _enrichmentInstructions,
       if (soulPath != null) 'soulPath': soulPath,
+      if (autoCleanup) 'autoCleanup': true,
       if (priceOverrides.isNotEmpty)
         'priceOverrides': <String, dynamic>{
           for (final MapEntry<String, ModelPrice> entry
@@ -347,6 +356,7 @@ class AppSettings {
         json['queueDensity'] is String ? json['queueDensity'] as String : null,
       ),
       navRailExpanded: json['navRailExpanded'] == true,
+      autoCleanup: json['autoCleanup'] == true,
       soulPath: json['soulPath'] is String
           ? json['soulPath'] as String
           : null,

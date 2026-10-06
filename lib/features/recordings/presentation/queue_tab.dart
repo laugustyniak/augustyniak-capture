@@ -1341,6 +1341,13 @@ class _QueueTabState extends State<QueueTab> {
           widget.usageRepository?.forCapture(recording.id) ??
           const <UsageEvent>[],
       storagePrice: widget.storagePrice,
+      onCleanUp: RecordingsController.canCleanUp(recording)
+          ? () => controller.proposeCleanup(recording.id)
+          : null,
+      onAcceptCleanup: () => controller.acceptCleanup(recording.id),
+      onRejectCleanup: () => controller.rejectCleanup(recording.id),
+      cleaning: controller.isCleaning(recording.id),
+      cleanupError: controller.cleanupError(recording.id),
     );
   }
 

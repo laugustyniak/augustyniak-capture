@@ -14,6 +14,7 @@ import '../../costs/domain/usage_sink.dart';
 import '../../enrichment/domain/enrichment_context.dart';
 import '../../enrichment/domain/enrichment_result.dart';
 import '../../enrichment/domain/enrichment_service.dart';
+import '../../enrichment/domain/transcript_cleaner.dart';
 import '../../logs/domain/log_event.dart';
 import '../../processing/data/ocr_service.dart';
 import '../../processing/data/video_audio_extractor.dart';
@@ -52,6 +53,7 @@ import '../domain/capture_category.dart';
 import '../domain/capture_priority.dart';
 import '../domain/stale_rank.dart';
 import '../domain/capture_segment.dart';
+import '../domain/cleanup_proposal.dart';
 import '../domain/capture_type.dart';
 import '../domain/clipboard_sink.dart';
 import '../domain/capture_router.dart';
@@ -533,6 +535,137 @@ class RecordingsController extends ChangeNotifier {
   }
 
   set connectionReasoner(ConnectionReasoner value) => _connectionReasoner = value;
+
+  /// Applied to the next clean-up, like [enrichmentService]. The default
+  /// throws at use, so an unconfigured install only lacks the proposal.
+  set transcriptCleaner(TranscriptCleaner value) => _transcriptCleaner = value;
+  TranscriptCleaner _transcriptCleaner = const DisabledTranscriptCleaner();
+
+  /// Whether a finished capture gets a clean-up proposal without being asked.
+  /// Off by default: each one is a model call per transcript chunk (#258).
+  bool autoCleanup = false;
+
+  /// In memory only, like `_enrichingIds`: proposing is not a state anything
+  /// resumes, and the item is already whole while it runs.
+  final Set<String> _cleaningIds = <String>{};
+  bool isCleaning(String id) => _cleaningIds.contains(id);
+
+  /// Why the last clean-up of an item produced no proposal, for the editor to
+  /// say so — the log alone would leave CLEAN UP looking like it did nothing.
+  /// In memory only, and cleared by the next attempt.
+  final Map<String, String> _cleanupErrors = <String, String>{};
+  String? cleanupError(String id) => _cleanupErrors[id];
+
+  /// Whether [recording] has text that came from speech or OCR. A note typed
+  /// by hand is already the user's own wording — proposing to "clean" it
+  /// would be rewriting them.
+  static bool canCleanUp(Recording recording) =>
+      (recording.transcript ?? '').trim().isNotEmpty &&
+      recording.segments.any(
+        (CaptureSegment segment) => segment.type != CaptureType.text,
+      );
+
+  /// Ask for a clean-up proposal for [id], from its transcript as it is now.
+  ///
+  /// Holds the usage scope like [retryEnrichment], so the cost lands against
+  /// this capture under `UsageStage.cleanup`. Never writes `transcript`.
+  Future<void> proposeCleanup(String id) async {
+    if (_cleaningIds.contains(id)) return;
+    final void Function() releaseUsageScope = await _acquireUsageScope();
+    try {
+      if (_disposed) return;
+      await _proposeCleanup(id);
+    } finally {
+      releaseUsageScope();
+    }
+  }
+
+  /// The proposal itself; the caller holds the usage scope. Best-effort under
+  /// the `ClipboardSink` contract: every failure is logged and costs only the
+  /// proposal.
+  Future<void> _proposeCleanup(String id) async {
+    final int index = _recordings.indexWhere((Recording i) => i.id == id);
+    if (index < 0) return;
+    final Recording item = _recordings[index];
+    if (!canCleanUp(item) || !_cleaningIds.add(id)) return;
+    final String source = item.transcript!;
+    _cleanupErrors.remove(id);
+    if (!_disposed) notifyListeners();
+    try {
+      final EnrichmentContext context = await _resolveEnrichmentContext(id);
+      _beginUsageJob(id, UsageStage.cleanup);
+      final String cleaned;
+      try {
+        cleaned = await _transcriptCleaner.cleanUp(source, context: context);
+      } finally {
+        _endUsageJob();
+      }
+      if (_disposed) return;
+      // Written only if the transcript is still the one that was cleaned: a
+      // hand edit or an appended segment while the call ran would otherwise get
+      // a proposal for text that no longer exists.
+      await _update(
+        id,
+        (Recording current) => current.transcript == source
+            ? current.copyWith(
+                cleanup: CleanupProposal(
+                  text: cleaned,
+                  source: CleanupProposal.fingerprint(source),
+                ),
+              )
+            : current,
+      );
+      _logSink.log('Clean-up proposed.', recordingId: id);
+    } on CleanupNotConfiguredException catch (exception) {
+      _cleanupErrors[id] = exception.toString();
+      _logSink.log(
+        'Clean-up skipped — no model configured.',
+        level: LogLevel.warn,
+        recordingId: id,
+      );
+    } catch (exception) {
+      _cleanupErrors[id] = exception.toString();
+      _logSink.log(
+        'Clean-up failed: $exception',
+        level: LogLevel.warn,
+        recordingId: id,
+      );
+    } finally {
+      _cleaningIds.remove(id);
+      if (!_disposed) notifyListeners();
+    }
+  }
+
+  /// Replace the transcript with the proposal, through the same funnel as a
+  /// hand edit — so the revision history keeps the raw text. Refused, and
+  /// false, when the proposal is stale: it describes a transcript that has
+  /// since changed, and applying it would silently undo that change.
+  Future<bool> acceptCleanup(String id) async {
+    final int index = _recordings.indexWhere((Recording i) => i.id == id);
+    if (index < 0) return false;
+    final CleanupProposal? proposal = _recordings[index].cleanup;
+    if (proposal == null || !proposal.matches(_recordings[index].transcript)) {
+      return false;
+    }
+    await _update(
+      id,
+      (Recording item) =>
+          item.copyWith(transcript: proposal.text, clearCleanup: true),
+      source: RevisionSource.user,
+    );
+    _logSink.log('Clean-up accepted.', recordingId: id);
+    return true;
+  }
+
+  /// Drop the proposal. The transcript is untouched.
+  Future<void> rejectCleanup(String id) async {
+    await _update(
+      id,
+      (Recording item) => item.copyWith(clearCleanup: true),
+      source: RevisionSource.user,
+    );
+    _logSink.log('Clean-up rejected.', recordingId: id);
+  }
 
   bool isAnalyzingConnections(String id) => _analyzingConnections.contains(id);
   String? connectionAnalysisError(String id) => _connectionErrors[id];
@@ -3210,6 +3343,11 @@ class RecordingsController extends ChangeNotifier {
         // changed again. It runs whether or not enrichment succeeded: an
         // install with no profile still wants its captures copied.
         await _mirrorToVault(id);
+        // After everything the capture needs: a proposal is optional and
+        // reviewed later, so it waits behind the title and the vault copy.
+        if (autoCleanup && !_cancelledProcessingIds.contains(id)) {
+          await _proposeCleanup(id);
+        }
       } catch (exception) {
         if (_cancelledProcessingIds.contains(id)) {
           await _update(

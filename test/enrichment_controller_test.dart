@@ -7,6 +7,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:augustyniak_capture/features/enrichment/domain/enrichment_context.dart';
 import 'package:augustyniak_capture/features/enrichment/domain/enrichment_result.dart';
 import 'package:augustyniak_capture/features/enrichment/domain/enrichment_service.dart';
+import 'package:augustyniak_capture/features/enrichment/domain/transcript_cleaner.dart';
 import 'package:augustyniak_capture/features/processing/domain/processor.dart';
 import 'package:augustyniak_capture/features/processing/domain/processor_registry.dart';
 import 'package:augustyniak_capture/features/recordings/data/recordings_repository.dart';
@@ -872,6 +873,180 @@ void main() {
       expect(await c.staleRankCount(), 1);
     });
   });
+
+  group('transcript clean-up', () {
+    const String raw = 'eee so we need to uh call the client';
+    const String clean = 'So we need to call the client.';
+
+    Recording spoken(
+      Directory dir,
+      String id, {
+      CaptureType type = CaptureType.audioRecording,
+    }) => Recording(
+      id: id,
+      filePath: '${dir.path}/$id.m4a',
+      createdAt: DateTime(2026, 10, 7),
+      durationMs: 1000,
+      status: RecordingStatus.completed,
+      type: type,
+      transcript: raw,
+    );
+
+    Future<RecordingsController> withCleaner(
+      Directory dir,
+      List<Recording> seed,
+      TranscriptCleaner cleaner,
+    ) async {
+      final _FakeRepo repo = _FakeRepo(dir)..saved = seed;
+      final RecordingsController c = _controller(repo)
+        ..transcriptCleaner = cleaner;
+      addTearDown(c.dispose);
+      await c.initialize();
+      return c;
+    }
+
+    test('a proposal never writes the transcript', () async {
+      final Directory dir = await _tmp();
+      addTearDown(() => dir.delete(recursive: true));
+      final RecordingsController c = await withCleaner(dir, <Recording>[
+        spoken(dir, 'a'),
+      ], _FakeCleaner(clean));
+
+      await c.proposeCleanup('a');
+
+      expect(c.recordings.single.transcript, raw);
+      expect(c.recordings.single.cleanup?.text, clean);
+      expect(c.recordings.single.cleanup?.matches(raw), isTrue);
+      expect(c.isCleaning('a'), isFalse);
+    });
+
+    test('accept writes the proposal and clears it', () async {
+      final Directory dir = await _tmp();
+      addTearDown(() => dir.delete(recursive: true));
+      final RecordingsController c = await withCleaner(dir, <Recording>[
+        spoken(dir, 'a'),
+      ], _FakeCleaner(clean));
+      await c.proposeCleanup('a');
+
+      expect(await c.acceptCleanup('a'), isTrue);
+
+      expect(c.recordings.single.transcript, clean);
+      expect(c.recordings.single.cleanup, isNull);
+    });
+
+    test('reject drops the proposal and leaves the transcript alone', () async {
+      final Directory dir = await _tmp();
+      addTearDown(() => dir.delete(recursive: true));
+      final RecordingsController c = await withCleaner(dir, <Recording>[
+        spoken(dir, 'a'),
+      ], _FakeCleaner(clean));
+      await c.proposeCleanup('a');
+
+      await c.rejectCleanup('a');
+
+      expect(c.recordings.single.cleanup, isNull);
+      expect(c.recordings.single.transcript, raw);
+    });
+
+    test('a stale proposal cannot be accepted', () async {
+      final Directory dir = await _tmp();
+      addTearDown(() => dir.delete(recursive: true));
+      final RecordingsController c = await withCleaner(dir, <Recording>[
+        spoken(dir, 'a'),
+      ], _FakeCleaner(clean));
+      await c.proposeCleanup('a');
+      await c.editTranscript('a', '$raw and one more thing');
+
+      expect(await c.acceptCleanup('a'), isFalse);
+      expect(c.recordings.single.transcript, '$raw and one more thing');
+    });
+
+    test('an edit while the call runs gets no proposal for old text', () async {
+      final Directory dir = await _tmp();
+      addTearDown(() => dir.delete(recursive: true));
+      final _GatedCleaner cleaner = _GatedCleaner(clean);
+      final RecordingsController c = await withCleaner(dir, <Recording>[
+        spoken(dir, 'a'),
+      ], cleaner);
+
+      final Future<void> pending = c.proposeCleanup('a');
+      await cleaner.started.future;
+      expect(c.isCleaning('a'), isTrue);
+      await c.editTranscript('a', 'edited by hand');
+      cleaner.release.complete();
+      await pending;
+
+      expect(c.recordings.single.cleanup, isNull);
+      expect(c.recordings.single.transcript, 'edited by hand');
+    });
+
+    test('a failure is swallowed and proposes nothing', () async {
+      final Directory dir = await _tmp();
+      addTearDown(() => dir.delete(recursive: true));
+      final RecordingsController c = await withCleaner(dir, <Recording>[
+        spoken(dir, 'a'),
+      ], const DisabledTranscriptCleaner());
+
+      await c.proposeCleanup('a');
+
+      expect(c.recordings.single.cleanup, isNull);
+      expect(c.recordings.single.status, RecordingStatus.completed);
+      expect(c.cleanupError('a'), contains('Configure'));
+    });
+
+    for (final bool auto in <bool>[true, false]) {
+      test('a dictation that finishes processing is proposed only when '
+          'auto clean-up is ${auto ? 'on' : 'off'}', () async {
+        final Directory dir = await _tmp();
+        addTearDown(() => dir.delete(recursive: true));
+        await File('${dir.path}/a.m4a').writeAsString(raw);
+        final _FakeCleaner cleaner = _FakeCleaner(clean);
+        final RecordingsController c = RecordingsController(
+          repository: _FakeRepo(dir)
+            ..saved = <Recording>[
+              Recording(
+                id: 'a',
+                filePath: '${dir.path}/a.m4a',
+                createdAt: DateTime(2026, 10, 7),
+                durationMs: 1000,
+                status: RecordingStatus.failed,
+              ),
+            ],
+          transcriptionService: const DisabledTranscriptionService(),
+          enrichmentService: const DisabledEnrichmentService(),
+          processorRegistry: ProcessorRegistry(<CaptureType, Processor>{
+            CaptureType.audioRecording: const _EchoProcessor(),
+          }),
+        )
+          ..transcriptCleaner = cleaner
+          ..autoCleanup = auto;
+        addTearDown(c.dispose);
+        await c.initialize();
+
+        await c.retryTranscription('a');
+        await c.waitForProcessing();
+
+        expect(c.recordings.single.status, RecordingStatus.completed);
+        expect(cleaner.calls, auto ? 1 : 0);
+        expect(c.recordings.single.cleanup?.text, auto ? clean : null);
+        expect(c.recordings.single.transcript, raw);
+      });
+    }
+
+    test('a note typed by hand is never cleaned', () async {
+      final Directory dir = await _tmp();
+      addTearDown(() => dir.delete(recursive: true));
+      final _FakeCleaner cleaner = _FakeCleaner(clean);
+      final RecordingsController c = await withCleaner(dir, <Recording>[
+        spoken(dir, 'a', type: CaptureType.text),
+      ], cleaner);
+
+      await c.proposeCleanup('a');
+
+      expect(cleaner.calls, 0);
+      expect(c.recordings.single.cleanup, isNull);
+    });
+  });
 }
 
 /// Throws on the first call only, so a pass sees one failure and one success.
@@ -887,6 +1062,38 @@ class _FlakyEnrichment implements EnrichmentService {
   }) async {
     calls++;
     if (calls == 1) throw StateError('boom');
+    return result;
+  }
+}
+
+class _FakeCleaner implements TranscriptCleaner {
+  _FakeCleaner(this.result);
+  final String result;
+  int calls = 0;
+
+  @override
+  Future<String> cleanUp(
+    String text, {
+    EnrichmentContext context = EnrichmentContext.none,
+  }) async {
+    calls++;
+    return result;
+  }
+}
+
+class _GatedCleaner implements TranscriptCleaner {
+  _GatedCleaner(this.result);
+  final String result;
+  final Completer<void> started = Completer<void>();
+  final Completer<void> release = Completer<void>();
+
+  @override
+  Future<String> cleanUp(
+    String text, {
+    EnrichmentContext context = EnrichmentContext.none,
+  }) async {
+    if (!started.isCompleted) started.complete();
+    await release.future;
     return result;
   }
 }

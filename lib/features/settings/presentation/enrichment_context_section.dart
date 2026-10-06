@@ -491,6 +491,50 @@ class _EnrichmentContextSectionState extends State<EnrichmentContextSection> {
                 ],
               ),
               Divider(color: Console.border, height: 26),
+              // Off by default: one extra model call per dictation is a cost
+              // the user opts into, and the proposal still waits for ACCEPT.
+              // A Row, not a SwitchListTile: a ListTile inside this card's
+              // decorated box trips the "ink splashes may be invisible" check.
+              Row(
+                children: <Widget>[
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: <Widget>[
+                        Text(
+                          'PROPOSE A CLEAN-UP FOR EVERY DICTATION',
+                          style: ConsoleText.micro.copyWith(
+                            color: Console.muted,
+                            fontWeight: FontWeight.w800,
+                            letterSpacing: .6,
+                          ),
+                        ),
+                        const SizedBox(height: 4),
+                        Text(
+                          'Fillers out, misheard names fixed against your '
+                          'soul. One extra model call each; nothing replaces '
+                          'the transcript until you accept it.',
+                          style: TextStyle(
+                            color: Console.mutedSoft,
+                            fontSize: 10,
+                            height: 1.45,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(width: 10),
+                  Switch(
+                    key: const ValueKey<String>('auto-cleanup'),
+                    value: widget.controller.autoCleanup,
+                    onChanged: (bool value) async {
+                      await widget.controller.setAutoCleanup(value);
+                      if (mounted) setState(() {});
+                    },
+                  ),
+                ],
+              ),
+              Divider(color: Console.border, height: 26),
               Row(
                 children: <Widget>[
                   Text(
