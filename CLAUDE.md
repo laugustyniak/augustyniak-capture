@@ -141,7 +141,7 @@ Neither rule is weakened by the two removal paths (`discardRecording`, `deleteRe
 
 Seventeen features, sixteen lines — `timer`/`momentum` share one. Read the pointer before changing anything in its area.
 
-- **`recordings`** — the queue, the capture screen, the editor, the controller that owns the pipeline. `docs/architecture/capture-pipeline.md`, `docs/architecture/ui.md`.
+- **`recordings`** — the queue, the capture screen, the editor, the controller that owns the pipeline. `docs/architecture/capture-pipeline.md`, `docs/architecture/ui.md`. External text captures (Siri intent, Android CREATE_NOTE) arrive through an inbox directory drained after load and on resume: `docs/architecture/capture-pipeline.md#inbox-external-capture`.
 - **`processing`** — `Processor` turns a segment's source into text. **The rule to enforce in review: a processor only ever reads the source — never writes, moves or deletes it.** `docs/architecture/processing.md`.
 - **`transcription`** — `TranscriptionService` and the on-device engine behind `ProfileKind.localWhisper`. Long audio has three ceilings and only one of them tells you. `docs/architecture/transcription.md`.
 - **`enrichment`** — the optional second AI stage: processor output becomes `title`, `category`, `summary`, `tags`, and a `priority` ranked against the user's profile ("soul"). Best-effort and last, after the item is already persisted `completed`; it respects field ownership and never touches `status`. `docs/architecture/enrichment.md`.
