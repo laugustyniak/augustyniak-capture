@@ -22,6 +22,7 @@ Usage:
     python3 tool/generate_icon.py                       # 1024 px master
     python3 tool/generate_icon.py --sizes-dir out/ 512 256 128
     python3 tool/generate_icon.py --android-res android/app/src/main/res
+    python3 tool/generate_icon.py --wear-res android/wear/src/main/res
     python3 tool/generate_icon.py \\
         --ios-appiconset ios/Runner/Assets.xcassets/AppIcon.appiconset
     python3 tool/generate_icon.py \\
@@ -211,6 +212,7 @@ def main() -> None:
     )
     parser.add_argument("--sizes-dir", type=pathlib.Path, default=None)
     parser.add_argument("--android-res", type=pathlib.Path, default=None)
+    parser.add_argument("--wear-res", type=pathlib.Path, default=None)
     parser.add_argument("--ios-appiconset", type=pathlib.Path, default=None)
     parser.add_argument("--macos-appiconset", type=pathlib.Path, default=None)
     parser.add_argument("sizes", type=int, nargs="*", default=[])
@@ -229,6 +231,9 @@ def main() -> None:
 
     if args.android_res:
         write_android(args.android_res)
+
+    if args.wear_res:
+        write_android(args.wear_res)
 
     if args.ios_appiconset:
         write_appiconset(args.ios_appiconset, "flat")
