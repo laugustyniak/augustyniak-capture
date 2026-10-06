@@ -2,7 +2,15 @@
 enum AgentKind {
   codex,
   claudeCode,
-  antigravity;
+  antigravity,
+
+  /// Google's Gemini CLI (`gemini`, `@google/gemini-cli`).
+  ///
+  /// **Persisted as `geminiCli`, never `gemini`.** `gemini` is already on disk:
+  /// before Antigravity had its own name, projects saved Google's agent as
+  /// `gemini`, and [fromName] maps that spelling to [antigravity]. Reusing it
+  /// for the CLI would silently turn every legacy row into a different program.
+  geminiCli;
 
   /// Returns null for values written by a newer app version.
   ///

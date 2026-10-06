@@ -173,12 +173,14 @@ class ProjectAgentHandoff implements AgentHandoff {
     AgentKind.codex => 'Codex',
     AgentKind.claudeCode => 'Claude Code',
     AgentKind.antigravity => 'Antigravity',
+    AgentKind.geminiCli => 'Gemini CLI',
   };
 
   static ProjectAgent _launcherAgent(AgentKind agent) => switch (agent) {
     AgentKind.codex => ProjectAgent.codex,
     AgentKind.claudeCode => ProjectAgent.claude,
     AgentKind.antigravity => ProjectAgent.antigravity,
+    AgentKind.geminiCli => ProjectAgent.gemini,
   };
 }
 

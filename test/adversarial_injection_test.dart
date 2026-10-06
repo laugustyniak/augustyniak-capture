@@ -176,6 +176,7 @@ void main() {
         expect(
           arguments.first.startsWith('-') &&
               arguments.first != '--prompt-interactive' &&
+              arguments.first != '-i' &&
               arguments.first != '--',
           isFalse,
           reason: '${agent.name} would parse the capture body as a flag',
