@@ -22,6 +22,7 @@ import 'package:augustyniak_capture/features/recordings/domain/capture_type.dart
 import 'package:augustyniak_capture/features/recordings/domain/media_opener.dart';
 import 'package:augustyniak_capture/features/recordings/domain/note_vault.dart';
 import 'package:augustyniak_capture/features/recordings/domain/capture_router.dart';
+import 'package:augustyniak_capture/features/recordings/domain/capture_sender.dart';
 import 'package:augustyniak_capture/features/recordings/domain/recording.dart';
 import 'package:augustyniak_capture/features/recordings/domain/route_record.dart';
 import 'package:augustyniak_capture/features/recordings/presentation/recordings_controller.dart';
@@ -130,6 +131,7 @@ Future<RecordingsController> buildRecordingsController(
   MediaOpener mediaOpener = const NoopMediaOpener(),
   CaptureRouter captureRouter = const DisabledCaptureRouter(),
   AgentHandoff agentHandoff = const DisabledAgentHandoff(),
+  CaptureSender captureSender = const DisabledCaptureSender(),
   FakeRecordingsRepository? repository,
   UsageSink usageSink = const NoopUsageSink(),
   ClosureLog closureLog = const NoopClosureLog(),
@@ -150,6 +152,7 @@ Future<RecordingsController> buildRecordingsController(
     mediaOpener: mediaOpener,
     captureRouter: captureRouter,
     agentHandoff: agentHandoff,
+    captureSender: captureSender,
     recorder: FakeRecorder(),
     player: FakePlayer(),
     usageSink: usageSink,

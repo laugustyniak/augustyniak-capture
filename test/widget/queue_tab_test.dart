@@ -76,6 +76,26 @@ void main() {
     await tester.pump();
   }
 
+  testWidgets('the send control shows on a projectless capture with text', (
+    WidgetTester tester,
+  ) async {
+    final SemanticsHandle semantics = tester.ensureSemantics();
+    final RecordingsController controller = await buildRecordingsController(
+      appDir,
+      seed: <Recording>[
+        makeRecording(id: 'with', transcript: 'Something to ask.'),
+        makeRecording(id: 'without', title: 'Still transcribing'),
+      ],
+    );
+
+    await pumpQueue(tester, controller);
+
+    // One of the two: the capture with no text of its own has nothing to send,
+    // and the card's stand-in title is not text.
+    expect(find.bySemanticsLabel(RecordingCard.handoffLabel), findsOneWidget);
+    semantics.dispose();
+  });
+
   /// Lets real filesystem work finish: opening a source stats the file, and
   /// `Image.file` reads and decodes one — neither of which the fake-async zone
   /// a tap runs in will ever advance. `runAsync` hands the isolate back to the

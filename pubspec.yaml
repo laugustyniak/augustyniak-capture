@@ -34,6 +34,8 @@ dependencies:
   package_info_plus: ^9.0.1
   url_launcher: ^6.3.2
   supabase_flutter: ^2.17.2
+  # ^12, not 13: share_plus 13 needs win32 ^6 and file_picker ^11 needs win32 ^5.
+  share_plus: ^12.0.2
 
 dev_dependencies:
   flutter_test:

@@ -56,7 +56,9 @@ import '../domain/capture_segment.dart';
 import '../domain/cleanup_proposal.dart';
 import '../domain/capture_type.dart';
 import '../domain/clipboard_sink.dart';
+import '../domain/capture_prompt.dart';
 import '../domain/capture_router.dart';
+import '../domain/capture_sender.dart';
 import '../domain/media_opener.dart';
 import '../domain/capture_session.dart';
 import '../domain/note_vault.dart';
@@ -90,6 +92,7 @@ class RecordingsController extends ChangeNotifier {
     MediaOpener mediaOpener = const NoopMediaOpener(),
     CaptureRouter captureRouter = const DisabledCaptureRouter(),
     AgentHandoff agentHandoff = const DisabledAgentHandoff(),
+    CaptureSender captureSender = const DisabledCaptureSender(),
     NoteVault noteVault = const DisabledNoteVault(),
     ConnectionReasoner connectionReasoner = const ReviewConnectionReasoner(),
     VaultConnectionAnalyzer connectionAnalyzer = const VaultConnectionAnalyzer(),
@@ -167,6 +170,7 @@ class RecordingsController extends ChangeNotifier {
        _mediaOpener = mediaOpener,
        _captureRouter = captureRouter,
        _agentHandoff = agentHandoff,
+       _captureSender = captureSender,
        _noteVault = noteVault,
        _connectionReasoner = connectionReasoner,
        _connectionAnalyzer = connectionAnalyzer,
@@ -282,6 +286,7 @@ class RecordingsController extends ChangeNotifier {
   /// both write the index.
   bool _refreshingOutcomes = false;
   final AgentHandoff _agentHandoff;
+  final CaptureSender _captureSender;
   final NoteVault _noteVault;
   ConnectionReasoner _connectionReasoner;
   final VaultConnectionAnalyzer _connectionAnalyzer;
@@ -2325,6 +2330,10 @@ class RecordingsController extends ChangeNotifier {
         processedAt: nextValue ? DateTime.now() : null,
         clearProcessedAt: !nextValue,
       ),
+      // How the capture left the desk is where it last went: an assistant
+      // send leaves the item open, so "Mark done" afterwards is a handoff and
+      // not a bare review. No routes at all still answers review.
+      closure: _closureKindFor(recording),
     );
     // The tally is raised inside `_update`, which is the only place that can
     // tell a first closure from a re-tick — see [CaptureHistory].
@@ -2396,8 +2405,22 @@ class RecordingsController extends ChangeNotifier {
   /// written.
   String handoffTaskPath(String id) => _agentHandoff.taskPathFor(id);
 
+  /// Read through [capturePrompt] rather than the handoff seam, so a capture
+  /// with no project — whose handoff is `DisabledAgentHandoff` — still seeds
+  /// the sheet's prompt field.
   String handoffPrompt(Recording recording) =>
-      _agentHandoff.promptFor(_routedCapture(recording));
+      capturePrompt(_routedCapture(recording));
+
+  /// Whether the **Send to…** sheet has anything to send: the capture has text
+  /// of its own. Deliberately *not* `capturePrompt` non-empty — that falls back
+  /// to the card's title, which is never empty (`Voice note · 17:09`), and a
+  /// capture still transcribing must keep the control hidden.
+  bool canSend(Recording recording) =>
+      (recording.transcript ?? '').trim().isNotEmpty ||
+      (recording.summary ?? '').trim().isNotEmpty;
+
+  /// Targets the platform can reach, for the sheet's groups.
+  Future<List<SendTarget>> sendTargets() => _captureSender.availableTargets();
 
   /// The one place a `Recording` is flattened for a destination, so the prompt
   /// the sheet shows and the prompt the launch uses cannot drift apart.
@@ -2491,6 +2514,95 @@ class RecordingsController extends ChangeNotifier {
     );
     unawaited(refreshArtifacts(id));
     return result;
+  }
+
+  /// Send a capture's text to an assistant, the share sheet or the clipboard —
+  /// the project-free counterpart of [handoff], and it shares its single-flight
+  /// set so a double tap cannot open two tabs.
+  ///
+  /// **Delivery first, as everywhere:** a throw records nothing and leaves the
+  /// item open, with only [error] set. **Unlike [handoff] a success does not
+  /// close the capture.** A browser opening is not a prompt sent, a share sheet
+  /// confirms little and a clipboard write confirms nothing, so the route is
+  /// recorded — the capture says where it went — and closing stays the user's
+  /// call ("Mark done" in the sheet, which goes through [toggleProcessed]).
+  ///
+  /// Returns null on failure, on a dismissed share sheet, when a send is
+  /// already in flight for [id], and when there is nothing to send. [prompt] is
+  /// the sheet's editable text; a blank one falls back to the capture's own
+  /// text, and a capture with none is refused with [error] rather than sent as
+  /// its stand-in title.
+  ///
+  /// **A delivered send is always returned, even when recording it failed.** If
+  /// the route cannot be persisted the text has still left this device, so
+  /// returning null would tell the user nothing was sent and invite a second
+  /// send. The outcome comes back, nothing is recorded, and [error] says the
+  /// send was not recorded — a non-null [error] after a non-null return is
+  /// that state.
+  Future<SendOutcome?> send(String id, SendTarget target, String prompt) async {
+    final int index = _recordings.indexWhere((Recording item) => item.id == id);
+    if (index < 0) return null;
+    final Recording recording = _recordings[index];
+    if (!_handoffsInProgress.add(id)) return null;
+    // Cleared up front so a failure from an earlier send is not read as this
+    // one's: a dismissed share sets nothing, and the sheet shows [error].
+    _error = null;
+    notifyListeners();
+
+    final RoutedCapture capture = _routedCapture(recording);
+    final String text = prompt.trim().isNotEmpty
+        ? prompt.trim()
+        : canSend(recording)
+        ? capturePrompt(capture)
+        : '';
+    if (text.isEmpty) {
+      _error = 'The prompt is empty — there is nothing to send.';
+      _handoffsInProgress.remove(id);
+      notifyListeners();
+      return null;
+    }
+
+    final SendOutcome? outcome;
+    try {
+      outcome = await _captureSender.send(capture, target, text);
+    } catch (exception) {
+      _error = exception.toString();
+      _logSink.log(
+        'Send failed: $exception',
+        level: LogLevel.error,
+        recordingId: id,
+      );
+      _handoffsInProgress.remove(id);
+      notifyListeners();
+      return null;
+    }
+    _handoffsInProgress.remove(id);
+    if (outcome == null) {
+      // A dismissed share sheet: the user's own answer, not an error.
+      notifyListeners();
+      return null;
+    }
+
+    try {
+      await _update(
+        id,
+        (Recording item) => item.copyWith(
+          routes: <RouteRecord>[...item.routes, outcome!.record],
+        ),
+      );
+    } catch (exception) {
+      _error = 'Sent to ${outcome.record.target}, but not recorded on this '
+          'capture: $exception';
+      _logSink.log(
+        'Send to ${outcome.record.target} was not recorded: $exception',
+        level: LogLevel.error,
+        recordingId: id,
+      );
+      notifyListeners();
+      return outcome;
+    }
+    _logSink.log('Sent to ${outcome.record.target}.', recordingId: id);
+    return outcome;
   }
 
   /// Scans project repository and note vault for any artifacts or results
@@ -3935,7 +4047,9 @@ class RecordingsController extends ChangeNotifier {
       // Both hand the capture to something that executes it, and the momentum
       // history counts *how it left the desk* rather than which wire carried
       // it — a separate kind here would split one habit across two bars.
-      RouteKind.agent || RouteKind.command => ClosureKind.handoff,
+      RouteKind.agent ||
+      RouteKind.command ||
+      RouteKind.assistant => ClosureKind.handoff,
     };
   }
 

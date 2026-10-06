@@ -928,7 +928,8 @@ class _QueueTabState extends State<QueueTab> {
       isMarkingDone: markingDoneIds.contains(recording.id),
       canRoute: controller.canRoute(recording),
       onRoute: () => controller.route(recording.id),
-      canHandoff: controller.canHandoff(recording),
+      canHandoff:
+          controller.canHandoff(recording) || controller.canSend(recording),
       onHandoff: () => _openHandoff(recording),
       onOpenOutcome: controller.openCommandOutcome,
       canOpenOutcome: (RouteOutcome outcome) =>
