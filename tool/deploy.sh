@@ -325,13 +325,23 @@ install_android() {
       | sed -n 's/^Signer #1 certificate DN: /deploy: APK signed by /p' || true
   fi
 
-  local serial output failed=0
+  local serial output failed=0 installed=0
   for serial in $devices; do
     local model
-    model="$("$adb" -s "$serial" shell getprop ro.product.model 2>/dev/null | tr -d '\r')"
+    # Probed with `if`, never as a bare assignment: under `set -e` a failing
+    # `getprop` would end the whole script here — silently, after an earlier
+    # device had already installed — and `deploy-all.sh` would report that as
+    # an install failure with an uninstall hint (#243). The usual cause is a
+    # stale second transport for the same phone (wireless plus USB). A device
+    # that cannot answer is skipped and named, not counted as a failure.
+    if ! model="$("$adb" -s "$serial" shell getprop ro.product.model 2>/dev/null | tr -d '\r')"; then
+      echo "deploy: $serial not reachable — skipped"
+      continue
+    fi
     echo "deploy: installing on ${model:-unknown} ($serial)"
     if output="$("$adb" -s "$serial" install -r "$apk" 2>&1)"; then
       echo "deploy: installed on ${model:-$serial}"
+      installed=1
     else
       failed=1
       echo "$output" | tail -3 | sed 's/^/        /' >&2
@@ -344,7 +354,12 @@ install_android() {
       esac
     fi
   done
-  return "$failed"
+  # A refused install is the only failure. Nothing installed and nothing
+  # refused means no device could answer — the same "no device" exit as an
+  # empty `adb devices`, which `deploy-all.sh` reports as SKIP.
+  [ "$failed" = 0 ] || return 1
+  [ "$installed" = 1 ] || return 3
+  return 0
 }
 
 if [ "$target_android" = 1 ]; then

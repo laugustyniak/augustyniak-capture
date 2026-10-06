@@ -121,7 +121,12 @@ out in `.worktrees/deploy` on the Mac so that clone's own checkout never moves.
 different key answers `INSTALL_FAILED_UPDATE_INCOMPATIBLE`, and the only way
 past that is an uninstall, which deletes the container and the recordings in it.
 So the device is reported and skipped, and replacing it takes a backup plus a
-manual uninstall.
+manual uninstall. A device that cannot even answer `getprop` — typically a
+stale second transport for the same phone, wireless plus USB — is named and
+skipped too, and is not a failure: before #243 it ended the script silently
+under `set -e`, after the real install had already succeeded, and the summary
+read FAIL with an uninstall hint. `deploy.sh --android` exits 0 when something
+installed, 3 when no device answered, and 1 only when an install was refused.
 
 **Nothing in it is a literal.** The Linux launcher names the application
 identifier in six places, none of them compiled, so a stale copy costs the dock

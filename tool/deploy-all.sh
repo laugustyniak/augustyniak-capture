@@ -78,8 +78,11 @@ if wanted android; then
   status=$?
   case "$status" in
     0) record android OK "every attached device" ;;
-    3) record android SKIP "no adb or no device attached" ;;
-    *) record android FAIL "see output above (a device may need a backup and manual uninstall)" ;;
+    3) record android SKIP "no adb, or no device that answers" ;;
+    # No uninstall hint here: an exit code cannot say why. `deploy.sh` prints
+    # the backup-then-uninstall advice itself, per device, and only for a
+    # signature mismatch (#243).
+    *) record android FAIL "tool/deploy.sh --android exited $status — see output above" ;;
   esac
 fi
 
