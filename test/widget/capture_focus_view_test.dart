@@ -371,6 +371,67 @@ void main() {
     await tester.pump(const Duration(seconds: 2));
   });
 
+  testWidgets('a phone detail page swipes to the neighbouring capture', (
+    WidgetTester tester,
+  ) async {
+    final RecordingsController controller = await buildRecordingsController(
+      appDir,
+      seed: <Recording>[
+        makeRecording(id: 'a', title: 'Alpha', transcript: 'alpha body'),
+        makeRecording(id: 'b', title: 'Bravo', transcript: 'bravo body'),
+        makeRecording(id: 'c', title: 'Charlie', transcript: 'charlie body'),
+      ],
+    );
+    await pumpQueue(tester, controller, surface: const Size(393, 852));
+
+    // The queue's own order, read off the screen, is the order a swipe walks.
+    final List<String> order = <String>['Alpha', 'Bravo', 'Charlie']
+      ..sort(
+        (String x, String y) => tester
+            .getTopLeft(find.text(x))
+            .dy
+            .compareTo(tester.getTopLeft(find.text(y)).dy),
+      );
+    Finder inPanel(String text) => find.descendant(
+      of: find.byType(CaptureDetailPanel),
+      matching: find.text(text),
+    );
+
+    await tester.tap(find.text(order[1]));
+    await tester.pumpAndSettle();
+    expect(inPanel(order[1]), findsOneWidget);
+
+    // Left goes down the list.
+    await tester.fling(
+      find.byType(CaptureDetailPanel),
+      const Offset(-300, 0),
+      1000,
+    );
+    await tester.pumpAndSettle();
+    expect(inPanel(order[2]), findsOneWidget);
+    expect(inPanel(order[1]), findsNothing);
+
+    // Past the last capture there is nowhere to go, and nothing changes.
+    await tester.fling(
+      find.byType(CaptureDetailPanel),
+      const Offset(-300, 0),
+      1000,
+    );
+    await tester.pumpAndSettle();
+    expect(inPanel(order[2]), findsOneWidget);
+
+    // Right goes back up, past where the page was opened.
+    for (int i = 0; i < 2; i++) {
+      await tester.fling(
+        find.byType(CaptureDetailPanel),
+        const Offset(300, 0),
+        1000,
+      );
+      await tester.pumpAndSettle();
+    }
+    expect(inPanel(order[0]), findsOneWidget);
+  });
+
   testWidgets('a phone detail page closes itself when its capture is deleted', (
     WidgetTester tester,
   ) async {

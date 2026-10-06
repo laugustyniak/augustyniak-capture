@@ -1127,12 +1127,29 @@ class _QueueTabState extends State<QueueTab> {
   Future<void> _openDetailPage(Recording recording) async {
     setState(() => focusedId = recording.id);
     final RecordingsController controller = widget.controller;
+    String? pageEditingId;
     await Navigator.of(context).push<void>(
       MaterialPageRoute<void>(
         builder: (BuildContext context) => ConsolePaletteScope(
           builder: (BuildContext context) => _CaptureDetailPage(
             controller: controller,
             recordingId: recording.id,
+            // The queue's visible order, the one j/k walks, read at the
+            // moment of the swipe so a capture that left the filter is
+            // skipped rather than revisited.
+            neighbour: (String id, int delta) {
+              final int index = _visible.indexWhere(
+                (Recording item) => item.id == id,
+              );
+              final int target = index + delta;
+              if (index < 0 || target < 0 || target >= _visible.length) {
+                return null;
+              }
+              return _visible[target].id;
+            },
+            onShown: (String id) {
+              if (mounted) setState(() => focusedId = id);
+            },
             panelBuilder: (Recording item, VoidCallback onEdit) =>
                 CaptureDetailPanel(
                   controller: controller,
@@ -1169,9 +1186,10 @@ class _QueueTabState extends State<QueueTab> {
             // `editingId` is set while the page edits, so the filters keep
             // the row — the exemption [_filter] documents — even though the
             // editor is drawn on the page, not in the list.
-            onEditingChanged: (bool editing) {
+            onEditingChanged: (String? id) {
+              pageEditingId = id;
               if (!mounted) return;
-              setState(() => editingId = editing ? recording.id : null);
+              setState(() => editingId = id);
             },
             editorBuilder: (Recording item, VoidCallback onDone) =>
                 _buildEditor(
@@ -1188,7 +1206,7 @@ class _QueueTabState extends State<QueueTab> {
         ),
       ),
     );
-    if (mounted && editingId == recording.id) {
+    if (mounted && pageEditingId != null && editingId == pageEditingId) {
       setState(() => editingId = null);
     }
   }
@@ -1899,11 +1917,15 @@ class _SyncButton extends StatelessWidget {
 
 /// A capture on a phone, full screen: the detail panel, or the editor while
 /// editing. Reads through [controller] by id so it follows the capture as it
-/// moves, and pops itself once the id stops resolving.
+/// moves, and pops itself once the id stops resolving. A horizontal swipe
+/// outside the editor steps to the neighbouring capture: left is the next one
+/// down the queue, right the one above.
 class _CaptureDetailPage extends StatefulWidget {
   const _CaptureDetailPage({
     required this.controller,
     required this.recordingId,
+    required this.neighbour,
+    required this.onShown,
     required this.panelBuilder,
     required this.editorBuilder,
     required this.onEditingChanged,
@@ -1911,26 +1933,65 @@ class _CaptureDetailPage extends StatefulWidget {
 
   final RecordingsController controller;
   final String recordingId;
+
+  /// The id [delta] rows away from the given one in the queue, or null past
+  /// either end.
+  final String? Function(String id, int delta) neighbour;
+  final ValueChanged<String> onShown;
   final Widget Function(Recording, VoidCallback onEdit) panelBuilder;
   final Widget Function(Recording, VoidCallback onDone) editorBuilder;
-  final ValueChanged<bool> onEditingChanged;
+
+  /// The id being edited, or null when the editor closes.
+  final ValueChanged<String?> onEditingChanged;
 
   @override
   State<_CaptureDetailPage> createState() => _CaptureDetailPageState();
 }
 
 class _CaptureDetailPageState extends State<_CaptureDetailPage> {
+  late String _id = widget.recordingId;
   bool _editing = false;
   bool _popped = false;
 
   void _setEditing(bool value) {
     setState(() => _editing = value);
-    widget.onEditingChanged(value);
+    widget.onEditingChanged(value ? _id : null);
+  }
+
+  Offset? _swipeStart;
+  Duration _swipeStartTime = Duration.zero;
+
+  void _onPointerDown(PointerDownEvent event) {
+    _swipeStart = event.position;
+    _swipeStartTime = event.timeStamp;
+  }
+
+  /// Read from raw pointers rather than a drag recognizer: the panel's
+  /// `SelectionArea` claims every drag in the gesture arena, so a
+  /// `GestureDetector` here would never hear one.
+  void _onPointerUp(PointerUpEvent event) {
+    final Offset? start = _swipeStart;
+    _swipeStart = null;
+    if (start == null) return;
+    final Offset delta = event.position - start;
+    final Duration elapsed = event.timeStamp - _swipeStartTime;
+    // Mostly sideways, far enough and quick: a page turn, not a scroll, a
+    // tap or a hand resting on the screen.
+    if (delta.dx.abs() < 60 ||
+        delta.dx.abs() < delta.dy.abs() * 2 ||
+        elapsed > const Duration(milliseconds: 600)) {
+      return;
+    }
+    final String? next = widget.neighbour(_id, delta.dx < 0 ? 1 : -1);
+    if (next == null) return;
+    unawaited(HapticFeedback.selectionClick());
+    setState(() => _id = next);
+    widget.onShown(next);
   }
 
   Recording? _resolve() {
     for (final Recording item in widget.controller.recordings) {
-      if (item.id == widget.recordingId) return item;
+      if (item.id == _id) return item;
     }
     return null;
   }
@@ -1974,7 +2035,21 @@ class _CaptureDetailPageState extends State<_CaptureDetailPage> {
                     () => _setEditing(false),
                   ),
                 )
-              : widget.panelBuilder(recording, () => _setEditing(true)),
+              : Listener(
+                  onPointerDown: _onPointerDown,
+                  onPointerUp: _onPointerUp,
+                  onPointerCancel: (_) => _swipeStart = null,
+                  child: AnimatedSwitcher(
+                    duration: const Duration(milliseconds: 150),
+                    child: KeyedSubtree(
+                      key: ValueKey<String>(recording.id),
+                      child: widget.panelBuilder(
+                        recording,
+                        () => _setEditing(true),
+                      ),
+                    ),
+                  ),
+                ),
         );
       },
     );
