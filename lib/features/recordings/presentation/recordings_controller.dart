@@ -3797,7 +3797,9 @@ class RecordingsController extends ChangeNotifier {
       // Both hand the capture to something that executes it, and the momentum
       // history counts *how it left the desk* rather than which wire carried
       // it — a separate kind here would split one habit across two bars.
-      RouteKind.agent || RouteKind.command => ClosureKind.handoff,
+      RouteKind.agent ||
+      RouteKind.command ||
+      RouteKind.assistant => ClosureKind.handoff,
     };
   }
 
