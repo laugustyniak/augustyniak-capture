@@ -71,10 +71,12 @@ class RecordingCard extends StatelessWidget {
   static const String routeLabel = "Hand off to the project's inbox";
 
   /// The second destination, and the one that does something rather than
-  /// filing something — so it names the agent, not the gesture. Kept distinct
+  /// filing something. It opens the Send to… sheet, which reaches a terminal
+  /// agent (when the project has one) and any assistant, so it names both. Kept distinct
   /// from [routeLabel] in wording as well as icon: two controls that both said
   /// "hand off" would be one control the user has to guess at.
-  static const String handoffLabel = 'Start a coding agent on this capture';
+  static const String handoffLabel =
+      'Send this capture to an assistant or agent';
 
   final Recording recording;
   final bool isPlaying;

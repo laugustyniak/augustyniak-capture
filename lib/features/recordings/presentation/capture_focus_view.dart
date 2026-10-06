@@ -795,7 +795,9 @@ class _Actions extends StatelessWidget {
                       ? RecordingCard.openFileLabel
                       : RecordingCard.openVideoLabel,
                 ),
-              if (controller.canHandoff(recording) && !reviewed)
+              if ((controller.canHandoff(recording) ||
+                      controller.canSend(recording)) &&
+                  !reviewed)
                 ConsoleIconButton(
                   icon: Icons.smart_toy_outlined,
                   onTap: () => showHandoffSheet(
@@ -1656,10 +1658,12 @@ class _PanelActions extends StatelessWidget {
               : RecordingCard.openVideoLabel,
           onPressed: () => controller.openSource(recording.id),
         ),
-      if (controller.canHandoff(recording) && !reviewed)
+      if ((controller.canHandoff(recording) ||
+              controller.canSend(recording)) &&
+          !reviewed)
         _PanelButton(
           icon: Icons.smart_toy_outlined,
-          label: 'Agent',
+          label: 'Send',
           semanticLabel: RecordingCard.handoffLabel,
           onPressed: () => showHandoffSheet(
             context,
