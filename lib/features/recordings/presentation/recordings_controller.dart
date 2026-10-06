@@ -2394,24 +2394,44 @@ class RecordingsController extends ChangeNotifier {
   /// recorded — the capture says where it went — and closing stays the user's
   /// call ("Mark done" in the sheet, which goes through [toggleProcessed]).
   ///
-  /// Returns null on failure, on a dismissed share sheet, and when a send is
-  /// already in flight for [id]. [prompt] is the sheet's editable text; a blank
-  /// one falls back to the capture's own.
+  /// Returns null on failure, on a dismissed share sheet, when a send is
+  /// already in flight for [id], and when there is nothing to send. [prompt] is
+  /// the sheet's editable text; a blank one falls back to the capture's own
+  /// text, and a capture with none is refused with [error] rather than sent as
+  /// its stand-in title.
+  ///
+  /// **A delivered send is always returned, even when recording it failed.** If
+  /// the route cannot be persisted the text has still left this device, so
+  /// returning null would tell the user nothing was sent and invite a second
+  /// send. The outcome comes back, nothing is recorded, and [error] says the
+  /// send was not recorded — a non-null [error] after a non-null return is
+  /// that state.
   Future<SendOutcome?> send(String id, SendTarget target, String prompt) async {
     final int index = _recordings.indexWhere((Recording item) => item.id == id);
     if (index < 0) return null;
     final Recording recording = _recordings[index];
     if (!_handoffsInProgress.add(id)) return null;
+    // Cleared up front so a failure from an earlier send is not read as this
+    // one's: a dismissed share sets nothing, and the sheet shows [error].
+    _error = null;
     notifyListeners();
 
     final RoutedCapture capture = _routedCapture(recording);
+    final String text = prompt.trim().isNotEmpty
+        ? prompt.trim()
+        : canSend(recording)
+        ? capturePrompt(capture)
+        : '';
+    if (text.isEmpty) {
+      _error = 'The prompt is empty — there is nothing to send.';
+      _handoffsInProgress.remove(id);
+      notifyListeners();
+      return null;
+    }
+
     final SendOutcome? outcome;
     try {
-      outcome = await _captureSender.send(
-        capture,
-        target,
-        prompt.trim().isNotEmpty ? prompt.trim() : capturePrompt(capture),
-      );
+      outcome = await _captureSender.send(capture, target, text);
     } catch (exception) {
       _error = exception.toString();
       _logSink.log(
@@ -2430,12 +2450,24 @@ class RecordingsController extends ChangeNotifier {
       return null;
     }
 
-    _error = null;
-    await _update(
-      id,
-      (Recording item) =>
-          item.copyWith(routes: <RouteRecord>[...item.routes, outcome!.record]),
-    );
+    try {
+      await _update(
+        id,
+        (Recording item) => item.copyWith(
+          routes: <RouteRecord>[...item.routes, outcome!.record],
+        ),
+      );
+    } catch (exception) {
+      _error = 'Sent to ${outcome.record.target}, but not recorded on this '
+          'capture: $exception';
+      _logSink.log(
+        'Send to ${outcome.record.target} was not recorded: $exception',
+        level: LogLevel.error,
+        recordingId: id,
+      );
+      notifyListeners();
+      return outcome;
+    }
     _logSink.log('Sent to ${outcome.record.target}.', recordingId: id);
     return outcome;
   }

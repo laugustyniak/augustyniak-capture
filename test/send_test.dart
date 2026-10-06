@@ -15,9 +15,9 @@ import 'support/harness.dart';
 class _FakeSender implements CaptureSender {
   _FakeSender({this.error, this.gate, this.dismiss = false});
 
-  final Object? error;
+  Object? error;
   final Future<void>? gate;
-  final bool dismiss;
+  bool dismiss;
   final List<({SendTarget target, String prompt})> calls =
       <({SendTarget target, String prompt})>[];
 
@@ -185,6 +185,94 @@ void main() {
     await controller.send('r1', _chatgpt, '   ');
 
     expect(sender.calls.single.prompt, 'ask about X');
+  });
+
+  test('a persist failure after delivery still reports the send', () async {
+    final RecordingsController controller = await buildRecordingsController(
+      appDir,
+      repository: FakeRecordingsRepository(
+        appDir,
+        seed: <Recording>[seeded()],
+        saveError: const FileSystemException('disk full'),
+      ),
+      captureSender: _FakeSender(),
+    );
+
+    // Must not throw: the text left this device, so the caller has to be told.
+    final SendOutcome? outcome = await controller.send('r1', _chatgpt, 'p');
+
+    expect(outcome, isNotNull);
+    expect(controller.error, contains('not recorded'));
+    expect(controller.recordings.single.routes, isEmpty);
+    expect(controller.isHandingOff('r1'), isFalse);
+  });
+
+  test('a dismissed share clears the error a failed send left', () async {
+    final _FakeSender sender = _FakeSender(
+      error: const AssistantUnavailableException(AssistantTarget.chatgpt),
+    );
+    final RecordingsController controller = await buildRecordingsController(
+      appDir,
+      seed: <Recording>[seeded()],
+      captureSender: sender,
+    );
+
+    await controller.send('r1', _chatgpt, 'p');
+    expect(controller.error, isNotNull);
+    sender
+      ..error = null
+      ..dismiss = true;
+    await controller.send('r1', const ShareSendTarget(), 'p');
+
+    expect(controller.error, isNull);
+  });
+
+  test('an empty prompt on a capture with no text is refused', () async {
+    final _FakeSender sender = _FakeSender();
+    final RecordingsController controller = await buildRecordingsController(
+      appDir,
+      seed: <Recording>[makeRecording(id: 'r1', title: 'Still transcribing')],
+      captureSender: sender,
+    );
+
+    final SendOutcome? outcome = await controller.send('r1', _chatgpt, '  ');
+
+    expect(outcome, isNull);
+    expect(sender.calls, isEmpty);
+    expect(controller.error, contains('empty'));
+    expect(controller.recordings.single.routes, isEmpty);
+  });
+
+  test('closing by hand records the kind of the last route', () async {
+    RouteRecord route(RouteKind kind) => RouteRecord(
+      at: DateTime.utc(2026, 10, 6),
+      kind: kind,
+      target: 'x',
+    );
+    final Map<RouteKind?, ClosureKind> expected = <RouteKind?, ClosureKind>{
+      null: ClosureKind.review,
+      RouteKind.file: ClosureKind.route,
+      RouteKind.agent: ClosureKind.handoff,
+    };
+    for (final MapEntry<RouteKind?, ClosureKind> entry in expected.entries) {
+      final _RecordingClosureLog log = _RecordingClosureLog();
+      final RecordingsController controller = await buildRecordingsController(
+        appDir,
+        seed: <Recording>[
+          makeRecording(
+            id: 'r1',
+            routes: <RouteRecord>[
+              if (entry.key != null) route(entry.key!),
+            ],
+          ),
+        ],
+        closureLog: log,
+      );
+
+      await controller.toggleProcessed('r1');
+
+      expect(log.appended.single.kind, entry.value, reason: '${entry.key}');
+    }
   });
 
   test('marking done after a send records a handoff closure', () async {
