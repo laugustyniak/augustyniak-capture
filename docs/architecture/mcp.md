@@ -47,7 +47,24 @@ Errors that reach the agent are fixed, generic messages (`Capture store unavaila
 
 `--db <path>` and `--recordings-dir <path>` override. Any other platform must pass both. The macOS paths are derived from the unsandboxed setup in `docs/platform-setup.md`, not yet checked on a Mac.
 
-## Build and setup
+## Install
+
+`tool/deploy.sh` (Linux and macOS, not `--android`) builds the bundle through `tool/deploy-mcp.sh` after the app install and puts it at `~/.local/opt/<cli>-mcp/`, with `~/.local/bin/<cli>-mcp` symlinked to `bin/capture_mcp`. `<cli>` is the hyphenated binary name `deploy.sh` reads from the platform files (`augustyniak-capture`). The directory is separate from the app's `~/.local/opt/<cli>`, which every app install wipes, and on macOS it sits outside the signed `.app`. The bundle is replaced as a whole (copy to `.new`, old aside, swap), so `bin` and `lib` cannot drift apart, and a failed build or a bundle missing `libsqlite3` leaves the previous install untouched. `--skip-build` reuses `build/mcp/bundle`. A failure is a WARNING line and does not change the deploy's exit status. `libsqlite3` resolves through the symlink. The script prints the registration lines:
+
+```bash
+claude mcp add augustyniak-capture -- ~/.local/bin/augustyniak-capture-mcp
+```
+
+```toml
+# ~/.codex/config.toml
+[mcp_servers.augustyniak-capture]
+command = "/home/<you>/.local/bin/augustyniak-capture-mcp"
+args = []
+```
+
+`test/deploy_mcp_test.dart` runs the helper against a fake `dart`.
+
+## Manual build
 
 `dart compile exe` refuses packages with build hooks (`sqlite3`), so build a bundle instead:
 
