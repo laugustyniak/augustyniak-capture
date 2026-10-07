@@ -155,10 +155,20 @@ later and press retry.
 | **Queue** | every capture, review progress, search, filters, playback, inline editing, manual daily connection review |
 | **Timer** | a focus session — countdown dial, session goal, alarm at zero — plus what got finished lately |
 | **Projects** | repository contexts, active project, per-project captures, one-click coding-agent sessions |
+| **Work** | read-only Todoist focus list, due counts, and manually linked Capture project context |
 | **Clipboard** | clipboard history, searchable, with a preview pane and in-place editing |
 | **Models** | provider profiles — transcription and enrichment, add / edit / activate |
 | **Logs** | live pipeline events (persist, queue, transcribe, errors) with a level filter |
 | **Config** | appearance, audio parameters, global shortcuts, enrichment profile, note vault, keyring status |
+
+**Work dashboard:** Open Work and paste a personal API token from Todoist
+Settings → Integrations → Developer. Capture stores it in the OS keyring, reads
+projects and tasks from Todoist API v1, and never changes Todoist tasks. The
+focus list shows up to five `@founder` P1/P2 tasks and urgent due tasks; the
+due counts include all tasks due today or overdue. Choose a Todoist project and
+map it to a Capture project to see recent captures and completed focus sessions.
+The mapping is local to this device. Refresh is manual, and task rows open in
+Todoist.
 
 **Daily connections:** In Queue, choose **REVIEW CONNECTIONS**, pick a date,
 then run **REVIEW DAY**. The active enrichment model reviews every capture from
