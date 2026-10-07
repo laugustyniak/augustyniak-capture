@@ -15,6 +15,7 @@ the two durability invariants `CLAUDE.md` states. Read this before touching
 - `gamification.json` (`gamification/data/gamification_repository.dart`) — two lifetime counters and the set of milestone ids already celebrated. Best-effort in **both** directions: an unreadable file answers empty stats rather than throwing, and a failed save is swallowed. That is the right trade here and nowhere else in this list — the worst case is one confetti burst too many.
 - `revisions.jsonl` (`recordings/data/revisions_repository.dart`) — the change history, and **the first of the stores that are appended rather than rewritten**. See `docs/architecture/revisions.md`.
 - `closures.jsonl` (`momentum/data/file_closure_log.dart`) — one line per capture that left the desk. The third append-only store, after `revisions.jsonl` and `focus-sessions.jsonl`. See `docs/architecture/timer-momentum.md` for why it cannot be derived from `recordings.json`.
+- `capture_embeddings` (SQLite table, `recordings/data/sqlite_embedding_store.dart`) — one vector per capture per embedding model, for related captures (#272). **Derived and device-local**: not in `recordings.json`, not in the backup archive, not synced. An unreadable row is dropped alone; dropping the whole table costs a BUILD INDEX, never a capture.
 
 Every `fromJson` must stay backward-compatible: new fields default when absent (see the "legacy JSON" tests).
 

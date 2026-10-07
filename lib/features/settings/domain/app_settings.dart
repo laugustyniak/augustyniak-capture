@@ -20,6 +20,7 @@ class AppSettings {
     String? enrichmentInstructions,
     this.soulPath,
     this.autoCleanup = false,
+    this.embeddingModel,
     this.audio = AudioConfig.defaults,
     this.themeMode = AppThemeMode.system,
     this.textScale = defaultTextScale,
@@ -91,6 +92,11 @@ class AppSettings {
   /// (#258). Off by default — it is one more model call per capture — and
   /// written only when on, so a file that never touched it is unchanged.
   final bool autoCleanup;
+
+  /// The model asked for embeddings on the enrichment profile's endpoint, or
+  /// null when related captures are off (#272). Absent from the JSON while
+  /// null, so a file that never set it is unchanged.
+  final String? embeddingModel;
 
   final AudioConfig audio;
   final AppThemeMode themeMode;
@@ -180,6 +186,8 @@ class AppSettings {
     String? soulPath,
     bool clearSoulPath = false,
     bool? autoCleanup,
+    String? embeddingModel,
+    bool clearEmbeddingModel = false,
     AudioConfig? audio,
     AppThemeMode? themeMode,
     double? textScale,
@@ -216,6 +224,9 @@ class AppSettings {
           : (enrichmentInstructions ?? _enrichmentInstructions),
       soulPath: clearSoulPath ? null : (soulPath ?? this.soulPath),
       autoCleanup: autoCleanup ?? this.autoCleanup,
+      embeddingModel: clearEmbeddingModel
+          ? null
+          : (embeddingModel ?? this.embeddingModel),
       audio: audio ?? this.audio,
       themeMode: themeMode ?? this.themeMode,
       textScale: resetTextScale
@@ -271,6 +282,7 @@ class AppSettings {
         'enrichmentInstructions': _enrichmentInstructions,
       if (soulPath != null) 'soulPath': soulPath,
       if (autoCleanup) 'autoCleanup': true,
+      if (embeddingModel != null) 'embeddingModel': embeddingModel,
       if (priceOverrides.isNotEmpty)
         'priceOverrides': <String, dynamic>{
           for (final MapEntry<String, ModelPrice> entry
@@ -357,6 +369,11 @@ class AppSettings {
       ),
       navRailExpanded: json['navRailExpanded'] == true,
       autoCleanup: json['autoCleanup'] == true,
+      embeddingModel:
+          json['embeddingModel'] is String &&
+              (json['embeddingModel'] as String).trim().isNotEmpty
+          ? (json['embeddingModel'] as String).trim()
+          : null,
       soulPath: json['soulPath'] is String
           ? json['soulPath'] as String
           : null,
