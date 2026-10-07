@@ -187,10 +187,20 @@ class SettingsRepository {
       }
     }
 
+    String? s3Secret = settings.s3SecretAccessKey;
+    if (s3Secret != null && s3Secret.isNotEmpty) {
+      final String value = await transform(s3Secret);
+      if (value != s3Secret) {
+        changed = true;
+        s3Secret = value;
+      }
+    }
+
     return changed
         ? settings.copyWith(
             profiles: profiles,
             commandToken: commandToken,
+            s3SecretAccessKey: s3Secret,
           )
         : settings;
   }
@@ -199,6 +209,11 @@ class SettingsRepository {
     if (settings.commandToken != null &&
         settings.commandToken!.isNotEmpty &&
         !TokenCipher.isSealed(settings.commandToken!)) {
+      return true;
+    }
+    if (settings.s3SecretAccessKey != null &&
+        settings.s3SecretAccessKey!.isNotEmpty &&
+        !TokenCipher.isSealed(settings.s3SecretAccessKey!)) {
       return true;
     }
     return settings.profiles.any(
