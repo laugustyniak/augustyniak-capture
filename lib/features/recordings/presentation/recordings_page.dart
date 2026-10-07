@@ -72,6 +72,7 @@ import '../../timer/data/file_focus_session_log.dart';
 import '../../timer/domain/focus_session.dart';
 import '../../timer/presentation/focus_timer_controller.dart';
 import '../../timer/presentation/timer_tab.dart';
+import '../../work_dashboard/presentation/work_dashboard_tab.dart';
 import '../../transcription/data/audio_splitter.dart';
 import '../../transcription/data/chunked_transcription_service.dart';
 import '../../transcription/data/audio_decoder.dart';
@@ -161,7 +162,8 @@ class _RecordingsPageState extends State<RecordingsPage>
   // the navigation itself.
   static const int queueIndex = 0;
   static const int timerIndex = 1;
-  static const int modelsIndex = 4;
+  static const int workIndex = 2;
+  static const int modelsIndex = 5;
 
   static const List<({IconData icon, String label, String shortLabel})>
   destinations = <({IconData icon, String label, String shortLabel})>[
@@ -173,6 +175,7 @@ class _RecordingsPageState extends State<RecordingsPage>
     // Beside the Queue rather than beside Config: a focus session is something
     // you *do*, on the same footing as capturing, not something you set up once.
     (icon: Icons.timer_outlined, label: 'TIMER', shortLabel: 'TIMER'),
+    (icon: Icons.dashboard_outlined, label: 'WORK', shortLabel: 'WORK'),
     (icon: Icons.account_tree_outlined, label: 'PROJECTS', shortLabel: 'PROJ'),
     (icon: Icons.content_paste_rounded, label: 'CLIPBOARD', shortLabel: 'CLIP'),
     (icon: Icons.memory_rounded, label: 'MODELS', shortLabel: 'MODELS'),
@@ -1187,6 +1190,20 @@ class _RecordingsPageState extends State<RecordingsPage>
                                   ),
                                 ),
                                 ConsolePageWidth(
+                                  child: WorkDashboardTab(
+                                    projects: projects,
+                                    recordings: controller,
+                                    timer: timer,
+                                    active: navigationIndex == workIndex,
+                                    onNavigateToQueue: (String projectId) {
+                                      setState(() {
+                                        activeQueueProjectFilterId = projectId;
+                                        navigationIndex = queueIndex;
+                                      });
+                                    },
+                                  ),
+                                ),
+                                ConsolePageWidth(
                                   child: ProjectsTab(
                                     controller: projects,
                                     recordingsController: controller,
@@ -1417,7 +1434,7 @@ class _RecordingsPageState extends State<RecordingsPage>
             // reads as broken; one with no count reads as a plain link.
             count: index == queueIndex
                 ? total
-                : index == 3
+                : index == 4
                 ? clipboardWatcher.items.length
                 : null,
             warn: index == modelsIndex && settings.activeProfile == null,
