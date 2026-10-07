@@ -15,6 +15,8 @@ Your thought lands on disk *before* anything clever is attempted with it.
 [![Website](https://img.shields.io/badge/website-laugustyniak.github.io-1056C6)](https://laugustyniak.github.io/augustyniak-capture/)
 
 [Quick start](#-quick-start) ·
+[Anti-shutdown](#️-the-anti-shutdown-covenant--longevity) ·
+[The guarantee](#-the-one-guarantee) ·
 [What it captures](#-what-it-captures) ·
 [Note vault](#-note-vault--obsidian-and-friends) ·
 [Build & deploy](#-build--deploy) ·
@@ -112,6 +114,36 @@ Two rules fall out of it, and both are enforced in code:
 
 Capture never waits on processing. Start a new recording while the previous one
 is still being transcribed — the queue simply grows.
+
+---
+
+## 🛡️ The Anti-Shutdown Covenant & Longevity
+
+Capture and voice-memo tools have a notorious track record of disappearing:
+startups burn through VC money, get acquired, hike subscriptions to $20+/month,
+or abruptly shut down with 30-day export warnings.
+
+Augustyniak Capture is built on the inverse premise — an explicit **anti-shutdown commitment**:
+
+1. **Never sold, never abruptly shut down**: The creator commits to never
+   selling the app or shutting it down. The application is offline-first:
+   your notes, audio, images, and index files reside permanently on your local
+   filesystem in standard, open formats (`.m4a`, UTF-8 `.txt`, SQLite, Markdown).
+   It continues running indefinitely even if every remote server on earth goes dark.
+2. **Zero fixed-cost infrastructure (Scale-to-Zero)**: The project avoids
+   expensive, 24/7 dedicated virtual machines that force commercialization.
+   Cloud synchronization is powered by serverless Supabase PostgreSQL (with
+   zero-knowledge E2EE), and media storage runs on AWS S3 / S3-compatible tiers.
+   At average usage (100 recordings/month), cloud media storage costs under
+   **$0.01 / user / month**.
+3. **Bring Your Own Cloud (BYOC) & Self-Hosting**: You can connect your own
+   free Supabase project or personal AWS S3 bucket. The data and keys belong
+   entirely to you, with zero dependency on a central company.
+4. **Transparent Cost-Pass-Through**: Any managed synchronization services
+   operate on a pure cost-pass-through endowment basis, with real-time in-app cost
+   visibility.
+
+Detailed architectural blueprint: [`docs/plans/2026-10-07-anti-shutdown-low-cost-architecture.md`](docs/plans/2026-10-07-anti-shutdown-low-cost-architecture.md).
 
 ---
 
