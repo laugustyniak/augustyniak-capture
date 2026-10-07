@@ -16,6 +16,7 @@ import '../domain/recording.dart';
 import '../domain/recording_revision.dart';
 import 'card_parts.dart';
 import 'cleanup_section.dart';
+import 'related_section.dart';
 import 'revision_history.dart';
 import 'tag_editor.dart';
 
@@ -69,6 +70,8 @@ class RecordingEditor extends StatefulWidget {
     this.onRejectCleanup,
     this.cleaning = false,
     this.cleanupError,
+    this.related = const <RelatedEntry>[],
+    this.onOpenRelated,
   });
 
   /// Public so a test asserts on the same string the widget renders.
@@ -124,6 +127,11 @@ class RecordingEditor extends StatefulWidget {
   bool get showsCleanup =>
       onCleanUp != null ||
       (recording.cleanup != null && onAcceptCleanup != null);
+
+  /// Captures close in meaning (#272), resolved by the host. Empty, or a null
+  /// [onOpenRelated], draws no RELATED section.
+  final List<RelatedEntry> related;
+  final ValueChanged<Recording>? onOpenRelated;
 
   bool get canAppend =>
       onAppendRecording != null ||
@@ -521,6 +529,15 @@ class _RecordingEditorState extends State<RecordingEditor> {
                   acceptBlockedReason: _textDirty
                       ? 'Save or revert the text above first.'
                       : null,
+                ),
+                const SizedBox(height: 8),
+              ],
+              if (widget.related.isNotEmpty &&
+                  widget.onOpenRelated != null) ...<Widget>[
+                const SizedBox(height: 4),
+                RelatedSection(
+                  entries: widget.related,
+                  onOpen: widget.onOpenRelated!,
                 ),
                 const SizedBox(height: 8),
               ],

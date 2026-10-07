@@ -1,5 +1,7 @@
 import '../../costs/domain/usage_sink.dart';
 import '../../enrichment/data/http_chat_enrichment_service.dart';
+import '../../enrichment/data/http_embedding_service.dart';
+import '../../enrichment/domain/embedding_service.dart';
 import '../../enrichment/domain/enrichment_service.dart';
 import '../../processing/data/http_vision_ocr_service.dart';
 import '../../processing/data/ocr_service.dart';
@@ -281,6 +283,27 @@ class ProviderProfile {
       endpoint: uri,
       bearerToken: usableBearerToken,
       model: _blankToNull(model),
+      usageSink: usageSink,
+    );
+  }
+
+  /// Build the embedding service for this profile (#272): the same server and
+  /// token, the `/embeddings` path beside `/chat/completions`, and the model
+  /// the user named for it — a chat model cannot embed. Disabled when the
+  /// endpoint has no recognisable chat path, rather than guessing one.
+  EmbeddingService toEmbeddingService({
+    required String model,
+    UsageSink usageSink = const NoopUsageSink(),
+  }) {
+    final Uri? uri = hasEndpoint ? Uri.tryParse(endpoint.trim()) : null;
+    final Uri? embeddings = uri == null || !uri.hasScheme
+        ? null
+        : embeddingsEndpointFor(uri);
+    if (embeddings == null) return const DisabledEmbeddingService();
+    return HttpEmbeddingService(
+      endpoint: embeddings,
+      model: model,
+      bearerToken: usableBearerToken,
       usageSink: usageSink,
     );
   }

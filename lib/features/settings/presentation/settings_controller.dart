@@ -6,6 +6,7 @@ import '../../costs/domain/price_book.dart';
 import '../../costs/domain/usage_sink.dart';
 import '../../command/data/http_command_client.dart';
 import '../../command/domain/command_client.dart';
+import '../../enrichment/domain/embedding_service.dart';
 import '../../enrichment/domain/enrichment_service.dart';
 import '../../processing/data/ocr_service.dart';
 import '../../shortcuts/domain/hotkey_binding.dart';
@@ -81,6 +82,8 @@ class SettingsController extends ChangeNotifier {
   TranscriptionService? _service;
   String? _serviceSignature;
   EnrichmentService? _enrichment;
+  EmbeddingService? _embedding;
+  String? _embeddingSignature;
   String? _enrichmentSignature;
   OcrService? _ocr;
   String? _ocrSignature;
@@ -228,6 +231,31 @@ class SettingsController extends ChangeNotifier {
       _enrichmentSignature = signature;
     }
     return _enrichment!;
+  }
+
+  /// The embedding service for related captures (#272): the enrichment
+  /// profile's endpoint with `/embeddings` in place of `/chat/completions`,
+  /// asked for [embeddingModel]. Disabled while either is missing. Same
+  /// caching rule as [enrichmentService].
+  EmbeddingService get embeddingService {
+    final ProviderProfile? active = _settings.activeEnrichmentProfile;
+    final String? model = _settings.embeddingModel;
+    final String signature = active == null || model == null
+        ? 'disabled'
+        : <String?>[
+            active.id,
+            active.endpoint,
+            active.bearerToken,
+            model,
+          ].join('|');
+
+    if (_embedding == null || _embeddingSignature != signature) {
+      _embedding = active == null || model == null
+          ? const DisabledEmbeddingService()
+          : active.toEmbeddingService(model: model, usageSink: _usageSink);
+      _embeddingSignature = signature;
+    }
+    return _embedding!;
   }
 
   /// The image-OCR service, derived from the **enrichment** profile — OCR has
@@ -525,6 +553,21 @@ class SettingsController extends ChangeNotifier {
   Future<void> setAutoCleanup(bool value) async {
     if (value == _settings.autoCleanup) return;
     await _persist(_settings.copyWith(autoCleanup: value));
+  }
+
+  /// The embedding model for related captures, or null when they are off.
+  String? get embeddingModel => _settings.embeddingModel;
+
+  /// Set it, or turn related captures off with a blank value.
+  Future<void> setEmbeddingModel(String? value) async {
+    final String trimmed = value?.trim() ?? '';
+    if (trimmed.isEmpty) {
+      if (_settings.embeddingModel == null) return;
+      await _persist(_settings.copyWith(clearEmbeddingModel: true));
+      return;
+    }
+    if (trimmed == _settings.embeddingModel) return;
+    await _persist(_settings.copyWith(embeddingModel: trimmed));
   }
 
   /// The user's `SOUL.md`, or null when the typed profile is the soul.

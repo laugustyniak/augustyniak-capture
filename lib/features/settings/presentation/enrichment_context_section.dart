@@ -9,6 +9,7 @@ import '../../projects/data/directory_picker.dart';
 import '../../projects/data/project_context_probe.dart';
 import '../../projects/data/project_context_reader.dart';
 import '../../projects/domain/project.dart';
+import '../../recordings/domain/related_captures.dart';
 import '../../recordings/domain/stale_rank.dart';
 import '../../recordings/presentation/recordings_controller.dart';
 import 'settings_controller.dart';
@@ -156,6 +157,103 @@ class _EnrichmentContextSectionState extends State<EnrichmentContextSection> {
     );
   }
 
+  late final TextEditingController _embeddingField = TextEditingController(
+    text: widget.controller.embeddingModel ?? '',
+  );
+  final FocusNode _embeddingFocus = FocusNode();
+
+  Future<void> _commitEmbeddingModel() async {
+    await widget.controller.setEmbeddingModel(_embeddingField.text);
+    if (mounted) setState(() {});
+  }
+
+  /// The RELATED CAPTURES block: the model, then what the index holds and the
+  /// build that fills it — rebuilt from the controller so progress moves.
+  Widget _relatedBlock() {
+    final RecordingsController? recordings = widget.recordings;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: <Widget>[
+        Text('RELATED CAPTURES · EMBEDDING MODEL', style: ConsoleText.fieldLabel),
+        const SizedBox(height: 6),
+        ConsoleField(
+          controller: _embeddingField,
+          focusNode: _embeddingFocus,
+          monospace: true,
+          fontSize: 12,
+          textInputAction: TextInputAction.done,
+          onSubmitted: (String _) => _commitEmbeddingModel(),
+          hintText: 'text-embedding-3-small · nomic-embed-text',
+        ),
+        const SizedBox(height: 6),
+        if (recordings == null)
+          const SizedBox.shrink()
+        else
+          ListenableBuilder(
+            listenable: recordings,
+            builder: (BuildContext context, Widget? _) =>
+                _indexRow(recordings),
+          ),
+      ],
+    );
+  }
+
+  Widget _indexRow(RecordingsController recordings) {
+    final IndexProgress? progress = recordings.indexProgress;
+    if (progress != null) {
+      return Row(
+        children: <Widget>[
+          Expanded(
+            child: Text(
+              'INDEXING ${progress.done} / ${progress.total}',
+              style: ConsoleText.micro.copyWith(color: Console.accent),
+            ),
+          ),
+          TextButton(
+            onPressed: recordings.cancelIndex,
+            child: const Text('CANCEL'),
+          ),
+        ],
+      );
+    }
+    if (widget.controller.embeddingModel == null) {
+      return Text(
+        'Off. Name an embedding model served by the enrichment endpoint to '
+        'see related captures and repeats.',
+        style: ConsoleText.micro.copyWith(color: Console.mutedSoft),
+      );
+    }
+    if (!recordings.relatedEnabled) {
+      return Text(
+        'Needs an active enrichment profile whose endpoint ends in '
+        '/chat/completions.',
+        style: ConsoleText.micro.copyWith(color: Console.amber),
+      );
+    }
+    final int count = recordings.unindexedIds().length;
+    if (count == 0) {
+      return Text(
+        'Every capture is indexed. New ones are indexed as they finish.',
+        style: ConsoleText.micro.copyWith(color: Console.accent),
+      );
+    }
+    return Row(
+      children: <Widget>[
+        Expanded(
+          child: Text(
+            '$count not indexed · one embedding call each',
+            style: ConsoleText.micro.copyWith(color: Console.amber),
+          ),
+        ),
+        TextButton(
+          key: const ValueKey<String>('build-index'),
+          onPressed: recordings.buildIndex,
+          child: Text('BUILD INDEX $count'),
+        ),
+      ],
+    );
+  }
+
   String get _storedSoulPath => widget.controller.soulPath ?? '';
   bool get _soulDirty => _soulField.text.trim() != _syncedSoulPath.trim();
 
@@ -172,6 +270,9 @@ class _EnrichmentContextSectionState extends State<EnrichmentContextSection> {
     });
     _soulFocus.addListener(() {
       if (!_soulFocus.hasFocus && _soulDirty) _commitSoulPath();
+    });
+    _embeddingFocus.addListener(() {
+      if (!_embeddingFocus.hasFocus) _commitEmbeddingModel();
     });
     _probeSoul();
     _refreshStale();
@@ -311,6 +412,8 @@ class _EnrichmentContextSectionState extends State<EnrichmentContextSection> {
     _field.dispose();
     _soulFocus.dispose();
     _soulField.dispose();
+    _embeddingFocus.dispose();
+    _embeddingField.dispose();
     super.dispose();
   }
 
@@ -534,6 +637,8 @@ class _EnrichmentContextSectionState extends State<EnrichmentContextSection> {
                   ),
                 ],
               ),
+              Divider(color: Console.border, height: 26),
+              _relatedBlock(),
               Divider(color: Console.border, height: 26),
               Row(
                 children: <Widget>[

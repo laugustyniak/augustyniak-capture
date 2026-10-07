@@ -8,6 +8,7 @@ import 'package:path_provider/path_provider.dart';
 import 'package:sqlite3/sqlite3.dart';
 
 import '../../features/costs/data/usage_repository.dart';
+import '../../features/recordings/data/sqlite_embedding_store.dart';
 import '../security/owner_only_file.dart';
 
 class AppDatabase {
@@ -180,6 +181,9 @@ class AppDatabase {
     // Per-API-call cost history. Owned by UsageRepository so the same schema
     // builds against an in-memory database in tests.
     UsageRepository.createTable(_db);
+
+    // Derived vectors for related captures (#272); same ownership rule.
+    SqliteEmbeddingStore.createTable(_db);
   }
 
   /// Bring across whatever the pre-SQLite JSON files still hold, **without

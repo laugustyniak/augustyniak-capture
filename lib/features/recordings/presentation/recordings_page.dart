@@ -82,6 +82,7 @@ import '../../transcription/domain/transcription_limits.dart';
 import '../../gamification/presentation/celebration_overlay.dart';
 import '../../gamification/presentation/gamification_controller.dart';
 import '../../clipboard/data/sqlite_clipboard_repository.dart';
+import '../data/sqlite_embedding_store.dart';
 import '../data/foreground_capture_session.dart';
 import '../data/media_picker.dart';
 import '../data/markdown_note_vault.dart';
@@ -699,6 +700,15 @@ class _RecordingsPageState extends State<RecordingsPage>
     } catch (exception) {
       logs.log('Cost store unavailable: $exception', level: LogLevel.warn);
     }
+    // Same guard for the related-captures vectors: derived data, so a store
+    // that will not open leaves the in-memory default and costs nothing else.
+    try {
+      controller.embeddingStore = SqliteEmbeddingStore(
+        (await AppDatabase.getInstance()).rawDb,
+      );
+    } catch (exception) {
+      logs.log('Embedding store unavailable: $exception', level: LogLevel.warn);
+    }
     // Settings first so the very first recording already uses the saved
     // provider and capture parameters.
     await settings.initialize();
@@ -830,6 +840,7 @@ class _RecordingsPageState extends State<RecordingsPage>
         ? settings.enrichmentService as TranscriptCleaner
         : const DisabledTranscriptCleaner();
     controller.autoCleanup = settings.autoCleanup;
+    controller.embeddingService = settings.embeddingService;
     // OCR rides the enrichment profile (vision-capable chat endpoint) and has
     // no platform fallback behind it: with no profile active this is the
     // disabled service on desktop exactly as on mobile, so an image capture
