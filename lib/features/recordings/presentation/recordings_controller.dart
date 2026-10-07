@@ -2405,6 +2405,11 @@ class RecordingsController extends ChangeNotifier {
   /// written.
   String handoffTaskPath(String id) => _agentHandoff.taskPathFor(id);
 
+  /// The scratch folder the handoff will run in, or null when it uses a
+  /// project's repository. Shown by the sheet before anything is created.
+  String? handoffWorkspace(Recording recording) =>
+      _agentHandoff.workspacePathFor(recording.id, recording.projectId);
+
   /// Read through [capturePrompt] rather than the handoff seam, so a capture
   /// with no project — whose handoff is `DisabledAgentHandoff` — still seeds
   /// the sheet's prompt field.
