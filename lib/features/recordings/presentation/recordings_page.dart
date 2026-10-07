@@ -31,6 +31,7 @@ import '../../costs/domain/price_book.dart';
 import '../../costs/domain/usage_event.dart';
 import '../../costs/domain/usage_model_keys.dart';
 import '../../connections/data/http_daily_connections_service.dart';
+import '../../enrichment/domain/transcript_cleaner.dart';
 import '../../enrichment/data/composed_enrichment_context_source.dart';
 import '../domain/connection_reasoner.dart';
 import '../../logs/data/log_store.dart';
@@ -85,6 +86,7 @@ import '../data/foreground_capture_session.dart';
 import '../data/media_picker.dart';
 import '../data/markdown_note_vault.dart';
 import '../domain/capture_session.dart';
+import '../data/plugin_capture_sender.dart';
 import '../data/project_agent_handoff.dart';
 import '../data/command_router.dart';
 import '../data/project_inbox_router.dart';
@@ -410,6 +412,12 @@ class _RecordingsPageState extends State<RecordingsPage>
       agentHandoff: launcher == null
           ? const DisabledAgentHandoff()
           : ProjectAgentHandoff(projectById: _projectById, launcher: launcher),
+      // The fourth way out, and the only one that needs no project: a
+      // capture's text goes to a web assistant, the share sheet or the
+      // clipboard. Never disabled — Web and Copy exist on every platform.
+      captureSender: createPluginCaptureSender(
+        clipboard: const SystemClipboardSink(),
+      ),
       // The second copy of every capture, as markdown. Reads its directory
       // through callbacks for the same reason the router reads its projects
       // live: the user can point it somewhere else at any time, and the very
@@ -816,6 +824,12 @@ class _RecordingsPageState extends State<RecordingsPage>
     controller.connectionReasoner = settings.enrichmentService is ConnectionReasoner
         ? settings.enrichmentService as ConnectionReasoner
         : const ReviewConnectionReasoner();
+    // Clean-up rides the enrichment profile too: the same chat endpoint, asked
+    // for plain text instead of JSON.
+    controller.transcriptCleaner = settings.enrichmentService is TranscriptCleaner
+        ? settings.enrichmentService as TranscriptCleaner
+        : const DisabledTranscriptCleaner();
+    controller.autoCleanup = settings.autoCleanup;
     // OCR rides the enrichment profile (vision-capable chat endpoint) and has
     // no platform fallback behind it: with no profile active this is the
     // disabled service on desktop exactly as on mobile, so an image capture

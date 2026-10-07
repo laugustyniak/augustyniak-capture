@@ -928,7 +928,8 @@ class _QueueTabState extends State<QueueTab> {
       isMarkingDone: markingDoneIds.contains(recording.id),
       canRoute: controller.canRoute(recording),
       onRoute: () => controller.route(recording.id),
-      canHandoff: controller.canHandoff(recording),
+      canHandoff:
+          controller.canHandoff(recording) || controller.canSend(recording),
       onHandoff: () => _openHandoff(recording),
       onOpenOutcome: controller.openCommandOutcome,
       canOpenOutcome: (RouteOutcome outcome) =>
@@ -1341,6 +1342,13 @@ class _QueueTabState extends State<QueueTab> {
           widget.usageRepository?.forCapture(recording.id) ??
           const <UsageEvent>[],
       storagePrice: widget.storagePrice,
+      onCleanUp: RecordingsController.canCleanUp(recording)
+          ? () => controller.proposeCleanup(recording.id)
+          : null,
+      onAcceptCleanup: () => controller.acceptCleanup(recording.id),
+      onRejectCleanup: () => controller.rejectCleanup(recording.id),
+      cleaning: controller.isCleaning(recording.id),
+      cleanupError: controller.cleanupError(recording.id),
     );
   }
 

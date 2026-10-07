@@ -15,6 +15,7 @@ import '../domain/capture_priority.dart';
 import '../domain/recording.dart';
 import '../domain/recording_revision.dart';
 import 'card_parts.dart';
+import 'cleanup_section.dart';
 import 'revision_history.dart';
 import 'tag_editor.dart';
 
@@ -63,6 +64,11 @@ class RecordingEditor extends StatefulWidget {
     this.onAppendRecording,
     this.onAppendNote,
     this.onAppendUpload,
+    this.onCleanUp,
+    this.onAcceptCleanup,
+    this.onRejectCleanup,
+    this.cleaning = false,
+    this.cleanupError,
   });
 
   /// Public so a test asserts on the same string the widget renders.
@@ -105,6 +111,19 @@ class RecordingEditor extends StatefulWidget {
   final VoidCallback? onAppendRecording;
   final VoidCallback? onAppendNote;
   final ValueChanged<CaptureType>? onAppendUpload;
+
+  /// Clean-up proposals (#258). [onCleanUp] null hides the CLEAN UP button —
+  /// a typed note, or a host with nothing to clean with; [onAcceptCleanup]
+  /// null hides a stored proposal too, so a bare host renders as before.
+  final VoidCallback? onCleanUp;
+  final VoidCallback? onAcceptCleanup;
+  final VoidCallback? onRejectCleanup;
+  final bool cleaning;
+  final String? cleanupError;
+
+  bool get showsCleanup =>
+      onCleanUp != null ||
+      (recording.cleanup != null && onAcceptCleanup != null);
 
   bool get canAppend =>
       onAppendRecording != null ||
@@ -490,6 +509,21 @@ class _RecordingEditorState extends State<RecordingEditor> {
                   onChanged: (String _) => setState(() {}),
                 ),
               ),
+              if (widget.showsCleanup) ...<Widget>[
+                const SizedBox(height: 4),
+                CleanupSection(
+                  recording: recording,
+                  cleaning: widget.cleaning,
+                  error: widget.cleanupError,
+                  onCleanUp: widget.onCleanUp,
+                  onAccept: widget.onAcceptCleanup,
+                  onReject: widget.onRejectCleanup,
+                  acceptBlockedReason: _textDirty
+                      ? 'Save or revert the text above first.'
+                      : null,
+                ),
+                const SizedBox(height: 8),
+              ],
               if (recording.segments.length > 1 || widget.canAppend) ...<Widget>[
                 const SizedBox(height: 4),
                 _FragmentsSection(

@@ -90,6 +90,32 @@ void main() {
     expect(log.appended.single.type, CaptureType.text);
   });
 
+  test('backfill counts a capture last sent to an assistant as a handoff', () async {
+    final _RecordingClosureLog log = _RecordingClosureLog();
+    final RecordingsController controller = await buildRecordingsController(
+      appDir,
+      seed: <Recording>[
+        makeRecording(
+          id: 'r1',
+          isProcessedByUser: true,
+          processedAt: DateTime(2026, 10, 6, 10),
+          routes: <RouteRecord>[
+            RouteRecord(
+              at: DateTime.utc(2026, 10, 6),
+              kind: RouteKind.assistant,
+              target: 'clipboard',
+            ),
+          ],
+        ),
+      ],
+      closureLog: log,
+    );
+
+    await controller.backfillClosures();
+
+    expect(log.appended.single.kind, ClosureKind.handoff);
+  });
+
   test('un-closing and re-closing records nothing the second time', () async {
     // A capture closes once, ever — otherwise the count could be farmed by
     // toggling one row rather than by doing any work, which is the whole

@@ -2,18 +2,27 @@ import 'package:flutter/material.dart';
 
 import '../../../app/ui_kit.dart';
 import '../domain/agent_handoff.dart';
+import '../domain/assistant_target.dart';
+import '../domain/capture_sender.dart';
 import '../domain/recording.dart';
 import 'card_parts.dart';
 import 'recordings_controller.dart';
 
-/// Hands one capture to a coding agent: pick the agent, check the prompt, launch.
+/// The **Send to…** sheet: one prompt, and every place this machine can put it.
 ///
-/// It runs the handoff itself rather than returning a choice to the caller, and
-/// that is the whole reason it is a stateful sheet. A launch has two different
-/// successful outcomes — a new session, which received the prompt, and an attach
-/// to an agent that was already running, which did not — and the user has to be
-/// told which one happened. With no snackbars in this app, the sheet is the only
-/// surface that can say so, so it stays open on an attach and closes on a start.
+/// Terminal agents (only when the capture's project offers some), Claude
+/// Desktop, the web assistants, the system share sheet and the clipboard. It
+/// runs the send itself rather than returning a choice to the caller, and that
+/// is the whole reason it is a stateful sheet: the outcomes differ and the user
+/// has to be told which one happened. A launch has two successful outcomes — a
+/// new session, which received the prompt, and an attach to an agent that was
+/// already running, which did not. A web, share or copy send cannot confirm
+/// delivery at all, so the sheet stays open to say where the text went and to
+/// ask whether the capture is done. With no snackbars in this app, the sheet is
+/// the only surface that can say so.
+///
+/// Opens with an empty agent list: a capture with no project still has Web and
+/// Copy. The callers decide whether to show the control at all.
 Future<void> showHandoffSheet(
   BuildContext context, {
   required RecordingsController controller,
@@ -21,7 +30,11 @@ Future<void> showHandoffSheet(
   String? projectName,
 }) async {
   final List<HandoffAgent> agents = controller.handoffAgents(recording);
-  if (agents.isEmpty) return;
+  // Read before the sheet exists so it never has to render a loading state:
+  // the probe for a `claude://` handler is the only slow part and it is short.
+  final List<SendTarget> targets = await controller.sendTargets();
+  if (agents.isEmpty && targets.isEmpty) return;
+  if (!context.mounted) return;
 
   await showModalBottomSheet<void>(
     context: context,
@@ -32,6 +45,7 @@ Future<void> showHandoffSheet(
       recording: recording,
       projectName: projectName,
       agents: agents,
+      targets: targets,
     ),
   );
 }
@@ -42,12 +56,14 @@ class _HandoffSheet extends StatefulWidget {
     required this.recording,
     required this.projectName,
     required this.agents,
+    required this.targets,
   });
 
   final RecordingsController controller;
   final Recording recording;
   final String? projectName;
   final List<HandoffAgent> agents;
+  final List<SendTarget> targets;
 
   @override
   State<_HandoffSheet> createState() => _HandoffSheetState();
@@ -55,9 +71,11 @@ class _HandoffSheet extends StatefulWidget {
 
 class _HandoffSheetState extends State<_HandoffSheet> {
   late final TextEditingController _instruction;
-  late String _agentId;
+  String _agentId = '';
   bool _busy = false;
+  bool _launching = false;
   AgentHandoffResult? _attached;
+  SendOutcome? _sent;
   String? _error;
 
   @override
@@ -66,12 +84,14 @@ class _HandoffSheetState extends State<_HandoffSheet> {
     // The project's default agent, or simply the first: launching the usual
     // agent has to stay one tap, and a sheet that opens with nothing selected
     // would make the common case cost two.
-    _agentId = widget.agents
-        .firstWhere(
-          (HandoffAgent agent) => agent.isDefault,
-          orElse: () => widget.agents.first,
-        )
-        .id;
+    if (widget.agents.isNotEmpty) {
+      _agentId = widget.agents
+          .firstWhere(
+            (HandoffAgent agent) => agent.isDefault,
+            orElse: () => widget.agents.first,
+          )
+          .id;
+    }
     _instruction = TextEditingController(
       text: widget.controller.handoffPrompt(widget.recording),
     );
@@ -83,9 +103,42 @@ class _HandoffSheetState extends State<_HandoffSheet> {
     super.dispose();
   }
 
+  Future<void> _send(SendTarget target) async {
+    setState(() {
+      _busy = true;
+      _error = null;
+    });
+    SendOutcome? outcome;
+    try {
+      outcome = await widget.controller.send(
+        widget.recording.id,
+        target,
+        _instruction.text,
+      );
+    } finally {
+      // Never leave the targets dead: whatever happened, the user can act.
+      if (mounted) setState(() => _busy = false);
+    }
+    if (!mounted) return;
+    setState(() {
+      if (outcome != null) _sent = outcome;
+      // A failure, or a send that went out but could not be recorded — the
+      // controller reports both through its error. A dismissed share leaves
+      // none, and the controller clears it at the start of every send.
+      _error = widget.controller.error;
+    });
+  }
+
+  Future<void> _markDone() async {
+    await widget.controller.toggleProcessed(widget.recording.id);
+    if (!mounted) return;
+    Navigator.of(context).pop();
+  }
+
   Future<void> _launch() async {
     setState(() {
       _busy = true;
+      _launching = true;
       _error = null;
     });
     final AgentHandoffResult? result = await widget.controller.handoff(
@@ -98,6 +151,7 @@ class _HandoffSheetState extends State<_HandoffSheet> {
     if (result == null) {
       setState(() {
         _busy = false;
+        _launching = false;
         _error = widget.controller.error ?? 'The agent session did not open.';
       });
       return;
@@ -105,6 +159,7 @@ class _HandoffSheetState extends State<_HandoffSheet> {
     if (result.attachedToExistingSession) {
       setState(() {
         _busy = false;
+        _launching = false;
         _attached = result;
       });
       return;
@@ -150,7 +205,7 @@ class _HandoffSheetState extends State<_HandoffSheet> {
               children: <Widget>[
                 Expanded(
                   child: Text(
-                    'Hand off to an agent',
+                    'Send to…',
                     style: TextStyle(
                       fontFamily: ConsoleFont.display,
                       fontSize: 18,
@@ -174,52 +229,14 @@ class _HandoffSheetState extends State<_HandoffSheet> {
               overflow: TextOverflow.ellipsis,
               style: ConsoleText.cardMeta,
             ),
-            const SizedBox(height: 14),
-            // **The label is the point of this sheet now.** This path opens one
-            // CLI in one terminal on this machine and then loses sight of it:
-            // no second prompt reaches the running session, and nothing ever
-            // reports back. A project bound to the control plane never gets
-            // here — `ProjectAgentHandoff` refuses it — so a sheet that is open
-            // is by definition the unsupervised path, and saying so is what
-            // stops the two reading as the same action.
-            Row(
-              children: <Widget>[
-                Icon(Icons.desktop_windows_outlined, size: 13, color: Console.amber),
-                const SizedBox(width: 6),
-                Expanded(
-                  child: Text(
-                    'Local session — not supervised. It runs on this machine '
-                    'and reports nothing back.',
-                    style: ConsoleText.micro.copyWith(color: Console.amber),
-                  ),
-                ),
-              ],
-            ),
             const SizedBox(height: 18),
 
-            SectionHeader(title: 'AGENT'),
+            SectionHeader(title: 'PROMPT'),
             const SizedBox(height: 9),
-            Wrap(
-              spacing: 8,
-              runSpacing: 8,
-              children: <Widget>[
-                for (final HandoffAgent agent in widget.agents)
-                  ConsoleChip(
-                    label: agent.label.toUpperCase(),
-                    selected: agent.id == _agentId,
-                    onSelected: _busy
-                        ? () {}
-                        : () => setState(() => _agentId = agent.id),
-                  ),
-              ],
-            ),
-            const SizedBox(height: 18),
-
-            SectionHeader(title: 'OPENING PROMPT'),
-            const SizedBox(height: 9),
-            // Room for the capture itself, which is what this field now holds.
-            // Bounded rather than unbounded: the sheet has to stay reachable
-            // above the keyboard on a phone, and a long transcript scrolls.
+            // Room for the capture itself, which is what this field holds and
+            // what every target below receives, edited or not. Bounded rather
+            // than unbounded: the sheet has to stay reachable above the
+            // keyboard on a phone, and a long transcript scrolls.
             ConsoleField(
               controller: _instruction,
               maxLines: 12,
@@ -227,58 +244,296 @@ class _HandoffSheetState extends State<_HandoffSheet> {
               monospace: true,
               fontSize: 12,
             ),
-            const SizedBox(height: 9),
-            // The agent is started with the text above. The file is the copy
-            // that outlives the session — and the one an *attach* falls back
-            // on, since a running agent never receives this prompt.
-            Row(
-              children: <Widget>[
-                Icon(
-                  Icons.description_outlined,
-                  size: 13,
-                  color: Console.dimText,
-                ),
-                const SizedBox(width: 6),
-                Expanded(
-                  child: Text(
-                    'Sent to the agent as its opening prompt. A copy is also '
-                    'written to $taskPath',
-                    maxLines: 3,
-                    style: ConsoleText.micro,
-                  ),
-                ),
-              ],
-            ),
+            const SizedBox(height: 18),
 
-            if (_attached case final AgentHandoffResult result) ...<Widget>[
-              const SizedBox(height: 16),
-              _AttachedNotice(result: result, instruction: _instruction.text),
+            if (_sent case final SendOutcome outcome) ...<Widget>[
+              _SentNotice(
+                outcome: outcome,
+                onMarkDone: _markDone,
+                onKeep: () => Navigator.of(context).pop(),
+              ),
+              const SizedBox(height: 18),
             ],
             if (_error case final String message) ...<Widget>[
-              const SizedBox(height: 16),
               ErrorBanner(message: message),
+              const SizedBox(height: 18),
             ],
 
-            const SizedBox(height: 18),
-            Row(
-              children: <Widget>[
-                Expanded(
-                  child: _LaunchButton(
-                    busy: _busy,
-                    // After an attach the session is already open and the
-                    // capture already closed; the remaining action is to paste
-                    // the prompt, not to launch again.
-                    label: _attached == null ? 'LAUNCH SESSION' : 'DONE',
-                    onTap: _busy
-                        ? null
-                        : _attached == null
-                        ? _launch
-                        : () => Navigator.of(context).pop(),
-                  ),
+            if (widget.agents.isNotEmpty) ..._terminalGroup(taskPath),
+            ..._targetGroups(),
+          ],
+        ),
+      ),
+    );
+  }
+
+  /// Existing agents, unchanged in behaviour: launch, attach notice, close on a
+  /// new session.
+  List<Widget> _terminalGroup(String taskPath) => <Widget>[
+    SectionHeader(title: 'TERMINAL'),
+    const SizedBox(height: 9),
+    // **The label is the point of this group.** This path opens one CLI in one
+    // terminal on this machine and then loses sight of it: no second prompt
+    // reaches the running session, and nothing ever reports back. A project
+    // bound to the control plane never gets here — `ProjectAgentHandoff`
+    // refuses it — so a group that is shown is by definition the unsupervised
+    // path, and saying so is what stops the two reading as the same action.
+    Row(
+      children: <Widget>[
+        Icon(Icons.desktop_windows_outlined, size: 13, color: Console.amber),
+        const SizedBox(width: 6),
+        Expanded(
+          child: Text(
+            'Local session — not supervised. It runs on this machine '
+            'and reports nothing back.',
+            style: ConsoleText.micro.copyWith(color: Console.amber),
+          ),
+        ),
+      ],
+    ),
+    const SizedBox(height: 12),
+    Wrap(
+      spacing: 8,
+      runSpacing: 8,
+      children: <Widget>[
+        for (final HandoffAgent agent in widget.agents)
+          ConsoleChip(
+            label: agent.label.toUpperCase(),
+            selected: agent.id == _agentId,
+            onSelected: _busy
+                ? () {}
+                : () => setState(() => _agentId = agent.id),
+          ),
+      ],
+    ),
+    const SizedBox(height: 9),
+    // The agent is started with the prompt above. The file is the copy that
+    // outlives the session — and the one an *attach* falls back on, since a
+    // running agent never receives this prompt.
+    Row(
+      children: <Widget>[
+        Icon(Icons.description_outlined, size: 13, color: Console.dimText),
+        const SizedBox(width: 6),
+        Expanded(
+          child: Text(
+            'Sent to the agent as its opening prompt. A copy is also '
+            'written to $taskPath',
+            maxLines: 3,
+            style: ConsoleText.micro,
+          ),
+        ),
+      ],
+    ),
+    if (_attached case final AgentHandoffResult result) ...<Widget>[
+      const SizedBox(height: 16),
+      _AttachedNotice(result: result, instruction: _instruction.text),
+    ],
+    const SizedBox(height: 14),
+    _LaunchButton(
+      busy: _launching,
+      // After an attach the session is already open and the capture already
+      // closed; the remaining action is to paste the prompt, not to launch
+      // again.
+      label: _attached == null ? 'LAUNCH SESSION' : 'DONE',
+      onTap: _busy
+          ? null
+          : _attached == null
+          ? _launch
+          : () => Navigator.of(context).pop(),
+    ),
+    const SizedBox(height: 22),
+  ];
+
+  /// Claude Desktop, Web, Share and Copy, in the order the sender listed them
+  /// (Android puts Share first). A header is printed where the group changes.
+  List<Widget> _targetGroups() {
+    final List<Widget> out = <Widget>[];
+    String? group;
+    for (final SendTarget target in widget.targets) {
+      final String next = _groupOf(target);
+      if (next != group) {
+        if (group != null) out.add(const SizedBox(height: 14));
+        out.add(SectionHeader(title: next));
+        out.add(const SizedBox(height: 9));
+        group = next;
+      }
+      out.add(
+        Padding(
+          padding: const EdgeInsets.only(bottom: 8),
+          child: _TargetTile(
+            label: _labelOf(target),
+            detail: _detailOf(target),
+            onTap: _busy ? null : () => _send(target),
+          ),
+        ),
+      );
+    }
+    return out;
+  }
+
+  static String _groupOf(SendTarget target) => switch (target) {
+    AssistantSendTarget(:final AssistantTarget target) =>
+      target.isWeb ? 'WEB' : 'CLAUDE DESKTOP',
+    ShareSendTarget() => 'SHARE',
+    CopySendTarget() => 'COPY',
+  };
+
+  static String _labelOf(SendTarget target) => switch (target) {
+    AssistantSendTarget(:final AssistantTarget target) => target.label,
+    ShareSendTarget() => 'System share sheet',
+    CopySendTarget() => 'Copy prompt',
+  };
+
+  /// Where the text goes, and what happens when it gets there. Sending
+  /// publishes the capture to a third party, so the destination is on the
+  /// button, and a target that sends the moment it opens says so — the prompt
+  /// field above is then the user's last chance to edit.
+  ///
+  /// Claude Desktop is named as the app it opens rather than by a domain: its
+  /// link never reaches a website, and "claude.ai" beside it read as a second
+  /// web button.
+  static String _detailOf(SendTarget target) => switch (target) {
+    AssistantSendTarget(:final AssistantTarget target) => () {
+      final String where = target.isWeb ? target.domain : 'desktop app';
+      return !target.supportsPrefill
+          ? '$where · you paste the prompt'
+          : target.autoSubmits
+          ? '$where · sends immediately'
+          : '$where · opens with the prompt filled in';
+    }(),
+    ShareSendTarget() => 'Pick any app you have installed',
+    CopySendTarget() => 'Nothing leaves this device',
+  };
+}
+
+/// What a completed send says, and the two things the user can do about the
+/// capture. Delivery is unconfirmed, so closing it is their call.
+class _SentNotice extends StatelessWidget {
+  _SentNotice({
+    required this.outcome,
+    required this.onMarkDone,
+    required this.onKeep,
+  });
+
+  final SendOutcome outcome;
+  final VoidCallback onMarkDone;
+  final VoidCallback onKeep;
+
+  @override
+  Widget build(BuildContext context) {
+    final String target = outcome.record.target;
+    final bool copyOnly = target == 'clipboard';
+    return Container(
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: Console.green.withValues(alpha: .08),
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(color: Console.green.withValues(alpha: .35)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: <Widget>[
+          Row(
+            children: <Widget>[
+              Icon(Icons.check_circle_outline, size: 14, color: Console.green),
+              const SizedBox(width: 6),
+              Expanded(
+                child: Text(
+                  // A clipboard fallback opened a page and sent nothing, so
+                  // it must not read as a delivery.
+                  copyOnly
+                      ? 'Copied to clipboard'
+                      : outcome.copiedToClipboard
+                      ? 'Opened $target'
+                      : 'Sent to $target',
+                  style: ConsoleText.micro.copyWith(color: Console.green),
                 ),
-              ],
+              ),
+            ],
+          ),
+          if (outcome.copiedToClipboard && !copyOnly) ...<Widget>[
+            const SizedBox(height: 7),
+            Text(
+              'Prompt copied — paste it into ${_serviceOf(target)}',
+              style: ConsoleText.micro,
             ),
           ],
+          const SizedBox(height: 12),
+          Row(
+            children: <Widget>[
+              Expanded(
+                child: _LaunchButton(
+                  busy: false,
+                  label: 'MARK DONE',
+                  onTap: onMarkDone,
+                ),
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: _LaunchButton(
+                  busy: false,
+                  label: 'KEEP ON DESK',
+                  onTap: onKeep,
+                  outlined: true,
+                ),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// `ChatGPT · web` → `ChatGPT`.
+  static String _serviceOf(String target) => target.split(' · ').first;
+}
+
+/// One destination: its name, and where it goes.
+class _TargetTile extends StatelessWidget {
+  _TargetTile({required this.label, required this.detail, required this.onTap});
+
+  final String label;
+  final String detail;
+  final VoidCallback? onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final bool enabled = onTap != null;
+    return Semantics(
+      button: true,
+      enabled: enabled,
+      label: '$label, $detail',
+      excludeSemantics: true,
+      child: GestureDetector(
+        onTap: onTap,
+        behavior: HitTestBehavior.opaque,
+        child: Opacity(
+          opacity: enabled ? 1 : .5,
+          child: Container(
+            width: double.infinity,
+            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 11),
+            decoration: BoxDecoration(
+              color: Console.surface,
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(color: Console.borderStrong),
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: <Widget>[
+                Text(
+                  label,
+                  style: TextStyle(
+                    fontFamily: ConsoleFont.display,
+                    fontSize: 14,
+                    fontWeight: FontWeight.w600,
+                    color: Console.text,
+                  ),
+                ),
+                const SizedBox(height: 2),
+                Text(detail, style: ConsoleText.micro),
+              ],
+            ),
+          ),
         ),
       ),
     );
@@ -355,11 +610,15 @@ class _LaunchButton extends StatelessWidget {
     required this.busy,
     required this.label,
     required this.onTap,
+    this.outlined = false,
   });
 
   final bool busy;
   final String label;
   final VoidCallback? onTap;
+
+  /// The quieter of two side-by-side actions.
+  final bool outlined;
 
   @override
   Widget build(BuildContext context) {
@@ -375,9 +634,12 @@ class _LaunchButton extends StatelessWidget {
           height: 46,
           alignment: Alignment.center,
           decoration: BoxDecoration(
-            color: enabled
+            color: outlined
+                ? null
+                : enabled
                 ? Console.accent
                 : Console.accent.withValues(alpha: .35),
+            border: outlined ? Border.all(color: Console.borderStrong) : null,
             borderRadius: BorderRadius.circular(12),
           ),
           // A label rather than a spinner, deliberately: a never-ending
@@ -386,7 +648,7 @@ class _LaunchButton extends StatelessWidget {
           child: Text(
             busy ? 'LAUNCHING…' : label,
             style: ConsoleText.micro.copyWith(
-              color: Console.ink,
+              color: outlined ? Console.text : Console.ink,
               fontWeight: FontWeight.w700,
               letterSpacing: 1.1,
             ),

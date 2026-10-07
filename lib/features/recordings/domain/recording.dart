@@ -1,5 +1,6 @@
 import 'agent_artifact.dart';
 import 'capture_category.dart';
+import 'cleanup_proposal.dart';
 import 'capture_priority.dart';
 import 'capture_segment.dart';
 import 'capture_type.dart';
@@ -42,6 +43,7 @@ class Recording {
     this.priority,
     this.priorityReason,
     this.priorityBasis,
+    this.cleanup,
     this.tags = const <String>[],
     this.projectId,
     this.error,
@@ -130,6 +132,12 @@ class Recording {
   /// existed. Comparing it with the current fingerprint tells a rank made
   /// under old goals from a current one.
   final String? priorityBasis;
+
+  /// A cleaned-up transcript waiting for accept or reject (#258). Null means
+  /// none was proposed, or the last one was accepted or rejected. Never read
+  /// as the transcript: search, the vault and agent briefs all keep reading
+  /// [transcript] until the user accepts.
+  final CleanupProposal? cleanup;
 
   /// The capture's tags: one normalized list, no provenance. Enrichment may
   /// propose it and the user may rewrite it — see [RecordingTags].
@@ -244,6 +252,8 @@ class Recording {
     bool clearPriorityReason = false,
     String? priorityBasis,
     bool clearPriorityBasis = false,
+    CleanupProposal? cleanup,
+    bool clearCleanup = false,
     List<String>? tags,
     String? projectId,
     bool clearProjectId = false,
@@ -278,6 +288,7 @@ class Recording {
       priorityBasis: clearPriorityBasis
           ? null
           : (priorityBasis ?? this.priorityBasis),
+      cleanup: clearCleanup ? null : (cleanup ?? this.cleanup),
       tags: RecordingTags.normalize(tags ?? this.tags),
       projectId: clearProjectId ? null : (projectId ?? this.projectId),
       error: clearError ? null : (error ?? this.error),
@@ -309,6 +320,7 @@ class Recording {
     if (priority != null) 'priority': priority!.name,
     if (priorityReason != null) 'priorityReason': priorityReason,
     if (priorityBasis != null) 'priorityBasis': priorityBasis,
+    if (cleanup != null) 'cleanup': cleanup!.toJson(),
     'tags': tags,
     'projectId': projectId,
     'error': error,
@@ -367,6 +379,7 @@ class Recording {
       priorityBasis: json['priorityBasis'] is String
           ? json['priorityBasis'] as String
           : null,
+      cleanup: CleanupProposal.fromJson(json['cleanup']),
       // Reads the plain string list *and* the retired `{value, source}` form,
       // which is already on disk. Invalid entries degrade individually rather
       // than taking down the index.

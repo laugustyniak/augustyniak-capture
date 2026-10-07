@@ -14,6 +14,7 @@ import '../domain/enrichment_context.dart';
 import '../domain/enrichment_prompt.dart';
 import '../domain/enrichment_result.dart';
 import '../domain/enrichment_service.dart';
+import '../domain/transcript_cleaner.dart';
 
 /// OpenAI-compatible `/v1/chat/completions` client.
 ///
@@ -22,7 +23,7 @@ import '../domain/enrichment_service.dart';
 /// against OpenAI, Groq and a local Ollama without a code change, because all
 /// three speak this body.
 class HttpChatEnrichmentService
-    implements EnrichmentService, ConnectionReasoner {
+    implements EnrichmentService, ConnectionReasoner, TranscriptCleaner {
   HttpChatEnrichmentService({
     required this.endpoint,
     this.bearerToken,
@@ -220,6 +221,86 @@ class HttpChatEnrichmentService
     final String body = utf8.decode(response.bodyBytes);
     _recordUsage(body);
     return parseResponse(body);
+  }
+
+  /// One request per [cleanupChunks] piece, in order, joined by a blank line.
+  ///
+  /// Plain text, not JSON mode: the answer *is* the text, and wrapping it in an
+  /// object only adds a way to lose it. Each chunk is checked with
+  /// [keptEnough] before the next is sent — one implausibly short answer
+  /// refuses the whole proposal rather than splicing a summary into the
+  /// middle of a transcript.
+  @override
+  Future<String> cleanUp(
+    String text, {
+    EnrichmentContext context = EnrichmentContext.none,
+  }) async {
+    final String trimmed = text.trim();
+    if (trimmed.length > CleanupLimits.maxChars) {
+      throw CleanupTooLongException(trimmed.length);
+    }
+    final String system = buildCleanupSystemPrompt(context: context);
+    final List<String> cleaned = <String>[];
+    for (final String chunk in cleanupChunks(trimmed)) {
+      final http.Response response = await _client
+          .post(
+            endpoint,
+            headers: <String, String>{
+              'content-type': 'application/json; charset=utf-8',
+              if (bearerToken != null && bearerToken!.isNotEmpty)
+                'Authorization': 'Bearer $bearerToken',
+            },
+            body: utf8.encode(
+              jsonEncode(<String, dynamic>{
+                if (model != null && model!.isNotEmpty) 'model': model,
+                'messages': <Map<String, String>>[
+                  <String, String>{'role': 'system', 'content': system},
+                  <String, String>{'role': 'user', 'content': chunk},
+                ],
+              }),
+            ),
+          )
+          .timeout(const Duration(seconds: 90));
+      if (response.statusCode < 200 || response.statusCode >= 300) {
+        throw HttpException(
+          describeProviderFailure(
+            'Clean-up',
+            response.statusCode,
+            response.body,
+          ),
+        );
+      }
+      final String body = utf8.decode(response.bodyBytes);
+      _recordUsage(body);
+      final String answer = _stripFence(parseTextContent(body));
+      if (!keptEnough(chunk, answer)) {
+        throw const CleanupDroppedContentException();
+      }
+      cleaned.add(answer.trim());
+    }
+    return cleaned.join('\n\n');
+  }
+
+  /// The message content of a chat completion, as text. Throws when there is
+  /// none — the caller logs it and proposes nothing.
+  static String parseTextContent(String body) {
+    final dynamic envelope = jsonDecode(body);
+    final dynamic choices = envelope is Map<String, dynamic>
+        ? envelope['choices']
+        : null;
+    final dynamic first = choices is List<dynamic> && choices.isNotEmpty
+        ? choices.first
+        : null;
+    final dynamic message = first is Map<String, dynamic>
+        ? first['message']
+        : null;
+    final dynamic content = message is Map<String, dynamic>
+        ? message['content']
+        : null;
+    if (content is! String || content.trim().isEmpty) {
+      throw const FormatException('Response contains no message content.');
+    }
+    return content;
   }
 
   /// Accounting must never cost a capture: a malformed usage block, or a sink
