@@ -22,6 +22,7 @@ import '../domain/provider_profile.dart';
 import '../domain/queue_density.dart';
 import '../domain/token_cipher.dart';
 import 'backup_section.dart';
+import 'byoc_storage_section.dart';
 import 'command_section.dart';
 import 'enrichment_context_section.dart';
 import 'settings_controller.dart';
@@ -560,6 +561,8 @@ class _ConfigTabState extends State<ConfigTab> {
       AccountSection(controller: widget.authController),
       const SizedBox(height: 22),
       CommandSection(controller: widget.controller),
+      const SizedBox(height: 22),
+      ByocStorageSection(controller: widget.controller),
     ];
   }
 

@@ -497,6 +497,45 @@ class SettingsController extends ChangeNotifier {
     );
   }
 
+  Future<void> updateS3Storage({
+    String? endpoint,
+    String? bucket,
+    String? region,
+    String? accessKeyId,
+    String? secretAccessKey,
+    String? prefix,
+  }) async {
+    await _persist(
+      _settings.copyWith(
+        s3Endpoint: endpoint,
+        clearS3Endpoint: endpoint != null && endpoint.trim().isEmpty,
+        s3Bucket: bucket,
+        clearS3Bucket: bucket != null && bucket.trim().isEmpty,
+        s3Region: region,
+        clearS3Region: region != null && region.trim().isEmpty,
+        s3AccessKeyId: accessKeyId,
+        clearS3AccessKeyId: accessKeyId != null && accessKeyId.trim().isEmpty,
+        s3SecretAccessKey: secretAccessKey,
+        clearS3SecretAccessKey: secretAccessKey != null && secretAccessKey.trim().isEmpty,
+        s3Prefix: prefix,
+        clearS3Prefix: prefix != null && prefix.trim().isEmpty,
+      ),
+    );
+  }
+
+  Future<void> clearS3Storage() async {
+    await _persist(
+      _settings.copyWith(
+        clearS3Endpoint: true,
+        clearS3Bucket: true,
+        clearS3Region: true,
+        clearS3AccessKeyId: true,
+        clearS3SecretAccessKey: true,
+        clearS3Prefix: true,
+      ),
+    );
+  }
+
   /// Generated once and persisted here — never derived a second time, and
   /// never written directly by a caller that only holds an `AppSettings`
   /// snapshot: this controller is `settings.json`'s single writer, and a

@@ -174,6 +174,29 @@ void main() {
       expect(loaded.usableCommandToken, 'canary fleet token');
     });
 
+    test('the S3 secret access key is sealed like any other token', () async {
+      final AesGcmTokenCipher cipher = AesGcmTokenCipher(
+        keyStore: _MemoryKeyStore(),
+      );
+      final _TempFileSettingsRepository repository =
+          _TempFileSettingsRepository(fileIn(tempDir), cipher: cipher);
+
+      await repository.save(
+        const AppSettings(
+          s3Endpoint: 'https://test.r2.cloudflarestorage.com',
+          s3SecretAccessKey: 'canary-secret',
+        ),
+      );
+
+      final String raw = await fileIn(tempDir).readAsString();
+      expect(raw, isNot(contains('canary-secret')));
+      expect(raw, contains(TokenCipher.sealedPrefix));
+
+      final AppSettings? loaded = await repository.load();
+      expect(loaded!.s3SecretAccessKey, 'canary-secret');
+      expect(loaded.usableS3SecretAccessKey, 'canary-secret');
+    });
+
     test('a fleet token sealed under a lost key never reaches a header', () async {
       // `usableCommandToken` is what keeps an unopenable blob out of the
       // Authorization header, where it would be sent literally and answered
