@@ -2612,10 +2612,21 @@ class RecordingsController extends ChangeNotifier {
     if (index < 0) return const <AgentArtifact>[];
     final Recording recording = _recordings[index];
     final String? projectId = recording.projectId;
-    if (projectId == null || projectId.isEmpty) return recording.artifacts;
-
-    final Project? project = _projectById?.call(projectId);
-    if (project == null) return recording.artifacts;
+    Project? project = projectId == null || projectId.isEmpty
+        ? null
+        : _projectById?.call(projectId);
+    if (project == null || project.repoPath.trim().isEmpty) {
+      // A capture handed off with no repository ran in a scratch folder, and
+      // that folder is where its results are. Scanned as a repository root so
+      // the scanner needs no second code path.
+      final String? workspace = _agentHandoff.workspacePathFor(id, projectId);
+      if (workspace == null) return recording.artifacts;
+      project = Project(
+        id: 'capture-$id',
+        name: 'Capture',
+        repoPath: workspace,
+      );
+    }
 
     final Directory? vaultDir = _vaultDirectory?.call();
 

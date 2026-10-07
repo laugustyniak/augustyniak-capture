@@ -1,7 +1,9 @@
 import 'dart:io';
 
+import 'package:augustyniak_capture/features/projects/domain/agent_session_launcher.dart';
 import 'package:augustyniak_capture/features/projects/domain/project.dart';
 import 'package:augustyniak_capture/features/recordings/data/agent_artifact_scanner.dart';
+import 'package:augustyniak_capture/features/recordings/data/project_agent_handoff.dart';
 import 'package:augustyniak_capture/features/recordings/domain/agent_artifact.dart';
 import 'package:augustyniak_capture/features/recordings/domain/capture_type.dart';
 import 'package:augustyniak_capture/features/recordings/domain/recording.dart';
@@ -252,5 +254,58 @@ analysis-hash: example
       await controller.attachArtifact(captureId, extraFile.path);
       expect(controller.recordings.first.artifacts.length, 2);
     });
+
+    test('a result in a projectless capture\'s scratch workspace is found',
+        () async {
+      final Directory sessions = Directory(p.join(tempDir.path, 'sessions'));
+      const String captureId = 'cap-scratch';
+      final Recording recording = Recording(
+        id: captureId,
+        filePath: p.join(tempDir.path, '$captureId.txt'),
+        createdAt: DateTime.now(),
+        durationMs: 0,
+        type: CaptureType.text,
+        status: RecordingStatus.completed,
+      );
+      final RecordingsController controller = RecordingsController(
+        repository: FakeRecordingsRepository(
+          tempDir,
+          seed: <Recording>[recording],
+        ),
+        transcriptionService: const DisabledTranscriptionService(),
+        projectById: (String id) => null,
+        agentHandoff: ProjectAgentHandoff(
+          projectById: (String id) => null,
+          launcher: _NoopLauncher(),
+          sessionsRoot: () => sessions,
+        ),
+        player: FakePlayer(),
+        recorder: FakeRecorder(),
+      );
+      await controller.initialize();
+
+      final File result = File(
+        p.join(sessions.path, captureId, '.agent-tasks', '$captureId-result.md'),
+      );
+      await result.create(recursive: true);
+      await result.writeAsString('# Scratch Output\nDone.');
+
+      final List<AgentArtifact> found = await controller.refreshArtifacts(
+        captureId,
+      );
+
+      expect(found.single.title, 'Scratch Output');
+      expect(controller.recordings.single.artifacts, hasLength(1));
+    });
   });
+}
+
+class _NoopLauncher implements AgentSessionLauncher {
+  @override
+  Future<AgentSessionLaunchResult> launch(
+    AgentSessionLaunchRequest request,
+  ) async => const AgentSessionLaunchResult(
+    sessionName: 'x',
+    attachedToExistingSession: false,
+  );
 }
