@@ -268,6 +268,12 @@ echo "${FAKE_DART_MARKER:-}" > "$out/bundle/marker"
     expect(Directory(dest()).existsSync(), isFalse);
   });
 
+  const List<String> desktopTools = <String>[
+    'desktop-file-validate',
+    'update-desktop-database',
+    'gtk-update-icon-cache',
+  ];
+
   group('deploy.sh wiring', () {
     // deploy.sh run for real in a temp copy of the layout it reads, with
     // `--skip-build` and a placeholder bundle, so no build happens and the
@@ -277,6 +283,8 @@ echo "${FAKE_DART_MARKER:-}" > "$out/bundle/marker"
     Future<ProcessResult> deploy(
       List<String> args, {
       required int helperExit,
+      Map<String, int> toolExit = const <String, int>{},
+      bool toolsAbsent = false,
     }) async {
       fake = Directory('${temp.path}/deployrepo')..createSync();
       Directory('${fake.path}/tool').createSync();
@@ -305,15 +313,31 @@ echo "${FAKE_DART_MARKER:-}" > "$out/bundle/marker"
       );
       // The desktop-integration tools are stubbed: the fixture's launcher is
       // not meant to validate, and this test is about the MCP call only.
-      for (final String tool in <String>[
-        'desktop-file-validate',
-        'update-desktop-database',
-        'gtk-update-icon-cache',
-      ]) {
+      for (final String tool in desktopTools) {
+        if (toolsAbsent) break;
         File('${temp.path}/fakebin/$tool')
-          ..writeAsStringSync('#!/bin/sh\nexit 0\n')
+          ..writeAsStringSync('#!/bin/sh\nexit ${toolExit[tool] ?? 0}\n')
           ..createSync();
         Process.runSync('chmod', <String>['+x', '${temp.path}/fakebin/$tool']);
+      }
+      var path = '${temp.path}/fakebin:${Platform.environment['PATH']}';
+      if (toolsAbsent) {
+        // The host may have the real tools, so PATH is rebuilt from
+        // symlinks to everything else in the system bin directories.
+        final Directory clean = Directory('${temp.path}/cleanbin')
+          ..createSync();
+        for (final String dir in <String>['/usr/bin', '/usr/local/bin']) {
+          if (!Directory(dir).existsSync()) continue;
+          for (final FileSystemEntity e in Directory(dir).listSync()) {
+            final String name = e.uri.pathSegments.lastWhere(
+              (String x) => x.isNotEmpty,
+            );
+            if (desktopTools.contains(name)) continue;
+            final Link l = Link('${clean.path}/$name');
+            if (!l.existsSync()) l.createSync(e.path);
+          }
+        }
+        path = '${clean.path}:${temp.path}/fakebin';
       }
       Process.runSync('chmod', <String>[
         '+x',
@@ -341,7 +365,7 @@ echo "${FAKE_DART_MARKER:-}" > "$out/bundle/marker"
         'bash',
         <String>['${fake.path}/tool/deploy.sh', ...args],
         environment: <String, String>{
-          'PATH': '${temp.path}/fakebin:${Platform.environment['PATH']}',
+          'PATH': path,
           'HOME': home.path,
           'XDG_CONFIG_HOME': home.path,
           'XDG_DATA_HOME': '${home.path}/data',
@@ -350,6 +374,48 @@ echo "${FAKE_DART_MARKER:-}" > "$out/bundle/marker"
     }
 
     final bool linux = Platform.isLinux;
+
+    for (final String tool in desktopTools) {
+      test(
+        'a failing $tool is a warning, not a failed deploy',
+        () async {
+          final ProcessResult r = await deploy(
+            <String>['--skip-build'],
+            helperExit: 0,
+            toolExit: <String, int>{tool: 1},
+          );
+
+          expect(r.exitCode, 0, reason: output(r));
+          expect(r.stderr, contains('deploy: warning: $tool failed'));
+          for (final String other in desktopTools.where((t) => t != tool)) {
+            expect(r.stderr, isNot(contains('warning: $other')));
+          }
+          expect(r.stdout, contains('deploy: installed'));
+          expect(
+            File('${fake.path}/stub.log').readAsStringSync().trim(),
+            'some-cli --skip-build',
+            reason: 'the MCP install must still run',
+          );
+        },
+        skip: linux ? false : 'the host install branch is Linux-specific',
+      );
+    }
+
+    test(
+      'with no desktop tools installed there is no warning',
+      () async {
+        final ProcessResult r = await deploy(
+          <String>['--skip-build'],
+          helperExit: 0,
+          toolsAbsent: true,
+        );
+
+        expect(r.exitCode, 0, reason: output(r));
+        expect(r.stderr, isNot(contains('warning')));
+        expect(r.stdout, contains('deploy: installed'));
+      },
+      skip: linux ? false : 'the host install branch is Linux-specific',
+    );
 
     test(
       'a failing helper is a warning and the deploy still succeeds',
