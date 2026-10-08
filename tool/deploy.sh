@@ -229,12 +229,21 @@ MimeType=x-scheme-handler/$application_id;
 StartupWMClass=$application_id
 EOF
 
-  command -v desktop-file-validate >/dev/null 2>&1 \
-    && desktop-file-validate "$apps_dir/$application_id.desktop"
-  command -v update-desktop-database >/dev/null 2>&1 \
-    && update-desktop-database "$apps_dir" 2>/dev/null
-  command -v gtk-update-icon-cache >/dev/null 2>&1 \
-    && gtk-update-icon-cache -f -t "$icons_dir" 2>/dev/null
+  # Best-effort: under `set -e` a failing `A && B` list would end the deploy
+  # after the install is already in place, so each step is guarded by `if`.
+  # Stderr stays visible, since it carries the reason.
+  if command -v desktop-file-validate >/dev/null 2>&1; then
+    desktop-file-validate "$apps_dir/$application_id.desktop" \
+      || echo "deploy: warning: desktop-file-validate failed" >&2
+  fi
+  if command -v update-desktop-database >/dev/null 2>&1; then
+    update-desktop-database "$apps_dir" \
+      || echo "deploy: warning: update-desktop-database failed" >&2
+  fi
+  if command -v gtk-update-icon-cache >/dev/null 2>&1; then
+    gtk-update-icon-cache -f -t "$icons_dir" \
+      || echo "deploy: warning: gtk-update-icon-cache failed" >&2
+  fi
 
   echo "deploy: installed $display_name"
   echo "        bundle   $opt_dir"
