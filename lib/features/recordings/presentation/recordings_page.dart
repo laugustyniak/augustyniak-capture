@@ -256,13 +256,16 @@ class _RecordingsPageState extends State<RecordingsPage>
   /// cannot be resolved, which keeps the handoff exactly as it was.
   Directory? _sessionsRoot;
 
+  /// Fails closed: until this completes (a few milliseconds after launch) the
+  /// resolver answers null and projectless captures are offered no terminal.
   Future<void> _resolveSessionsRoot() async {
     try {
       final Directory support = await getApplicationSupportDirectory();
       _sessionsRoot = Directory(p.join(support.path, 'sessions'));
-    } catch (_) {
+    } catch (exception) {
       // No directory, no scratch folders: projectless captures simply keep
       // offering no terminal agent.
+      logs.log('Sessions folder unavailable: $exception', level: LogLevel.warn);
     }
   }
 

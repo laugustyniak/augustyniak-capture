@@ -855,7 +855,7 @@ String _agentLabel(AgentKind agent) => switch (agent) {
   AgentKind.codex => 'Codex',
   AgentKind.claudeCode => 'Claude Code',
   AgentKind.antigravity => 'Antigravity',
-  AgentKind.geminiCli => 'GEMINI CLI',
+  AgentKind.geminiCli => 'Gemini CLI',
 };
 
 IconData _agentIcon(AgentKind agent) => switch (agent) {

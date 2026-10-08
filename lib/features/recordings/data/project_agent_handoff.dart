@@ -141,10 +141,7 @@ class ProjectAgentHandoff implements AgentHandoff {
     if (!await repo.exists()) {
       // Named rather than swallowed: a moved checkout and a silent agent look
       // identical from the queue, and only one of them is the user's problem.
-      throw FileSystemException(
-        'Project repository not found',
-        repoPath,
-      );
+      throw FileSystemException('Project repository not found', repoPath);
     }
 
     // The brief goes down first. An agent started against a file that is not

@@ -443,30 +443,31 @@ void main() {
     expect(find.text('WEB'), findsOneWidget);
   });
 
-  testWidgets('a projectless capture with a scratch root gets a Terminal group', (
-    WidgetTester tester,
-  ) async {
-    final Directory sessions = Directory('${appDir.path}/sessions');
-    final RecordingsController controller = await buildRecordingsController(
-      appDir,
-      seed: <Recording>[makeRecording(id: 'r1', transcript: 'Body.')],
-      agentHandoff: ProjectAgentHandoff(
-        projectById: (String id) => null,
-        launcher: _FakeLauncher(),
-        sessionsRoot: () => sessions,
-      ),
-      captureSender: _FakeSender(),
-    );
+  testWidgets(
+    'a projectless capture with a scratch root gets a Terminal group',
+    (WidgetTester tester) async {
+      final Directory sessions = Directory('${appDir.path}/sessions');
+      final RecordingsController controller = await buildRecordingsController(
+        appDir,
+        seed: <Recording>[makeRecording(id: 'r1', transcript: 'Body.')],
+        agentHandoff: ProjectAgentHandoff(
+          projectById: (String id) => null,
+          launcher: _FakeLauncher(),
+          sessionsRoot: () => sessions,
+        ),
+        captureSender: _FakeSender(),
+      );
 
-    await openSheet(tester, controller);
+      await openSheet(tester, controller);
 
-    expect(find.text('TERMINAL'), findsOneWidget);
-    expect(find.text('LAUNCH SESSION'), findsOneWidget);
-    expect(
-      find.textContaining('Runs in a scratch folder: ${sessions.path}'),
-      findsOneWidget,
-    );
-  });
+      expect(find.text('TERMINAL'), findsOneWidget);
+      expect(find.text('LAUNCH SESSION'), findsOneWidget);
+      expect(
+        find.textContaining('Runs in a scratch folder: ${sessions.path}'),
+        findsOneWidget,
+      );
+    },
+  );
 
   testWidgets('a repository-backed capture shows no scratch note', (
     WidgetTester tester,
