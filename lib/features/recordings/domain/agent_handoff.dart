@@ -158,6 +158,26 @@ class DisabledAgentHandoff implements AgentHandoff {
   }
 }
 
+/// Whether [id] can be used as a single path segment.
+///
+/// Capture ids arrive from sync and from backup import, which check only that
+/// they are strings, and a handoff turns one into a directory name and a file
+/// name. `..`, a separator or an absolute path would make that a write outside
+/// the folder it was meant for.
+bool isSafeCaptureId(String id) => _safeCaptureId.hasMatch(id);
+
+final RegExp _safeCaptureId = RegExp(r'^[A-Za-z0-9_-]{1,64}$');
+
+/// A handoff was refused because the capture's id is not a safe path segment.
+class UnsafeCaptureIdException implements Exception {
+  const UnsafeCaptureIdException();
+
+  @override
+  String toString() =>
+      'This capture has an id that cannot be used as a file name, so it '
+      'cannot be handed to an agent.';
+}
+
 class AgentHandoffUnavailableException implements Exception {
   const AgentHandoffUnavailableException();
 

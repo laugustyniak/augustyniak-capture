@@ -2395,7 +2395,11 @@ class RecordingsController extends ChangeNotifier {
   /// Agents this capture can be handed to. Empty means the control is hidden,
   /// the same rule [canRoute] follows.
   List<HandoffAgent> handoffAgents(Recording recording) =>
-      _agentHandoff.agentsFor(recording.projectId);
+      // An id that cannot name a file is refused by the handoff itself; hiding
+      // the control here saves the user a failure they could not act on.
+      isSafeCaptureId(recording.id)
+      ? _agentHandoff.agentsFor(recording.projectId)
+      : const <HandoffAgent>[];
 
   bool canHandoff(Recording recording) => handoffAgents(recording).isNotEmpty;
 

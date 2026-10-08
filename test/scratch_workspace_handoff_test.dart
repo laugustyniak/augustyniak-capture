@@ -206,4 +206,58 @@ void main() {
     }
     expect(launcher.requests, isEmpty);
   });
+
+  group('an unsafe capture id', () {
+    final List<String> unsafe = <String>[
+      '..',
+      '.',
+      'a/b',
+      r'a\b',
+      '../../x',
+      '/tmp/x',
+      '',
+      'has space',
+      'x' * 65,
+    ];
+
+    test('is refused for the scratch workspace and creates nothing', () async {
+      final ProjectAgentHandoff handoff = handoffWith(
+        const <String, Project>{},
+        sessionsRoot: () => root,
+      );
+      for (final String id in unsafe) {
+        expect(handoff.workspacePathFor(id, null), isNull, reason: id);
+        await expectLater(
+          handoff.handoff(_request(id)),
+          throwsA(isA<UnsafeCaptureIdException>()),
+          reason: id,
+        );
+      }
+      expect(launcher.requests, isEmpty);
+      expect(root.listSync(), isEmpty);
+    });
+
+    test('is refused for a repository project too', () async {
+      final Directory repo = Directory.systemTemp.createTempSync('repo-');
+      addTearDown(() => repo.deleteSync(recursive: true));
+      final ProjectAgentHandoff handoff = handoffWith(<String, Project>{
+        'p1': Project(id: 'p1', name: 'Acme', repoPath: repo.path),
+      }, sessionsRoot: () => root);
+
+      for (final String id in unsafe) {
+        await expectLater(
+          handoff.handoff(_request(id, projectId: 'p1')),
+          throwsA(isA<UnsafeCaptureIdException>()),
+          reason: id,
+        );
+      }
+      expect(launcher.requests, isEmpty);
+      expect(repo.listSync(recursive: true), isEmpty);
+    });
+
+    test('uuid and plain ids are accepted', () {
+      expect(isSafeCaptureId('0b6f3c1e-1111-4222-8333-444455556666'), isTrue);
+      expect(isSafeCaptureId('cap_1'), isTrue);
+    });
+  });
 }

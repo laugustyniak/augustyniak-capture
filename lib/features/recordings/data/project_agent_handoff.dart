@@ -78,9 +78,13 @@ class ProjectAgentHandoff implements AgentHandoff {
 
   @override
   String? workspacePathFor(String captureId, String? projectId) {
+    if (!isSafeCaptureId(captureId)) return null;
     final ({Project? project, bool scratch})? target = _resolve(projectId);
     if (target == null || !target.scratch) return null;
-    return p.join(_scratchRoot()!.path, captureId);
+    final String root = _scratchRoot()!.path;
+    final String path = p.join(root, captureId);
+    // Defence in depth behind the id check.
+    return p.isWithin(root, path) ? path : null;
   }
 
   @override
@@ -110,6 +114,10 @@ class ProjectAgentHandoff implements AgentHandoff {
 
   @override
   Future<AgentHandoffResult> handoff(AgentHandoffRequest request) async {
+    // First, before any path is built from the id.
+    if (!isSafeCaptureId(request.captureId)) {
+      throw const UnsafeCaptureIdException();
+    }
     final ({Project? project, bool scratch})? target = _resolve(
       request.capture.projectId,
     );
@@ -167,7 +175,8 @@ class ProjectAgentHandoff implements AgentHandoff {
             : _scratchSessionName(request.captureId),
         arguments: <String>[
           ...settings.additionalArgs,
-          if (settings.skipPermissions) ...launcherAgent.skipPermissionsArguments,
+          if (settings.skipPermissions)
+            ...launcherAgent.skipPermissionsArguments,
           // The project's own `initialPrompt` is deliberately not appended. It
           // is the opening line for a session started *from the project card*,
           // with no particular task in hand; here there is a task, and two
@@ -191,8 +200,13 @@ class ProjectAgentHandoff implements AgentHandoff {
     );
   }
 
-  File _taskFile(String repoPath, String captureId) =>
-      File(p.join(repoPath, directoryName, '$captureId.md'));
+  File _taskFile(String repoPath, String captureId) {
+    final String path = p.join(repoPath, directoryName, '$captureId.md');
+    if (!p.isWithin(p.join(repoPath, directoryName), path)) {
+      throw const UnsafeCaptureIdException();
+    }
+    return File(path);
+  }
 
   /// `capture-` plus the first twelve alphanumerics of the id: lowercase and
   /// dash-only so Zellij accepts it, short enough that the launcher's 63
