@@ -148,13 +148,17 @@ const EnrichmentContext _withRoutes = EnrichmentContext(
   routeKinds: <SuggestedRouteKind>[SuggestedRouteKind.command],
 );
 
-Recording _row({SuggestedRoute? suggestion, bool auto = false}) => Recording(
+Recording _row({
+  SuggestedRoute? suggestion,
+  bool auto = false,
+  bool noProject = false,
+}) => Recording(
   id: 'rec-1',
   filePath: '/tmp/rec-1.m4a',
   createdAt: DateTime.utc(2026, 9, 21, 8),
   durationMs: 1,
   status: RecordingStatus.completed,
-  projectId: 'a',
+  projectId: noProject ? null : 'a',
   projectAuto: auto,
   suggestedRoute: suggestion,
 );
@@ -607,6 +611,132 @@ void main() {
         ),
       );
     });
+
+    const EnrichmentContext twoProjects = EnrichmentContext(
+      projects: <EnrichmentProjectOption>[
+        EnrichmentProjectOption(id: 'a', name: 'Alpha'),
+        EnrichmentProjectOption(id: 'b', name: 'Beta'),
+      ],
+    );
+
+    test('offers the union across the projects the model may move to', () async {
+      final _Enrichment enrichment = _Enrichment(const EnrichmentResult());
+      final RecordingsController c = await seeded(
+        _row(auto: true, noProject: true),
+        result: const EnrichmentResult(),
+        source: _Source(twoProjects),
+        enrichment: enrichment,
+      );
+      await reEnrich(c);
+      // No project of its own, but 'a' resolves to Command (plus an agent) and
+      // 'b' to the inbox.
+      expect(enrichment.lastContext!.routeKinds.toSet(), <SuggestedRouteKind>{
+        SuggestedRouteKind.command,
+        SuggestedRouteKind.file,
+        SuggestedRouteKind.agent,
+      });
+    });
+
+    test('a kind valid only for the project it moves to is kept', () async {
+      final RecordingsController c = await seeded(
+        _row(auto: true, noProject: true),
+        result: const EnrichmentResult(
+          projectId: 'a',
+          projectAnswered: true,
+          routeAnswered: true,
+          routeKind: SuggestedRouteKind.command,
+          routeReason: 'plan it',
+        ),
+        source: _Source(twoProjects),
+      );
+      await reEnrich(c);
+      expect(c.recordings.single.projectId, 'a');
+      expect(
+        c.recordings.single.suggestedRoute!.kind,
+        SuggestedRouteKind.command,
+      );
+    });
+
+    test('a kind the final project cannot perform is dropped', () async {
+      // `command` is offered (project 'a' is in the union) but the model moved
+      // the item to 'b', which only files to an inbox.
+      final RecordingsController c = await seeded(
+        _row(auto: true, noProject: true),
+        result: const EnrichmentResult(
+          projectId: 'b',
+          projectAnswered: true,
+          routeAnswered: true,
+          routeKind: SuggestedRouteKind.command,
+        ),
+        source: _Source(twoProjects),
+      );
+      await reEnrich(c);
+      expect(c.recordings.single.projectId, 'b');
+      expect(c.recordings.single.suggestedRoute, isNull);
+    });
+
+    test('a dismissal made while the request is in flight survives', () async {
+      final _Enrichment enrichment = _Enrichment(
+        const EnrichmentResult(
+          routeAnswered: true,
+          routeKind: SuggestedRouteKind.agent,
+          routeReason: 'late idea',
+        ),
+      );
+      final RecordingsController c = await seeded(
+        _row(
+          suggestion: const SuggestedRoute(kind: SuggestedRouteKind.command),
+        ),
+        result: const EnrichmentResult(),
+        enrichment: enrichment,
+      );
+      enrichment.gate = Completer<void>();
+      final Future<void> done = c.retryEnrichment('rec-1');
+      await enrichment.started.future;
+      await c.dismissSuggestedRoute('rec-1');
+      enrichment.gate!.complete();
+      await done;
+      await c.waitForProcessing();
+      while (c.isEnriching('rec-1')) {
+        await Future<void>.delayed(const Duration(milliseconds: 5));
+      }
+      expect(
+        c.recordings.single.suggestedRoute,
+        const SuggestedRoute(kind: SuggestedRouteKind.command, auto: false),
+      );
+    });
+
+    test(
+      'setting the project by hand clears a model suggestion only',
+      () async {
+        final RecordingsController model = await seeded(
+          _row(
+            suggestion: const SuggestedRoute(
+              kind: SuggestedRouteKind.command,
+              reason: 'about the old project',
+            ),
+          ),
+          result: const EnrichmentResult(),
+        );
+        await model.setProject('rec-1', 'b');
+        expect(model.recordings.single.suggestedRoute, isNull);
+
+        final RecordingsController dismissed = await seeded(
+          _row(
+            suggestion: const SuggestedRoute(
+              kind: SuggestedRouteKind.command,
+              auto: false,
+            ),
+          ),
+          result: const EnrichmentResult(),
+        );
+        await dismissed.setProject('rec-1', 'b');
+        expect(
+          dismissed.recordings.single.suggestedRoute,
+          const SuggestedRoute(kind: SuggestedRouteKind.command, auto: false),
+        );
+      },
+    );
 
     test(
       'the action is hidden for none, dismissed, routed or unavailable',

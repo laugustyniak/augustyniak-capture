@@ -2652,6 +2652,9 @@ class RecordingsController extends ChangeNotifier {
         projectId: normalized,
         clearProjectId: normalized == null || normalized.isEmpty,
         projectAuto: false,
+        // A model's reason describes the old project; a dismissal is the
+        // user's and stays.
+        clearSuggestedRoute: item.suggestedRoute?.auto == true,
       ),
       source: RevisionSource.user,
     );
@@ -4381,8 +4384,6 @@ class RecordingsController extends ChangeNotifier {
     }
   }
 
-  /// Resolve the user profile and the item's project description.
-  ///
   /// Applies the model's route answer to [item], already carrying this run's
   /// category and project, so the kind is validated for the item as it ends up
   /// rather than as it started.
@@ -4415,6 +4416,8 @@ class RecordingsController extends ChangeNotifier {
     );
   }
 
+  /// Resolve the user profile and the item's project description.
+  ///
   /// Swallows everything into the log under the `ClipboardSink` contract: a
   /// repository that has been moved, renamed or unmounted must cost a worse
   /// title, never the enrichment — and certainly never the capture.
@@ -4448,8 +4451,18 @@ class RecordingsController extends ChangeNotifier {
       final bool routeOpen =
           item.routes.isEmpty &&
           (item.suggestedRoute == null || item.suggestedRoute!.auto);
+      // One request, so the kinds cannot wait for the reply to learn which
+      // project it picks: offer the union across the current project and, for
+      // a stamp the model may move, every project in the list. The answer is
+      // checked again against the item as it ends up (`_withSuggestedRoute`).
+      final Set<SuggestedRouteKind> kinds = <SuggestedRouteKind>{
+        ...availableRouteKinds(item),
+        if (item.projectAuto)
+          for (final EnrichmentProjectOption option in context.projects)
+            ...availableRouteKinds(item.copyWith(projectId: option.id)),
+      };
       final EnrichmentContext withRoutes = context.withRouteKinds(
-        routeOpen ? availableRouteKinds(item) : const <SuggestedRouteKind>[],
+        routeOpen ? kinds.toList() : const <SuggestedRouteKind>[],
       );
       // A list is offered only to a stamp the model may still move: names and
       // descriptions go to the provider for nothing otherwise, since a
