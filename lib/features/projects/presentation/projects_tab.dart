@@ -855,12 +855,14 @@ String _agentLabel(AgentKind agent) => switch (agent) {
   AgentKind.codex => 'Codex',
   AgentKind.claudeCode => 'Claude Code',
   AgentKind.antigravity => 'Antigravity',
+  AgentKind.geminiCli => 'Gemini CLI',
 };
 
 IconData _agentIcon(AgentKind agent) => switch (agent) {
   AgentKind.codex => Icons.code,
   AgentKind.claudeCode => Icons.terminal,
   AgentKind.antigravity => Icons.auto_awesome,
+  AgentKind.geminiCli => Icons.diamond_outlined,
 };
 
 void _showFailure(BuildContext context, Object exception) {

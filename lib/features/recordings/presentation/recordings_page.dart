@@ -8,6 +8,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:package_info_plus/package_info_plus.dart';
 import 'package:path/path.dart' as p;
+import 'package:path_provider/path_provider.dart';
 
 import '../../../app/ui_kit.dart';
 import '../../../core/database/app_database.dart';
@@ -253,6 +254,26 @@ class _RecordingsPageState extends State<RecordingsPage>
   /// the fallback that is read and the copy that is retired.
   final FileMasterKeyStore _legacyKeyFile = FileMasterKeyStore();
 
+  /// `<application support>/sessions`, where a capture with no repository gets
+  /// its own scratch folder for a terminal agent. Resolved once at startup —
+  /// the handoff reads this through a resolver, and the platform call is async —
+  /// and left null where the terminal launcher is unsupported or the directory
+  /// cannot be resolved, which keeps the handoff exactly as it was.
+  Directory? _sessionsRoot;
+
+  /// Fails closed: until this completes (a few milliseconds after launch) the
+  /// resolver answers null and projectless captures are offered no terminal.
+  Future<void> _resolveSessionsRoot() async {
+    try {
+      final Directory support = await getApplicationSupportDirectory();
+      _sessionsRoot = Directory(p.join(support.path, 'sessions'));
+    } catch (exception) {
+      // No directory, no scratch folders: projectless captures simply keep
+      // offering no terminal agent.
+      logs.log('Sessions folder unavailable: $exception', level: LogLevel.warn);
+    }
+  }
+
   @override
   void initState() {
     super.initState();
@@ -329,6 +350,7 @@ class _RecordingsPageState extends State<RecordingsPage>
     final AgentSessionLauncher? launcher = TerminalLauncher.isSupportedPlatform
         ? ZellijAgentSessionLauncher()
         : null;
+    if (launcher != null) unawaited(_resolveSessionsRoot());
     projects = ProjectsController(
       repository: ProjectsRepository(),
       launcher: launcher,
@@ -414,7 +436,11 @@ class _RecordingsPageState extends State<RecordingsPage>
       // than offering one that can only fail.
       agentHandoff: launcher == null
           ? const DisabledAgentHandoff()
-          : ProjectAgentHandoff(projectById: _projectById, launcher: launcher),
+          : ProjectAgentHandoff(
+              projectById: _projectById,
+              launcher: launcher,
+              sessionsRoot: () => _sessionsRoot,
+            ),
       // The fourth way out, and the only one that needs no project: a
       // capture's text goes to a web assistant, the share sheet or the
       // clipboard. Never disabled — Web and Copy exist on every platform.

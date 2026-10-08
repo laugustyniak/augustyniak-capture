@@ -324,6 +324,23 @@ class _HandoffSheetState extends State<_HandoffSheet> {
         ),
       ],
     ),
+    if (widget.controller.handoffWorkspace(widget.recording)
+        case final String workspace) ...<Widget>[
+      const SizedBox(height: 6),
+      Row(
+        children: <Widget>[
+          Icon(Icons.folder_outlined, size: 13, color: Console.dimText),
+          const SizedBox(width: 6),
+          Expanded(
+            child: Text(
+              'Runs in a scratch folder: $workspace',
+              maxLines: 3,
+              style: ConsoleText.micro,
+            ),
+          ),
+        ],
+      ),
+    ],
     if (_attached case final AgentHandoffResult result) ...<Widget>[
       const SizedBox(height: 16),
       _AttachedNotice(result: result, instruction: _instruction.text),
