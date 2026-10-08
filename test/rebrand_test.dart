@@ -75,19 +75,26 @@ void main() {
     expect(script, contains('linux/CMakeLists.txt'));
     expect(script, contains('macos/Runner/Configs/AppInfo.xcconfig'));
 
-    for (final String literal in <String>[
-      applicationId,
-      displayName,
-      packageName,
+    // The MCP helper takes the CLI name as an argument, so it is held to the
+    // same rule as the script that calls it.
+    for (final String path in <String>[
+      'tool/deploy.sh',
+      'tool/deploy-mcp.sh',
     ]) {
-      expect(
-        script,
-        isNot(contains(literal)),
-        reason:
-            'tool/deploy.sh must read "$literal" from the platform files, not '
-            'carry its own copy — the next identity change would leave the '
-            'launcher pointing at the previous app',
-      );
+      for (final String literal in <String>[
+        applicationId,
+        displayName,
+        packageName,
+      ]) {
+        expect(
+          read(path),
+          isNot(contains(literal)),
+          reason:
+              '$path must read "$literal" from the platform files, not '
+              'carry its own copy — the next identity change would leave the '
+              'launcher pointing at the previous app',
+        );
+      }
     }
   });
 }
