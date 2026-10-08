@@ -12,7 +12,11 @@ import 'package:augustyniak_capture/features/enrichment/domain/enrichment_servic
 import 'package:augustyniak_capture/features/processing/domain/processor.dart';
 import 'package:augustyniak_capture/features/processing/domain/processor_registry.dart';
 import 'package:augustyniak_capture/features/projects/domain/project.dart';
+import 'package:augustyniak_capture/features/recordings/data/markdown_note_vault.dart';
 import 'package:augustyniak_capture/features/recordings/data/media_picker.dart';
+import 'package:augustyniak_capture/features/recordings/domain/capture_priority.dart';
+import 'package:augustyniak_capture/features/recordings/domain/stale_rank.dart';
+import 'package:augustyniak_capture/features/recordings/domain/connection_reasoner.dart';
 import 'package:augustyniak_capture/features/recordings/data/recordings_repository.dart';
 import 'package:augustyniak_capture/features/recordings/domain/capture_segment.dart';
 import 'package:augustyniak_capture/features/recordings/domain/capture_type.dart';
@@ -93,6 +97,30 @@ class _Picker implements MediaPicker {
   final PickedMedia? _result;
   @override
   Future<PickedMedia?> pick(CaptureType type) async => _result;
+}
+
+class _Reasoner implements ConnectionReasoner {
+  final List<EnrichmentContext> contexts = <EnrichmentContext>[];
+
+  @override
+  Future<ConnectionAdvice> assess({
+    required String title,
+    required String text,
+    required List<ConnectionCandidate> candidates,
+    required EnrichmentContext context,
+    CapturePriority? priority,
+    String? priorityReason,
+  }) {
+    contexts.add(context);
+    return const ReviewConnectionReasoner().assess(
+      title: title,
+      text: text,
+      candidates: candidates,
+      context: context,
+      priority: priority,
+      priorityReason: priorityReason,
+    );
+  }
 }
 
 class _GrantingRecorder implements AudioRecorder {
@@ -247,6 +275,17 @@ void main() {
       ],
     });
 
+    test('only a present string or explicit null counts as an answer', () {
+      bool answered(String raw) =>
+          HttpChatEnrichmentService.parseResponse(body(raw)).projectAnswered;
+      expect(answered('{"project":"a"}'), isTrue);
+      expect(answered('{"project":null}'), isTrue);
+      expect(answered('{"project":"  "}'), isTrue);
+      expect(answered('{"title":"T"}'), isFalse);
+      expect(answered('{"project":7}'), isFalse);
+      expect(answered('{"project":["a"]}'), isFalse);
+    });
+
     test('takes a non-blank project id, else null', () {
       expect(
         HttpChatEnrichmentService.parseResponse(
@@ -351,7 +390,9 @@ void main() {
       for (final String? answer in <String?>[null, 'ghost']) {
         final RecordingsController c = build(
           _Repo(dir),
-          enrichment: _Enrichment(EnrichmentResult(projectId: answer)),
+          enrichment: _Enrichment(
+            EnrichmentResult(projectId: answer, projectAnswered: true),
+          ),
         )..activeProjectId = 'a';
         await c.addTextNote('x');
         await c.waitForProcessing();
@@ -499,7 +540,7 @@ void main() {
 
     test('the stamped project is always offered, even past the cap', () async {
       final _Enrichment enrichment = _Enrichment(
-        const EnrichmentResult(projectId: null),
+        const EnrichmentResult(projectAnswered: true),
       );
       final EnrichmentContext many = EnrichmentContext(
         projects: <EnrichmentProjectOption>[
@@ -563,5 +604,97 @@ void main() {
       await c.waitForProcessing();
       expect(c.recordings.first.projectAuto, isFalse);
     });
+
+    test('a reply without the project key leaves the stamp alone', () async {
+      final RecordingsController c = build(
+        _Repo(dir),
+        enrichment: _Enrichment(const EnrichmentResult()),
+      )..activeProjectId = 'a';
+      await c.addTextNote('x');
+      await c.waitForProcessing();
+      expect(c.recordings.single.projectId, 'a');
+      expect(c.recordings.single.projectAuto, isTrue);
+    });
+
+    test(
+      'connection analysis keeps an auto item project context, no list',
+      () async {
+        final Directory vault = Directory.systemTemp.createTempSync('vault_');
+        addTearDown(() => vault.deleteSync(recursive: true));
+        final _Source source = _Source(_offered);
+        final _Reasoner reasoner = _Reasoner();
+        final RecordingsController c = RecordingsController(
+          repository: _Repo(dir),
+          transcriptionService: const DisabledTranscriptionService(),
+          recorder: _GrantingRecorder(),
+          player: _FakePlayer(),
+          enrichmentService: _Enrichment(const EnrichmentResult()),
+          enrichmentContextSource: source,
+          noteVault: MarkdownNoteVault(vaultPath: () => vault.path),
+          connectionVaultRoot: () => vault,
+          connectionReasoner: reasoner,
+          projectById: (String id) => _projects[id],
+          processorRegistry: ProcessorRegistry(<CaptureType, Processor>{
+            CaptureType.text: const _Echo(),
+          }),
+        )..activeProjectId = 'a';
+        addTearDown(c.dispose);
+        await c.addTextNote('x');
+        await c.waitForProcessing();
+        await c.waitForConnectionAnalysis();
+
+        expect(reasoner.contexts, isNotEmpty);
+        expect(source.requestedFor, contains('a'));
+        expect(reasoner.contexts.single.projects, isEmpty);
+      },
+    );
+
+    test(
+      're-rank keeps an auto item project context, and sends no list',
+      () async {
+        final _Source source = _Source(
+          const EnrichmentContext(
+            profile: 'Goal: beta.',
+            projects: <EnrichmentProjectOption>[_alpha, _beta],
+          ),
+        );
+        final _Enrichment enrichment = _Enrichment(
+          const EnrichmentResult(
+            priority: CapturePriority.p0,
+            priorityReason: 'r',
+          ),
+        );
+        final File note = File(p.join(dir.path, 'rec-1.txt'))
+          ..writeAsStringSync('hello');
+        final _Repo repo = _Repo(dir)
+          ..saved = <Recording>[
+            Recording(
+              id: 'rec-1',
+              filePath: note.path,
+              createdAt: DateTime.utc(2026, 9, 21),
+              durationMs: 0,
+              status: RecordingStatus.completed,
+              type: CaptureType.text,
+              transcript: 'hello',
+              priority: CapturePriority.p3,
+              priorityBasis: 'old00000',
+              projectId: 'a',
+              projectAuto: true,
+            ),
+          ];
+        final RecordingsController c = build(
+          repo,
+          enrichment: enrichment,
+          source: source,
+        );
+        await c.initialize();
+        final RerankSummary summary = await c.rerankStale();
+
+        expect(summary.reranked, 1);
+        expect(source.requestedFor, contains('a'));
+        expect(enrichment.lastContext!.projects, isEmpty);
+        expect(c.recordings.single.projectId, 'a');
+      },
+    );
   });
 }

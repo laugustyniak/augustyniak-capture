@@ -4108,7 +4108,10 @@ class RecordingsController extends ChangeNotifier {
     // project's CLAUDE.md — and raising the flag first would put a scan line on
     // screen for an install whose enrichment is disabled, which is the one case
     // the disabled service takes care to fail without ever building a frame.
-    final EnrichmentContext context = await _resolveEnrichmentContext(id);
+    final EnrichmentContext context = await _resolveEnrichmentContext(
+      id,
+      forEnrichment: true,
+    );
     if (_disposed) return;
     // Marked before the call and cleared in `finally`, so the card's scan line
     // cannot outlive the request — including on the throwing paths below, which
@@ -4131,7 +4134,7 @@ class RecordingsController extends ChangeNotifier {
         for (final EnrichmentProjectOption o in context.normalized().projects)
           o.id,
       };
-      final bool listOffered = offeredIds.isNotEmpty;
+      final bool listOffered = offeredIds.isNotEmpty && result.projectAnswered;
       final String? answered = result.projectId;
       final String? chosenProject =
           answered != null &&
@@ -4218,12 +4221,21 @@ class RecordingsController extends ChangeNotifier {
   /// Swallows everything into the log under the `ClipboardSink` contract: a
   /// repository that has been moved, renamed or unmounted must cost a worse
   /// title, never the enrichment — and certainly never the capture.
-  Future<EnrichmentContext> _resolveEnrichmentContext(String id) async {
+  ///
+  /// [forEnrichment] is true only for [_enrich]: it alone withholds an auto
+  /// stamp's project context and offers the project list. Every other caller
+  /// (clean-up, connection analysis, re-rank) gets the item's project context
+  /// as it always did, and no list.
+  Future<EnrichmentContext> _resolveEnrichmentContext(
+    String id, {
+    bool forEnrichment = false,
+  }) async {
     final int index = _recordings.indexWhere((Recording item) => item.id == id);
     // An auto stamp is a guess, not a fact about the capture: its project's
     // CLAUDE.md would pull the model toward the default it is meant to
     // second-guess, so the model sees the project list and nothing else.
-    final String? projectId = index < 0 || _recordings[index].projectAuto
+    final String? projectId =
+        index < 0 || (forEnrichment && _recordings[index].projectAuto)
         ? null
         : _recordings[index].projectId;
     try {
@@ -4231,6 +4243,9 @@ class RecordingsController extends ChangeNotifier {
           .contextFor(projectId);
       if (index < 0) return context;
       final Recording item = _recordings[index];
+      if (!forEnrichment) {
+        return context.withProjects(const <EnrichmentProjectOption>[]);
+      }
       // A list is offered only to a stamp the model may still move: names and
       // descriptions go to the provider for nothing otherwise, since a
       // user-owned or legacy item discards the answer. The stamped project

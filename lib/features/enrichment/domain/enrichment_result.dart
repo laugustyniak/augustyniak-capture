@@ -16,7 +16,8 @@ class EnrichmentResult {
     this.priority,
     this.priorityReason,
     this.projectId,
-  });
+    bool? projectAnswered,
+  }) : projectAnswered = projectAnswered ?? projectId != null;
 
   /// Null when the model returned nothing usable. The caller then leaves the
   /// item's existing title alone.
@@ -42,4 +43,9 @@ class EnrichmentResult {
   /// named none. Not validated here: the caller checks it against the live
   /// list, which may have changed during the request.
   final String? projectId;
+
+  /// True only when the reply carried a `project` key holding a string or an
+  /// explicit null. A reply that omitted the key, or sent something else, said
+  /// nothing about the project and must not clear a stamp.
+  final bool projectAnswered;
 }
