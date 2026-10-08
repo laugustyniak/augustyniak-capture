@@ -9,6 +9,7 @@ import '../../gamification/presentation/done_burst_animation.dart';
 import '../domain/agent_artifact.dart';
 import '../domain/capture_type.dart';
 import '../domain/recording.dart';
+import '../domain/related_captures.dart';
 import '../domain/route_record.dart';
 import 'card_parts.dart';
 
@@ -47,6 +48,8 @@ class RecordingCard extends StatelessWidget {
     this.onConfigureModels,
     this.onCancelProcessing,
     this.processingElapsed,
+    this.relatedCount = 0,
+    this.repeatCount = 0,
   });
 
   /// Said in both places the action is offered — the poster and the button —
@@ -171,6 +174,14 @@ class RecordingCard extends StatelessWidget {
   final VoidCallback? onCancelProcessing;
   final Duration? processingElapsed;
 
+  /// Captures close in meaning to this one (#272). Zero draws nothing, which
+  /// is also what an install without an embedding model always passes.
+  final int relatedCount;
+
+  /// How many times this thought was said within two weeks, itself included.
+  /// Badged from [RelatedLimits.repeatBadgeAt].
+  final int repeatCount;
+
   @override
   Widget build(BuildContext context) {
     final bool failed = recording.status == RecordingStatus.failed;
@@ -232,6 +243,30 @@ class RecordingCard extends StatelessWidget {
           child: StatusPill(
             label: recording.priority!.label,
             color: priorityColorFor(recording.priority!),
+            outlined: true,
+          ),
+        ),
+      if (repeatCount >= RelatedLimits.repeatBadgeAt)
+        // Saying something again is a signal about it, so this one is
+        // coloured; the related count below is only a pointer.
+        Tooltip(
+          message:
+              'Said $repeatCount times within '
+              '${RelatedLimits.repeatWindow.inDays} days',
+          child: StatusPill(
+            label: '×$repeatCount',
+            color: Console.amber,
+            outlined: true,
+          ),
+        ),
+      if (relatedCount > 0)
+        Tooltip(
+          message:
+              '$relatedCount related capture${relatedCount == 1 ? '' : 's'}'
+              ' — open the editor to see them',
+          child: StatusPill(
+            label: '≈ $relatedCount',
+            color: Console.mutedSoft,
             outlined: true,
           ),
         ),
@@ -910,7 +945,7 @@ class _CardTranscriptSectionState extends State<_CardTranscriptSection> {
 
   @override
   Widget build(BuildContext context) {
-    final String raw = (widget.recording.transcript ?? '').trim();
+    final String raw = widget.recording.displayText.trim();
     // Markers off, markup not rendered: see `markdownPreviewText`. The copy
     // button below still carries the *source*, because what gets pasted into
     // an editor should keep its formatting.

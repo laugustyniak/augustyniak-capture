@@ -33,6 +33,7 @@ import '../../costs/domain/usage_event.dart';
 import '../../costs/domain/usage_model_keys.dart';
 import '../../connections/data/http_daily_connections_service.dart';
 import '../../enrichment/domain/transcript_cleaner.dart';
+import '../../enrichment/domain/instruction_writer.dart';
 import '../../enrichment/data/composed_enrichment_context_source.dart';
 import '../domain/connection_reasoner.dart';
 import '../../logs/data/log_store.dart';
@@ -73,6 +74,7 @@ import '../../timer/data/file_focus_session_log.dart';
 import '../../timer/domain/focus_session.dart';
 import '../../timer/presentation/focus_timer_controller.dart';
 import '../../timer/presentation/timer_tab.dart';
+import '../../work_dashboard/presentation/work_dashboard_tab.dart';
 import '../../transcription/data/audio_splitter.dart';
 import '../../transcription/data/chunked_transcription_service.dart';
 import '../../transcription/data/audio_decoder.dart';
@@ -82,6 +84,7 @@ import '../../transcription/domain/transcription_limits.dart';
 import '../../gamification/presentation/celebration_overlay.dart';
 import '../../gamification/presentation/gamification_controller.dart';
 import '../../clipboard/data/sqlite_clipboard_repository.dart';
+import '../data/sqlite_embedding_store.dart';
 import '../data/foreground_capture_session.dart';
 import '../data/media_picker.dart';
 import '../data/markdown_note_vault.dart';
@@ -162,7 +165,8 @@ class _RecordingsPageState extends State<RecordingsPage>
   // the navigation itself.
   static const int queueIndex = 0;
   static const int timerIndex = 1;
-  static const int modelsIndex = 4;
+  static const int workIndex = 2;
+  static const int modelsIndex = 5;
 
   static const List<({IconData icon, String label, String shortLabel})>
   destinations = <({IconData icon, String label, String shortLabel})>[
@@ -174,6 +178,7 @@ class _RecordingsPageState extends State<RecordingsPage>
     // Beside the Queue rather than beside Config: a focus session is something
     // you *do*, on the same footing as capturing, not something you set up once.
     (icon: Icons.timer_outlined, label: 'TIMER', shortLabel: 'TIMER'),
+    (icon: Icons.dashboard_outlined, label: 'WORK', shortLabel: 'WORK'),
     (icon: Icons.account_tree_outlined, label: 'PROJECTS', shortLabel: 'PROJ'),
     (icon: Icons.content_paste_rounded, label: 'CLIPBOARD', shortLabel: 'CLIP'),
     (icon: Icons.memory_rounded, label: 'MODELS', shortLabel: 'MODELS'),
@@ -722,6 +727,15 @@ class _RecordingsPageState extends State<RecordingsPage>
     } catch (exception) {
       logs.log('Cost store unavailable: $exception', level: LogLevel.warn);
     }
+    // Same guard for the related-captures vectors: derived data, so a store
+    // that will not open leaves the in-memory default and costs nothing else.
+    try {
+      controller.embeddingStore = SqliteEmbeddingStore(
+        (await AppDatabase.getInstance()).rawDb,
+      );
+    } catch (exception) {
+      logs.log('Embedding store unavailable: $exception', level: LogLevel.warn);
+    }
     // Settings first so the very first recording already uses the saved
     // provider and capture parameters.
     await settings.initialize();
@@ -853,6 +867,13 @@ class _RecordingsPageState extends State<RecordingsPage>
         ? settings.enrichmentService as TranscriptCleaner
         : const DisabledTranscriptCleaner();
     controller.autoCleanup = settings.autoCleanup;
+    controller.instructionWriter =
+        settings.enrichmentService is InstructionWriter
+        ? settings.enrichmentService as InstructionWriter
+        : const DisabledInstructionWriter();
+    controller.autoInstruction = settings.autoInstruction;
+    controller.asrGlossary = settings.asrGlossary;
+    controller.embeddingService = settings.embeddingService;
     // OCR rides the enrichment profile (vision-capable chat endpoint) and has
     // no platform fallback behind it: with no profile active this is the
     // disabled service on desktop exactly as on mobile, so an image capture
@@ -1213,6 +1234,20 @@ class _RecordingsPageState extends State<RecordingsPage>
                                   ),
                                 ),
                                 ConsolePageWidth(
+                                  child: WorkDashboardTab(
+                                    projects: projects,
+                                    recordings: controller,
+                                    timer: timer,
+                                    active: navigationIndex == workIndex,
+                                    onNavigateToQueue: (String projectId) {
+                                      setState(() {
+                                        activeQueueProjectFilterId = projectId;
+                                        navigationIndex = queueIndex;
+                                      });
+                                    },
+                                  ),
+                                ),
+                                ConsolePageWidth(
                                   child: ProjectsTab(
                                     controller: projects,
                                     recordingsController: controller,
@@ -1443,7 +1478,7 @@ class _RecordingsPageState extends State<RecordingsPage>
             // reads as broken; one with no count reads as a plain link.
             count: index == queueIndex
                 ? total
-                : index == 3
+                : index == 4
                 ? clipboardWatcher.items.length
                 : null,
             warn: index == modelsIndex && settings.activeProfile == null,

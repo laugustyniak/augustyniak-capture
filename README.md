@@ -15,6 +15,8 @@ Your thought lands on disk *before* anything clever is attempted with it.
 [![Website](https://img.shields.io/badge/website-laugustyniak.github.io-1056C6)](https://laugustyniak.github.io/augustyniak-capture/)
 
 [Quick start](#-quick-start) ·
+[Anti-shutdown](#️-the-anti-shutdown-covenant--longevity) ·
+[The guarantee](#-the-one-guarantee) ·
 [What it captures](#-what-it-captures) ·
 [Note vault](#-note-vault--obsidian-and-friends) ·
 [Build & deploy](#-build--deploy) ·
@@ -115,6 +117,36 @@ is still being transcribed — the queue simply grows.
 
 ---
 
+## 🛡️ The Anti-Shutdown Covenant & Longevity
+
+Capture and voice-memo tools have a notorious track record of disappearing:
+startups burn through VC money, get acquired, hike subscriptions to $20+/month,
+or abruptly shut down with 30-day export warnings.
+
+Augustyniak Capture is built on the inverse premise — an explicit **anti-shutdown commitment**:
+
+1. **Never sold, never abruptly shut down**: The creator commits to never
+   selling the app or shutting it down. The application is offline-first:
+   your notes, audio, images, and index files reside permanently on your local
+   filesystem in standard, open formats (`.m4a`, UTF-8 `.txt`, SQLite, Markdown).
+   It continues running indefinitely even if every remote server on earth goes dark.
+2. **Zero fixed-cost infrastructure (Scale-to-Zero)**: The project avoids
+   expensive, 24/7 dedicated virtual machines that force commercialization.
+   Cloud synchronization is powered by serverless Supabase PostgreSQL (with
+   zero-knowledge E2EE), and media storage runs on AWS S3 / S3-compatible tiers.
+   At average usage (100 recordings/month), cloud media storage costs under
+   **$0.01 / user / month**.
+3. **Bring Your Own Cloud (BYOC) & Self-Hosting**: You can connect your own
+   free Supabase project or personal AWS S3 bucket. The data and keys belong
+   entirely to you, with zero dependency on a central company.
+4. **Transparent Cost-Pass-Through**: Any managed synchronization services
+   operate on a pure cost-pass-through endowment basis, with real-time in-app cost
+   visibility.
+
+Detailed architectural blueprint: [`docs/plans/2026-10-07-anti-shutdown-low-cost-architecture.md`](docs/plans/2026-10-07-anti-shutdown-low-cost-architecture.md).
+
+---
+
 ## 📥 What it captures
 
 | | Type | Stored as | Processing | Where it works |
@@ -155,10 +187,20 @@ later and press retry.
 | **Queue** | every capture, review progress, search, filters, playback, inline editing, manual daily connection review |
 | **Timer** | a focus session — countdown dial, session goal, alarm at zero — plus what got finished lately |
 | **Projects** | repository contexts, active project, per-project captures, one-click coding-agent sessions |
+| **Work** | read-only Todoist focus list, due counts, and manually linked Capture project context |
 | **Clipboard** | clipboard history, searchable, with a preview pane and in-place editing |
 | **Models** | provider profiles — transcription and enrichment, add / edit / activate |
 | **Logs** | live pipeline events (persist, queue, transcribe, errors) with a level filter |
 | **Config** | appearance, audio parameters, global shortcuts, enrichment profile, note vault, keyring status |
+
+**Work dashboard:** Open Work and paste a personal API token from Todoist
+Settings → Integrations → Developer. Capture stores it in the OS keyring, reads
+projects and tasks from Todoist API v1, and never changes Todoist tasks. The
+focus list shows up to five `@founder` P1/P2 tasks and urgent due tasks; the
+due counts include all tasks due today or overdue. Choose a Todoist project and
+map it to a Capture project to see recent captures and completed focus sessions.
+The mapping is local to this device. Refresh is manual, and task rows open in
+Todoist.
 
 **Daily connections:** In Queue, choose **REVIEW CONNECTIONS**, pick a date,
 then run **REVIEW DAY**. The active enrichment model reviews every capture from

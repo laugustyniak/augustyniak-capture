@@ -11,10 +11,12 @@ import 'package:uuid/uuid.dart';
 import '../../costs/domain/usage_event.dart';
 import '../../command/domain/command_client.dart';
 import '../../costs/domain/usage_sink.dart';
+import '../../enrichment/domain/embedding_service.dart';
 import '../../enrichment/domain/enrichment_context.dart';
 import '../../enrichment/domain/enrichment_result.dart';
 import '../../enrichment/domain/enrichment_service.dart';
 import '../../enrichment/domain/transcript_cleaner.dart';
+import '../../enrichment/domain/instruction_writer.dart';
 import '../../logs/domain/log_event.dart';
 import '../../processing/data/ocr_service.dart';
 import '../../processing/data/video_audio_extractor.dart';
@@ -53,7 +55,9 @@ import '../domain/capture_category.dart';
 import '../domain/capture_priority.dart';
 import '../domain/stale_rank.dart';
 import '../domain/capture_segment.dart';
+import '../domain/capture_instruction.dart';
 import '../domain/cleanup_proposal.dart';
+import '../domain/related_captures.dart';
 import '../domain/capture_type.dart';
 import '../domain/clipboard_sink.dart';
 import '../domain/capture_prompt.dart';
@@ -659,6 +663,7 @@ class RecordingsController extends ChangeNotifier {
       source: RevisionSource.user,
     );
     _logSink.log('Clean-up accepted.', recordingId: id);
+    await _reembed(id);
     return true;
   }
 
@@ -670,6 +675,340 @@ class RecordingsController extends ChangeNotifier {
       source: RevisionSource.user,
     );
     _logSink.log('Clean-up rejected.', recordingId: id);
+  }
+
+  /// Applied to the next instruction pass, like [transcriptCleaner]. The
+  /// default throws at use, so an unconfigured install only lacks the
+  /// instruction.
+  set instructionWriter(InstructionWriter value) => _instructionWriter = value;
+  InstructionWriter _instructionWriter = const DisabledInstructionWriter();
+
+  /// Whether a finished capture is rewritten as an instruction without being
+  /// asked (#281). On by default, like the setting it mirrors.
+  bool autoInstruction = true;
+
+  /// The user's list of misheard terms, sent as reference material.
+  String asrGlossary = '';
+
+  /// In memory only, like `_cleaningIds`.
+  final Set<String> _instructingIds = <String>{};
+  bool isWritingInstruction(String id) => _instructingIds.contains(id);
+
+  /// Why the last instruction pass produced nothing, for the detail views. In
+  /// memory only, and cleared by the next attempt.
+  final Map<String, String> _instructionErrors = <String, String>{};
+  String? instructionError(String id) => _instructionErrors[id];
+
+  /// Rewrite [id] as an instruction now, from its transcript as it is — the
+  /// detail views' REWRITE. Copies the result to the clipboard, as the
+  /// automatic pass does: asking for it is asking to paste it.
+  Future<void> writeInstruction(String id) async {
+    if (_instructingIds.contains(id)) return;
+    final void Function() releaseUsageScope = await _acquireUsageScope();
+    try {
+      if (_disposed) return;
+      await _writeInstruction(id);
+    } finally {
+      releaseUsageScope();
+    }
+  }
+
+  /// The pass itself; the caller holds the usage scope. Best-effort under the
+  /// `ClipboardSink` contract: it never touches `status` or `transcript`, and
+  /// every failure is logged and costs only the instruction.
+  Future<void> _writeInstruction(String id) async {
+    final int index = _recordings.indexWhere((Recording i) => i.id == id);
+    if (index < 0) return;
+    final Recording item = _recordings[index];
+    if (!canCleanUp(item) || !_instructingIds.add(id)) return;
+    final String source = item.transcript!;
+    _instructionErrors.remove(id);
+    if (!_disposed) notifyListeners();
+    try {
+      final EnrichmentContext context = await _resolveEnrichmentContext(id);
+      _beginUsageJob(id, UsageStage.instruction);
+      final String written;
+      try {
+        written = await _instructionWriter.writeInstruction(
+          source,
+          context: context,
+          glossary: asrGlossary,
+        );
+      } finally {
+        _endUsageJob();
+      }
+      if (_disposed || written.trim().isEmpty) return;
+      // Written only if the transcript is still the one rewritten, like a
+      // clean-up proposal: otherwise it describes text that no longer exists.
+      bool stored = false;
+      await _update(id, (Recording current) {
+        if (current.transcript != source) return current;
+        stored = true;
+        return current.copyWith(
+          instruction: CaptureInstruction(
+            text: written,
+            source: CleanupProposal.fingerprint(source),
+          ),
+        );
+      });
+      if (!stored) return;
+      _logSink.log('Instruction written.', recordingId: id);
+      await _copyToClipboard(item.type, written, id);
+    } on InstructionNotConfiguredException catch (exception) {
+      _instructionErrors[id] = exception.toString();
+    } catch (exception) {
+      _instructionErrors[id] = exception.toString();
+      _logSink.log(
+        'Instruction failed: $exception',
+        level: LogLevel.warn,
+        recordingId: id,
+      );
+    } finally {
+      _instructingIds.remove(id);
+      if (!_disposed) notifyListeners();
+    }
+  }
+
+  /// Vectors for related captures (#272). Disabled by default — an install
+  /// with no embedding model finds nothing and sends nothing.
+  set embeddingService(EmbeddingService value) {
+    // The shell re-applies settings on every change; the settings controller
+    // hands back the same instance until the connection changes, so only a
+    // real swap pays for a reload.
+    if (identical(value, _embeddingService)) return;
+    _embeddingService = value;
+    _invalidateVectors();
+    // Turns the RELATED section and the card chips on or off.
+    if (!_disposed) notifyListeners();
+  }
+
+  EmbeddingService _embeddingService = const DisabledEmbeddingService();
+
+  /// In memory by default, so a host without the database still finds related
+  /// captures for the session; the shell installs the SQLite store.
+  set embeddingStore(EmbeddingStore value) {
+    _embeddingStore = value;
+    _invalidateVectors();
+  }
+
+  EmbeddingStore _embeddingStore = InMemoryEmbeddingStore();
+
+  /// The current model's vectors, loaded on first use, and the model they were
+  /// loaded for. A model change empties this — vectors from two models are
+  /// never compared.
+  Map<String, StoredEmbedding>? _vectors;
+  String? _vectorsModel;
+
+  /// Bumped whenever a vector is written or dropped; [_relatedCache] is only
+  /// valid for the version it was computed at.
+  int _vectorsVersion = 0;
+  final Map<String, List<RelatedCapture>> _relatedCache =
+      <String, List<RelatedCapture>>{};
+  int _relatedCacheVersion = -1;
+
+  void _invalidateVectors() {
+    _vectors = null;
+    _vectorsModel = null;
+    _vectorsVersion++;
+  }
+
+  bool get relatedEnabled => _embeddingService.model.isNotEmpty;
+
+  Map<String, StoredEmbedding> _currentVectors() {
+    final String model = _embeddingService.model;
+    if (_vectors == null || _vectorsModel != model) {
+      try {
+        _vectors = model.isEmpty
+            ? <String, StoredEmbedding>{}
+            : _embeddingStore.load(model);
+      } catch (exception) {
+        _logSink.log('Could not read embeddings: $exception', level: LogLevel.warn);
+        _vectors = <String, StoredEmbedding>{};
+      }
+      _vectorsModel = model;
+      _vectorsVersion++;
+    }
+    return _vectors!;
+  }
+
+  /// The vector of [recording] if it was made from its text as it is now.
+  /// A stale one is never used: an edited transcript is not found by what it
+  /// used to say.
+  StoredEmbedding? _freshVector(Recording recording) {
+    final StoredEmbedding? stored = _currentVectors()[recording.id];
+    if (stored == null) return null;
+    return stored.fingerprint == _fingerprintOf(recording) ? stored : null;
+  }
+
+  /// [embeddingFingerprint] of a capture's input, memoised on the transcript
+  /// string itself: the card list asks on every rebuild, and an unchanged
+  /// transcript is the same object until something writes a new one.
+  final Map<String, (String, String?)> _fingerprints =
+      <String, (String, String?)>{};
+  String? _fingerprintOf(Recording recording) {
+    final String transcript = recording.transcript ?? '';
+    final (String, String?)? memo = _fingerprints[recording.id];
+    if (memo != null && identical(memo.$1, transcript)) return memo.$2;
+    final String? input = embeddingInput(recording);
+    final String? fingerprint =
+        input == null ? null : embeddingFingerprint(input);
+    _fingerprints[recording.id] = (transcript, fingerprint);
+    return fingerprint;
+  }
+
+  /// Captures close in meaning to [id], best first. Empty with related
+  /// captures off, or while [id] has no fresh vector.
+  List<RelatedCapture> relatedFor(String id) {
+    if (!relatedEnabled) return const <RelatedCapture>[];
+    _currentVectors();
+    if (_relatedCacheVersion != _vectorsVersion) {
+      _relatedCache.clear();
+      _relatedCacheVersion = _vectorsVersion;
+    }
+    final int index = _recordings.indexWhere((Recording i) => i.id == id);
+    if (index < 0 || _freshVector(_recordings[index]) == null) {
+      return const <RelatedCapture>[];
+    }
+    final List<RelatedCapture> ranked = _relatedCache[id] ??= rankRelated(
+      id,
+      <String, List<double>>{
+        for (final Recording item in _recordings)
+          if (_freshVector(item) case final StoredEmbedding vector)
+            item.id: vector.vector,
+      },
+    );
+    // Re-checked on every read, not only when ranked: a transcript edited
+    // since bumps no version, and its old vector must not keep it listed.
+    return <RelatedCapture>[
+      for (final RelatedCapture other in ranked)
+        if (_recordings.indexWhere((Recording i) => i.id == other.id)
+            case final int j when j >= 0 && _freshVector(_recordings[j]) != null)
+          other,
+    ];
+  }
+
+  /// How many times the thought in [id] was said within
+  /// [RelatedLimits.repeatWindow] of it, [id] included. 1 means only once.
+  int repeatCount(String id) {
+    final int index = _recordings.indexWhere((Recording i) => i.id == id);
+    if (index < 0) return 0;
+    final DateTime at = _recordings[index].createdAt;
+    int count = 1;
+    for (final RelatedCapture other in relatedFor(id)) {
+      if (other.score < RelatedLimits.repeat) continue;
+      final int j = _recordings.indexWhere((Recording i) => i.id == other.id);
+      if (j < 0) continue;
+      if (_recordings[j].createdAt.difference(at).abs() <=
+          RelatedLimits.repeatWindow) {
+        count++;
+      }
+    }
+    return count;
+  }
+
+  /// Captures with text but no fresh vector: what [buildIndex] would embed.
+  List<String> unindexedIds() => <String>[
+    if (relatedEnabled)
+      for (final Recording item in _recordings)
+        if (embeddingInput(item) != null && _freshVector(item) == null) item.id,
+  ];
+
+  /// Embed [id] unless its vector is already fresh. Best-effort under the
+  /// sink contract: the caller holds the usage scope, and every failure is
+  /// logged and costs only the vector.
+  Future<void> _embed(String id) async {
+    if (!relatedEnabled) return;
+    final int index = _recordings.indexWhere((Recording i) => i.id == id);
+    if (index < 0) return;
+    final Recording item = _recordings[index];
+    final String? input = embeddingInput(item);
+    if (input == null || _freshVector(item) != null) return;
+    final EmbeddingService service = _embeddingService;
+    try {
+      _beginUsageJob(id, UsageStage.embedding);
+      final List<double> vector;
+      try {
+        vector = await service.embed(input);
+      } finally {
+        _endUsageJob();
+      }
+      // A model swapped while the call ran made this vector for the old
+      // space; storing it under the new one would mix them.
+      if (_disposed || service.model != _embeddingService.model) return;
+      final StoredEmbedding stored = StoredEmbedding(
+        captureId: id,
+        fingerprint: embeddingFingerprint(input),
+        model: service.model,
+        vector: Float32List.fromList(vector),
+      );
+      _embeddingStore.put(stored);
+      _currentVectors()[id] = stored;
+      _vectorsVersion++;
+    } catch (exception) {
+      _logSink.log(
+        'Embedding failed: $exception',
+        level: LogLevel.warn,
+        recordingId: id,
+      );
+    }
+  }
+
+  /// Re-embed after a hand change to the text, inside its own usage scope.
+  /// Called after the edit is persisted, so a slow or failing endpoint can
+  /// only delay the vector, never the edit.
+  Future<void> _reembed(String id) async {
+    if (!relatedEnabled || _disposed) return;
+    final void Function() releaseUsageScope = await _acquireUsageScope();
+    try {
+      if (!_disposed) await _embed(id);
+    } finally {
+      releaseUsageScope();
+    }
+    if (!_disposed) notifyListeners();
+  }
+
+  /// Non-null while [buildIndex] runs. In memory only.
+  IndexProgress? get indexProgress => _indexProgress;
+  IndexProgress? _indexProgress;
+  bool _indexCancelled = false;
+
+  void cancelIndex() {
+    if (_indexProgress != null) _indexCancelled = true;
+  }
+
+  /// Embed every capture that has text and no fresh vector, one call each,
+  /// sequentially, each inside the usage scope. Single-flight; cancel stops
+  /// after the item in flight. Returns how many were embedded.
+  Future<int> buildIndex() async {
+    if (_indexProgress != null || !relatedEnabled) return 0;
+    final List<String> ids = unindexedIds();
+    if (ids.isEmpty || _disposed) return 0;
+    _indexCancelled = false;
+    _indexProgress = IndexProgress(done: 0, total: ids.length);
+    notifyListeners();
+    _logSink.log('Indexing ${ids.length} captures for related captures.');
+    int embedded = 0;
+    try {
+      for (final String id in ids) {
+        if (_disposed || _indexCancelled) break;
+        final void Function() releaseUsageScope = await _acquireUsageScope();
+        try {
+          if (_disposed) break;
+          final int before = _vectorsVersion;
+          await _embed(id);
+          if (_vectorsVersion != before) embedded++;
+        } finally {
+          releaseUsageScope();
+          _indexProgress = _indexProgress?.advance();
+          if (!_disposed) notifyListeners();
+        }
+      }
+    } finally {
+      _indexProgress = null;
+      if (!_disposed) notifyListeners();
+    }
+    _logSink.log('Indexed $embedded of ${ids.length} captures.');
+    return embedded;
   }
 
   bool isAnalyzingConnections(String id) => _analyzingConnections.contains(id);
@@ -1895,6 +2234,12 @@ class RecordingsController extends ChangeNotifier {
     // reuse the id from inheriting them, which `uuid.v4()` makes theoretical.
     _history.forget(id);
     await _persistAll(expectShrink: true);
+    // Derived, so best-effort: a vector left behind matches no live capture.
+    try {
+      _embeddingStore.remove(id);
+      _vectors?.remove(id);
+      _vectorsVersion++;
+    } catch (_) {}
     _logSink.log(
       'Capture deleted · ${item.type.name} · source and index row removed.',
       level: LogLevel.warn,
@@ -2203,6 +2548,7 @@ class RecordingsController extends ChangeNotifier {
       source: RevisionSource.user,
     );
     _logSink.log('Text updated.', recordingId: id);
+    await _reembed(id);
   }
 
   /// Set or clear an item's display title. An empty value clears it, and the
@@ -3469,6 +3815,14 @@ class RecordingsController extends ChangeNotifier {
         // refusing clipboard cannot undo a successful capture.
         await _copyToClipboard(recording.type, transcript, id);
         if (_cancelledProcessingIds.contains(id)) return;
+        // Straight after the raw copy, before enrichment: the instruction is
+        // what the user is waiting to paste, and it replaces the raw text on
+        // the clipboard as soon as it lands. Best-effort like everything
+        // after the `completed` write.
+        if (autoInstruction) {
+          await _writeInstruction(id);
+          if (_cancelledProcessingIds.contains(id)) return;
+        }
         // Deliberately after the `completed` write as well: the item is already
         // durable, so a model outage, a malformed response or a kill in this
         // window costs a title, never a capture.
@@ -3491,6 +3845,9 @@ class RecordingsController extends ChangeNotifier {
         if (autoCleanup && !_cancelledProcessingIds.contains(id)) {
           await _proposeCleanup(id);
         }
+        // Last: a vector only feeds the RELATED section, and it is made from
+        // the transcript as processing left it.
+        if (!_cancelledProcessingIds.contains(id)) await _embed(id);
       } catch (exception) {
         if (_cancelledProcessingIds.contains(id)) {
           await _update(

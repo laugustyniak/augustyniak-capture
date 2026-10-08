@@ -14,6 +14,7 @@ import '../domain/enrichment_context.dart';
 import '../domain/enrichment_prompt.dart';
 import '../domain/enrichment_result.dart';
 import '../domain/enrichment_service.dart';
+import '../domain/instruction_writer.dart';
 import '../domain/transcript_cleaner.dart';
 
 /// OpenAI-compatible `/v1/chat/completions` client.
@@ -23,7 +24,11 @@ import '../domain/transcript_cleaner.dart';
 /// against OpenAI, Groq and a local Ollama without a code change, because all
 /// three speak this body.
 class HttpChatEnrichmentService
-    implements EnrichmentService, ConnectionReasoner, TranscriptCleaner {
+    implements
+        EnrichmentService,
+        ConnectionReasoner,
+        TranscriptCleaner,
+        InstructionWriter {
   HttpChatEnrichmentService({
     required this.endpoint,
     this.bearerToken,
@@ -279,6 +284,56 @@ class HttpChatEnrichmentService
       cleaned.add(answer.trim());
     }
     return cleaned.join('\n\n');
+  }
+
+  /// One request, plain text like [cleanUp]. No kept-ratio check: an
+  /// instruction legitimately drops the fillers and repetitions a dictation is
+  /// made of, so its length says nothing about whether content was lost.
+  @override
+  Future<String> writeInstruction(
+    String text, {
+    EnrichmentContext context = EnrichmentContext.none,
+    String glossary = '',
+  }) async {
+    final String trimmed = text.trim();
+    if (trimmed.length > InstructionLimits.maxChars) {
+      throw InstructionTooLongException(trimmed.length);
+    }
+    final String system = buildInstructionSystemPrompt(
+      context: context,
+      glossary: glossary,
+    );
+    final http.Response response = await _client
+        .post(
+          endpoint,
+          headers: <String, String>{
+            'content-type': 'application/json; charset=utf-8',
+            if (bearerToken != null && bearerToken!.isNotEmpty)
+              'Authorization': 'Bearer $bearerToken',
+          },
+          body: utf8.encode(
+            jsonEncode(<String, dynamic>{
+              if (model != null && model!.isNotEmpty) 'model': model,
+              'messages': <Map<String, String>>[
+                <String, String>{'role': 'system', 'content': system},
+                <String, String>{'role': 'user', 'content': trimmed},
+              ],
+            }),
+          ),
+        )
+        .timeout(const Duration(seconds: 90));
+    if (response.statusCode < 200 || response.statusCode >= 300) {
+      throw HttpException(
+        describeProviderFailure(
+          'Instruction',
+          response.statusCode,
+          response.body,
+        ),
+      );
+    }
+    final String body = utf8.decode(response.bodyBytes);
+    _recordUsage(body);
+    return _stripFence(parseTextContent(body)).trim();
   }
 
   /// The message content of a chat completion, as text. Throws when there is

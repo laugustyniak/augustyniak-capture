@@ -20,6 +20,9 @@ class AppSettings {
     String? enrichmentInstructions,
     this.soulPath,
     this.autoCleanup = false,
+    this.autoInstruction = true,
+    this.asrGlossary = '',
+    this.embeddingModel,
     this.audio = AudioConfig.defaults,
     this.themeMode = AppThemeMode.system,
     this.textScale = defaultTextScale,
@@ -32,6 +35,12 @@ class AppSettings {
     this.timerAlarm = AlarmSound.fallback,
     this.commandBaseUrl,
     this.commandToken,
+    this.s3Endpoint,
+    this.s3Bucket,
+    this.s3Region,
+    this.s3AccessKeyId,
+    this.s3SecretAccessKey,
+    this.s3Prefix,
     this.syncDeviceId,
     this.priceOverrides = const <String, ModelPrice>{},
     StoragePrice? storagePrice,
@@ -92,6 +101,22 @@ class AppSettings {
   /// written only when on, so a file that never touched it is unchanged.
   final bool autoCleanup;
 
+  /// Whether every finished speech or OCR capture is rewritten as an
+  /// instruction that then replaces the raw transcript on the clipboard
+  /// (#281). On by default — it is the reason to dictate a task at all — and
+  /// written only when off, so a file that never touched it is unchanged.
+  final bool autoInstruction;
+
+  /// Terms the speech recogniser gets wrong, as free text — `Claude Code
+  /// (heard as "cloud code")`. Sent with the instruction pass as reference
+  /// material. Absent from the JSON while blank.
+  final String asrGlossary;
+
+  /// The model asked for embeddings on the enrichment profile's endpoint, or
+  /// null when related captures are off (#272). Absent from the JSON while
+  /// null, so a file that never set it is unchanged.
+  final String? embeddingModel;
+
   final AudioConfig audio;
   final AppThemeMode themeMode;
   final double textScale;
@@ -145,6 +170,25 @@ class AppSettings {
     return token;
   }
 
+  final String? s3Endpoint;
+  final String? s3Bucket;
+  final String? s3Region;
+  final String? s3AccessKeyId;
+  final String? s3SecretAccessKey;
+  final String? s3Prefix;
+
+  bool get hasCustomS3Storage =>
+      (s3Endpoint ?? '').trim().isNotEmpty &&
+      (s3Bucket ?? '').trim().isNotEmpty &&
+      (s3AccessKeyId ?? '').trim().isNotEmpty &&
+      (s3SecretAccessKey ?? '').trim().isNotEmpty;
+
+  String? get usableS3SecretAccessKey {
+    final String token = s3SecretAccessKey?.trim() ?? '';
+    if (token.isEmpty || TokenCipher.isSealed(token)) return null;
+    return token;
+  }
+
   /// **Only what the user changed.** The shipped table lives in
   /// `PriceBookDefaults`, so a later build can correct a provider's price for
   /// everyone who never edited it. Written to disk only when non-empty.
@@ -180,6 +224,10 @@ class AppSettings {
     String? soulPath,
     bool clearSoulPath = false,
     bool? autoCleanup,
+    bool? autoInstruction,
+    String? asrGlossary,
+    String? embeddingModel,
+    bool clearEmbeddingModel = false,
     AudioConfig? audio,
     AppThemeMode? themeMode,
     double? textScale,
@@ -196,6 +244,18 @@ class AppSettings {
     bool clearCommandBaseUrl = false,
     String? commandToken,
     bool clearCommandToken = false,
+    String? s3Endpoint,
+    bool clearS3Endpoint = false,
+    String? s3Bucket,
+    bool clearS3Bucket = false,
+    String? s3Region,
+    bool clearS3Region = false,
+    String? s3AccessKeyId,
+    bool clearS3AccessKeyId = false,
+    String? s3SecretAccessKey,
+    bool clearS3SecretAccessKey = false,
+    String? s3Prefix,
+    bool clearS3Prefix = false,
     String? syncDeviceId,
     Map<String, ModelPrice>? priceOverrides,
     StoragePrice? storagePrice,
@@ -216,6 +276,11 @@ class AppSettings {
           : (enrichmentInstructions ?? _enrichmentInstructions),
       soulPath: clearSoulPath ? null : (soulPath ?? this.soulPath),
       autoCleanup: autoCleanup ?? this.autoCleanup,
+      autoInstruction: autoInstruction ?? this.autoInstruction,
+      asrGlossary: asrGlossary ?? this.asrGlossary,
+      embeddingModel: clearEmbeddingModel
+          ? null
+          : (embeddingModel ?? this.embeddingModel),
       audio: audio ?? this.audio,
       themeMode: themeMode ?? this.themeMode,
       textScale: resetTextScale
@@ -234,6 +299,12 @@ class AppSettings {
       commandToken: clearCommandToken
           ? null
           : (commandToken ?? this.commandToken),
+      s3Endpoint: clearS3Endpoint ? null : (s3Endpoint ?? this.s3Endpoint),
+      s3Bucket: clearS3Bucket ? null : (s3Bucket ?? this.s3Bucket),
+      s3Region: clearS3Region ? null : (s3Region ?? this.s3Region),
+      s3AccessKeyId: clearS3AccessKeyId ? null : (s3AccessKeyId ?? this.s3AccessKeyId),
+      s3SecretAccessKey: clearS3SecretAccessKey ? null : (s3SecretAccessKey ?? this.s3SecretAccessKey),
+      s3Prefix: clearS3Prefix ? null : (s3Prefix ?? this.s3Prefix),
       syncDeviceId: syncDeviceId ?? this.syncDeviceId,
       priceOverrides: priceOverrides ?? this.priceOverrides,
       storagePrice: clearStoragePrice
@@ -261,6 +332,12 @@ class AppSettings {
       'timerAlarm': timerAlarm.name,
       if (commandBaseUrl != null) 'commandBaseUrl': commandBaseUrl,
       if (commandToken != null) 'commandToken': commandToken,
+      if (s3Endpoint != null && s3Endpoint!.trim().isNotEmpty) 's3Endpoint': s3Endpoint,
+      if (s3Bucket != null && s3Bucket!.trim().isNotEmpty) 's3Bucket': s3Bucket,
+      if (s3Region != null && s3Region!.trim().isNotEmpty) 's3Region': s3Region,
+      if (s3AccessKeyId != null && s3AccessKeyId!.trim().isNotEmpty) 's3AccessKeyId': s3AccessKeyId,
+      if (s3SecretAccessKey != null && s3SecretAccessKey!.trim().isNotEmpty) 's3SecretAccessKey': s3SecretAccessKey,
+      if (s3Prefix != null && s3Prefix!.trim().isNotEmpty) 's3Prefix': s3Prefix,
       if (syncDeviceId != null) 'syncDeviceId': syncDeviceId,
       if (vaultPath != null) ...<String, dynamic>{
         'vaultPath': vaultPath,
@@ -271,6 +348,9 @@ class AppSettings {
         'enrichmentInstructions': _enrichmentInstructions,
       if (soulPath != null) 'soulPath': soulPath,
       if (autoCleanup) 'autoCleanup': true,
+      if (!autoInstruction) 'autoInstruction': false,
+      if (asrGlossary.trim().isNotEmpty) 'asrGlossary': asrGlossary,
+      if (embeddingModel != null) 'embeddingModel': embeddingModel,
       if (priceOverrides.isNotEmpty)
         'priceOverrides': <String, dynamic>{
           for (final MapEntry<String, ModelPrice> entry
@@ -357,6 +437,15 @@ class AppSettings {
       ),
       navRailExpanded: json['navRailExpanded'] == true,
       autoCleanup: json['autoCleanup'] == true,
+      autoInstruction: json['autoInstruction'] != false,
+      asrGlossary: json['asrGlossary'] is String
+          ? json['asrGlossary'] as String
+          : '',
+      embeddingModel:
+          json['embeddingModel'] is String &&
+              (json['embeddingModel'] as String).trim().isNotEmpty
+          ? (json['embeddingModel'] as String).trim()
+          : null,
       soulPath: json['soulPath'] is String
           ? json['soulPath'] as String
           : null,
@@ -380,6 +469,24 @@ class AppSettings {
           : null,
       commandToken: json['commandToken'] is String
           ? json['commandToken'] as String
+          : null,
+      s3Endpoint: json['s3Endpoint'] is String
+          ? json['s3Endpoint'] as String
+          : null,
+      s3Bucket: json['s3Bucket'] is String
+          ? json['s3Bucket'] as String
+          : null,
+      s3Region: json['s3Region'] is String
+          ? json['s3Region'] as String
+          : null,
+      s3AccessKeyId: json['s3AccessKeyId'] is String
+          ? json['s3AccessKeyId'] as String
+          : null,
+      s3SecretAccessKey: json['s3SecretAccessKey'] is String
+          ? json['s3SecretAccessKey'] as String
+          : null,
+      s3Prefix: json['s3Prefix'] is String
+          ? json['s3Prefix'] as String
           : null,
       syncDeviceId: json['syncDeviceId'] is String
           ? json['syncDeviceId'] as String

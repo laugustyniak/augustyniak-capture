@@ -8,7 +8,9 @@ enum UsageStage {
   ocr,
   enrichment,
   connections,
-  cleanup;
+  cleanup,
+  embedding,
+  instruction;
 
   static UsageStage? fromName(String? name) =>
       name == null ? null : UsageStage.values.asNameMap()[name];
@@ -20,6 +22,8 @@ enum UsageStage {
     UsageStage.enrichment => 'ENRICHMENT',
     UsageStage.connections => 'DAILY CONNECTIONS',
     UsageStage.cleanup => 'CLEAN-UP',
+    UsageStage.embedding => 'EMBEDDING',
+    UsageStage.instruction => 'INSTRUCTION',
   };
 }
 

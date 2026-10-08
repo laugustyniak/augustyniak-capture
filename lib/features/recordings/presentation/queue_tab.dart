@@ -32,6 +32,8 @@ import 'queue_priority.dart';
 import 'queue_toolbar.dart';
 import 'recording_card.dart';
 import 'recording_editor.dart';
+import 'related_section.dart';
+import '../domain/related_captures.dart';
 import 'recordings_controller.dart';
 
 /// The five buckets from the design. They **partition** the queue: every item
@@ -172,6 +174,31 @@ class _QueueTabState extends State<QueueTab> {
   /// the selection onto whatever item slid into that slot.
   String? focusedId;
 
+  /// Bring [capture] into view the way the layout opens one: selected beside
+  /// the list on a wide screen (every filter cleared, so it cannot be hidden),
+  /// its own page on a phone, the focus view in between. [edit] opens it in
+  /// the editor where the layout allows, for a jump that started in one.
+  void _revealCapture(Recording capture, {bool edit = false}) {
+    final double width =
+        context.size?.width ?? MediaQuery.sizeOf(context).width;
+    if (width >= Console.masterDetailBreakpoint) {
+      setState(() {
+        reviewFilter = ReviewFilter.all;
+        selectedFilter = RecordingFilter.all;
+        selectedTypeFilter = CaptureTypeFilter.all;
+        projectFilterId = null;
+        searchQuery = '';
+        searchController.clear();
+        focusedId = capture.id;
+        if (edit) editingId = capture.id;
+      });
+    } else if (width < Console.compactBreakpoint) {
+      _openDetailPage(capture);
+    } else {
+      _openFocus(capture);
+    }
+  }
+
   Future<void> _openDailyConnections() async {
     final DailyConnectionsService? service = widget.dailyConnectionsService;
     if (service == null) return;
@@ -185,25 +212,7 @@ class _QueueTabState extends State<QueueTab> {
         service: service,
         captures: () => widget.controller.recordings,
         projectNames: projectNames,
-        onOpenCapture: (Recording capture) {
-          final double width = this.context.size?.width ??
-              MediaQuery.sizeOf(this.context).width;
-          if (width >= Console.masterDetailBreakpoint) {
-            setState(() {
-              reviewFilter = ReviewFilter.all;
-              selectedFilter = RecordingFilter.all;
-              selectedTypeFilter = CaptureTypeFilter.all;
-              projectFilterId = null;
-              searchQuery = '';
-              searchController.clear();
-              focusedId = capture.id;
-            });
-          } else if (width < Console.compactBreakpoint) {
-            _openDetailPage(capture);
-          } else {
-            _openFocus(capture);
-          }
-        },
+        onOpenCapture: _revealCapture,
       ),
     );
   }
@@ -953,6 +962,8 @@ class _QueueTabState extends State<QueueTab> {
       onOpenFocus: () => _openFocus(recording),
       onConfigureModels: widget.onConfigureModels,
       costUsd: _costTotals[recording.id],
+      relatedCount: controller.relatedFor(recording.id).length,
+      repeatCount: controller.repeatCount(recording.id),
     );
   }
 
@@ -1349,6 +1360,16 @@ class _QueueTabState extends State<QueueTab> {
       onRejectCleanup: () => controller.rejectCleanup(recording.id),
       cleaning: controller.isCleaning(recording.id),
       cleanupError: controller.cleanupError(recording.id),
+      related: <RelatedEntry>[
+        for (final RelatedCapture match in controller.relatedFor(recording.id))
+          if (controller.recordings
+                  .where((Recording r) => r.id == match.id)
+                  .firstOrNull
+              case final Recording other)
+            RelatedEntry(recording: other, match: match),
+      ],
+      onOpenRelated: (Recording other) =>
+          _revealCapture(other, edit: true),
     );
   }
 
