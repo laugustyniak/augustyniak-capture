@@ -6,6 +6,7 @@ import 'package:augustyniak_capture/features/recordings/domain/recording.dart';
 import 'package:augustyniak_capture/features/recordings/domain/route_record.dart';
 import 'package:augustyniak_capture/features/recordings/domain/suggested_route.dart';
 import 'package:augustyniak_capture/features/recordings/presentation/queue_tab.dart';
+import 'package:augustyniak_capture/features/recordings/presentation/recording_card.dart';
 import 'package:augustyniak_capture/features/recordings/presentation/recordings_controller.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -252,5 +253,24 @@ void main() {
     expect(stored.auto, isFalse);
     expect(stored.kind, SuggestedRouteKind.command);
     expect(h.controller.recordings.single.routes, isEmpty);
+  });
+
+  testWidgets('the dismiss control names itself and has a real hit area', (
+    WidgetTester tester,
+  ) async {
+    await pump(tester);
+
+    expect(
+      find.byTooltip(RecordingCard.dismissSuggestionLabel),
+      findsOneWidget,
+    );
+    final Size target = tester.getSize(
+      find.ancestor(
+        of: find.byIcon(Icons.close_rounded),
+        matching: find.byType(InkWell),
+      ),
+    );
+    expect(target.width, greaterThanOrEqualTo(32));
+    expect(target.height, greaterThanOrEqualTo(32));
   });
 }

@@ -309,6 +309,8 @@ class RecordingCard extends StatelessWidget {
       ),
     ];
     final bool hasPills = pillWidgets.isNotEmpty;
+    final bool hasSuggestionChip =
+        suggestedRoute != null && onConfirmSuggestedRoute != null;
 
     final Widget card = RecordingCardShell(
       borderColor: focused
@@ -320,7 +322,11 @@ class RecordingCard extends StatelessWidget {
           : Console.border,
       child: LayoutBuilder(
         builder: (BuildContext context, BoxConstraints constraints) {
-          final bool isNarrow = constraints.maxWidth < 480;
+          // The pills sit under the title, where they wrap to the card's
+          // width, whenever the suggestion chip is among them: beside the
+          // title a Wrap is laid out on one unbounded line, and the chip names
+          // a project. Every other card keeps its layout.
+          final bool isNarrow = constraints.maxWidth < 480 || hasSuggestionChip;
           final Widget actionButtons = Row(
             mainAxisSize: MainAxisSize.min,
             children: <Widget>[
@@ -488,18 +494,11 @@ class RecordingCard extends StatelessWidget {
                   ),
                   if (!isNarrow && hasPills) ...<Widget>[
                     const SizedBox(width: 8),
-                    // Bounded: a Wrap in a Row is otherwise laid out on one
-                    // unbounded line, and the suggestion chip names a project.
-                    ConstrainedBox(
-                      constraints: BoxConstraints(
-                        maxWidth: constraints.maxWidth * .45,
-                      ),
-                      child: Wrap(
-                        spacing: 6,
-                        runSpacing: 6,
-                        crossAxisAlignment: WrapCrossAlignment.center,
-                        children: pillWidgets,
-                      ),
+                    Wrap(
+                      spacing: 6,
+                      runSpacing: 6,
+                      crossAxisAlignment: WrapCrossAlignment.center,
+                      children: pillWidgets,
                     ),
                   ],
                 ],
@@ -906,26 +905,30 @@ class _SuggestedRouteChip extends StatelessWidget {
               ? body
               : Tooltip(message: reason, child: body),
         ),
-        if (onDismiss != null) ...<Widget>[
-          const SizedBox(width: 4),
+        if (onDismiss != null)
           Semantics(
             button: true,
             label: RecordingCard.dismissSuggestionLabel,
             excludeSemantics: true,
-            child: InkWell(
-              onTap: onDismiss,
-              borderRadius: BorderRadius.circular(999),
-              child: Padding(
-                padding: const EdgeInsets.all(4),
-                child: Icon(
-                  Icons.close_rounded,
-                  size: 13,
-                  color: Console.mutedSoft,
+            child: Tooltip(
+              message: RecordingCard.dismissSuggestionLabel,
+              child: InkWell(
+                onTap: onDismiss,
+                borderRadius: BorderRadius.circular(999),
+                // A 32 px target around a 13 px glyph: small to look at, not
+                // to hit.
+                child: SizedBox(
+                  width: 32,
+                  height: 32,
+                  child: Icon(
+                    Icons.close_rounded,
+                    size: 13,
+                    color: Console.mutedSoft,
+                  ),
                 ),
               ),
             ),
           ),
-        ],
       ],
     );
   }
