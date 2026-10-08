@@ -1,5 +1,6 @@
 import 'agent_artifact.dart';
 import 'capture_category.dart';
+import 'capture_instruction.dart';
 import 'cleanup_proposal.dart';
 import 'capture_priority.dart';
 import 'capture_segment.dart';
@@ -44,6 +45,7 @@ class Recording {
     this.priorityReason,
     this.priorityBasis,
     this.cleanup,
+    this.instruction,
     this.tags = const <String>[],
     this.projectId,
     this.error,
@@ -138,6 +140,21 @@ class Recording {
   /// as the transcript: search, the vault and agent briefs all keep reading
   /// [transcript] until the user accepts.
   final CleanupProposal? cleanup;
+
+  /// The capture rewritten as an instruction (#281). Null means none was
+  /// written yet. Never read as the transcript — the clipboard and the detail
+  /// views prefer it, everything else keeps reading [transcript].
+  final CaptureInstruction? instruction;
+
+  /// What the card shows and the copy buttons hand out: the [instruction]
+  /// while it still describes the [transcript], the transcript otherwise. A
+  /// stale instruction would paste text the user has since corrected.
+  String get displayText {
+    final CaptureInstruction? current = instruction;
+    return current != null && current.matches(transcript)
+        ? current.text
+        : (transcript ?? '');
+  }
 
   /// The capture's tags: one normalized list, no provenance. Enrichment may
   /// propose it and the user may rewrite it — see [RecordingTags].
@@ -254,6 +271,8 @@ class Recording {
     bool clearPriorityBasis = false,
     CleanupProposal? cleanup,
     bool clearCleanup = false,
+    CaptureInstruction? instruction,
+    bool clearInstruction = false,
     List<String>? tags,
     String? projectId,
     bool clearProjectId = false,
@@ -289,6 +308,9 @@ class Recording {
           ? null
           : (priorityBasis ?? this.priorityBasis),
       cleanup: clearCleanup ? null : (cleanup ?? this.cleanup),
+      instruction: clearInstruction
+          ? null
+          : (instruction ?? this.instruction),
       tags: RecordingTags.normalize(tags ?? this.tags),
       projectId: clearProjectId ? null : (projectId ?? this.projectId),
       error: clearError ? null : (error ?? this.error),
@@ -321,6 +343,7 @@ class Recording {
     if (priorityReason != null) 'priorityReason': priorityReason,
     if (priorityBasis != null) 'priorityBasis': priorityBasis,
     if (cleanup != null) 'cleanup': cleanup!.toJson(),
+    if (instruction != null) 'instruction': instruction!.toJson(),
     'tags': tags,
     'projectId': projectId,
     'error': error,
@@ -380,6 +403,7 @@ class Recording {
           ? json['priorityBasis'] as String
           : null,
       cleanup: CleanupProposal.fromJson(json['cleanup']),
+      instruction: CaptureInstruction.fromJson(json['instruction']),
       // Reads the plain string list *and* the retired `{value, source}` form,
       // which is already on disk. Invalid entries degrade individually rather
       // than taking down the index.

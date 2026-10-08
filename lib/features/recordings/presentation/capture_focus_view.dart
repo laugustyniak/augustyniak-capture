@@ -15,6 +15,7 @@ import '../domain/note_vault.dart';
 import '../domain/recording.dart';
 import 'audio_waveform_visualizer.dart';
 import 'agent_artifact_viewer_modal.dart';
+import 'capture_text_tabs.dart';
 import 'card_parts.dart';
 import 'handoff_sheet.dart';
 import 'inline_edit.dart';
@@ -365,13 +366,41 @@ class _FocusBody extends StatelessWidget {
                     trailing: transcript.isEmpty
                         ? null
                         : CopyButton(
-                            text: transcript,
+                            text: recording.displayText.trim(),
                             tooltip: 'Copy full text',
                             semanticLabel: 'Copy full text to clipboard',
                           ),
                   ),
                   const SizedBox(height: 8),
-                  Container(
+                  CaptureTextTabs(
+                    key: ValueKey<String>('text-tabs-${recording.id}'),
+                    recording: recording,
+                    writing: controller.isWritingInstruction(recording.id),
+                    error: controller.instructionError(recording.id),
+                    onRewrite: RecordingsController.canCleanUp(recording)
+                        ? () => controller.writeInstruction(recording.id)
+                        : null,
+                    instructionBody: (String text) => Container(
+                      width: double.infinity,
+                      padding: const EdgeInsets.all(14),
+                      decoration: BoxDecoration(
+                        color: Console.surfaceRaised,
+                        borderRadius: BorderRadius.circular(12),
+                        border: Border.all(color: Console.border),
+                      ),
+                      child: SimpleMarkdown(
+                        text: text,
+                        baseStyle: ConsoleText.body.copyWith(
+                          fontSize: 14,
+                          height: 1.55,
+                          color: Console.text,
+                        ),
+                        accentColor: Console.accent,
+                        mutedColor: Console.muted,
+                        borderColor: Console.border,
+                      ),
+                    ),
+                    raw: Container(
                     width: double.infinity,
                     padding: const EdgeInsets.all(14),
                     decoration: BoxDecoration(
@@ -397,6 +426,7 @@ class _FocusBody extends StatelessWidget {
                             mutedColor: Console.muted,
                             borderColor: Console.border,
                           ),
+                  ),
                   ),
                   const SizedBox(height: 14),
                   if (recording.routes.isNotEmpty) ...<Widget>[
@@ -1238,7 +1268,26 @@ class CaptureDetailPanel extends StatelessWidget {
                 : 'Transcript · $wordCount words',
           ),
           const SizedBox(height: 8),
-          InlineEditText(
+          CaptureTextTabs(
+            key: ValueKey<String>('text-tabs-${recording.id}'),
+            recording: recording,
+            writing: controller.isWritingInstruction(recording.id),
+            error: controller.instructionError(recording.id),
+            onRewrite: RecordingsController.canCleanUp(recording)
+                ? () => controller.writeInstruction(recording.id)
+                : null,
+            instructionBody: (String text) => SimpleMarkdown(
+              text: text,
+              baseStyle: ConsoleText.body.copyWith(
+                fontSize: 15,
+                height: 1.65,
+                color: Console.text,
+              ),
+              accentColor: Console.accent,
+              mutedColor: Console.muted,
+              borderColor: Console.border,
+            ),
+            raw: InlineEditText(
             value: transcript,
             semanticLabel: 'Edit transcript',
             hintText: 'Transcript / OCR text / note',
@@ -1265,6 +1314,7 @@ class CaptureDetailPanel extends StatelessWidget {
                     mutedColor: Console.muted,
                     borderColor: Console.border,
                   ),
+          ),
           ),
           const SizedBox(height: 24),
           InlineEditTags(
@@ -1705,7 +1755,8 @@ class _PanelActions extends StatelessWidget {
         semanticLabel: 'Edit title and text',
         onPressed: onEdit,
       ),
-      if (hasTranscript) _PanelCopyButton(text: transcript),
+      if (hasTranscript)
+        _PanelCopyButton(text: recording.displayText.trim()),
     ];
 
     return Row(

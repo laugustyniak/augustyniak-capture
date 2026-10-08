@@ -594,6 +594,21 @@ class SettingsController extends ChangeNotifier {
     await _persist(_settings.copyWith(autoCleanup: value));
   }
 
+  bool get autoInstruction => _settings.autoInstruction;
+
+  Future<void> setAutoInstruction(bool value) async {
+    if (value == _settings.autoInstruction) return;
+    await _persist(_settings.copyWith(autoInstruction: value));
+  }
+
+  String get asrGlossary => _settings.asrGlossary;
+
+  Future<void> setAsrGlossary(String value) async {
+    final String trimmed = value.trim();
+    if (trimmed == _settings.asrGlossary.trim()) return;
+    await _persist(_settings.copyWith(asrGlossary: trimmed));
+  }
+
   /// The embedding model for related captures, or null when they are off.
   String? get embeddingModel => _settings.embeddingModel;
 

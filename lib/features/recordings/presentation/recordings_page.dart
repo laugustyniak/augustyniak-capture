@@ -32,6 +32,7 @@ import '../../costs/domain/usage_event.dart';
 import '../../costs/domain/usage_model_keys.dart';
 import '../../connections/data/http_daily_connections_service.dart';
 import '../../enrichment/domain/transcript_cleaner.dart';
+import '../../enrichment/domain/instruction_writer.dart';
 import '../../enrichment/data/composed_enrichment_context_source.dart';
 import '../domain/connection_reasoner.dart';
 import '../../logs/data/log_store.dart';
@@ -840,6 +841,12 @@ class _RecordingsPageState extends State<RecordingsPage>
         ? settings.enrichmentService as TranscriptCleaner
         : const DisabledTranscriptCleaner();
     controller.autoCleanup = settings.autoCleanup;
+    controller.instructionWriter =
+        settings.enrichmentService is InstructionWriter
+        ? settings.enrichmentService as InstructionWriter
+        : const DisabledInstructionWriter();
+    controller.autoInstruction = settings.autoInstruction;
+    controller.asrGlossary = settings.asrGlossary;
     controller.embeddingService = settings.embeddingService;
     // OCR rides the enrichment profile (vision-capable chat endpoint) and has
     // no platform fallback behind it: with no profile active this is the

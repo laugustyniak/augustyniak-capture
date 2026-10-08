@@ -157,6 +157,80 @@ class _EnrichmentContextSectionState extends State<EnrichmentContextSection> {
     );
   }
 
+  late final TextEditingController _glossaryField = TextEditingController(
+    text: widget.controller.asrGlossary,
+  );
+  final FocusNode _glossaryFocus = FocusNode();
+
+  Future<void> _commitGlossary() async {
+    await widget.controller.setAsrGlossary(_glossaryField.text);
+    if (mounted) setState(() {});
+  }
+
+  /// The INSTRUCTION block (#281): the switch, then the glossary it repairs
+  /// misheard terms against.
+  Widget _instructionBlock() {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: <Widget>[
+        Row(
+          children: <Widget>[
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: <Widget>[
+                  Text(
+                    'REWRITE EVERY DICTATION AS AN INSTRUCTION',
+                    style: ConsoleText.micro.copyWith(
+                      color: Console.muted,
+                      fontWeight: FontWeight.w800,
+                      letterSpacing: .6,
+                    ),
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    'Misheard terms fixed against the glossary, then the '
+                    'dictation restated as a prompt for the task. It replaces '
+                    'the raw text on the clipboard; the raw transcript stays '
+                    'under RAW. One extra model call each.',
+                    style: TextStyle(
+                      color: Console.mutedSoft,
+                      fontSize: 10,
+                      height: 1.45,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(width: 10),
+            Switch(
+              key: const ValueKey<String>('auto-instruction'),
+              value: widget.controller.autoInstruction,
+              onChanged: (bool value) async {
+                await widget.controller.setAutoInstruction(value);
+                if (mounted) setState(() {});
+              },
+            ),
+          ],
+        ),
+        const SizedBox(height: 10),
+        Text('ASR GLOSSARY', style: ConsoleText.fieldLabel),
+        const SizedBox(height: 6),
+        ConsoleField(
+          key: const ValueKey<String>('asr-glossary'),
+          controller: _glossaryField,
+          focusNode: _glossaryFocus,
+          minLines: 3,
+          maxLines: 8,
+          fontSize: 12,
+          hintText:
+              'One term per line, with what it is misheard as:\n'
+              'Claude Code — heard as "cloud code"',
+        ),
+      ],
+    );
+  }
+
   late final TextEditingController _embeddingField = TextEditingController(
     text: widget.controller.embeddingModel ?? '',
   );
@@ -270,6 +344,9 @@ class _EnrichmentContextSectionState extends State<EnrichmentContextSection> {
     });
     _soulFocus.addListener(() {
       if (!_soulFocus.hasFocus && _soulDirty) _commitSoulPath();
+    });
+    _glossaryFocus.addListener(() {
+      if (!_glossaryFocus.hasFocus) _commitGlossary();
     });
     _embeddingFocus.addListener(() {
       if (!_embeddingFocus.hasFocus) _commitEmbeddingModel();
@@ -414,6 +491,8 @@ class _EnrichmentContextSectionState extends State<EnrichmentContextSection> {
     _soulField.dispose();
     _embeddingFocus.dispose();
     _embeddingField.dispose();
+    _glossaryFocus.dispose();
+    _glossaryField.dispose();
     super.dispose();
   }
 
@@ -637,6 +716,8 @@ class _EnrichmentContextSectionState extends State<EnrichmentContextSection> {
                   ),
                 ],
               ),
+              Divider(color: Console.border, height: 26),
+              _instructionBlock(),
               Divider(color: Console.border, height: 26),
               _relatedBlock(),
               Divider(color: Console.border, height: 26),
