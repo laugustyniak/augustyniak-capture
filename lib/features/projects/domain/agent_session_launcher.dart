@@ -2,7 +2,8 @@
 enum ProjectAgent {
   codex('codex'),
   claude('claude'),
-  antigravity('agy');
+  antigravity('agy'),
+  gemini('gemini');
 
   const ProjectAgent(this.executable);
 
@@ -20,6 +21,7 @@ enum ProjectAgent {
     final String safe = disarmOptionLookalike(prompt);
     return switch (this) {
       ProjectAgent.antigravity => <String>['--prompt-interactive', safe],
+      ProjectAgent.gemini => <String>['-i', safe],
       ProjectAgent.codex || ProjectAgent.claude => <String>[safe],
     };
   }
@@ -35,6 +37,7 @@ enum ProjectAgent {
     ProjectAgent.claude || ProjectAgent.antigravity => const <String>[
       '--dangerously-skip-permissions',
     ],
+    ProjectAgent.gemini => const <String>['--yolo'],
   };
 
   /// A prompt that would otherwise be read as an option, made positional.

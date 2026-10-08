@@ -2,6 +2,7 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:augustyniak_capture/features/projects/data/projects_repository.dart';
+import 'package:augustyniak_capture/features/projects/domain/agent_session_launcher.dart';
 import 'package:augustyniak_capture/features/projects/domain/project.dart';
 import 'package:flutter_test/flutter_test.dart';
 
@@ -94,6 +95,38 @@ void main() {
         restored.settingsFor(AgentKind.antigravity).additionalArgs,
         <String>['--model', 'gemini-2.5-pro'],
       );
+    });
+
+    test('geminiCli is its own agent and legacy gemini stays Antigravity', () {
+      expect(AgentKind.fromName('gemini'), AgentKind.antigravity);
+      expect(AgentKind.fromName('geminiCli'), AgentKind.geminiCli);
+      expect(AgentKind.fromName('someFutureAgent'), isNull);
+
+      const Project project = Project(
+        id: 'g',
+        name: 'G',
+        repoPath: '/tmp/g',
+        defaultAgent: AgentKind.geminiCli,
+        agentSettings: <AgentKind, AgentSettings>{
+          AgentKind.geminiCli: AgentSettings(skipPermissions: true),
+        },
+      );
+      final Project restored = Project.fromJson(project.toJson());
+      expect(restored.defaultAgent, AgentKind.geminiCli);
+      expect(restored.settingsFor(AgentKind.geminiCli).skipPermissions, isTrue);
+    });
+
+    test('Gemini CLI prompt and skip flag spellings', () {
+      expect(ProjectAgent.gemini.executable, 'gemini');
+      expect(ProjectAgent.gemini.promptArguments('do it'), <String>[
+        '-i',
+        'do it',
+      ]);
+      expect(ProjectAgent.gemini.promptArguments('--yolo'), <String>[
+        '-i',
+        ' --yolo',
+      ]);
+      expect(ProjectAgent.gemini.skipPermissionsArguments, <String>['--yolo']);
     });
 
     test('skip permissions round-trips and stays out of JSON when off', () {

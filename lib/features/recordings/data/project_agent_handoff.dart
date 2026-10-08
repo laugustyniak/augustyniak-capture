@@ -30,15 +30,23 @@ class ProjectAgentHandoff implements AgentHandoff {
   const ProjectAgentHandoff({
     required Project? Function(String projectId) projectById,
     required AgentSessionLauncher launcher,
+    Directory? Function()? sessionsRoot,
     this.directoryName = '.agent-tasks',
   }) : _projectById = projectById,
-       _launcher = launcher;
+       _launcher = launcher,
+       _sessionsRoot = sessionsRoot;
 
   final Project? Function(String projectId) _projectById;
   final AgentSessionLauncher _launcher;
+
+  /// Where a capture with no repository gets its own scratch folder, or null
+  /// when there is none. A resolver, not a snapshot, like every swappable seam
+  /// here: the answer is read at use, so an unconfigured install keeps the
+  /// behaviour it had before scratch folders existed.
+  final Directory? Function()? _sessionsRoot;
   final String directoryName;
 
-  /// The project this launcher will act for, or null when it must not.
+  /// What this launcher will act on for [projectId], or null when it must not.
   ///
   /// **A bound project is refused here, and that is the demotion.** This
   /// launcher opens one CLI in one terminal on this machine and loses sight of
@@ -49,26 +57,46 @@ class ProjectAgentHandoff implements AgentHandoff {
   /// will ever answer. So the offline case keeps the launcher, and the bound
   /// case does not see it: `agentsFor` answers empty and the queue hides the
   /// control rather than offering a worse one beside a better one.
-  Project? _resolve(String? projectId) {
-    if (projectId == null || projectId.isEmpty) return null;
-    // A project deleted after the capture was filed leaves a dangling id on the
-    // item, the same shape a dangling `activeProfileId` has in settings.
-    final Project? project = _projectById(projectId);
-    if (project == null) return null;
-    if (project.isBoundToCommand) return null;
-    return project.repoPath.trim().isEmpty ? null : project;
+  ///
+  /// A capture with no usable repository — no project, a dangling id (a project
+  /// deleted after the capture was filed, the same shape a dangling
+  /// `activeProfileId` has in settings) or an empty `repoPath` — runs in a
+  /// scratch folder instead, when [_sessionsRoot] provides one.
+  ({Project? project, bool scratch})? _resolve(String? projectId) {
+    final Project? project = projectId == null || projectId.isEmpty
+        ? null
+        : _projectById(projectId);
+    if (project != null && project.isBoundToCommand) return null;
+    if (project != null && project.repoPath.trim().isNotEmpty) {
+      return (project: project, scratch: false);
+    }
+    if (_scratchRoot() == null) return null;
+    return (project: project, scratch: true);
+  }
+
+  Directory? _scratchRoot() => _sessionsRoot?.call();
+
+  @override
+  String? workspacePathFor(String captureId, String? projectId) {
+    if (!isSafeCaptureId(captureId)) return null;
+    final ({Project? project, bool scratch})? target = _resolve(projectId);
+    if (target == null || !target.scratch) return null;
+    final String root = _scratchRoot()!.path;
+    final String path = p.join(root, captureId);
+    // Defence in depth behind the id check.
+    return p.isWithin(root, path) ? path : null;
   }
 
   @override
   List<HandoffAgent> agentsFor(String? projectId) {
-    final Project? project = _resolve(projectId);
-    if (project == null) return const <HandoffAgent>[];
+    final ({Project? project, bool scratch})? target = _resolve(projectId);
+    if (target == null) return const <HandoffAgent>[];
     return <HandoffAgent>[
       for (final AgentKind agent in AgentKind.values)
         HandoffAgent(
           id: agent.name,
           label: agentLabel(agent),
-          isDefault: project.defaultAgent == agent,
+          isDefault: target.project?.defaultAgent == agent,
         ),
     ];
   }
@@ -86,28 +114,40 @@ class ProjectAgentHandoff implements AgentHandoff {
 
   @override
   Future<AgentHandoffResult> handoff(AgentHandoffRequest request) async {
-    final Project? project = _resolve(request.capture.projectId);
-    if (project == null) throw const AgentHandoffUnavailableException();
+    // First, before any path is built from the id.
+    if (!isSafeCaptureId(request.captureId)) {
+      throw const UnsafeCaptureIdException();
+    }
+    final ({Project? project, bool scratch})? target = _resolve(
+      request.capture.projectId,
+    );
+    if (target == null) throw const AgentHandoffUnavailableException();
+    final Project? project = target.project;
+    final String? workspace = workspacePathFor(
+      request.captureId,
+      request.capture.projectId,
+    );
+    final String repoPath = workspace ?? project!.repoPath;
 
     final AgentKind? agent = AgentKind.fromName(request.agentId);
     if (agent == null) {
       throw AgentHandoffFailure('Unknown agent: ${request.agentId}');
     }
 
-    final Directory repo = Directory(project.repoPath);
+    // A scratch folder is ours to create, on first send, and never to delete:
+    // the agent's results live in it after the session is gone.
+    if (workspace != null) await Directory(workspace).create(recursive: true);
+    final Directory repo = Directory(repoPath);
     if (!await repo.exists()) {
       // Named rather than swallowed: a moved checkout and a silent agent look
       // identical from the queue, and only one of them is the user's problem.
-      throw FileSystemException(
-        'Project repository not found',
-        project.repoPath,
-      );
+      throw FileSystemException('Project repository not found', repoPath);
     }
 
     // The brief goes down first. An agent started against a file that is not
     // there yet reads nothing and reports nothing — the one failure the user
     // could not diagnose from either end.
-    final File file = _taskFile(project, request.captureId);
+    final File file = _taskFile(repoPath, request.captureId);
     final bool existed = await file.exists();
     if (!existed) await file.parent.create(recursive: true);
     await file.writeAsString(
@@ -115,23 +155,30 @@ class ProjectAgentHandoff implements AgentHandoff {
       mode: FileMode.writeOnlyAppend,
     );
 
-    final ProjectAgent target = _launcherAgent(agent);
-    final AgentSettings settings = project.settingsFor(agent);
+    final ProjectAgent launcherAgent = _launcherAgent(agent);
+    final AgentSettings settings =
+        project?.settingsFor(agent) ?? const AgentSettings();
     final AgentSessionLaunchResult session = await _launcher.launch(
       AgentSessionLaunchRequest(
-        projectId: project.id,
-        projectName: project.name,
-        repoPath: project.repoPath,
-        agent: target,
-        sessionName: project.sessionName,
+        projectId: project?.id ?? 'capture-${request.captureId}',
+        projectName: project?.name ?? 'Capture',
+        repoPath: repoPath,
+        agent: launcherAgent,
+        // Explicit for a scratch run: the launcher derives a name from the
+        // project id's first eight characters, and `capture-` is all of them,
+        // so two projectless captures would attach to each other's session.
+        sessionName: workspace == null
+            ? project!.sessionName
+            : _scratchSessionName(request.captureId),
         arguments: <String>[
           ...settings.additionalArgs,
-          if (settings.skipPermissions) ...target.skipPermissionsArguments,
+          if (settings.skipPermissions)
+            ...launcherAgent.skipPermissionsArguments,
           // The project's own `initialPrompt` is deliberately not appended. It
           // is the opening line for a session started *from the project card*,
           // with no particular task in hand; here there is a task, and two
           // prompts would leave the agent to guess which one it was started for.
-          ...target.promptArguments(request.instruction),
+          ...launcherAgent.promptArguments(request.instruction),
         ],
       ),
     );
@@ -150,8 +197,24 @@ class ProjectAgentHandoff implements AgentHandoff {
     );
   }
 
-  File _taskFile(Project project, String captureId) =>
-      File(p.join(project.repoPath, directoryName, '$captureId.md'));
+  File _taskFile(String repoPath, String captureId) {
+    final String path = p.join(repoPath, directoryName, '$captureId.md');
+    if (!p.isWithin(p.join(repoPath, directoryName), path)) {
+      throw const UnsafeCaptureIdException();
+    }
+    return File(path);
+  }
+
+  /// `capture-` plus the first twelve alphanumerics of the id: lowercase and
+  /// dash-only so Zellij accepts it, short enough that the launcher's 63
+  /// character bound never truncates the part that tells captures apart.
+  static String _scratchSessionName(String captureId) {
+    final String id = captureId.toLowerCase().replaceAll(
+      RegExp(r'[^a-z0-9]'),
+      '',
+    );
+    return 'capture-${id.length > 12 ? id.substring(0, 12) : id}';
+  }
 
   /// Delegates to [renderCaptureBrief], which is now the single definition of
   /// this format — see there for why it exists before there is a second writer.
@@ -173,12 +236,14 @@ class ProjectAgentHandoff implements AgentHandoff {
     AgentKind.codex => 'Codex',
     AgentKind.claudeCode => 'Claude Code',
     AgentKind.antigravity => 'Antigravity',
+    AgentKind.geminiCli => 'Gemini CLI',
   };
 
   static ProjectAgent _launcherAgent(AgentKind agent) => switch (agent) {
     AgentKind.codex => ProjectAgent.codex,
     AgentKind.claudeCode => ProjectAgent.claude,
     AgentKind.antigravity => ProjectAgent.antigravity,
+    AgentKind.geminiCli => ProjectAgent.gemini,
   };
 }
 

@@ -2759,7 +2759,11 @@ class RecordingsController extends ChangeNotifier {
   /// Agents this capture can be handed to. Empty means the control is hidden,
   /// the same rule [canRoute] follows.
   List<HandoffAgent> handoffAgents(Recording recording) =>
-      _agentHandoff.agentsFor(recording.projectId);
+      // An id that cannot name a file is refused by the handoff itself; hiding
+      // the control here saves the user a failure they could not act on.
+      isSafeCaptureId(recording.id)
+      ? _agentHandoff.agentsFor(recording.projectId)
+      : const <HandoffAgent>[];
 
   bool canHandoff(Recording recording) => handoffAgents(recording).isNotEmpty;
 
@@ -2768,6 +2772,11 @@ class RecordingsController extends ChangeNotifier {
   /// handoff sheet can show exactly what it is about to do before anything is
   /// written.
   String handoffTaskPath(String id) => _agentHandoff.taskPathFor(id);
+
+  /// The scratch folder the handoff will run in, or null when it uses a
+  /// project's repository. Shown by the sheet before anything is created.
+  String? handoffWorkspace(Recording recording) =>
+      _agentHandoff.workspacePathFor(recording.id, recording.projectId);
 
   /// Read through [capturePrompt] rather than the handoff seam, so a capture
   /// with no project — whose handoff is `DisabledAgentHandoff` — still seeds
@@ -2971,15 +2980,37 @@ class RecordingsController extends ChangeNotifier {
 
   /// Scans project repository and note vault for any artifacts or results
   /// generated for capture [id], updating the capture's artifact list.
+  ///
+  /// Where it looks: the project's repository; or, for a capture with no
+  /// repository, its scratch folder when the handoff has one; and the vault.
+  /// A capture with no project and no scratch folder returns its current list
+  /// untouched.
   Future<List<AgentArtifact>> refreshArtifacts(String id) async {
     final int index = _recordings.indexWhere((Recording item) => item.id == id);
     if (index < 0) return const <AgentArtifact>[];
     final Recording recording = _recordings[index];
     final String? projectId = recording.projectId;
-    if (projectId == null || projectId.isEmpty) return recording.artifacts;
-
-    final Project? project = _projectById?.call(projectId);
-    if (project == null) return recording.artifacts;
+    Project? project = projectId == null || projectId.isEmpty
+        ? null
+        : _projectById?.call(projectId);
+    if (project == null || project.repoPath.trim().isEmpty) {
+      // A capture handed off with no repository ran in a scratch folder, and
+      // that folder is where its results are. Scanned as a repository root so
+      // the scanner needs no second code path.
+      final String? workspace = _agentHandoff.workspacePathFor(id, projectId);
+      if (workspace != null) {
+        project = Project(
+          id: 'capture-$id',
+          name: 'Capture',
+          repoPath: workspace,
+        );
+      } else if (project == null) {
+        // No project and no scratch folder: nothing to scan, not even the vault.
+        return recording.artifacts;
+      }
+      // Otherwise a project with an empty `repoPath` and no scratch root is
+      // scanned as it always was — only the vault can match.
+    }
 
     final Directory? vaultDir = _vaultDirectory?.call();
 
