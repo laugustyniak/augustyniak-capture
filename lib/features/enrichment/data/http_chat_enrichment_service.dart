@@ -425,6 +425,13 @@ class HttpChatEnrichmentService
               decoded['priorityReason'],
               limit: maxPriorityReasonChars,
             ),
+      projectAnswered:
+          decoded.containsKey('project') &&
+          (decoded['project'] == null || decoded['project'] is String),
+      projectId: decoded['project'] is String &&
+              (decoded['project'] as String).trim().isNotEmpty
+          ? (decoded['project'] as String).trim()
+          : null,
     );
   }
 

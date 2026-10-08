@@ -371,6 +371,10 @@ class RecordingsController extends ChangeNotifier {
   String? _recordingProjectId;
   String? get recordingProjectId => _recordingProjectId;
 
+  /// True once the user chose the in-flight recording's project themselves, so
+  /// the saved row is user-owned rather than an auto stamp.
+  bool _recordingProjectPicked = false;
+
   /// The capture a fragment in progress will be appended to, or null for a
   /// capture that will stand on its own. Read by the capture screen so it can
   /// name what it is adding to.
@@ -386,7 +390,11 @@ class RecordingsController extends ChangeNotifier {
   /// A no-op unless the mic is live, so a stray tap after `SAVE` cannot attach
   /// a project to the next capture instead.
   void setRecordingProject(String? projectId) {
-    if (!_isRecording || _recordingProjectId == projectId) return;
+    if (!_isRecording) return;
+    // Even picking NONE, or the project already seeded: a deliberate choice is
+    // the user's, never a stamp.
+    _recordingProjectPicked = true;
+    if (_recordingProjectId == projectId) return;
     _recordingProjectId = projectId;
     notifyListeners();
   }
@@ -1744,6 +1752,7 @@ class RecordingsController extends ChangeNotifier {
     // the choice has to be changeable *while* the mic is live rather than
     // before it opens.
     _recordingProjectId = activeProjectId;
+    _recordingProjectPicked = false;
 
     // Inside a try for the same reason the amplitude subscription is: this
     // buys the capture the right to *continue* off-screen, and a capture that
@@ -2009,6 +2018,7 @@ class RecordingsController extends ChangeNotifier {
         // NONE. Falling back would make "file this one nowhere" impossible to
         // express — the same three-state trap as the enrichment profile.
         projectId: _recordingProjectId,
+        projectAuto: _recordingProjectId != null && !_recordingProjectPicked,
       );
 
       // Critical invariant: persist metadata only after the audio file exists.
@@ -2319,6 +2329,7 @@ class RecordingsController extends ChangeNotifier {
         type: CaptureType.text,
         sourceMimeType: 'text/plain',
         projectId: activeProjectId,
+        projectAuto: activeProjectId != null,
       );
 
       // Critical invariant: index the note only after the .txt exists on disk.
@@ -2382,7 +2393,10 @@ class RecordingsController extends ChangeNotifier {
         mimeType: picked.mimeType,
         createdAt: DateTime.now(),
       );
-      final Recording saved = imported.copyWith(projectId: activeProjectId);
+      final Recording saved = imported.copyWith(
+        projectId: activeProjectId,
+        projectAuto: activeProjectId != null,
+      );
 
       // Critical invariant: index only after the source is copied and verified.
       _recordings = <Recording>[saved, ..._recordings];
@@ -2446,7 +2460,10 @@ class RecordingsController extends ChangeNotifier {
         mimeType: mimeType,
         createdAt: DateTime.now(),
       );
-      final Recording saved = imported.copyWith(projectId: activeProjectId);
+      final Recording saved = imported.copyWith(
+        projectId: activeProjectId,
+        projectAuto: activeProjectId != null,
+      );
 
       _recordings = <Recording>[saved, ..._recordings];
       await _persistAll();
@@ -2633,6 +2650,7 @@ class RecordingsController extends ChangeNotifier {
       (Recording item) => item.copyWith(
         projectId: normalized,
         clearProjectId: normalized == null || normalized.isEmpty,
+        projectAuto: false,
       ),
       source: RevisionSource.user,
     );
@@ -4192,7 +4210,10 @@ class RecordingsController extends ChangeNotifier {
     // project's CLAUDE.md — and raising the flag first would put a scan line on
     // screen for an install whose enrichment is disabled, which is the one case
     // the disabled service takes care to fail without ever building a frame.
-    final EnrichmentContext context = await _resolveEnrichmentContext(id);
+    final EnrichmentContext context = await _resolveEnrichmentContext(
+      id,
+      forEnrichment: true,
+    );
     if (_disposed) return;
     // Marked before the call and cleared in `finally`, so the card's scan line
     // cannot outlive the request — including on the throwing paths below, which
@@ -4207,6 +4228,22 @@ class RecordingsController extends ChangeNotifier {
         context: context,
       );
       if (_disposed) return;
+      // Only a run that was shown a project list may judge the stamp: with no
+      // list (none configured, or the context failed) the model had nothing
+      // to choose from, so neither its answer nor its silence says anything.
+      // An answer must be an id that was actually offered *and* still exists.
+      final Set<String> offeredIds = <String>{
+        for (final EnrichmentProjectOption o in context.normalized().projects)
+          o.id,
+      };
+      final bool listOffered = offeredIds.isNotEmpty && result.projectAnswered;
+      final String? answered = result.projectId;
+      final String? chosenProject =
+          answered != null &&
+              offeredIds.contains(answered) &&
+              _projectById?.call(answered) != null
+          ? answered
+          : null;
       await _update(
         id,
         (Recording item) => item.copyWith(
@@ -4231,6 +4268,18 @@ class RecordingsController extends ChangeNotifier {
           // you ask for a fresh set. Re-resolving `item` inside the update is
           // what makes an edit landing mid-request win over this.
           tags: item.tags.isEmpty ? RecordingTags.normalize(result.tags) : null,
+          // Only a stamp nobody chose is the model's to move. An id that is no
+          // longer in the list (deleted mid-request, or invented) clears it
+          // rather than keeping a guess the model did not make. Stays auto so
+          // a retry may refine it; any user edit flips that off.
+          projectId: item.projectAuto && chosenProject != null
+              ? chosenProject
+              : null,
+          clearProjectId:
+              item.projectAuto &&
+              listOffered &&
+              chosenProject == null &&
+              offeredIds.contains(item.projectId),
         ),
         // The reason this feature exists: `summary` has no editor and is
         // refreshed wholesale on every re-run, so without a record the previous
@@ -4243,8 +4292,11 @@ class RecordingsController extends ChangeNotifier {
       // which file the model was actually given.
       final String? layers = context.sourceSummary;
       final String source = layers == null ? '' : ' \u00b7 context: $layers';
+      final String projectNote = chosenProject == null
+          ? ''
+          : ' \u00b7 project: ${_projectById?.call(chosenProject)?.name}';
       _logSink.log(
-        'Enriched \u00b7 ${result.category.name}$source',
+        'Enriched \u00b7 ${result.category.name}$projectNote$source',
         recordingId: id,
       );
     } on EnrichmentNotConfiguredException {
@@ -4271,11 +4323,43 @@ class RecordingsController extends ChangeNotifier {
   /// Swallows everything into the log under the `ClipboardSink` contract: a
   /// repository that has been moved, renamed or unmounted must cost a worse
   /// title, never the enrichment — and certainly never the capture.
-  Future<EnrichmentContext> _resolveEnrichmentContext(String id) async {
+  ///
+  /// [forEnrichment] is true only for [_enrich]: it alone withholds an auto
+  /// stamp's project context and offers the project list. Every other caller
+  /// (clean-up, connection analysis, re-rank) gets the item's project context
+  /// as it always did, and no list.
+  Future<EnrichmentContext> _resolveEnrichmentContext(
+    String id, {
+    bool forEnrichment = false,
+  }) async {
     final int index = _recordings.indexWhere((Recording item) => item.id == id);
-    final String? projectId = index < 0 ? null : _recordings[index].projectId;
+    // An auto stamp is a guess, not a fact about the capture: its project's
+    // CLAUDE.md would pull the model toward the default it is meant to
+    // second-guess, so the model sees the project list and nothing else.
+    final String? projectId =
+        index < 0 || (forEnrichment && _recordings[index].projectAuto)
+        ? null
+        : _recordings[index].projectId;
     try {
-      return await _enrichmentContextSource.contextFor(projectId);
+      final EnrichmentContext context = await _enrichmentContextSource
+          .contextFor(projectId);
+      if (index < 0) return context;
+      final Recording item = _recordings[index];
+      if (!forEnrichment) {
+        return context.withProjects(const <EnrichmentProjectOption>[]);
+      }
+      // A list is offered only to a stamp the model may still move: names and
+      // descriptions go to the provider for nothing otherwise, since a
+      // user-owned or legacy item discards the answer. The stamped project
+      // goes first so the 50-project cap can never cut it off.
+      if (!item.projectAuto) {
+        return context.withProjects(const <EnrichmentProjectOption>[]);
+      }
+      final List<EnrichmentProjectOption> options = context.projects;
+      return context.withProjects(<EnrichmentProjectOption>[
+        ...options.where((EnrichmentProjectOption o) => o.id == item.projectId),
+        ...options.where((EnrichmentProjectOption o) => o.id != item.projectId),
+      ]);
     } catch (exception) {
       _logSink.log(
         'Enrichment context unavailable: $exception',

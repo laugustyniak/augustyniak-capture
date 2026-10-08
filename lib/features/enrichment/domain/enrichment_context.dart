@@ -2,6 +2,20 @@ import 'dart:convert';
 
 import 'package:crypto/crypto.dart';
 
+/// One project the model may file a capture under: its id (the only thing the
+/// answer is checked against), its name, and an optional one-line description.
+class EnrichmentProjectOption {
+  const EnrichmentProjectOption({
+    required this.id,
+    required this.name,
+    this.description,
+  });
+
+  final String id;
+  final String name;
+  final String? description;
+}
+
 /// Who the user is, and what the capture's project is about.
 ///
 /// The two layers are kept apart rather than pre-joined into one string because
@@ -16,6 +30,7 @@ class EnrichmentContext {
     this.profileFallback,
     this.project,
     this.projectSource,
+    this.projects = const <EnrichmentProjectOption>[],
   });
 
   static const EnrichmentContext none = EnrichmentContext();
@@ -45,6 +60,22 @@ class EnrichmentContext {
   /// controller can report it next to the item it actually enriched.
   final String? projectSource;
 
+  /// The projects a capture may be filed under, offered to the model so it can
+  /// answer with the best fit. Independent of [project], which describes the
+  /// one project already attached.
+  final List<EnrichmentProjectOption> projects;
+
+  /// The same context offering a different project list.
+  EnrichmentContext withProjects(List<EnrichmentProjectOption> next) =>
+      EnrichmentContext(
+        profile: profile,
+        profileSource: profileSource,
+        profileFallback: profileFallback,
+        project: project,
+        projectSource: projectSource,
+        projects: next,
+      );
+
   /// Hard ceilings, applied here rather than only in the editor.
   ///
   /// [maxProjectChars] is the larger of the two and still much smaller than a
@@ -57,9 +88,14 @@ class EnrichmentContext {
   /// shipped default alone is close to the old bound.
   static const int maxProfileChars = 4000;
   static const int maxProjectChars = 4000;
+  static const int maxProjectOptions = 50;
+  static const int maxProjectNameChars = 80;
+  static const int maxProjectDescriptionChars = 200;
 
   bool get isEmpty =>
-      _blankToNull(profile) == null && _blankToNull(project) == null;
+      _blankToNull(profile) == null &&
+      _blankToNull(project) == null &&
+      normalized().projects.isEmpty;
 
   /// Names the layers that were actually sent, for the log line. Null when
   /// nothing was — the caller then omits the segment entirely.
@@ -94,7 +130,40 @@ class EnrichmentContext {
     profileFallback: _blankToNull(profileFallback),
     project: _clamp(defuseFenceMarkers(project), maxProjectChars),
     projectSource: _blankToNull(projectSource),
+    projects: _normalizedProjects(),
   );
+
+  /// Blank ids or names are dropped, names and descriptions are clamped to one
+  /// line each (a newline could start a fake marker), and the list is cut at
+  /// [maxProjectOptions].
+  List<EnrichmentProjectOption> _normalizedProjects() {
+    final List<EnrichmentProjectOption> result = <EnrichmentProjectOption>[];
+    for (final EnrichmentProjectOption option in projects) {
+      final String? id = _oneLine(option.id, 200);
+      final String? name = _oneLine(option.name, maxProjectNameChars);
+      if (id == null || name == null) continue;
+      result.add(
+        EnrichmentProjectOption(
+          id: id,
+          name: name,
+          description: _oneLine(
+            option.description,
+            maxProjectDescriptionChars,
+          ),
+        ),
+      );
+      if (result.length == maxProjectOptions) break;
+    }
+    return result;
+  }
+
+  static String? _oneLine(String? value, int limit) {
+    final String? flat = _blankToNull(
+      defuseFenceMarkers(value)?.replaceAll(RegExp(r'\s+'), ' '),
+    );
+    if (flat == null) return null;
+    return flat.length <= limit ? flat : '${flat.substring(0, limit)}...';
+  }
 
   /// A short fingerprint of the profile **as sent** — after the ceiling and
   /// the fence defusing — or null when no profile was sent.

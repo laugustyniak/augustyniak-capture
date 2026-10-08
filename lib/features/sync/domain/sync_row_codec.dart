@@ -89,6 +89,10 @@ class SyncRowCodec {
         'priorityReason': json['priorityReason'],
       if (json.containsKey('priorityBasis'))
         'priorityBasis': json['priorityBasis'],
+      // `project_id` is a column, but who chose it is not: without this a
+      // second device would read a model's stamp as the user's own pick.
+      if (json.containsKey('projectAuto'))
+        'projectAuto': json['projectAuto'],
       // A proposal rides `payload` like the rank: it is derived, but accepting
       // it on another device is the point of syncing it. It is never put in
       // the `transcript` column.
@@ -180,6 +184,7 @@ class SyncRowCodec {
       'priority': payload['priority'],
       'priorityReason': payload['priorityReason'],
       'priorityBasis': payload['priorityBasis'],
+      'projectAuto': payload['projectAuto'],
       'cleanup': payload['cleanup'],
       'instruction': payload['instruction'],
       'routes': payload['routes'] ?? <Object?>[],

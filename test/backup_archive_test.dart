@@ -509,6 +509,22 @@ void main() {
     expect(restored.artifacts.single.id, 'artifact-1');
   });
 
+  test('projectAuto survives a round trip, and a legacy row reads false', () async {
+    final Recording stamped = capture('a').copyWith(
+      projectId: 'p1',
+      projectAuto: true,
+    );
+    final Recording legacy = capture('b').copyWith(projectId: 'p1');
+    await seed(source, <Recording>[stamped, legacy]);
+
+    await archiveFor(source).exportTo(zipPath());
+    await archiveFor(target).importFrom(zipPath());
+
+    final List<Recording> rows = await repositoryFor(target).loadAll();
+    expect(rows.firstWhere((Recording r) => r.id == 'a').projectAuto, isTrue);
+    expect(rows.firstWhere((Recording r) => r.id == 'b').projectAuto, isFalse);
+  });
+
   test('a mid-export index rewrite cannot invalidate the archive', () async {
     await seed(source, <Recording>[capture('a'), capture('b')]);
 

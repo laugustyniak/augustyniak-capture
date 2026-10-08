@@ -613,6 +613,7 @@ class ZipCaptureArchive implements CaptureArchive {
       instruction: recording.instruction,
       tags: recording.tags,
       projectId: recording.projectId,
+      projectAuto: recording.projectAuto,
       error: recording.error,
       isProcessedByUser: recording.isProcessedByUser,
       processedAt: recording.processedAt,
