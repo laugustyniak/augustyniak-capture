@@ -173,11 +173,18 @@ void main() {
 
       for (final ProjectAgent agent in ProjectAgent.values) {
         final List<String> arguments = agent.promptArguments(hostile);
+        // Each agent may lead with its own introducer and nothing else; the
+        // capture text is whatever follows it (or the first element, for
+        // agents that take the prompt positionally).
+        final String? introducer = switch (agent) {
+          ProjectAgent.antigravity => '--prompt-interactive',
+          ProjectAgent.gemini => '-i',
+          ProjectAgent.codex || ProjectAgent.claude => null,
+        };
+        if (introducer != null) expect(arguments.first, introducer);
+        final String body = arguments[introducer == null ? 0 : 1];
         expect(
-          arguments.first.startsWith('-') &&
-              arguments.first != '--prompt-interactive' &&
-              arguments.first != '-i' &&
-              arguments.first != '--',
+          body.startsWith('-'),
           isFalse,
           reason: '${agent.name} would parse the capture body as a flag',
         );
