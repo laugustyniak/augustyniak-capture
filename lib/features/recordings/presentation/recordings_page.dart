@@ -385,6 +385,7 @@ class _RecordingsPageState extends State<RecordingsPage>
         profile: () => settings.enrichmentInstructions,
         soulPath: () => settings.soulPath,
         projectById: _projectById,
+        projects: () => projects.projects,
       ),
       // The queue's only way out. Reads the project list live for the same
       // reason the enrichment context does: a project can be created, renamed

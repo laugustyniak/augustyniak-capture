@@ -15,6 +15,7 @@ class EnrichmentResult {
     this.tags = const <String>[],
     this.priority,
     this.priorityReason,
+    this.projectId,
   });
 
   /// Null when the model returned nothing usable. The caller then leaves the
@@ -36,4 +37,9 @@ class EnrichmentResult {
 
   /// Always null when [priority] is: a reason for no rank explains nothing.
   final String? priorityReason;
+
+  /// The id the model picked from the offered project list, or null when it
+  /// named none. Not validated here: the caller checks it against the live
+  /// list, which may have changed during the request.
+  final String? projectId;
 }

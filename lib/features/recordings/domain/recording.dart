@@ -46,6 +46,7 @@ class Recording {
     this.cleanup,
     this.tags = const <String>[],
     this.projectId,
+    this.projectAuto = false,
     this.error,
     this.isProcessedByUser = false,
     this.processedAt,
@@ -146,6 +147,12 @@ class Recording {
   /// Optional executable context. Null keeps legacy and unassigned captures
   /// fully valid; projects live in their own store and are never embedded here.
   final String? projectId;
+
+  /// True while [projectId] is a stamp nobody chose: copied from the active
+  /// project at capture time, and open to the enrichment model's better
+  /// answer. Any user edit flips it false, after which enrichment never moves
+  /// the project. False on every legacy row.
+  final bool projectAuto;
 
   final String? error;
 
@@ -257,6 +264,7 @@ class Recording {
     List<String>? tags,
     String? projectId,
     bool clearProjectId = false,
+    bool? projectAuto,
     String? error,
     bool clearError = false,
     bool? isProcessedByUser,
@@ -291,6 +299,7 @@ class Recording {
       cleanup: clearCleanup ? null : (cleanup ?? this.cleanup),
       tags: RecordingTags.normalize(tags ?? this.tags),
       projectId: clearProjectId ? null : (projectId ?? this.projectId),
+      projectAuto: projectAuto ?? this.projectAuto,
       error: clearError ? null : (error ?? this.error),
       isProcessedByUser: isProcessedByUser ?? this.isProcessedByUser,
       processedAt: clearProcessedAt ? null : (processedAt ?? this.processedAt),
@@ -323,6 +332,8 @@ class Recording {
     if (cleanup != null) 'cleanup': cleanup!.toJson(),
     'tags': tags,
     'projectId': projectId,
+    // Omitted unless true, so a legacy row serialises byte for byte as before.
+    if (projectAuto) 'projectAuto': true,
     'error': error,
     'isProcessedByUser': isProcessedByUser,
     'processedAt': processedAt?.toIso8601String(),
@@ -387,6 +398,9 @@ class Recording {
       projectId: json['projectId'] is String
           ? json['projectId'] as String
           : null,
+      // Absent on every legacy row, which is user-owned: enrichment never
+      // moves a project it did not stamp.
+      projectAuto: json['projectAuto'] == true,
       error: json['error'] as String?,
       isProcessedByUser: json['isProcessedByUser'] as bool? ?? false,
       processedAt: json['processedAt'] == null

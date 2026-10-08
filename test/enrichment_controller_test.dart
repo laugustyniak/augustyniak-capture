@@ -251,7 +251,12 @@ void main() {
       await c.addTextNote('spotkanie z klientem');
       await c.waitForProcessing();
 
-      expect(source.requestedFor, <String?>['p1']);
+      // The stamp from the active project is an auto guess (#284), so its own
+      // repo context is withheld; a project the user picked is looked up.
+      expect(source.requestedFor, <String?>[null]);
+      await c.setProject(c.recordings.single.id, 'p1');
+      await c.retryEnrichment(c.recordings.single.id);
+      expect(source.requestedFor, <String?>[null, 'p1']);
       expect(enrichment.lastContext?.profile, 'I collect specs.');
       expect(enrichment.lastContext?.projectSource, 'CLAUDE.md');
     },
