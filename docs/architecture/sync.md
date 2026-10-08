@@ -43,6 +43,14 @@ fills it and a trigger refuses any later change, so a client cannot push a
 row it does not own no matter what it sends. `table_name` is validated
 against the seven known names before it reaches `format()`.
 
+**Derived fields ride `payload`, with no schema change.** `projectAuto` and
+`suggestedRoute` (#248, `{kind, reason?, auto}`) are written to the capture
+row's `payload` only while present, so an unchanged row hashes as before. The
+cost is the one `projectAuto` already has: a client built before the key
+existed does not know it, drops it on its next push, and so erases a remote
+dismissal (`auto: false`) — the model may then propose that route again. Both
+are advisory, so this is accepted rather than versioned.
+
 Per row, the six versioned tables run an upsert gated `where version =
 excluded.version - 1`; `revisions` runs `insert … on conflict do nothing` —
 no version, no update grant, and a no-op is not a conflict. The RPC answers
