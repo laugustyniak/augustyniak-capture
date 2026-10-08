@@ -12,6 +12,7 @@ import 'package:augustyniak_capture/features/enrichment/domain/enrichment_servic
 import 'package:augustyniak_capture/features/processing/domain/processor.dart';
 import 'package:augustyniak_capture/features/processing/domain/processor_registry.dart';
 import 'package:augustyniak_capture/features/projects/domain/project.dart';
+import 'package:augustyniak_capture/features/recordings/data/media_picker.dart';
 import 'package:augustyniak_capture/features/recordings/data/recordings_repository.dart';
 import 'package:augustyniak_capture/features/recordings/domain/capture_segment.dart';
 import 'package:augustyniak_capture/features/recordings/domain/capture_type.dart';
@@ -60,12 +61,14 @@ class _Enrichment implements EnrichmentService {
   EnrichmentResult result;
   Completer<void>? gate;
   Completer<void> started = Completer<void>();
+  EnrichmentContext? lastContext;
 
   @override
   Future<EnrichmentResult> enrich(
     String text, {
     EnrichmentContext context = EnrichmentContext.none,
   }) async {
+    lastContext = context;
     if (!started.isCompleted) started.complete();
     final Completer<void>? g = gate;
     if (g != null) await g.future;
@@ -83,6 +86,13 @@ class _Source implements EnrichmentContextSource {
     requestedFor.add(projectId);
     return context;
   }
+}
+
+class _Picker implements MediaPicker {
+  _Picker(this._result);
+  final PickedMedia? _result;
+  @override
+  Future<PickedMedia?> pick(CaptureType type) async => _result;
 }
 
 class _GrantingRecorder implements AudioRecorder {
@@ -459,6 +469,99 @@ void main() {
 
       expect(c.recordings.single.projectId, 'a');
       expect(c.recordings.single.projectAuto, isFalse);
+    });
+
+    test('an answer is ignored when no list was offered', () async {
+      final RecordingsController c = build(
+        _Repo(dir),
+        enrichment: _Enrichment(const EnrichmentResult(projectId: 'b')),
+        source: _Source(EnrichmentContext.none),
+      )..activeProjectId = 'a';
+      await c.addTextNote('x');
+      await c.waitForProcessing();
+      expect(c.recordings.single.projectId, 'a');
+    });
+
+    test('an answer outside the offered ids is treated as unknown', () async {
+      final RecordingsController c = build(
+        _Repo(dir),
+        enrichment: _Enrichment(const EnrichmentResult(projectId: 'b')),
+        source: _Source(
+          const EnrichmentContext(projects: <EnrichmentProjectOption>[_alpha]),
+        ),
+      )..activeProjectId = 'a';
+      await c.addTextNote('x');
+      await c.waitForProcessing();
+      // 'b' exists but was never offered, so it is not accepted; the list was
+      // offered, so the unusable answer clears the stamp.
+      expect(c.recordings.single.projectId, isNull);
+    });
+
+    test('the stamped project is always offered, even past the cap', () async {
+      final _Enrichment enrichment = _Enrichment(
+        const EnrichmentResult(projectId: null),
+      );
+      final EnrichmentContext many = EnrichmentContext(
+        projects: <EnrichmentProjectOption>[
+          for (int i = 0; i < 60; i++)
+            EnrichmentProjectOption(id: 'p$i', name: 'P$i'),
+          _alpha,
+        ],
+      );
+      final RecordingsController c = build(
+        _Repo(dir),
+        enrichment: enrichment,
+        source: _Source(many),
+      )..activeProjectId = 'a';
+      await c.addTextNote('x');
+      await c.waitForProcessing();
+      final List<String> ids = enrichment.lastContext!
+          .normalized()
+          .projects
+          .map((EnrichmentProjectOption o) => o.id)
+          .toList();
+      expect(ids.length, EnrichmentContext.maxProjectOptions);
+      expect(ids.first, 'a');
+    });
+
+    test('a user-owned item is offered no project list', () async {
+      final _Enrichment enrichment = _Enrichment(
+        const EnrichmentResult(projectId: 'b'),
+      );
+      final RecordingsController c = build(_Repo(dir), enrichment: enrichment)
+        ..activeProjectId = 'a';
+      await c.addTextNote('x');
+      await c.waitForProcessing();
+      final String id = c.recordings.single.id;
+      await c.setProject(id, 'a');
+
+      await c.retryEnrichment(id);
+      expect(enrichment.lastContext!.projects, isEmpty);
+    });
+
+    test('both import paths stamp the active project as auto', () async {
+      final File picked = File(p.join(dir.path, 'in.png'))
+        ..writeAsBytesSync(<int>[1, 2, 3]);
+      final RecordingsController c = RecordingsController(
+        repository: _Repo(dir),
+        transcriptionService: const DisabledTranscriptionService(),
+        recorder: _GrantingRecorder(),
+        player: _FakePlayer(),
+        mediaPicker: _Picker(PickedMedia(file: picked, mimeType: 'image/png')),
+      )..activeProjectId = 'a';
+      await c.addUpload(CaptureType.image);
+      await c.addImportedFile(picked, CaptureType.image, mimeType: 'image/png');
+      await c.waitForProcessing();
+      expect(c.recordings, hasLength(2));
+      for (final Recording r in c.recordings) {
+        expect(r.projectId, 'a');
+        expect(r.projectAuto, isTrue);
+      }
+
+      c.activeProjectId = null;
+      await c.addImportedFile(picked, CaptureType.image, mimeType: 'image/png');
+      await c.waitForProcessing();
+      expect(c.recordings.first.projectAuto, isFalse);
     });
   });
 }

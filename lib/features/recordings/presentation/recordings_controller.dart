@@ -4125,12 +4125,19 @@ class RecordingsController extends ChangeNotifier {
       if (_disposed) return;
       // Only a run that was shown a project list may judge the stamp: with no
       // list (none configured, or the context failed) the model had nothing
-      // to choose from, so its silence says nothing about the stamp.
-      final bool listOffered = context.normalized().projects.isNotEmpty;
-      final String? offered = result.projectId;
+      // to choose from, so neither its answer nor its silence says anything.
+      // An answer must be an id that was actually offered *and* still exists.
+      final Set<String> offeredIds = <String>{
+        for (final EnrichmentProjectOption o in context.normalized().projects)
+          o.id,
+      };
+      final bool listOffered = offeredIds.isNotEmpty;
+      final String? answered = result.projectId;
       final String? chosenProject =
-          offered != null && _projectById?.call(offered) != null
-          ? offered
+          answered != null &&
+              offeredIds.contains(answered) &&
+              _projectById?.call(answered) != null
+          ? answered
           : null;
       await _update(
         id,
@@ -4164,7 +4171,10 @@ class RecordingsController extends ChangeNotifier {
               ? chosenProject
               : null,
           clearProjectId:
-              item.projectAuto && listOffered && chosenProject == null,
+              item.projectAuto &&
+              listOffered &&
+              chosenProject == null &&
+              offeredIds.contains(item.projectId),
         ),
         // The reason this feature exists: `summary` has no editor and is
         // refreshed wholesale on every re-run, so without a record the previous
@@ -4217,7 +4227,22 @@ class RecordingsController extends ChangeNotifier {
         ? null
         : _recordings[index].projectId;
     try {
-      return await _enrichmentContextSource.contextFor(projectId);
+      final EnrichmentContext context = await _enrichmentContextSource
+          .contextFor(projectId);
+      if (index < 0) return context;
+      final Recording item = _recordings[index];
+      // A list is offered only to a stamp the model may still move: names and
+      // descriptions go to the provider for nothing otherwise, since a
+      // user-owned or legacy item discards the answer. The stamped project
+      // goes first so the 50-project cap can never cut it off.
+      if (!item.projectAuto) {
+        return context.withProjects(const <EnrichmentProjectOption>[]);
+      }
+      final List<EnrichmentProjectOption> options = context.projects;
+      return context.withProjects(<EnrichmentProjectOption>[
+        ...options.where((EnrichmentProjectOption o) => o.id == item.projectId),
+        ...options.where((EnrichmentProjectOption o) => o.id != item.projectId),
+      ]);
     } catch (exception) {
       _logSink.log(
         'Enrichment context unavailable: $exception',

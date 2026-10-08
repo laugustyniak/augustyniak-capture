@@ -65,6 +65,17 @@ class EnrichmentContext {
   /// one project already attached.
   final List<EnrichmentProjectOption> projects;
 
+  /// The same context offering a different project list.
+  EnrichmentContext withProjects(List<EnrichmentProjectOption> next) =>
+      EnrichmentContext(
+        profile: profile,
+        profileSource: profileSource,
+        profileFallback: profileFallback,
+        project: project,
+        projectSource: projectSource,
+        projects: next,
+      );
+
   /// Hard ceilings, applied here rather than only in the editor.
   ///
   /// [maxProjectChars] is the larger of the two and still much smaller than a
