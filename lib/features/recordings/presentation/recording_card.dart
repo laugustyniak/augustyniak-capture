@@ -11,6 +11,7 @@ import '../domain/capture_type.dart';
 import '../domain/recording.dart';
 import '../domain/related_captures.dart';
 import '../domain/route_record.dart';
+import '../domain/suggested_route.dart';
 import 'card_parts.dart';
 
 /// One queue item, in the design's "console card" form.
@@ -39,6 +40,9 @@ class RecordingCard extends StatelessWidget {
     this.canRoute = false,
     required this.onHandoff,
     this.canHandoff = false,
+    this.suggestedRoute,
+    this.onConfirmSuggestedRoute,
+    this.onDismissSuggestedRoute,
     this.onSelectArtifact,
     this.onOpenOutcome,
     this.canOpenOutcome,
@@ -80,6 +84,10 @@ class RecordingCard extends StatelessWidget {
   /// that both said "hand off" would be one control the user has to guess at.
   static const String handoffLabel =
       'Send this capture to an assistant or agent';
+
+  /// Turns the suggested destination down for good: the model never proposes
+  /// one for this capture again.
+  static const String dismissSuggestionLabel = 'Dismiss suggested destination';
 
   final Recording recording;
   final bool isPlaying;
@@ -132,6 +140,17 @@ class RecordingCard extends StatelessWidget {
   /// the same reason as [canRoute] — an install with no repository configured
   /// would otherwise carry a dead button on every row.
   final bool canHandoff;
+
+  /// The enrichment model's proposed destination, already re-checked against
+  /// the item as it is now (`RecordingsController.suggestedRouteAction`): null
+  /// draws nothing, so the card never shows a control that cannot deliver.
+  final SuggestedRouteAction? suggestedRoute;
+
+  /// Confirms the suggestion. The host maps it onto the existing entry point —
+  /// `route` for a file or Command kind, the handoff sheet for an agent — so
+  /// the card holds no delivery logic of its own.
+  final VoidCallback? onConfirmSuggestedRoute;
+  final VoidCallback? onDismissSuggestedRoute;
   final void Function(AgentArtifact artifact)? onSelectArtifact;
 
   /// Opens the delivery's own page on the control plane. Null where nothing can
@@ -245,6 +264,13 @@ class RecordingCard extends StatelessWidget {
             color: priorityColorFor(recording.priority!),
             outlined: true,
           ),
+        ),
+      if (suggestedRoute != null && onConfirmSuggestedRoute != null)
+        _SuggestedRouteChip(
+          action: suggestedRoute!,
+          projectName: projectName,
+          onConfirm: onConfirmSuggestedRoute!,
+          onDismiss: onDismissSuggestedRoute,
         ),
       if (repeatCount >= RelatedLimits.repeatBadgeAt)
         // Saying something again is a signal about it, so this one is
@@ -462,11 +488,18 @@ class RecordingCard extends StatelessWidget {
                   ),
                   if (!isNarrow && hasPills) ...<Widget>[
                     const SizedBox(width: 8),
-                    Wrap(
-                      spacing: 6,
-                      runSpacing: 6,
-                      crossAxisAlignment: WrapCrossAlignment.center,
-                      children: pillWidgets,
+                    // Bounded: a Wrap in a Row is otherwise laid out on one
+                    // unbounded line, and the suggestion chip names a project.
+                    ConstrainedBox(
+                      constraints: BoxConstraints(
+                        maxWidth: constraints.maxWidth * .45,
+                      ),
+                      child: Wrap(
+                        spacing: 6,
+                        runSpacing: 6,
+                        crossAxisAlignment: WrapCrossAlignment.center,
+                        children: pillWidgets,
+                      ),
                     ),
                   ],
                 ],
@@ -795,6 +828,105 @@ class _GhostButton extends StatelessWidget {
           ),
         ),
       ),
+    );
+  }
+}
+
+/// The model's one-tap proposal for where this capture goes next.
+///
+/// It names the destination and the project, and carries the model's reason as
+/// a tooltip. The label is the same words as the control it stands in for, so
+/// the user knows what the tap will do before doing it. Not `const`: it paints
+/// palette colours.
+class _SuggestedRouteChip extends StatelessWidget {
+  _SuggestedRouteChip({
+    required this.action,
+    required this.projectName,
+    required this.onConfirm,
+    required this.onDismiss,
+  });
+
+  final SuggestedRouteAction action;
+  final String? projectName;
+  final VoidCallback onConfirm;
+  final VoidCallback? onDismiss;
+
+  /// What the tap will do, in the words of the control it stands in for.
+  String get label {
+    final String verb = switch (action.kind) {
+      SuggestedRouteKind.command => 'SEND TO COMMAND',
+      SuggestedRouteKind.file => 'SEND TO INBOX',
+      SuggestedRouteKind.agent =>
+        'HAND OFF TO ${(action.agentLabel ?? 'AGENT').toUpperCase()}',
+      SuggestedRouteKind.none => '',
+    };
+    return projectName == null ? verb : '$verb \u00b7 $projectName';
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final Widget body = Semantics(
+      button: true,
+      label: label,
+      excludeSemantics: true,
+      child: InkWell(
+        onTap: onConfirm,
+        borderRadius: BorderRadius.circular(999),
+        child: Container(
+          padding: EdgeInsets.fromLTRB(10, 5, onDismiss == null ? 10 : 6, 5),
+          decoration: BoxDecoration(
+            color: Console.accent.withValues(alpha: .1),
+            border: Border.all(color: Console.accent.withValues(alpha: .55)),
+            borderRadius: BorderRadius.circular(999),
+          ),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: <Widget>[
+              Icon(Icons.outbound_outlined, size: 12, color: Console.accent),
+              const SizedBox(width: 6),
+              Flexible(
+                child: Text(
+                  label,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: ConsoleText.pill.copyWith(color: Console.accent),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+    final String? reason = action.reason;
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: <Widget>[
+        Flexible(
+          child: reason == null
+              ? body
+              : Tooltip(message: reason, child: body),
+        ),
+        if (onDismiss != null) ...<Widget>[
+          const SizedBox(width: 4),
+          Semantics(
+            button: true,
+            label: RecordingCard.dismissSuggestionLabel,
+            excludeSemantics: true,
+            child: InkWell(
+              onTap: onDismiss,
+              borderRadius: BorderRadius.circular(999),
+              child: Padding(
+                padding: const EdgeInsets.all(4),
+                child: Icon(
+                  Icons.close_rounded,
+                  size: 13,
+                  color: Console.mutedSoft,
+                ),
+              ),
+            ),
+          ),
+        ],
+      ],
     );
   }
 }
