@@ -16,6 +16,7 @@ import '../../enrichment/domain/enrichment_context.dart';
 import '../../enrichment/domain/enrichment_result.dart';
 import '../../enrichment/domain/enrichment_service.dart';
 import '../../enrichment/domain/transcript_cleaner.dart';
+import '../../enrichment/domain/instruction_writer.dart';
 import '../../logs/domain/log_event.dart';
 import '../../processing/data/ocr_service.dart';
 import '../../processing/data/video_audio_extractor.dart';
@@ -54,6 +55,7 @@ import '../domain/capture_category.dart';
 import '../domain/capture_priority.dart';
 import '../domain/stale_rank.dart';
 import '../domain/capture_segment.dart';
+import '../domain/capture_instruction.dart';
 import '../domain/cleanup_proposal.dart';
 import '../domain/related_captures.dart';
 import '../domain/capture_type.dart';
@@ -673,6 +675,98 @@ class RecordingsController extends ChangeNotifier {
       source: RevisionSource.user,
     );
     _logSink.log('Clean-up rejected.', recordingId: id);
+  }
+
+  /// Applied to the next instruction pass, like [transcriptCleaner]. The
+  /// default throws at use, so an unconfigured install only lacks the
+  /// instruction.
+  set instructionWriter(InstructionWriter value) => _instructionWriter = value;
+  InstructionWriter _instructionWriter = const DisabledInstructionWriter();
+
+  /// Whether a finished capture is rewritten as an instruction without being
+  /// asked (#281). On by default, like the setting it mirrors.
+  bool autoInstruction = true;
+
+  /// The user's list of misheard terms, sent as reference material.
+  String asrGlossary = '';
+
+  /// In memory only, like `_cleaningIds`.
+  final Set<String> _instructingIds = <String>{};
+  bool isWritingInstruction(String id) => _instructingIds.contains(id);
+
+  /// Why the last instruction pass produced nothing, for the detail views. In
+  /// memory only, and cleared by the next attempt.
+  final Map<String, String> _instructionErrors = <String, String>{};
+  String? instructionError(String id) => _instructionErrors[id];
+
+  /// Rewrite [id] as an instruction now, from its transcript as it is — the
+  /// detail views' REWRITE. Copies the result to the clipboard, as the
+  /// automatic pass does: asking for it is asking to paste it.
+  Future<void> writeInstruction(String id) async {
+    if (_instructingIds.contains(id)) return;
+    final void Function() releaseUsageScope = await _acquireUsageScope();
+    try {
+      if (_disposed) return;
+      await _writeInstruction(id);
+    } finally {
+      releaseUsageScope();
+    }
+  }
+
+  /// The pass itself; the caller holds the usage scope. Best-effort under the
+  /// `ClipboardSink` contract: it never touches `status` or `transcript`, and
+  /// every failure is logged and costs only the instruction.
+  Future<void> _writeInstruction(String id) async {
+    final int index = _recordings.indexWhere((Recording i) => i.id == id);
+    if (index < 0) return;
+    final Recording item = _recordings[index];
+    if (!canCleanUp(item) || !_instructingIds.add(id)) return;
+    final String source = item.transcript!;
+    _instructionErrors.remove(id);
+    if (!_disposed) notifyListeners();
+    try {
+      final EnrichmentContext context = await _resolveEnrichmentContext(id);
+      _beginUsageJob(id, UsageStage.instruction);
+      final String written;
+      try {
+        written = await _instructionWriter.writeInstruction(
+          source,
+          context: context,
+          glossary: asrGlossary,
+        );
+      } finally {
+        _endUsageJob();
+      }
+      if (_disposed || written.trim().isEmpty) return;
+      // Written only if the transcript is still the one rewritten, like a
+      // clean-up proposal: otherwise it describes text that no longer exists.
+      bool stored = false;
+      await _update(id, (Recording current) {
+        if (current.transcript != source) return current;
+        stored = true;
+        return current.copyWith(
+          instruction: CaptureInstruction(
+            text: written,
+            source: CleanupProposal.fingerprint(source),
+          ),
+        );
+      });
+      if (!stored) return;
+      _logSink.log('Instruction written.', recordingId: id);
+      await _copyToClipboard(item.type, written, id);
+    } on InstructionNotConfiguredException catch (exception) {
+      _instructionErrors[id] = exception.toString();
+    } catch (exception) {
+      _instructionErrors[id] = exception.toString();
+      _logSink.log(
+        'Instruction failed: $exception',
+        level: LogLevel.warn,
+        recordingId: id,
+      );
+    } finally {
+      _instructingIds.remove(id);
+      if (!_disposed) notifyListeners();
+    }
   }
 
   /// Vectors for related captures (#272). Disabled by default — an install
@@ -3690,6 +3784,14 @@ class RecordingsController extends ChangeNotifier {
         // refusing clipboard cannot undo a successful capture.
         await _copyToClipboard(recording.type, transcript, id);
         if (_cancelledProcessingIds.contains(id)) return;
+        // Straight after the raw copy, before enrichment: the instruction is
+        // what the user is waiting to paste, and it replaces the raw text on
+        // the clipboard as soon as it lands. Best-effort like everything
+        // after the `completed` write.
+        if (autoInstruction) {
+          await _writeInstruction(id);
+          if (_cancelledProcessingIds.contains(id)) return;
+        }
         // Deliberately after the `completed` write as well: the item is already
         // durable, so a model outage, a malformed response or a kill in this
         // window costs a title, never a capture.

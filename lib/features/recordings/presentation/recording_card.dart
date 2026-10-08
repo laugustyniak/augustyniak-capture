@@ -945,7 +945,7 @@ class _CardTranscriptSectionState extends State<_CardTranscriptSection> {
 
   @override
   Widget build(BuildContext context) {
-    final String raw = (widget.recording.transcript ?? '').trim();
+    final String raw = widget.recording.displayText.trim();
     // Markers off, markup not rendered: see `markdownPreviewText`. The copy
     // button below still carries the *source*, because what gets pasted into
     // an editor should keep its formatting.

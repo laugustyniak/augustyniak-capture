@@ -20,6 +20,8 @@ class AppSettings {
     String? enrichmentInstructions,
     this.soulPath,
     this.autoCleanup = false,
+    this.autoInstruction = true,
+    this.asrGlossary = '',
     this.embeddingModel,
     this.audio = AudioConfig.defaults,
     this.themeMode = AppThemeMode.system,
@@ -98,6 +100,17 @@ class AppSettings {
   /// (#258). Off by default — it is one more model call per capture — and
   /// written only when on, so a file that never touched it is unchanged.
   final bool autoCleanup;
+
+  /// Whether every finished speech or OCR capture is rewritten as an
+  /// instruction that then replaces the raw transcript on the clipboard
+  /// (#281). On by default — it is the reason to dictate a task at all — and
+  /// written only when off, so a file that never touched it is unchanged.
+  final bool autoInstruction;
+
+  /// Terms the speech recogniser gets wrong, as free text — `Claude Code
+  /// (heard as "cloud code")`. Sent with the instruction pass as reference
+  /// material. Absent from the JSON while blank.
+  final String asrGlossary;
 
   /// The model asked for embeddings on the enrichment profile's endpoint, or
   /// null when related captures are off (#272). Absent from the JSON while
@@ -211,6 +224,8 @@ class AppSettings {
     String? soulPath,
     bool clearSoulPath = false,
     bool? autoCleanup,
+    bool? autoInstruction,
+    String? asrGlossary,
     String? embeddingModel,
     bool clearEmbeddingModel = false,
     AudioConfig? audio,
@@ -261,6 +276,8 @@ class AppSettings {
           : (enrichmentInstructions ?? _enrichmentInstructions),
       soulPath: clearSoulPath ? null : (soulPath ?? this.soulPath),
       autoCleanup: autoCleanup ?? this.autoCleanup,
+      autoInstruction: autoInstruction ?? this.autoInstruction,
+      asrGlossary: asrGlossary ?? this.asrGlossary,
       embeddingModel: clearEmbeddingModel
           ? null
           : (embeddingModel ?? this.embeddingModel),
@@ -331,6 +348,8 @@ class AppSettings {
         'enrichmentInstructions': _enrichmentInstructions,
       if (soulPath != null) 'soulPath': soulPath,
       if (autoCleanup) 'autoCleanup': true,
+      if (!autoInstruction) 'autoInstruction': false,
+      if (asrGlossary.trim().isNotEmpty) 'asrGlossary': asrGlossary,
       if (embeddingModel != null) 'embeddingModel': embeddingModel,
       if (priceOverrides.isNotEmpty)
         'priceOverrides': <String, dynamic>{
@@ -418,6 +437,10 @@ class AppSettings {
       ),
       navRailExpanded: json['navRailExpanded'] == true,
       autoCleanup: json['autoCleanup'] == true,
+      autoInstruction: json['autoInstruction'] != false,
+      asrGlossary: json['asrGlossary'] is String
+          ? json['asrGlossary'] as String
+          : '',
       embeddingModel:
           json['embeddingModel'] is String &&
               (json['embeddingModel'] as String).trim().isNotEmpty

@@ -93,6 +93,8 @@ class SyncRowCodec {
       // it on another device is the point of syncing it. It is never put in
       // the `transcript` column.
       if (json.containsKey('cleanup')) 'cleanup': json['cleanup'],
+      if (json.containsKey('instruction'))
+        'instruction': json['instruction'],
     };
     return <String, Object?>{
       'id': r.id,
@@ -179,6 +181,7 @@ class SyncRowCodec {
       'priorityReason': payload['priorityReason'],
       'priorityBasis': payload['priorityBasis'],
       'cleanup': payload['cleanup'],
+      'instruction': payload['instruction'],
       'routes': payload['routes'] ?? <Object?>[],
       'artifacts': payload['artifacts'] ?? <Object?>[],
       if (payload.containsKey('segments'))
