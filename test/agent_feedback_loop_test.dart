@@ -297,6 +297,44 @@ analysis-hash: example
       expect(found.single.title, 'Scratch Output');
       expect(controller.recordings.single.artifacts, hasLength(1));
     });
+
+    test('a project with no repoPath and no scratch root still scans the vault',
+        () async {
+      final Directory vault = Directory(p.join(tempDir.path, 'vault'))
+        ..createSync();
+      const String captureId = 'cap-norepo';
+      File(p.join(vault.path, 'note.md')).writeAsStringSync(
+        '# Linked\ncapture-id: $captureId\n',
+      );
+      final Recording recording = Recording(
+        id: captureId,
+        filePath: p.join(tempDir.path, '$captureId.txt'),
+        createdAt: DateTime.now(),
+        durationMs: 0,
+        type: CaptureType.text,
+        status: RecordingStatus.completed,
+        projectId: 'empty',
+      );
+      final RecordingsController controller = RecordingsController(
+        repository: FakeRecordingsRepository(
+          tempDir,
+          seed: <Recording>[recording],
+        ),
+        transcriptionService: const DisabledTranscriptionService(),
+        projectById: (String id) =>
+            const Project(id: 'empty', name: 'Empty', repoPath: ''),
+        vaultDirectory: () => vault,
+        player: FakePlayer(),
+        recorder: FakeRecorder(),
+      );
+      await controller.initialize();
+
+      final List<AgentArtifact> found = await controller.refreshArtifacts(
+        captureId,
+      );
+
+      expect(found, hasLength(1));
+    });
   });
 }
 

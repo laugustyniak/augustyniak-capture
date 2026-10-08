@@ -2616,6 +2616,11 @@ class RecordingsController extends ChangeNotifier {
 
   /// Scans project repository and note vault for any artifacts or results
   /// generated for capture [id], updating the capture's artifact list.
+  ///
+  /// Where it looks: the project's repository; or, for a capture with no
+  /// repository, its scratch folder when the handoff has one; and the vault.
+  /// A capture with no project and no scratch folder returns its current list
+  /// untouched.
   Future<List<AgentArtifact>> refreshArtifacts(String id) async {
     final int index = _recordings.indexWhere((Recording item) => item.id == id);
     if (index < 0) return const <AgentArtifact>[];
@@ -2629,12 +2634,18 @@ class RecordingsController extends ChangeNotifier {
       // that folder is where its results are. Scanned as a repository root so
       // the scanner needs no second code path.
       final String? workspace = _agentHandoff.workspacePathFor(id, projectId);
-      if (workspace == null) return recording.artifacts;
-      project = Project(
-        id: 'capture-$id',
-        name: 'Capture',
-        repoPath: workspace,
-      );
+      if (workspace != null) {
+        project = Project(
+          id: 'capture-$id',
+          name: 'Capture',
+          repoPath: workspace,
+        );
+      } else if (project == null) {
+        // No project and no scratch folder: nothing to scan, not even the vault.
+        return recording.artifacts;
+      }
+      // Otherwise a project with an empty `repoPath` and no scratch root is
+      // scanned as it always was — only the vault can match.
     }
 
     final Directory? vaultDir = _vaultDirectory?.call();
