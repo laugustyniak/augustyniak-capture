@@ -6,6 +6,7 @@ import 'capture_priority.dart';
 import 'capture_segment.dart';
 import 'capture_type.dart';
 import 'route_record.dart';
+import 'suggested_route.dart';
 import 'recording_tag.dart';
 
 /// Generic processing state, not transcription-specific: `pendingTranscription`
@@ -49,6 +50,7 @@ class Recording {
     this.tags = const <String>[],
     this.projectId,
     this.projectAuto = false,
+    this.suggestedRoute,
     this.error,
     this.isProcessedByUser = false,
     this.processedAt,
@@ -171,6 +173,12 @@ class Recording {
   /// the project. False on every legacy row.
   final bool projectAuto;
 
+  /// Where enrichment proposed sending this capture. Null means enrichment
+  /// never proposed; an explicit `none` means the model looked and would leave
+  /// it on the desk. Only a model-written ([SuggestedRoute.auto]) value may be
+  /// replaced by a later run, and none is written once the item has a route.
+  final SuggestedRoute? suggestedRoute;
+
   final String? error;
 
   /// User-level state. This is intentionally separate from AI processing.
@@ -284,6 +292,8 @@ class Recording {
     String? projectId,
     bool clearProjectId = false,
     bool? projectAuto,
+    SuggestedRoute? suggestedRoute,
+    bool clearSuggestedRoute = false,
     String? error,
     bool clearError = false,
     bool? isProcessedByUser,
@@ -322,6 +332,9 @@ class Recording {
       tags: RecordingTags.normalize(tags ?? this.tags),
       projectId: clearProjectId ? null : (projectId ?? this.projectId),
       projectAuto: projectAuto ?? this.projectAuto,
+      suggestedRoute: clearSuggestedRoute
+          ? null
+          : (suggestedRoute ?? this.suggestedRoute),
       error: clearError ? null : (error ?? this.error),
       isProcessedByUser: isProcessedByUser ?? this.isProcessedByUser,
       processedAt: clearProcessedAt ? null : (processedAt ?? this.processedAt),
@@ -357,6 +370,8 @@ class Recording {
     'projectId': projectId,
     // Omitted unless true, so a legacy row serialises byte for byte as before.
     if (projectAuto) 'projectAuto': true,
+    // Omitted while null: "never proposed" is a different fact from `none`.
+    if (suggestedRoute != null) 'suggestedRoute': suggestedRoute!.toJson(),
     'error': error,
     'isProcessedByUser': isProcessedByUser,
     'processedAt': processedAt?.toIso8601String(),
@@ -425,6 +440,7 @@ class Recording {
       // Absent on every legacy row, which is user-owned: enrichment never
       // moves a project it did not stamp.
       projectAuto: json['projectAuto'] == true,
+      suggestedRoute: SuggestedRoute.fromJson(json['suggestedRoute']),
       error: json['error'] as String?,
       isProcessedByUser: json['isProcessedByUser'] as bool? ?? false,
       processedAt: json['processedAt'] == null

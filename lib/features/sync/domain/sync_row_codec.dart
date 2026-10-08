@@ -93,6 +93,9 @@ class SyncRowCodec {
       // second device would read a model's stamp as the user's own pick.
       if (json.containsKey('projectAuto'))
         'projectAuto': json['projectAuto'],
+      // Derived like the rank, and its ownership (a dismissal) must follow it.
+      if (json.containsKey('suggestedRoute'))
+        'suggestedRoute': json['suggestedRoute'],
       // A proposal rides `payload` like the rank: it is derived, but accepting
       // it on another device is the point of syncing it. It is never put in
       // the `transcript` column.
@@ -185,6 +188,7 @@ class SyncRowCodec {
       'priorityReason': payload['priorityReason'],
       'priorityBasis': payload['priorityBasis'],
       'projectAuto': payload['projectAuto'],
+      'suggestedRoute': payload['suggestedRoute'],
       'cleanup': payload['cleanup'],
       'instruction': payload['instruction'],
       'routes': payload['routes'] ?? <Object?>[],

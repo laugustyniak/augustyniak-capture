@@ -70,6 +70,7 @@ import '../domain/recording.dart';
 import '../domain/recording_revision.dart';
 import '../domain/recording_tag.dart';
 import '../domain/route_record.dart';
+import '../domain/suggested_route.dart';
 // Same layer, not a widget import: `displayNameFor` is the one definition of
 // what an untitled capture is called, and a destination heading must not be
 // allowed to drift from what the card shows.
@@ -2651,6 +2652,9 @@ class RecordingsController extends ChangeNotifier {
         projectId: normalized,
         clearProjectId: normalized == null || normalized.isEmpty,
         projectAuto: false,
+        // A model's reason describes the old project; a dismissal is the
+        // user's and stays.
+        clearSuggestedRoute: item.suggestedRoute?.auto == true,
       ),
       source: RevisionSource.user,
     );
@@ -2755,6 +2759,60 @@ class RecordingsController extends ChangeNotifier {
     );
     _logSink.log('Routed to ${record.target}.', recordingId: id);
   }
+
+  /// The destinations a suggestion for [recording] may name: what [route] would
+  /// really do for it right now (one kind, never both file and Command), plus
+  /// the agent handoff when the project has one. Read at the item's current
+  /// project and category, so a caller that changes either asks again.
+  List<SuggestedRouteKind> availableRouteKinds(Recording recording) {
+    final RouteKind? resolved = _captureRouter.resolvedKind(
+      _routedCapture(recording),
+    );
+    return <SuggestedRouteKind>[
+      if (resolved == RouteKind.command)
+        SuggestedRouteKind.command
+      else if (resolved == RouteKind.file)
+        SuggestedRouteKind.file,
+      if (canHandoff(recording)) SuggestedRouteKind.agent,
+    ];
+  }
+
+  /// The suggestion's action, or null when the card must draw nothing: no
+  /// suggestion, `none`, one the user dismissed, an item that already has a
+  /// route or is done, or a destination that is no longer available (Command
+  /// unbound, repo path cleared). Synchronous because the card calls it during
+  /// `build`.
+  SuggestedRouteAction? suggestedRouteAction(Recording recording) {
+    final SuggestedRoute? suggestion = recording.suggestedRoute;
+    if (suggestion == null ||
+        !suggestion.auto ||
+        suggestion.kind == SuggestedRouteKind.none ||
+        recording.routes.isNotEmpty ||
+        recording.isProcessedByUser ||
+        !availableRouteKinds(recording).contains(suggestion.kind)) {
+      return null;
+    }
+    final List<HandoffAgent> agents = handoffAgents(recording);
+    return SuggestedRouteAction(
+      kind: suggestion.kind,
+      reason: suggestion.reason,
+      agentLabel: suggestion.kind == SuggestedRouteKind.agent
+          ? (agents.where((HandoffAgent a) => a.isDefault).firstOrNull ??
+                    agents.first)
+                .label
+          : null,
+    );
+  }
+
+  /// The user turned the suggestion down. It stays on the row, owned by the
+  /// user, so a later enrichment run cannot bring it back.
+  Future<void> dismissSuggestedRoute(String id) => _update(
+    id,
+    (Recording item) => item.suggestedRoute == null
+        ? item
+        : item.copyWith(suggestedRoute: item.suggestedRoute!.dismissed()),
+    source: RevisionSource.user,
+  );
 
   /// Agents this capture can be handed to. Empty means the control is hidden,
   /// the same rule [canRoute] follows.
@@ -4275,42 +4333,50 @@ class RecordingsController extends ChangeNotifier {
               _projectById?.call(answered) != null
           ? answered
           : null;
+      final Set<SuggestedRouteKind> offeredRoutes = context
+          .normalized()
+          .routeKinds
+          .toSet();
       await _update(
         id,
-        (Recording item) => item.copyWith(
-          // User-editable fields are fill-only: a retry must not undo a manual
-          // correction. Clearing a field asks enrichment to fill it again.
-          title: (item.title ?? '').trim().isEmpty ? result.title : null,
-          category: item.category ?? result.category,
-          summary: result.summary,
-          // Fill-only, like `category`: a rank the user set is theirs. The
-          // reason travels with the rank it argues for, never alone.
-          priority: item.priority ?? result.priority,
-          priorityReason: item.priority == null ? result.priorityReason : null,
-          // Which soul the rank was judged against. Only when this run is the
-          // one supplying the rank — a kept rank keeps its own basis.
-          priorityBasis: item.priority == null && result.priority != null
-              ? context.profileBasis
-              : null,
-          // Fill-only, like `title` and `category`, now that a tag carries no
-          // owner: with nothing marking which tags came from a model, a refresh
-          // could only refresh *all* of them, and a re-run would keep
-          // resurrecting tags the user had deleted. Clearing the list is how
-          // you ask for a fresh set. Re-resolving `item` inside the update is
-          // what makes an edit landing mid-request win over this.
-          tags: item.tags.isEmpty ? RecordingTags.normalize(result.tags) : null,
-          // Only a stamp nobody chose is the model's to move. An id that is no
-          // longer in the list (deleted mid-request, or invented) clears it
-          // rather than keeping a guess the model did not make. Stays auto so
-          // a retry may refine it; any user edit flips that off.
-          projectId: item.projectAuto && chosenProject != null
-              ? chosenProject
-              : null,
-          clearProjectId:
-              item.projectAuto &&
-              listOffered &&
-              chosenProject == null &&
-              offeredIds.contains(item.projectId),
+        (Recording item) => _withSuggestedRoute(
+          item.copyWith(
+            // User-editable fields are fill-only: a retry must not undo a manual
+            // correction. Clearing a field asks enrichment to fill it again.
+            title: (item.title ?? '').trim().isEmpty ? result.title : null,
+            category: item.category ?? result.category,
+            summary: result.summary,
+            // Fill-only, like `category`: a rank the user set is theirs. The
+            // reason travels with the rank it argues for, never alone.
+            priority: item.priority ?? result.priority,
+            priorityReason: item.priority == null ? result.priorityReason : null,
+            // Which soul the rank was judged against. Only when this run is the
+            // one supplying the rank — a kept rank keeps its own basis.
+            priorityBasis: item.priority == null && result.priority != null
+                ? context.profileBasis
+                : null,
+            // Fill-only, like `title` and `category`, now that a tag carries no
+            // owner: with nothing marking which tags came from a model, a refresh
+            // could only refresh *all* of them, and a re-run would keep
+            // resurrecting tags the user had deleted. Clearing the list is how
+            // you ask for a fresh set. Re-resolving `item` inside the update is
+            // what makes an edit landing mid-request win over this.
+            tags: item.tags.isEmpty ? RecordingTags.normalize(result.tags) : null,
+            // Only a stamp nobody chose is the model's to move. An id that is no
+            // longer in the list (deleted mid-request, or invented) clears it
+            // rather than keeping a guess the model did not make. Stays auto so
+            // a retry may refine it; any user edit flips that off.
+            projectId: item.projectAuto && chosenProject != null
+                ? chosenProject
+                : null,
+            clearProjectId:
+                item.projectAuto &&
+                listOffered &&
+                chosenProject == null &&
+                offeredIds.contains(item.projectId),
+          ),
+          result,
+          offeredRoutes,
         ),
         // The reason this feature exists: `summary` has no editor and is
         // refreshed wholesale on every re-run, so without a record the previous
@@ -4349,6 +4415,38 @@ class RecordingsController extends ChangeNotifier {
     }
   }
 
+  /// Applies the model's route answer to [item], already carrying this run's
+  /// category and project, so the kind is validated for the item as it ends up
+  /// rather than as it started.
+  ///
+  /// Written only when the model was offered routes, answered usably, the item
+  /// has no route yet, and nothing user-owned is there to overwrite (a
+  /// dismissal is `auto: false`). The kind must be both one that was offered
+  /// and one the entry point would perform now; `none` is always allowed. An
+  /// invented or unavailable kind stores nothing and leaves what was there.
+  Recording _withSuggestedRoute(
+    Recording item,
+    EnrichmentResult result,
+    Set<SuggestedRouteKind> offered,
+  ) {
+    final SuggestedRouteKind? kind = result.routeKind;
+    final SuggestedRoute? current = item.suggestedRoute;
+    if (offered.isEmpty ||
+        !result.routeAnswered ||
+        kind == null ||
+        item.routes.isNotEmpty ||
+        (current != null && !current.auto)) {
+      return item;
+    }
+    if (kind != SuggestedRouteKind.none &&
+        !(offered.contains(kind) && availableRouteKinds(item).contains(kind))) {
+      return item;
+    }
+    return item.copyWith(
+      suggestedRoute: SuggestedRoute(kind: kind, reason: result.routeReason),
+    );
+  }
+
   /// Resolve the user profile and the item's project description.
   ///
   /// Swallows everything into the log under the `ClipboardSink` contract: a
@@ -4379,15 +4477,33 @@ class RecordingsController extends ChangeNotifier {
       if (!forEnrichment) {
         return context.withProjects(const <EnrichmentProjectOption>[]);
       }
+      // A route is asked for only while it is still the model's to write: not
+      // once the item is routed, nor over a dismissal the user made.
+      final bool routeOpen =
+          item.routes.isEmpty &&
+          (item.suggestedRoute == null || item.suggestedRoute!.auto);
+      // One request, so the kinds cannot wait for the reply to learn which
+      // project it picks: offer the union across the current project and, for
+      // a stamp the model may move, every project in the list. The answer is
+      // checked again against the item as it ends up (`_withSuggestedRoute`).
+      final Set<SuggestedRouteKind> kinds = <SuggestedRouteKind>{
+        ...availableRouteKinds(item),
+        if (item.projectAuto)
+          for (final EnrichmentProjectOption option in context.projects)
+            ...availableRouteKinds(item.copyWith(projectId: option.id)),
+      };
+      final EnrichmentContext withRoutes = context.withRouteKinds(
+        routeOpen ? kinds.toList() : const <SuggestedRouteKind>[],
+      );
       // A list is offered only to a stamp the model may still move: names and
       // descriptions go to the provider for nothing otherwise, since a
       // user-owned or legacy item discards the answer. The stamped project
       // goes first so the 50-project cap can never cut it off.
       if (!item.projectAuto) {
-        return context.withProjects(const <EnrichmentProjectOption>[]);
+        return withRoutes.withProjects(const <EnrichmentProjectOption>[]);
       }
       final List<EnrichmentProjectOption> options = context.projects;
-      return context.withProjects(<EnrichmentProjectOption>[
+      return withRoutes.withProjects(<EnrichmentProjectOption>[
         ...options.where((EnrichmentProjectOption o) => o.id == item.projectId),
         ...options.where((EnrichmentProjectOption o) => o.id != item.projectId),
       ]);

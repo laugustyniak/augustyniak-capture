@@ -22,6 +22,7 @@ import '../domain/capture_priority.dart';
 import '../domain/capture_type.dart';
 import '../domain/recording.dart';
 import '../domain/route_record.dart';
+import '../domain/suggested_route.dart';
 import 'agent_artifact_viewer_modal.dart';
 import 'capture_focus_view.dart';
 import 'card_parts.dart';
@@ -940,6 +941,12 @@ class _QueueTabState extends State<QueueTab> {
       canHandoff:
           controller.canHandoff(recording) || controller.canSend(recording),
       onHandoff: () => _openHandoff(recording),
+      // Re-checked here, every build, against the item as it is now: the
+      // destination may have been unbound since the model proposed it.
+      suggestedRoute: controller.suggestedRouteAction(recording),
+      onConfirmSuggestedRoute: () => _confirmSuggestedRoute(recording),
+      onDismissSuggestedRoute: () =>
+          controller.dismissSuggestedRoute(recording.id),
       onOpenOutcome: controller.openCommandOutcome,
       canOpenOutcome: (RouteOutcome outcome) =>
           controller.commandOutcomeUrl(outcome) != null,
@@ -1315,6 +1322,22 @@ class _QueueTabState extends State<QueueTab> {
       recording: recording,
       projectName: _projectName(recording.projectId),
     );
+  }
+
+  /// Confirms a model-proposed destination through the entry point the manual
+  /// control uses. A file or Command kind goes straight to `route`, delivery
+  /// first and state second. An agent opens the handoff sheet and stops there:
+  /// the prompt is reviewed by a human before anything is launched.
+  void _confirmSuggestedRoute(Recording recording) {
+    final SuggestedRouteAction? action = widget.controller.suggestedRouteAction(
+      recording,
+    );
+    if (action == null) return;
+    if (action.kind == SuggestedRouteKind.agent) {
+      _openHandoff(recording);
+    } else {
+      widget.controller.route(recording.id);
+    }
   }
 
   /// The same row, in edit mode.

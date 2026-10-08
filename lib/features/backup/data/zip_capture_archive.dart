@@ -614,6 +614,7 @@ class ZipCaptureArchive implements CaptureArchive {
       tags: recording.tags,
       projectId: recording.projectId,
       projectAuto: recording.projectAuto,
+      suggestedRoute: recording.suggestedRoute,
       error: recording.error,
       isProcessedByUser: recording.isProcessedByUser,
       processedAt: recording.processedAt,

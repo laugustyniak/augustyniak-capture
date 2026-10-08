@@ -13,6 +13,7 @@ import 'package:augustyniak_capture/features/recordings/data/recordings_reposito
 import 'package:augustyniak_capture/features/recordings/domain/agent_artifact.dart';
 import 'package:augustyniak_capture/features/recordings/domain/capture_segment.dart';
 import 'package:augustyniak_capture/features/recordings/domain/capture_type.dart';
+import 'package:augustyniak_capture/features/recordings/domain/suggested_route.dart';
 import 'package:augustyniak_capture/features/recordings/domain/recording.dart';
 
 /// The archive is the only answer this app has to a mobile reinstall, which
@@ -523,6 +524,33 @@ void main() {
     final List<Recording> rows = await repositoryFor(target).loadAll();
     expect(rows.firstWhere((Recording r) => r.id == 'a').projectAuto, isTrue);
     expect(rows.firstWhere((Recording r) => r.id == 'b').projectAuto, isFalse);
+  });
+
+  test('suggestedRoute survives a round trip, dismissal included', () async {
+    final Recording proposed = capture('a').copyWith(
+      suggestedRoute: const SuggestedRoute(
+        kind: SuggestedRouteKind.command,
+        reason: 'plan it',
+      ),
+    );
+    final Recording dismissed = capture('b').copyWith(
+      suggestedRoute: const SuggestedRoute(
+        kind: SuggestedRouteKind.agent,
+        auto: false,
+      ),
+    );
+    final Recording plain = capture('c');
+    await seed(source, <Recording>[proposed, dismissed, plain]);
+
+    await archiveFor(source).exportTo(zipPath());
+    await archiveFor(target).importFrom(zipPath());
+
+    final List<Recording> rows = await repositoryFor(target).loadAll();
+    Recording row(String id) => rows.firstWhere((Recording r) => r.id == id);
+    expect(row('a').suggestedRoute, proposed.suggestedRoute);
+    expect(row('b').suggestedRoute, dismissed.suggestedRoute);
+    expect(row('b').suggestedRoute!.auto, isFalse);
+    expect(row('c').suggestedRoute, isNull);
   });
 
   test('a mid-export index rewrite cannot invalidate the archive', () async {

@@ -2,6 +2,8 @@ import 'dart:convert';
 
 import 'package:crypto/crypto.dart';
 
+import '../../recordings/domain/suggested_route.dart';
+
 /// One project the model may file a capture under: its id (the only thing the
 /// answer is checked against), its name, and an optional one-line description.
 class EnrichmentProjectOption {
@@ -31,6 +33,7 @@ class EnrichmentContext {
     this.project,
     this.projectSource,
     this.projects = const <EnrichmentProjectOption>[],
+    this.routeKinds = const <SuggestedRouteKind>[],
   });
 
   static const EnrichmentContext none = EnrichmentContext();
@@ -65,6 +68,24 @@ class EnrichmentContext {
   /// one project already attached.
   final List<EnrichmentProjectOption> projects;
 
+  /// The destinations the capture could actually be sent to, computed by the
+  /// controller from what its entry points would perform. Never contains
+  /// [SuggestedRouteKind.none]: leaving it on the desk is always allowed and
+  /// the prompt adds it itself. Empty means no route is asked for.
+  final List<SuggestedRouteKind> routeKinds;
+
+  /// The same context offering different destinations.
+  EnrichmentContext withRouteKinds(List<SuggestedRouteKind> next) =>
+      EnrichmentContext(
+        profile: profile,
+        profileSource: profileSource,
+        profileFallback: profileFallback,
+        project: project,
+        projectSource: projectSource,
+        projects: projects,
+        routeKinds: next,
+      );
+
   /// The same context offering a different project list.
   EnrichmentContext withProjects(List<EnrichmentProjectOption> next) =>
       EnrichmentContext(
@@ -74,6 +95,7 @@ class EnrichmentContext {
         project: project,
         projectSource: projectSource,
         projects: next,
+        routeKinds: routeKinds,
       );
 
   /// Hard ceilings, applied here rather than only in the editor.
@@ -95,7 +117,8 @@ class EnrichmentContext {
   bool get isEmpty =>
       _blankToNull(profile) == null &&
       _blankToNull(project) == null &&
-      normalized().projects.isEmpty;
+      normalized().projects.isEmpty &&
+      normalized().routeKinds.isEmpty;
 
   /// Names the layers that were actually sent, for the log line. Null when
   /// nothing was — the caller then omits the segment entirely.
@@ -131,6 +154,10 @@ class EnrichmentContext {
     project: _clamp(defuseFenceMarkers(project), maxProjectChars),
     projectSource: _blankToNull(projectSource),
     projects: _normalizedProjects(),
+    routeKinds: <SuggestedRouteKind>{
+      for (final SuggestedRouteKind kind in routeKinds)
+        if (kind != SuggestedRouteKind.none) kind,
+    }.toList(),
   );
 
   /// Blank ids or names are dropped, names and descriptions are clamped to one
