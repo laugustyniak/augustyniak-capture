@@ -45,6 +45,10 @@ class CommandRouter implements CaptureRouter {
   bool canRoute(String? projectId) => _resolve(projectId) != null;
 
   @override
+  RouteKind? resolvedKind(RoutedCapture capture) =>
+      _resolve(capture.projectId) == null ? null : RouteKind.command;
+
+  @override
   Future<RouteRecord> route(RoutedCapture capture) async {
     final Project? project = _resolve(capture.projectId);
     if (project == null) throw const CaptureRoutingUnavailableException();
@@ -165,12 +169,20 @@ class ProjectCaptureRouter implements CaptureRouter {
   bool canRoute(String? projectId) =>
       _command.canRoute(projectId) || _fallback.canRoute(projectId);
 
+  bool _toCommand(RoutedCapture capture) =>
+      capture.category != null &&
+      commandCategories.contains(capture.category) &&
+      _command.canRoute(capture.projectId);
+
+  @override
+  RouteKind? resolvedKind(RoutedCapture capture) => _toCommand(capture)
+      ? _command.resolvedKind(capture)
+      : _fallback.resolvedKind(capture);
+
   @override
   Future<RouteRecord> route(RoutedCapture capture) {
-    final bool toCommand =
-        capture.category != null &&
-        commandCategories.contains(capture.category) &&
-        _command.canRoute(capture.projectId);
-    return toCommand ? _command.route(capture) : _fallback.route(capture);
+    return _toCommand(capture)
+        ? _command.route(capture)
+        : _fallback.route(capture);
   }
 }

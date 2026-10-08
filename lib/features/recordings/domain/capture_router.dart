@@ -71,6 +71,12 @@ abstract interface class CaptureRouter {
   /// changes when a project does.
   bool canRoute(String? projectId);
 
+  /// The destination [route] would actually deliver this capture to, or null
+  /// when it would deliver nowhere. A read-only question over the same
+  /// decision [route] makes — it never delivers — so a surface that proposes a
+  /// destination offers only one the entry point will perform.
+  RouteKind? resolvedKind(RoutedCapture capture);
+
   /// Throws on failure. The caller marks nothing and records nothing when it
   /// does: a half-delivered capture that had been ticked off as routed is the
   /// one outcome worse than a capture that was never routed at all.
@@ -82,6 +88,9 @@ class DisabledCaptureRouter implements CaptureRouter {
 
   @override
   bool canRoute(String? projectId) => false;
+
+  @override
+  RouteKind? resolvedKind(RoutedCapture capture) => null;
 
   @override
   Future<RouteRecord> route(RoutedCapture capture) async {

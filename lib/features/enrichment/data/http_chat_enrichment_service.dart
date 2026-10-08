@@ -10,6 +10,7 @@ import '../../costs/domain/usage_sink.dart';
 import '../../recordings/domain/capture_category.dart';
 import '../../recordings/domain/capture_priority.dart';
 import '../../recordings/domain/connection_reasoner.dart';
+import '../../recordings/domain/suggested_route.dart';
 import '../domain/enrichment_context.dart';
 import '../domain/enrichment_prompt.dart';
 import '../domain/enrichment_result.dart';
@@ -410,6 +411,8 @@ class HttpChatEnrichmentService
     final CapturePriority? priority = CapturePriority.tryName(
       decoded['priority'],
     );
+    final ({bool answered, SuggestedRouteKind? kind, String? reason}) route =
+        _parseRoute(decoded);
     return EnrichmentResult(
       title: _cleanText(decoded['title'], limit: maxTitleChars),
       category: CaptureCategory.fromName(
@@ -432,6 +435,30 @@ class HttpChatEnrichmentService
               (decoded['project'] as String).trim().isNotEmpty
           ? (decoded['project'] as String).trim()
           : null,
+      routeAnswered: route.answered,
+      routeKind: route.kind,
+      routeReason: route.reason,
+    );
+  }
+
+  /// `route` is `null` (leave it on the desk) or `{kind, reason}`. Anything
+  /// else, an unknown kind included, is "said nothing": the controller then
+  /// stores nothing and leaves an existing suggestion alone.
+  static ({bool answered, SuggestedRouteKind? kind, String? reason})
+  _parseRoute(Map<String, dynamic> decoded) {
+    const none = (answered: false, kind: null, reason: null);
+    if (!decoded.containsKey('route')) return none;
+    final Object? raw = decoded['route'];
+    if (raw == null) {
+      return (answered: true, kind: SuggestedRouteKind.none, reason: null);
+    }
+    if (raw is! Map) return none;
+    final SuggestedRouteKind? kind = SuggestedRouteKind.fromName(raw['kind']);
+    if (kind == null) return none;
+    return (
+      answered: true,
+      kind: kind,
+      reason: _cleanText(raw['reason'], limit: SuggestedRoute.maxReasonChars),
     );
   }
 

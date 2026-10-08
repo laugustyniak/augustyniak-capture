@@ -1,5 +1,6 @@
 import '../../recordings/domain/capture_category.dart';
 import '../../recordings/domain/capture_priority.dart';
+import '../../recordings/domain/suggested_route.dart';
 import 'enrichment_context.dart';
 
 /// Head and tail kept when the text is longer than their sum. A 90-minute
@@ -23,6 +24,7 @@ String buildEnrichmentSystemPrompt({
 }) {
   final EnrichmentContext resolved = context.normalized();
   final bool hasProjects = resolved.projects.isNotEmpty;
+  final bool hasRoutes = resolved.routeKinds.isNotEmpty;
   final StringBuffer buffer = StringBuffer()
     ..writeln(
       'You classify captured notes, transcripts and OCR text for a personal '
@@ -43,6 +45,13 @@ String buildEnrichmentSystemPrompt({
     buffer.writeln(
       '- "project": exactly one id from the project list below, or null when '
       'no project clearly fits.',
+    );
+  }
+  if (hasRoutes) {
+    buffer.writeln(
+      '- "route": null, or an object {"kind": exactly one id from the route '
+      'list below, "reason": one sentence, max 160 characters}. Use "none" '
+      'when the capture should stay on the desk.',
     );
   }
   buffer
@@ -143,6 +152,19 @@ void _appendContext(StringBuffer buffer, EnrichmentContext context) {
     buffer.writeln('--- END PROJECT LIST ---');
   }
 
+  final List<SuggestedRouteKind> routes = context.routeKinds;
+  if (routes.isNotEmpty) {
+    buffer
+      ..writeln()
+      ..writeln('--- BEGIN ROUTE LIST ---');
+    for (final SuggestedRouteKind kind in routes) {
+      buffer.writeln('- "${kind.name}": ${_describeRoute(kind)}');
+    }
+    buffer
+      ..writeln('- "none": ${_describeRoute(SuggestedRouteKind.none)}')
+      ..writeln('--- END ROUTE LIST ---');
+  }
+
   buffer
     ..writeln()
     ..writeln(
@@ -158,7 +180,22 @@ void _appendContext(StringBuffer buffer, EnrichmentContext context) {
                 'lists given earlier and "project" only from the project list '
                 '(or null).',
     );
+  if (routes.isNotEmpty) {
+    buffer.writeln(
+      'Also include "route", and pick its "kind" only from the route list.',
+    );
+  }
 }
+
+String _describeRoute(SuggestedRouteKind kind) => switch (kind) {
+  SuggestedRouteKind.file => "append to the project's inbox file",
+  SuggestedRouteKind.command =>
+    "file a brief with the project's Command workspace, to be planned and "
+        'executed there',
+  SuggestedRouteKind.agent =>
+    'hand to a coding agent on this machine, which the user reviews first',
+  SuggestedRouteKind.none => 'leave it on the desk; nothing fits',
+};
 
 String _describe(CaptureCategory category) => switch (category) {
   CaptureCategory.note =>
