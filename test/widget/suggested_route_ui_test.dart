@@ -52,6 +52,9 @@ class _Agents implements AgentHandoff {
   String taskPathFor(String captureId) => '.agent-tasks/$captureId.md';
 
   @override
+  String? workspacePathFor(String captureId, String? projectId) => null;
+
+  @override
   String promptFor(RoutedCapture capture) => capture.body;
 
   @override
