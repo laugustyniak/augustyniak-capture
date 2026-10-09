@@ -86,6 +86,7 @@ import '../../gamification/presentation/gamification_controller.dart';
 import '../../clipboard/data/sqlite_clipboard_repository.dart';
 import '../data/sqlite_embedding_store.dart';
 import '../data/foreground_capture_session.dart';
+import '../data/inbox_drainer.dart';
 import '../data/media_picker.dart';
 import '../data/markdown_note_vault.dart';
 import '../domain/capture_session.dart';
@@ -212,6 +213,11 @@ class _RecordingsPageState extends State<RecordingsPage>
   late final LogStore logs;
   late final GamificationController gamification;
   late final RecordingsController controller;
+
+  /// Built on first use because the inbox lives under the application-support
+  /// directory, which is only known asynchronously.
+  InboxDrainer? _inboxDrainer;
+  Future<void>? _drainFuture;
   late final ProjectsController projects;
   late final FocusTimerController timer;
 
@@ -698,6 +704,33 @@ class _RecordingsPageState extends State<RecordingsPage>
     return summary;
   }
 
+  /// Moves notes that external producers (Siri, Android CREATE_NOTE) left in
+  /// the inbox into the queue. Runs only once the controller has loaded the
+  /// index: a drain before that would persist a partial list. Concurrent calls
+  /// (start-up and a resume) share one run.
+  Future<void> _drainInbox() {
+    if (!controller.isInitialized || controller.isIndexUnreadable) {
+      return Future<void>.value();
+    }
+    return _drainFuture ??= _runDrain().whenComplete(() => _drainFuture = null);
+  }
+
+  Future<void> _runDrain() async {
+    try {
+      final InboxDrainer drainer = _inboxDrainer ??= InboxDrainer(
+        inbox: Directory(
+          p.join((await getApplicationSupportDirectory()).path, 'inbox'),
+        ),
+        ingest: (String id, String body) =>
+            controller.addTextNote(body, id: id),
+        logSink: logs,
+      );
+      await drainer.drain();
+    } catch (exception) {
+      logs.log('Inbox drain failed: $exception', level: LogLevel.warn);
+    }
+  }
+
   Future<void> _bootstrap() async {
     await logs.initialize();
     // Best-effort and unrelated to everything else here: a Supabase sync
@@ -752,6 +785,7 @@ class _RecordingsPageState extends State<RecordingsPage>
     // it belongs to the shell that knows the directory is the real one. On a
     // healthy install it costs one listing and finds nothing.
     await controller.recoverOrphans();
+    await _drainInbox();
     // Both read real files, so they belong here for the same reason
     // `recoverOrphans` does: an in-memory repository fake cannot stand in for
     // them, and running either from `initialize` would send every widget test
@@ -1057,6 +1091,7 @@ class _RecordingsPageState extends State<RecordingsPage>
     if (state == AppLifecycleState.resumed) {
       unawaited(controller.refreshCommandOutcomes());
       unawaited(controller.resumeInterruptedProcessing());
+      unawaited(_drainInbox());
     }
   }
 

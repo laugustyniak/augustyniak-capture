@@ -494,6 +494,13 @@ class RecordingsController extends ChangeNotifier {
   /// refuses every write, so the queue is showing nothing rather than nothing
   /// being there — the UI must say so instead of looking empty.
   bool get isIndexUnreadable => _indexUnreadable;
+
+  bool _initialized = false;
+
+  /// True once [initialize] has read the index successfully. Until then the
+  /// in-memory list is empty rather than right, and any `saveAll` would
+  /// overwrite the history with it, so [addTextNote] refuses to run.
+  bool get isInitialized => _initialized;
   bool get isRecording => _isRecording;
   bool get isBusy => _isBusy;
 
@@ -1085,6 +1092,7 @@ class RecordingsController extends ChangeNotifier {
       notifyListeners();
       return;
     }
+    _initialized = true;
     _logSink.log('Loaded ${_recordings.length} captures from disk.');
 
     unawaited(
@@ -2265,10 +2273,35 @@ class RecordingsController extends ChangeNotifier {
   /// text processor is a passthrough, so the item lands `completed` — but it
   /// travels the same persist-then-process path as every other capture, and a
   /// failure never deletes the source.
-  Future<void> addTextNote(String body, {String? appendTo}) async {
-    if (_isRecording || _isBusy) return;
+  ///
+  /// Returns true only once the note is persisted and enqueued — or, when [id]
+  /// is given and a row with that id already exists, without writing anything
+  /// (an external producer retrying after a crash). False means nothing was
+  /// saved: busy, recording, empty, or a failure. [id] lets an inbox file's
+  /// name become the capture's id, which makes re-ingestion idempotent.
+  Future<bool> addTextNote(
+    String body, {
+    String? appendTo,
+    String? id,
+  }) async {
+    if (appendTo != null && id != null) {
+      throw ArgumentError('appendTo and id cannot be combined.');
+    }
+    // Before the first load the list is empty, not right: persisting now would
+    // overwrite recordings.json with just this note.
+    if (!_initialized) {
+      // Callers that ignore the result still show `error`, so say why nothing
+      // was saved. An unreadable-index message already explains more; keep it.
+      if (!_indexUnreadable) {
+        _error = 'Captures are still loading — try again.';
+        notifyListeners();
+      }
+      return false;
+    }
+    if (id != null && _recordings.any((Recording r) => r.id == id)) return true;
+    if (_isRecording || _isBusy) return false;
     final String trimmed = body.trim();
-    if (trimmed.isEmpty) return;
+    if (trimmed.isEmpty) return false;
 
     _isBusy = true;
     _error = null;
@@ -2306,11 +2339,11 @@ class RecordingsController extends ChangeNotifier {
             sizeBytes: fragmentBytes,
           ),
         );
-        return;
+        return true;
       }
 
-      final String id = const Uuid().v4();
-      final File file = await _repository.createSourceFile(id, 'txt');
+      final String noteId = id ?? const Uuid().v4();
+      final File file = await _repository.createSourceFile(noteId, 'txt');
       await file.writeAsString(trimmed, flush: true);
       final int sizeBytes = await file.exists() ? await file.length() : 0;
       if (sizeBytes == 0) {
@@ -2321,7 +2354,7 @@ class RecordingsController extends ChangeNotifier {
       }
 
       final Recording saved = Recording(
-        id: id,
+        id: noteId,
         filePath: file.path,
         createdAt: DateTime.now(),
         durationMs: 0,
@@ -2343,9 +2376,11 @@ class RecordingsController extends ChangeNotifier {
       // Enqueue for background processing and return; the drain loop runs the
       // job off the capture lock so it never blocks the next capture.
       await _enqueueProcessing(saved.id);
+      return true;
     } catch (exception) {
       _error = exception.toString();
       _logSink.log('Failed to save note: $exception', level: LogLevel.error);
+      return false;
     } finally {
       _isBusy = false;
       notifyListeners();

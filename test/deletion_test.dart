@@ -196,6 +196,7 @@ void main() {
       final _TempRepository repository = _TempRepository(root);
       final RecordingsController controller = controllerFor(repository);
 
+      await controller.initialize();
       await controller.addTextNote('keep me');
       await controller.addTextNote('drop me');
       await controller.waitForProcessing();
@@ -230,6 +231,7 @@ void main() {
         _TempRepository(root),
       );
 
+      await controller.initialize();
       await controller.addTextNote('one');
       await controller.addTextNote('two');
       await controller.waitForProcessing();
@@ -247,6 +249,7 @@ void main() {
         _UndeletableRepository(root),
       );
 
+      await controller.initialize();
       await controller.addTextNote('stubborn');
       await controller.waitForProcessing();
       final Recording item = controller.recordings.single;
@@ -282,6 +285,7 @@ void main() {
         _TempRepository(root),
       );
 
+      await controller.initialize();
       await controller.addTextNote('only one');
       await controller.waitForProcessing();
 
@@ -300,6 +304,7 @@ void main() {
         textProcessor: processor,
       );
 
+      await controller.initialize();
       await controller.addTextNote('first');
       await controller.addTextNote('second');
       await _until(() => processor.gates.isNotEmpty);
@@ -324,6 +329,7 @@ void main() {
         textProcessor: processor,
       );
 
+      await controller.initialize();
       await controller.addTextNote('running');
       await _until(() => processor.gates.isNotEmpty);
       expect(processor.gates, hasLength(1));

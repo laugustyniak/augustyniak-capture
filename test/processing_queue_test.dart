@@ -137,6 +137,7 @@ void main() {
     final RecordingsController c = _controller(_FakeRepo(dir), proc);
     addTearDown(c.dispose);
 
+    await c.initialize();
     await c.addTextNote('pierwsza');
     await _until(() => proc.gates.length == 1, 'the first job to start');
 
@@ -175,6 +176,7 @@ void main() {
     final RecordingsController c = _controller(_FakeRepo(dir), proc);
     addTearDown(c.dispose);
 
+    await c.initialize();
     await c.addTextNote('a');
     await c.addTextNote('b');
     await c.addTextNote('c');
@@ -215,6 +217,7 @@ void main() {
     final RecordingsController c = _controller(_FakeRepo(dir), proc);
     addTearDown(c.dispose);
 
+    await c.initialize();
     await c.addTextNote('will-fail');
     await c.addTextNote('will-pass');
     await _until(
@@ -363,6 +366,7 @@ void main() {
     final RecordingsController c = _controller(_FakeRepo(dir), proc);
     addTearDown(c.dispose);
 
+    await c.initialize();
     await c.addTextNote('x');
     await _until(() => proc.gates.length == 1, 'the job to start');
     expect(proc.gates.length, 1); // one job running, gated
@@ -385,6 +389,7 @@ void main() {
     final RecordingsController c = _controller(_FakeRepo(dir), proc);
     addTearDown(c.dispose);
 
+    await c.initialize();
     await c.addTextNote('flaky');
     await _until(
       () => c.recordings.single.status == RecordingStatus.failed,
@@ -420,6 +425,7 @@ void main() {
       final RecordingsController c = _controller(_FakeRepo(dir), proc);
       addTearDown(c.dispose);
 
+      await c.initialize();
       await c.addTextNote('held open');
       await _until(() => proc.gates.length == 1, 'the job to start');
 
@@ -519,6 +525,7 @@ void main() {
       final RecordingsController c = _controller(_FakeRepo(dir), proc);
       addTearDown(c.dispose);
 
+      await c.initialize();
       await c.addTextNote('running-item');
       await _until(() => proc.gates.length == 1, 'the job to start');
       expect(proc.gates.length, 1);
