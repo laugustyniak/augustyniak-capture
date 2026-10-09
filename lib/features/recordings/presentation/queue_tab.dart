@@ -295,9 +295,12 @@ class _QueueTabState extends State<QueueTab> {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: Text(report.message),
-            backgroundColor: report.success
+            duration: report.supabase?.conflictDetails.isNotEmpty == true
+                ? const Duration(seconds: 12)
+                : const Duration(seconds: 4),
+            backgroundColor: report.success && !report.hasItemConflicts
                 ? Console.green
-                : report.partialSuccess
+                : report.success || report.partialSuccess
                 ? Console.amber
                 : Console.red,
           ),

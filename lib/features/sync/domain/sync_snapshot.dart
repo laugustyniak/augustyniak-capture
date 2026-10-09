@@ -45,6 +45,7 @@ class SupabaseSyncResult {
     this.pushed = 0,
     this.pulled = 0,
     this.conflicts = 0,
+    this.conflictDetails = const <SyncConflictDetail>[],
     this.tombstonesApplied = 0,
     this.skipped = 0,
     this.failureReason,
@@ -53,9 +54,35 @@ class SupabaseSyncResult {
   final int pushed;
   final int pulled;
   final int conflicts;
+  final List<SyncConflictDetail> conflictDetails;
   final int tombstonesApplied;
   final int skipped;
   final String? failureReason;
 
   bool get success => failureReason == null;
+}
+
+/// A version race, without any capture content or credentials.
+class SyncConflictDetail {
+  const SyncConflictDetail({
+    required this.table,
+    required this.id,
+    required this.resolution,
+    this.overwrittenFields = const <String>[],
+  });
+
+  final String table;
+  final String id;
+  final SyncConflictResolution resolution;
+  final List<String> overwrittenFields;
+
+  bool get isBookkeeping => table == 'devices' || table == 'sync_state';
+}
+
+enum SyncConflictResolution {
+  serverApplied,
+  serverDeleted,
+  localTranscriptKept,
+  serverAdopted,
+  retryNeeded,
 }

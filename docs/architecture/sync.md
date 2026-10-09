@@ -289,20 +289,17 @@ or one this device never had, leaves the active id untouched — the same
 tombstone for the active project cannot leave `_activeProjectId` pointing
 at a project that no longer exists.
 
-### A known staleness gap
+### History and mirror refresh
 
-`CaptureHistory.loadRevisions()` only runs from `RecordingsController.
-initialize()`, not from `reloadFromStorage()`. A sync run's `appendRevisions`
-writes straight through `RevisionsRepository.append` — durable on disk
-immediately — but the in-memory `CaptureHistory._revisions` map that powers
-the editor's HISTORY section is not refreshed until the next full launch.
-The data is never lost; it is simply not visible in that section until then.
+A sync run's `appendRevisions` writes through `RevisionsRepository.append`,
+then `RecordingsController.syncCloud()` reloads the history and notifies the
+editor. Overwritten values appear in HISTORY without restarting the app.
 
 `applySyncedRecordings` merges into `_recordings` and calls `_persistAll()`
 directly — it does not go through `_update`, so a pulled upsert also
 bypasses `_mirrorToVault` (the markdown mirror sees a pulled edit only once
-`reloadFromStorage()` or the next full launch re-reads it, same as HISTORY
-above) and the gamification totals (`GamificationController` only ever
+`reloadFromStorage()` or the next full launch re-reads it) and the
+gamification totals (`GamificationController` only ever
 counts what `_update`/`stopRecording` etc. route through it — a pulled
 capture is never double-counted, but it is also never counted at all on the
 receiving device).
@@ -428,13 +425,16 @@ lib/features/sync/
 (`SyncRowsStore(db.rawDb)`) and a `SyncApplier` — never the controller, so
 the engine stays pure Dart and testable with an in-memory fake transport.
 `run(SyncSnapshot)` returns a `SupabaseSyncResult` (`pushed`, `pulled`,
-`conflicts`, `tombstonesApplied`, `skipped`, `failureReason`; `success ==
+`conflicts`, conflict details without record content, `tombstonesApplied`,
+`skipped`, `failureReason`; `success ==
 failureReason == null`).
 
 `CloudSyncCoordinator` runs `syncSupabase` first, because its pull may add
 recording rows whose media `syncMedia` then fetches. `CloudSyncReport` carries
-a `supabase` field beside `media`, and `message` gets a line: `Supabase: N pushed · N pulled[ · N conflicts][ · N removed][
-· N skipped]` on success, `Supabase: <failureReason>` on failure.
+a `supabase` field beside `media`. On success, `message` separates item
+conflicts from sync bookkeeping conflicts and lists up to five item IDs with
+their resolution and overwritten field names. It reports the failure reason
+on failure.
 
 `RecordingsController` takes eight new constructor parameters, all
 resolvers or seams and all null in every existing call site and every

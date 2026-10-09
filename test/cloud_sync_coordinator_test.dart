@@ -106,6 +106,73 @@ void main() {
     );
   });
 
+  test('item conflicts explain the resolution and separate sync bookkeeping', () async {
+    final CloudSyncReport report = await CloudSyncCoordinator(
+      syncSupabase: () async => const SupabaseSyncResult(
+        conflicts: 2,
+        conflictDetails: <SyncConflictDetail>[
+          SyncConflictDetail(
+            table: 'recordings',
+            id: 'capture-1',
+            resolution: SyncConflictResolution.serverApplied,
+            overwrittenFields: <String>['title'],
+          ),
+          SyncConflictDetail(
+            table: 'sync_state',
+            id: 'device-1/recordings',
+            resolution: SyncConflictResolution.serverAdopted,
+          ),
+        ],
+      ),
+    ).sync();
+
+    expect(report.success, isTrue);
+    expect(report.hasItemConflicts, isTrue);
+    expect(report.message, startsWith('Sync completed with conflicts'));
+    expect(report.message, contains('1 item conflict · 1 sync state conflict'));
+    expect(report.message, contains('Recording capture-1: server version applied; previous title in HISTORY'));
+    expect(report.message, isNot(contains('device-1/recordings')));
+  });
+
+  test('a later failure keeps earlier conflict details visible', () async {
+    final CloudSyncReport report = await CloudSyncCoordinator(
+      syncSupabase: () async => const SupabaseSyncResult(
+        conflicts: 1,
+        failureReason: 'network unavailable',
+        conflictDetails: <SyncConflictDetail>[
+          SyncConflictDetail(
+            table: 'recordings',
+            id: 'capture-1',
+            resolution: SyncConflictResolution.serverApplied,
+          ),
+        ],
+      ),
+    ).sync();
+
+    expect(report.success, isFalse);
+    expect(report.message, contains('Before failure: 1 item conflict'));
+    expect(report.message, contains('Recording capture-1: server version applied'));
+  });
+
+  test('bookkeeping conflicts do not mark item data as conflicted', () async {
+    final CloudSyncReport report = await CloudSyncCoordinator(
+      syncSupabase: () async => const SupabaseSyncResult(
+        conflicts: 1,
+        conflictDetails: <SyncConflictDetail>[
+          SyncConflictDetail(
+            table: 'devices',
+            id: 'device-1',
+            resolution: SyncConflictResolution.serverAdopted,
+          ),
+        ],
+      ),
+    ).sync();
+
+    expect(report.hasItemConflicts, isFalse);
+    expect(report.message, startsWith('Sync completed\n'));
+    expect(report.message, contains('1 sync state conflict'));
+  });
+
   test('keeps storage success visible when supabase fails', () async {
     final CloudSyncReport report = await CloudSyncCoordinator(
       syncSupabase: () async =>
