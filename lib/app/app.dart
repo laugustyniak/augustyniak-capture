@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
@@ -5,9 +7,11 @@ import 'ui_kit.dart';
 
 import '../features/auth/data/supabase_auth_gateway.dart';
 import '../features/auth/presentation/auth_controller.dart';
+import '../features/logs/domain/log_event.dart';
 import '../features/recordings/presentation/recordings_page.dart';
 import '../features/settings/domain/app_settings.dart';
 import '../features/settings/domain/app_theme_mode.dart';
+import '../features/sync/data/e2ee_service.dart';
 import '../features/sync/data/supabase_media_store.dart';
 import '../features/sync/data/supabase_sync_transport.dart';
 
@@ -47,19 +51,38 @@ class _AugustyniakCaptureAppState extends State<AugustyniakCaptureApp> {
   /// build a `SupabaseSyncTransport`.
   SupabaseAuthGateway? _authGateway;
 
+  /// The end-to-end encryption key for the signed-in user, built alongside
+  /// the auth controller because it exists for the same reason: Supabase is
+  /// configured. Both sync resolvers below ask it, per run, to wrap the plain
+  /// transport and store — see `E2eeService.wrapTransport`. It follows the
+  /// identity (`E2eeService.followIdentity`): the key is restored from the
+  /// OS keyring when a user appears and dropped when the user changes or
+  /// goes. Nothing here derives one, which is the passphrase flow's job (#317).
+  E2eeService? _e2ee;
+
   @override
   void initState() {
     super.initState();
     if (widget.supabaseClient case final SupabaseClient client) {
       final SupabaseAuthGateway gateway = SupabaseAuthGateway(client);
       _authGateway = gateway;
-      _authController = AuthController(gateway)..initialize();
+      final AuthController auth = AuthController(gateway)..initialize();
+      _authController = auth;
+      _e2ee = E2eeService();
+      auth.addListener(_followIdentity);
+      _followIdentity();
     }
+  }
+
+  void _followIdentity() {
+    unawaited(_e2ee?.followIdentity(_authController?.identity?.id));
   }
 
   @override
   void dispose() {
+    _authController?.removeListener(_followIdentity);
     _authController?.dispose();
+    _e2ee?.dispose();
     _themeMode.dispose();
     _textScale.dispose();
     super.dispose();
@@ -129,16 +152,26 @@ class _AugustyniakCaptureAppState extends State<AugustyniakCaptureApp> {
             // because the resolver has to keep returning a fresh transport on
             // every call — a stored `SupabaseAuthGateway` field would work
             // just as well here, but the client is what the transport itself
-            // is built from.
+            // is built from. Both go through `_e2ee`, which seals them when it
+            // holds a key and hands them back plain when it does not; the
+            // Queue's sync status names which one happened.
             syncTransportResolver: widget.supabaseClient == null
                 ? null
-                : () => SupabaseSyncTransport(widget.supabaseClient!),
+                : (String ownerId, LogSink log) => _e2ee!.wrapTransport(
+                    SupabaseSyncTransport(widget.supabaseClient!),
+                    ownerId: ownerId,
+                    log: log,
+                  ),
             mediaStoreResolver: widget.supabaseClient == null
                 ? null
-                : (String ownerId) => SupabaseMediaStore(
-                    widget.supabaseClient!,
+                : (String ownerId) => _e2ee!.wrapMediaStore(
+                    SupabaseMediaStore(
+                      widget.supabaseClient!,
+                      ownerId: ownerId,
+                    ),
                     ownerId: ownerId,
                   ),
+            e2eeService: _e2ee,
           ),
         );
       },

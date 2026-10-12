@@ -26,8 +26,27 @@ import 'package:augustyniak_capture/features/recordings/presentation/recordings_
 import 'package:augustyniak_capture/features/projects/data/projects_repository.dart';
 import 'package:augustyniak_capture/features/projects/domain/project.dart';
 import 'package:augustyniak_capture/features/projects/presentation/projects_controller.dart';
+import 'package:augustyniak_capture/features/auth/data/secure_auth_storage.dart';
+import 'package:augustyniak_capture/features/sync/data/e2ee_service.dart';
+import 'package:augustyniak_capture/features/sync/domain/e2ee_cipher.dart';
 
 import '../support/harness.dart';
+
+class _InMemorySecureStore implements SecureValueStore {
+  final Map<String, String> values = <String, String>{};
+
+  @override
+  Future<bool> containsKey(String key) async => values.containsKey(key);
+
+  @override
+  Future<void> delete(String key) async => values.remove(key);
+
+  @override
+  Future<String?> read(String key) async => values[key];
+
+  @override
+  Future<void> write(String key, String value) async => values[key] = value;
+}
 
 /// Taken from the widget rather than retyped, so renaming the label cannot
 /// leave a test asserting a string nothing renders any more.
@@ -60,6 +79,7 @@ void main() {
     RecordingsController controller, {
     ProjectsController? projects,
     UsageRepository? usageRepository,
+    E2eeService? e2ee,
   }) async {
     await tester.pumpWidget(
       hostTab(
@@ -67,6 +87,7 @@ void main() {
           controller: controller,
           projects: projects,
           usageRepository: usageRepository,
+          e2ee: e2ee,
         ),
         listenable: projects == null
             ? controller
@@ -176,6 +197,51 @@ void main() {
     expect(find.text('Cloud sync is not configured'), findsOneWidget);
     expect(find.text('NOTES · not configured'), findsOneWidget);
     expect(find.text('FILES · not configured'), findsOneWidget);
+    // No Supabase, no key holder: encryption is not a question here.
+    expect(find.textContaining('ENCRYPTION'), findsNothing);
+  });
+
+  testWidgets('sync status says NOT ENCRYPTED without a key and follows the key when one arrives', (
+    WidgetTester tester,
+  ) async {
+    // #297: a signed-in install synced in plaintext and nothing on screen
+    // said so. With a key holder present the status line is never silent
+    // about which of the two happened, and it follows the key live.
+    AppDatabase.resetForTesting();
+    final Database db = sqlite3.openInMemory();
+    await AppDatabase.getInstance(overrideDb: db);
+    addTearDown(() {
+      AppDatabase.resetForTesting();
+      db.close();
+    });
+    final E2eeService e2ee = E2eeService(
+      secureStore: _InMemorySecureStore(),
+      kdf: E2eeKeyDerivation(iterations: 1000),
+    );
+    addTearDown(e2ee.dispose);
+    final RecordingsController controller = await buildRecordingsController(appDir);
+    await pumpQueue(tester, controller, e2ee: e2ee);
+
+    // Signed out: nothing syncs, so nothing is said.
+    expect(find.text(QueueTab.notEncryptedBanner), findsNothing);
+
+    // Signed in, no key: the banner is up before any run and without the
+    // sync panel — the launch and edit-debounce syncs never open one.
+    await e2ee.followIdentity('u');
+    await tester.pump();
+    expect(find.text(QueueTab.notEncryptedBanner), findsOneWidget);
+
+    await tester.tap(find.text('SYNC CLOUD'));
+    await settleIo(tester);
+    expect(find.textContaining('ENCRYPTION · NOT ENCRYPTED'), findsOneWidget);
+    expect(find.textContaining('end-to-end'), findsNothing);
+
+    await e2ee.setupPassphrase(userId: 'u', passphrase: 'p');
+    await tester.pump();
+
+    expect(find.text(QueueTab.notEncryptedBanner), findsNothing);
+    expect(find.textContaining('NOT ENCRYPTED'), findsNothing);
+    expect(find.textContaining('end-to-end'), findsOneWidget);
   });
 
   testWidgets('the default All filter lists every item', (

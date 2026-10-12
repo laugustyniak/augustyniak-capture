@@ -58,6 +58,7 @@ import '../../projects/presentation/projects_tab.dart';
 import '../../settings/presentation/config_tab.dart';
 import '../../settings/presentation/models_tab.dart';
 import '../../settings/presentation/settings_controller.dart';
+import '../../sync/data/e2ee_service.dart';
 import '../../shortcuts/data/linux_hotkey_registrar.dart';
 import '../../shortcuts/data/system_hotkey_registrar.dart';
 import '../../shortcuts/data/system_window_presenter.dart';
@@ -124,6 +125,7 @@ class RecordingsPage extends StatefulWidget {
     this.authGateway,
     this.syncTransportResolver,
     this.mediaStoreResolver,
+    this.e2eeService,
   });
 
   /// Where the shell publishes the persisted theme so `AugustyniakCaptureApp`,
@@ -149,11 +151,17 @@ class RecordingsPage extends StatefulWidget {
   /// A resolver, never a snapshot — the seam shape every runtime-swappable
   /// dependency in this app follows. Null whenever Supabase was not
   /// initialised, which leaves Supabase sync off.
-  final SyncTransport Function()? syncTransportResolver;
+  final SyncTransport Function(String ownerId, LogSink log)?
+      syncTransportResolver;
 
   /// Supabase Storage for capture media; null under the same condition as
   /// [syncTransportResolver].
   final MediaObjectStore Function(String ownerId)? mediaStoreResolver;
+
+  /// The key holder behind both resolvers, passed down only so the Queue's
+  /// sync status can say whether rows left sealed or in plaintext. Null
+  /// under the same condition as [syncTransportResolver].
+  final E2eeService? e2eeService;
 
   @override
   State<RecordingsPage> createState() => _RecordingsPageState();
@@ -1226,6 +1234,7 @@ class _RecordingsPageState extends State<RecordingsPage>
                                   // through.
                                   usageRepository: _usageRepository,
                                   storagePrice: settings.storagePrice,
+                                  e2ee: widget.e2eeService,
                                 ),
                                 ConsolePageWidth(
                                   child: TimerTab(

@@ -419,8 +419,60 @@ adds the columns is `20261006200000_e2ee_encrypted_payload.sql`;
 `20261012090000_e2ee_revisions_payload_kdf_iterations.sql` adds the
 revisions column and the KDF iteration count (#298).
 
-**Whether the decorators are wired into `app.dart` is #297.** This section
-describes the envelope; it does not claim a release uses it.
+**The wiring (#297).** `app.dart` builds one `E2eeService` next to the
+`AuthController`, under the same condition (Supabase configured), and both
+sync resolvers go through it: `syncTransportResolver` returns
+`e2ee.wrapTransport(SupabaseSyncTransport(client), ownerId:, log:)` and
+`mediaStoreResolver` returns `e2ee.wrapMediaStore(SupabaseMediaStore(...),
+ownerId:)`. With a key held, those are the decorators; without one they are
+the plain transport and store. The controller resolves both at the top of
+`_performCloudSync`, before either slot runs and with no `await` between,
+so the two slots of one run see the same key state and a run is never
+half-sealed. The service follows the identity through
+`E2eeService.followIdentity(userId)`, which the shell calls on every auth
+change: the held key is dropped *before* the new user's is read from the
+keyring (a user without a stored key never inherits the previous one), a
+restore that lands after the identity moved on is discarded (a fast
+sign-out cannot leave a key held), and a repeat call with the same id is a
+no-op (the auth controller notifies on busy and error too). Two runs are
+refused rather than served: one whose owner is not the followed user (the
+gateway's identity moves before the auth controller notifies, so a run can
+start as B while the service still holds A's key), and one that starts
+while the followed user's key is still being read from the keyring (it
+would leave in plaintext although a key exists). Both wrappers throw, and
+`_performCloudSync` turns a throwing resolver into a failed Supabase slot
+with the reason (`sync skipped: signed-in user changed`, `sync skipped:
+encryption key still loading`) — never a plaintext run, never an error
+out of `syncCloud`, which the launch and edit paths do not catch. The
+next run tries again. The keyring read is time-boxed
+(`E2eeService.keyringTimeout`, 10 s): a prompt that never answers counts
+as "no key" rather than refusing every run for the session. `lock()` and
+`forgetKey` end a restore in flight, so a key just locked cannot land a
+moment later. Each resolver is called per run, so a key that
+arrives later applies to the next run and never to one in flight. **Nothing in the app yet derives a key** — the
+passphrase set-up/unlock flow and the `user_e2ee_settings` read/write are
+Slice 4 of `docs/plans/2026-10-06-e2ee-sync-and-storage.md`, tracked as
+#317 — so until that lands every install syncs in plaintext.
+That state is not silent, in three places. `E2eeService` is a
+`ChangeNotifier`, and the Queue shows `QueueTab.notEncryptedBanner` (red,
+persistent, not tied to a run) for as long as a user is signed in without
+a key and no restore is in flight (`isRestoring`; runs are refused
+meanwhile, so there is nothing to warn about yet) — the launch sync and the edit-debounce sync open no panel, so a
+line that only showed during a run would miss exactly the runs that leave
+plaintext unattended. The sync status panel adds `ENCRYPTION · NOT
+ENCRYPTED, notes and files leave in plaintext` or `ENCRYPTION ·
+end-to-end, sealed on this device` for a signed-in user. And
+`wrapTransport` logs one `warn` line through the controller's `LogSink`
+on every run it hands back plain, so the Logs tab records each one. Tests:
+`test/sync/e2ee_wiring_test.dart` drives the controller's Supabase slot
+through the same resolver shape and reads the wire (sealed with a key,
+plaintext without plus the warn line, the signed-in owner and the
+controller's `LogSink` handed through, and a source pin on `app.dart`'s
+wraps and `followIdentity`); `test/sync/e2ee_service_test.dart` covers A
+to B without a key, restore from the keyring, the same-id no-op, the
+late restore after sign-out, and the two refused runs; `test/widget/queue_tab_test.dart` covers the
+banner appearing on sign-in, the panel line, and both clearing once a key
+arrives.
 
 Four rules, each with a test that fails when it is broken
 (`test/sync/e2ee_cipher_test.dart`, `test/sync/encrypted_sync_transport_test.dart`,
@@ -449,8 +501,7 @@ Four rules, each with a test that fails when it is broken
   paging after the last row of the page it was handed, so dropping a row
   here would re-fetch it forever. A transport that *opened* a row removes
   the envelope, which is how the codec tells the two apart — and why an
-  install without the key (or before #297) applies nothing rather than
-  blanks.
+  install without the key applies nothing rather than blanks.
 - **The master key never meets AES, and the verifier is not the key.**
   `E2eeKeyDerivation` derives the master key from the passphrase with
   PBKDF2-HMAC-SHA256; `E2eeCipher.forMasterKey` HKDFs a data key from it
@@ -519,9 +570,13 @@ the Supabase slot out entirely rather than handing the engine an empty
 `_recordings` snapshot against non-empty bookkeeping — the controller-side
 half of the same guard the engine fuse above is the push-side half of:
 
-- `syncTransportResolver: SyncTransport Function()?` — a resolver, not a
-  snapshot, the seam rule the root `CLAUDE.md` states once: a Config change
-  only affects a run started afterwards, never one already in flight.
+- `syncTransportResolver: SyncTransport Function(String ownerId, LogSink
+  log)?` — a resolver, not a snapshot, the seam rule the root `CLAUDE.md`
+  states once: a Config change only affects a run started afterwards, never
+  one already in flight. Called once per run, together with
+  `mediaStoreResolver` and before either slot starts, with the signed-in
+  owner (an E2EE envelope is bound to it) and the controller's `LogSink`,
+  so a row the decorator cannot open is reported in the Logs tab.
 - `authGateway: AuthGateway?` — `currentIdentity != null` gates the whole
   slot.
 - `projectsRepository`, `clipboardRepository` — read once per run to build

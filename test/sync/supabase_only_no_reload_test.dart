@@ -87,7 +87,7 @@ void main() {
         transcriptionService: const DisabledTranscriptionService(),
         // Turso/R2 are left unconfigured (no dart-defines, no SyncDefaults),
         // so only the Supabase slot is wired here.
-        syncTransportResolver: () => transport,
+        syncTransportResolver: (_, _) => transport,
         authGateway: _FakeAuthGateway(),
         projectsRepository: ProjectsRepository(directoryProvider: () async => dir),
         clipboardRepository: LocalJsonClipboardRepository(

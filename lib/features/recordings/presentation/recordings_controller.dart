@@ -121,7 +121,7 @@ class RecordingsController extends ChangeNotifier {
     // every existing call site and in every pure-Dart test, which is what
     // keeps Supabase sync out of the suites that build no database: `hasSupabase`
     // below is false whenever any of the seven it checks is missing.
-    SyncTransport Function()? syncTransportResolver,
+    SyncTransport Function(String ownerId, LogSink log)? syncTransportResolver,
     AuthGateway? authGateway,
     ProjectsRepository? projectsRepository,
     ClipboardRepository? clipboardRepository,
@@ -232,7 +232,8 @@ class RecordingsController extends ChangeNotifier {
   /// The Supabase sync seam. All eight are null unless the app shell wired
   /// them (Supabase initialised, both repositories built) — see the
   /// constructor's doc comment.
-  final SyncTransport Function()? _syncTransportResolver;
+  final SyncTransport Function(String ownerId, LogSink log)?
+      _syncTransportResolver;
   final AuthGateway? _authGateway;
   final ProjectsRepository? _projectsRepository;
   final ClipboardRepository? _clipboardRepository;
@@ -1300,19 +1301,50 @@ class RecordingsController extends ChangeNotifier {
     // empty snapshot would read as "everything was deleted locally" to the
     // push-side sweep — see the engine's own refusal for an empty outbox,
     // which this gate backs up rather than relies on alone.
+    final String? ownerId = _authGateway?.currentIdentity?.id;
     final bool hasSupabase =
         !_indexUnreadable &&
-        _authGateway?.currentIdentity != null &&
+        ownerId != null &&
         _syncTransportResolver != null &&
         _projectsRepository != null &&
         _clipboardRepository != null &&
         _syncDeviceId != null &&
         _applySyncedProjects != null &&
         _applySyncedProjectDelete != null;
+    // Both resolved here, before either slot runs and with no await between
+    // them, so the two slots of one run see the same key state: an E2EE key
+    // arriving or leaving mid-run must not seal the rows and send the media
+    // plain, or the reverse. The resolver gets the owner because an
+    // envelope is bound to it, and the log so a row that fails to open is
+    // reported where the Logs tab can see it.
+    // A resolver may refuse the run (the E2EE wrapper does, when the signed-in
+    // user changed under it or its key is still loading); that is a failed
+    // slot with the reason, never a run in plaintext and never a throw out
+    // of `syncCloud`, which the launch and edit paths do not catch.
+    SyncTransport? transport;
+    MediaObjectStore? mediaStore;
+    String? resolveFailure;
+    if (hasSupabase) {
+      try {
+        transport = _syncTransportResolver(ownerId, _logSink);
+        mediaStore = _mediaStoreResolver?.call(ownerId);
+      } catch (error) {
+        transport = null;
+        mediaStore = null;
+        resolveFailure = error is StateError ? error.message : '$error';
+      }
+    }
+    final SyncTransport? resolvedTransport = transport;
+    final MediaObjectStore? resolvedMediaStore = mediaStore;
 
     final CloudSyncCoordinator coordinator = CloudSyncCoordinator(
       syncSupabase: hasSupabase
           ? () async {
+              if (resolvedTransport == null) {
+                return SupabaseSyncResult(
+                  failureReason: resolveFailure ?? 'sync skipped',
+                );
+              }
               // `ensureSyncDeviceId()` returns null rather than minting and
               // persisting an id when `SettingsController.initialize()`
               // never actually loaded settings — writing one in that state
@@ -1338,7 +1370,7 @@ class RecordingsController extends ChangeNotifier {
                 ),
               );
               return SyncEngine(
-                transport: _syncTransportResolver(),
+                transport: resolvedTransport,
                 bookkeeping: store,
                 applier: RepositorySyncApplier(
                   applySyncedRecordings: applySyncedRecordings,
@@ -1355,17 +1387,11 @@ class RecordingsController extends ChangeNotifier {
       // After the metadata slot: its pull is what adds the rows whose media
       // this fetches. Reads `_recordings` at call time, not the snapshot the
       // metadata slot captured before its pull.
-      syncMedia: hasSupabase && _mediaStoreResolver != null
+      syncMedia: hasSupabase && resolvedMediaStore != null
           ? () async {
-              final String? ownerId = _authGateway?.currentIdentity?.id;
-              if (ownerId == null) {
-                return const MediaSyncResult(
-                  failureReason: 'sync skipped: signed out',
-                );
-              }
               await _rerootSyncedPaths();
               return MediaSyncService(
-                store: _mediaStoreResolver(ownerId),
+                store: resolvedMediaStore,
                 // A capture deleted while its download was in flight must
                 // not come back as an orphan the next launch re-adopts.
                 stillWanted: (MediaSyncJob job) => _recordings.any(
