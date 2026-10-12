@@ -8,6 +8,7 @@ import '../../clipboard/domain/clipboard_item.dart';
 import '../../projects/domain/project.dart';
 import '../../recordings/domain/recording.dart';
 import '../../recordings/domain/recording_revision.dart';
+import 'e2ee_cipher.dart';
 import 'sync_table.dart';
 
 /// Canonical server-row shape for each synced type, and the hash the engine
@@ -58,6 +59,18 @@ class SyncRowCodec {
 
   static String rowId(SyncTable table, Map<String, Object?> row) =>
       table.keyColumns.map((String c) => '${row[c]}').join('/');
+
+  /// A row that still carries an E2EE envelope when it reaches the codec was
+  /// never opened — no cipher in the pipeline, or one that could not open
+  /// it. Its content columns are the nulls the server stores, not the
+  /// capture's content, so decoding it would apply a blank. Every
+  /// `*FromRow` refuses such a row instead, which the engine counts as a
+  /// skip and holds the cursor for. `EncryptedSyncTransport` removes the
+  /// envelope from a row it opened.
+  static bool _stillSealed(Map<String, Object?> row) {
+    final Object? envelope = row['encrypted_payload'];
+    return envelope is String && E2eeCipher.isSealed(envelope);
+  }
 
   // ---- recordings ---------------------------------------------------------
 
@@ -145,6 +158,7 @@ class SyncRowCodec {
     Map<String, Object?> row, {
     Recording? local,
   }) {
+    if (_stillSealed(row)) return null;
     final Object? id = row['id'];
     final DateTime? createdAt = _date(row['created_at']);
     if (id is! String || createdAt == null) return null;
@@ -265,7 +279,7 @@ class SyncRowCodec {
   };
 
   static Project? projectFromRow(Map<String, Object?> row) {
-    if (row['id'] is! String) return null;
+    if (_stillSealed(row) || row['id'] is! String) return null;
     final Object? payloadRaw = row['payload'];
     final Map<String, dynamic> json = <String, dynamic>{
       if (payloadRaw is Map) ...Map<String, dynamic>.from(payloadRaw),
@@ -294,6 +308,7 @@ class SyncRowCodec {
       };
 
   static ClipboardItem? clipboardItemFromRow(Map<String, Object?> row) {
+    if (_stillSealed(row)) return null;
     final DateTime? copiedAt = _date(row['copied_at']);
     if (row['id'] is! String || copiedAt == null) return null;
     try {
@@ -326,6 +341,7 @@ class SyncRowCodec {
   /// Degrades to null on a row missing a required field, rather than
   /// throwing — the project-wide `fromJson` rule.
   static RecordingRevision? revisionFromRow(Map<String, Object?> row) {
+    if (_stillSealed(row)) return null;
     final Object? recordingId = row['recording_id'];
     final Object? field = row['field'];
     final DateTime? at = _date(row['at']);

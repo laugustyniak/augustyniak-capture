@@ -405,6 +405,80 @@ as bytes, so a download holds the file in memory once, and there is no
 resumable (TUS) transfer — #187's resumable-transfer item stays open. Objects
 of a deleted capture are not removed from the bucket yet.
 
+## End-to-end encryption: the envelope
+
+`EncryptedSyncTransport` and `EncryptedMediaStore` (`features/sync/data/`)
+decorate the plain transport and the media store. On push a row's content
+columns — `transcript`, `title`, `summary`, `tags`, `payload`, `category`
+for recordings; `text`/`error` for segments; `text`/`preview`/`collections`
+for clipboard items; `repository_path`/`payload` for projects;
+`from_value`/`to_value` for revisions — are packed into one AES-256-GCM
+envelope in `encrypted_payload` and sent null, so Postgres holds no content.
+`devices` and `sync_state` carry none and pass through. The migration that
+adds the columns is `20261006200000_e2ee_encrypted_payload.sql`;
+`20261012090000_e2ee_revisions_payload_kdf_iterations.sql` adds the
+revisions column and the KDF iteration count (#298).
+
+**Whether the decorators are wired into `app.dart` is #297.** This section
+describes the envelope; it does not claim a release uses it.
+
+Four rules, each with a test that fails when it is broken
+(`test/sync/e2ee_cipher_test.dart`, `test/sync/encrypted_sync_transport_test.dart`,
+`test/sync/encrypted_media_store_test.dart`, `test/sync/sync_row_codec_test.dart`):
+
+- **Every envelope is bound to its place.** `E2eeCipher.seal` takes
+  associated data and has no default for it. For a sync row it is the owner
+  id, the table name and each key column's value, every part written
+  `<length>:<value>` and newline-joined so no two contexts can spell the same
+  bytes, with `revisions.at` parsed and re-encoded first because the device
+  pushes Dart's `.000Z` and Postgres answers `+00:00`; for a media blob it is
+  `<owner id>\n<object key>`, because the inner store prefixes the owner
+  folder outside the cipher. The owner id is this device's signed-in user,
+  never the row's `owner_id`, which is the server's word. A server that moves `encrypted_payload` between rows,
+  tables or owners, or a blob between keys, gets an envelope that fails
+  authentication — not one that decrypts into the wrong capture. The prefix
+  is `enc:v2:`; `enc:v1:` carried no associated data, was never written by a
+  release, and is refused.
+- **A row that fails to open stays sealed and is skipped.** `_unsealRow`
+  leaves `encrypted_payload` in place, logs one `warn` line through the
+  `LogSink` it was given, and never applies a row whose content columns are
+  the server's nulls. `SyncRowCodec` refuses any row that still carries an
+  envelope (`_stillSealed`), so the engine counts it as a codec skip and
+  holds the cursor at its `updated_at` exactly as for any other undecodable
+  row. The row is **not** removed from the page: the engine continues keyset
+  paging after the last row of the page it was handed, so dropping a row
+  here would re-fetch it forever. A transport that *opened* a row removes
+  the envelope, which is how the codec tells the two apart — and why an
+  install without the key (or before #297) applies nothing rather than
+  blanks.
+- **The master key never meets AES, and the verifier is not the key.**
+  `E2eeKeyDerivation` derives the master key from the passphrase with
+  PBKDF2-HMAC-SHA256; `E2eeCipher.forMasterKey` HKDFs a data key from it
+  under one `info` string and `computeKeyCheckHash` HKDFs the server-side
+  check tag (`kc1:` + hex) under another. The tag stored in
+  `user_e2ee_settings.key_check_hash` lets a second device confirm a
+  passphrase before trusting the key it derived; it opens nothing.
+- **The iteration count is data, not a constant.** It travels with the salt
+  (`user_e2ee_settings.kdf_iterations`, range 1000..10000000 enforced by
+  both the column constraint and `E2eeKeyDerivation`, default for pre-#298
+  rows 100000) and `E2eeService.unlockWithPassphrase` derives with the
+  stored count, never this build's default. The bound is what stops a
+  hostile row from weakening the key or pinning the unlock for hours. A row
+  whose check tag predates the `kc1:` prefix is reported as a legacy row to
+  set up again, not as a wrong passphrase. The default for a new key is
+  `E2eeKeyDerivation.defaultIterations` (600000, OWASP's PBKDF2-SHA256
+  figure; about 1.5 s in pure Dart on a desktop, paid once per passphrase
+  entry). A server-side verifier is an offline guess oracle by construction
+  — anyone with database read can run the KDF against it — so the count is
+  the only cost between a leaked row and the passphrase, and it has to be
+  raisable without orphaning every existing key.
+
+`test/sync/sync_engine_pull_test.dart` drives a still-sealed row and a
+sealed tombstone through the engine: skipped and held, and deleted,
+respectively. The pgTAP file `supabase/tests/e2ee_encrypted_payload_test.sql`
+covers the columns, the push of a sealed revision and the iteration range. CI does not
+run pgTAP; `supabase start && supabase db reset && supabase test db` does.
+
 ## Seam
 
 ```

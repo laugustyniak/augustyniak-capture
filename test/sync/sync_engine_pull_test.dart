@@ -169,6 +169,73 @@ void main() {
     },
   );
 
+  test(
+    'a row still carrying an E2EE envelope is skipped, holds the cursor and '
+    're-offers, never applied blank — #298',
+    () async {
+      // No cipher in this pipeline (or one that could not open it): the row
+      // arrives with the server's nulls and the envelope still on it.
+      transport.tables.putIfAbsent(SyncTable.recordings, () => {})['sealed'] = {
+        ...SyncRowCodec.recording(recording(id: 'sealed', title: 'must not land')),
+        'title': null,
+        'transcript': null,
+        'encrypted_payload': 'enc:v2:AAAA',
+        'updated_at': t0.toIso8601String(),
+        'version': 1,
+      };
+      advance(const Duration(seconds: 10));
+      await seedServer(recording(id: 'good'));
+
+      advance(const Duration(minutes: 1));
+      final r1 = await engine.run(const SyncSnapshot());
+      expect(r1.skipped, 1);
+      expect(r1.pulled, 1);
+      expect(applier.recordings.keys, ['good'], reason: 'a sealed row is never applied as a blank');
+      expect(bookkeeping.cursor('recordings'), t0, reason: 'held at the sealed row');
+
+      // Terminates and re-offers: the row is still in the page the engine
+      // pages after, so the run ends, and the next run sees it again.
+      advance(const Duration(minutes: 1));
+      final r2 = await engine.run(const SyncSnapshot());
+      expect(r2.skipped, 1);
+      expect(applier.recordings.keys, ['good']);
+    },
+  );
+
+  test('a tombstone that still carries an envelope is applied as a delete, not skipped', () async {
+    await engine.run(SyncSnapshot(recordings: [recording(id: 'a', title: 'v1')]));
+    transport.tables[SyncTable.recordings]!['a'] = {
+      'id': 'a',
+      'version': 2,
+      'deleted_at': t0.toIso8601String(),
+      'encrypted_payload': 'enc:v2:AAAA',
+      'updated_at': t0.add(const Duration(seconds: 10)).toIso8601String(),
+    };
+    advance(const Duration(minutes: 1));
+    final r = await engine.run(SyncSnapshot(recordings: [recording(id: 'a', title: 'v1')]));
+    expect(r.tombstonesApplied, 1);
+    expect(r.skipped, 0);
+    expect(applier.deleted, contains('a'));
+  });
+
+  test('a sealed revision row is skipped and holds the revisions cursor', () async {
+    transport.tables.putIfAbsent(SyncTable.revisions, () => {})['rec-1/x/title'] = {
+      'recording_id': 'rec-1',
+      'at': t0.toIso8601String(),
+      'field': 'title',
+      'from_value': null,
+      'to_value': null,
+      'source': 'user',
+      'encrypted_payload': 'enc:v2:AAAA',
+      'updated_at': t0.toIso8601String(),
+    };
+    advance(const Duration(minutes: 1));
+    final r = await engine.run(const SyncSnapshot());
+    expect(r.skipped, 1);
+    expect(applier.revisions, isEmpty);
+    expect(bookkeeping.cursor('revisions'), t0);
+  });
+
   test('the cursor advances to the newest updated_at seen', () async {
     await seedServer(recording(id: 'a'));
     advance(const Duration(minutes: 1));

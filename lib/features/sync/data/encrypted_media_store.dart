@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'dart:io';
 
 import 'package:crypto/crypto.dart' as crypto;
@@ -11,15 +12,25 @@ import '../domain/media_sync.dart';
 ///
 /// Cloud storage receives and stores only ciphertext; download yields the
 /// original plaintext bytes that match the recording's local `contentHash`.
+///
+/// The envelope is bound to the owner and the object key as its associated
+/// data, so a blob the server moves under another recording's key — or
+/// another owner's folder, which the inner store prefixes outside the
+/// cipher — fails to open rather than landing as that recording's audio.
 class EncryptedMediaStore implements MediaObjectStore {
   EncryptedMediaStore({
     required MediaObjectStore inner,
     required E2eeCipher cipher,
+    required String ownerId,
   })  : _inner = inner,
-        _cipher = cipher;
+        _cipher = cipher,
+        _ownerId = ownerId;
 
   final MediaObjectStore _inner;
   final E2eeCipher _cipher;
+  final String _ownerId;
+
+  List<int> _aad(String key) => utf8.encode('$_ownerId\n$key');
 
   @override
   Future<bool> exists(String key) => _inner.exists(key);
@@ -31,7 +42,10 @@ class EncryptedMediaStore implements MediaObjectStore {
     required String sha256,
   }) async {
     final List<int> clearBytes = await source.readAsBytes();
-    final List<int> cipherBytes = await _cipher.sealBytes(clearBytes);
+    final List<int> cipherBytes = await _cipher.sealBytes(
+      clearBytes,
+      aad: _aad(key),
+    );
 
     final Directory tempDir =
         await Directory.systemTemp.createTemp('e2ee_media_upload_');
@@ -51,6 +65,6 @@ class EncryptedMediaStore implements MediaObjectStore {
   @override
   Future<List<int>> download(String key) async {
     final List<int> cipherBytes = await _inner.download(key);
-    return await _cipher.unsealBytes(cipherBytes);
+    return await _cipher.unsealBytes(cipherBytes, aad: _aad(key));
   }
 }
