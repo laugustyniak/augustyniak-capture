@@ -73,7 +73,7 @@ void main() {
     return RecordingsController(
       repository: RecordingsRepository(directoryProvider: () async => dir),
       transcriptionService: const DisabledTranscriptionService(),
-      syncTransportResolver: () => transport,
+      syncTransportResolver: (_, _) => transport,
       authGateway: _FakeAuthGateway(signedIn: signedIn),
       projectsRepository: ProjectsRepository(
         directoryProvider: () async => dir,

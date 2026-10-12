@@ -95,7 +95,7 @@ void main() {
     final RecordingsController c = RecordingsController(
       repository: RecordingsRepository(directoryProvider: () async => dir),
       transcriptionService: const DisabledTranscriptionService(),
-      syncTransportResolver: FakeSyncTransport.new,
+      syncTransportResolver: (_, _) => FakeSyncTransport(),
       authGateway: _FakeAuthGateway(),
       projectsRepository: ProjectsRepository(
         directoryProvider: () async => dir,

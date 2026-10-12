@@ -14,6 +14,7 @@ import '../../costs/domain/usage_event.dart';
 import '../../projects/domain/project.dart';
 import '../../projects/presentation/projects_controller.dart';
 import '../../settings/domain/queue_density.dart';
+import '../../sync/data/e2ee_service.dart';
 import '../../sync/domain/media_sync.dart';
 import '../../sync/domain/sync_snapshot.dart';
 import '../domain/agent_artifact.dart';
@@ -85,7 +86,22 @@ class QueueTab extends StatefulWidget {
     this.density = QueueDensity.compact,
     this.onDensityChanged,
     this.dailyConnectionsService,
+    this.e2ee,
   });
+
+  /// Whether cloud sync seals rows and files before they leave. Null where
+  /// Supabase is not configured, so nothing here mentions encryption;
+  /// non-null, a signed-in user without a key sees [notEncryptedBanner]
+  /// for as long as that holds, and the sync panel names the state.
+  final E2eeService? e2ee;
+
+  /// Shown while signed in with no encryption key on this device. Every
+  /// sync run in that state — launch, edit-debounce or SYNC CLOUD — sends
+  /// notes and files in plaintext, so the line stays up, not only during
+  /// a run.
+  static const String notEncryptedBanner =
+      'NOT ENCRYPTED · cloud sync sends notes and files in plaintext; '
+      'no encryption key on this device';
 
   /// Row height in the master list. Owned by settings; the toolbar's toggle
   /// writes back through [onDensityChanged], and a host that passes none
@@ -528,6 +544,25 @@ class _QueueTabState extends State<QueueTab> {
                       const SizedBox(height: 10),
                       ErrorBanner(message: controller.error!),
                     ],
+                    // Persistent, not tied to the sync panel: the launch
+                    // sync and the edit-debounce sync show no panel, and
+                    // those are the runs that would otherwise leave
+                    // plaintext with nothing on screen saying so (#297).
+                    if (widget.e2ee case final E2eeService e2ee)
+                      ListenableBuilder(
+                        listenable: e2ee,
+                        builder: (BuildContext context, Widget? _) =>
+                            e2ee.hasIdentity &&
+                                    !e2ee.isUnlocked &&
+                                    !e2ee.isRestoring
+                                ? Padding(
+                                    padding: const EdgeInsets.only(top: 10),
+                                    child: ErrorBanner(
+                                      message: QueueTab.notEncryptedBanner,
+                                    ),
+                                  )
+                                : const SizedBox.shrink(),
+                      ),
                     // Pinned above the scroll area, not scrolled with it.
                     //
                     // These four are the screen's entire navigation, and as list children
@@ -697,7 +732,10 @@ class _QueueTabState extends State<QueueTab> {
                           compact ? 12 : 20,
                           0,
                         ),
-                        child: _CloudSyncStatus(progress: progress),
+                        child: _CloudSyncStatus(
+                          progress: progress,
+                          e2ee: widget.e2ee,
+                        ),
                       ),
                     if (masterDetail && visible.isNotEmpty)
                       Expanded(
@@ -1796,9 +1834,16 @@ class _DensityToggle extends StatelessWidget {
 }
 
 class _CloudSyncStatus extends StatelessWidget {
-  const _CloudSyncStatus({required this.progress});
+  const _CloudSyncStatus({required this.progress, this.e2ee});
 
   final CloudSyncProgress progress;
+  final E2eeService? e2ee;
+
+  /// The line under NOTES and FILES. Red when a signed-in install is
+  /// syncing in plaintext: that is the state #297 found shipping silently.
+  static String encryptionStatus({required bool unlocked}) => unlocked
+      ? 'ENCRYPTION · end-to-end, sealed on this device'
+      : 'ENCRYPTION · NOT ENCRYPTED, notes and files leave in plaintext';
 
   @override
   Widget build(BuildContext context) {
@@ -1874,6 +1919,20 @@ class _CloudSyncStatus extends StatelessWidget {
               'FILES · ${_storageStatus(storage, storageActive, storagePassed)}',
               style: ConsoleText.chip.copyWith(color: Console.muted),
             ),
+            // Only for a signed-in user: signed out, no run uses the
+            // transport, so there is no sealed-or-plain fact to state.
+            if (e2ee case final E2eeService e2ee when e2ee.hasIdentity) ...<Widget>[
+              const SizedBox(height: 3),
+              ListenableBuilder(
+                listenable: e2ee,
+                builder: (BuildContext context, Widget? _) => Text(
+                  encryptionStatus(unlocked: e2ee.isUnlocked),
+                  style: ConsoleText.chip.copyWith(
+                    color: e2ee.isUnlocked ? Console.muted : Console.red,
+                  ),
+                ),
+              ),
+            ],
           ],
         ),
       ),
