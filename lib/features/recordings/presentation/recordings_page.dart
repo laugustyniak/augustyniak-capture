@@ -1291,6 +1291,7 @@ class _RecordingsPageState extends State<RecordingsPage>
                                   child: ConfigTab(
                                     controller: settings,
                                     authController: widget.authController,
+                                    e2ee: widget.e2eeService,
                                     recordingsController: controller,
                                     storagePath: storagePath,
                                     recordingsCount:

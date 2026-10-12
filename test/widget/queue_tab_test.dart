@@ -29,8 +29,10 @@ import 'package:augustyniak_capture/features/projects/presentation/projects_cont
 import 'package:augustyniak_capture/features/auth/data/secure_auth_storage.dart';
 import 'package:augustyniak_capture/features/sync/data/e2ee_service.dart';
 import 'package:augustyniak_capture/features/sync/domain/e2ee_cipher.dart';
+import 'package:augustyniak_capture/features/sync/presentation/e2ee_passphrase_dialog.dart';
 
 import '../support/harness.dart';
+import '../sync/fake_e2ee_settings_store.dart';
 
 class _InMemorySecureStore implements SecureValueStore {
   final Map<String, String> values = <String, String>{};
@@ -242,6 +244,245 @@ void main() {
     expect(find.text(QueueTab.notEncryptedBanner), findsNothing);
     expect(find.textContaining('NOT ENCRYPTED'), findsNothing);
     expect(find.textContaining('end-to-end'), findsOneWidget);
+  });
+
+  /// The derivation runs as real async work; wait for the service to say
+  /// it landed rather than pumping a guessed number of frames. Each pump
+  /// advances the fake clock, which is fine only because the KDF and the
+  /// fakes are microtask-driven pure Dart — nothing here waits on a real
+  /// timer.
+  Future<void> pumpUntil(WidgetTester tester, bool Function() done) async {
+    for (int i = 0; i < 500 && !done(); i++) {
+      await tester.pump(const Duration(milliseconds: 10));
+    }
+    expect(done(), isTrue, reason: 'condition not reached');
+  }
+
+  Future<E2eeService> e2eeWith(FakeE2eeSettingsStore settings, {_InMemorySecureStore? keyring}) async {
+    final E2eeService e2ee = E2eeService(
+      secureStore: keyring ?? _InMemorySecureStore(),
+      kdf: E2eeKeyDerivation(iterations: 1000),
+      settings: settings,
+    );
+    addTearDown(e2ee.dispose);
+    return e2ee;
+  }
+
+  testWidgets('set-up from the banner warns about loss, then seals the next run (#317)', (
+    WidgetTester tester,
+  ) async {
+    AppDatabase.resetForTesting();
+    final Database db = sqlite3.openInMemory();
+    await AppDatabase.getInstance(overrideDb: db);
+    addTearDown(() {
+      AppDatabase.resetForTesting();
+      db.close();
+    });
+    final FakeE2eeSettingsStore settings = FakeE2eeSettingsStore();
+    final E2eeService e2ee = await e2eeWith(settings);
+    final RecordingsController controller = await buildRecordingsController(appDir);
+    await pumpQueue(tester, controller, e2ee: e2ee);
+
+    await e2ee.followIdentity('u');
+    await tester.pump();
+    expect(find.text(QueueTab.notEncryptedBanner), findsOneWidget);
+    expect(find.text(QueueTab.lockedBanner), findsNothing);
+
+    await tester.tap(find.text('SET UP ENCRYPTION'));
+    await tester.pump();
+    // The Queue has its own search field; only the dialog's count here.
+    final Finder fields = find.descendant(
+      of: find.byType(AlertDialog),
+      matching: find.byType(TextField),
+    );
+    // The warning is on screen before anything can be submitted.
+    expect(find.text(E2eePassphraseDialog.lossWarning), findsOneWidget);
+    expect(find.text('SET UP END-TO-END ENCRYPTION'), findsOneWidget);
+    expect(fields, findsNWidgets(2));
+
+    final Finder submit = find.widgetWithText(FilledButton, 'SET UP');
+    expect(tester.widget<FilledButton>(submit).onPressed, isNull);
+    await tester.enterText(fields.first, 'short');
+    await tester.pump();
+    expect(find.text(E2eePassphraseDialog.tooShort), findsOneWidget);
+    await tester.enterText(fields.first, 'correct horse');
+    await tester.enterText(fields.last, 'wrong horse!');
+    await tester.pump();
+    expect(find.text(E2eePassphraseDialog.mismatch), findsOneWidget);
+    expect(tester.widget<FilledButton>(submit).onPressed, isNull);
+    expect(settings.rows, isEmpty);
+
+    await tester.enterText(fields.last, 'correct horse');
+    await tester.pump();
+    expect(tester.widget<FilledButton>(submit).onPressed, isNotNull);
+    await tester.tap(submit);
+    await pumpUntil(tester, () => e2ee.isUnlocked);
+    await tester.pump(const Duration(milliseconds: 300)); // dialog pop transition
+
+    expect(settings.rows['u'], isNotNull);
+    expect(find.text(E2eePassphraseDialog.lossWarning), findsNothing);
+    expect(find.text(QueueTab.notEncryptedBanner), findsNothing);
+    expect(find.text('SET UP ENCRYPTION'), findsNothing);
+
+    await tester.tap(find.text('SYNC CLOUD'));
+    await settleIo(tester);
+    expect(find.text('ENCRYPTION · end-to-end, sealed on this device'), findsOneWidget);
+  });
+
+  testWidgets('a second device is locked, refuses the run, and unlocks with the passphrase (#317)', (
+    WidgetTester tester,
+  ) async {
+    AppDatabase.resetForTesting();
+    final Database db = sqlite3.openInMemory();
+    await AppDatabase.getInstance(overrideDb: db);
+    addTearDown(() {
+      AppDatabase.resetForTesting();
+      db.close();
+    });
+    final FakeE2eeSettingsStore settings = FakeE2eeSettingsStore();
+    final E2eeService first = await e2eeWith(settings);
+    await first.followIdentity('u');
+    await first.enroll('correct horse');
+
+    final E2eeService e2ee = await e2eeWith(settings);
+    final RecordingsController controller = await buildRecordingsController(appDir);
+    await pumpQueue(tester, controller, e2ee: e2ee);
+    await e2ee.followIdentity('u');
+    await tester.pump();
+
+    expect(find.text(QueueTab.lockedBanner), findsOneWidget);
+    expect(find.text(QueueTab.notEncryptedBanner), findsNothing);
+
+    // The run that opens the panel is refused, and the panel says why.
+    await tester.tap(find.text('SYNC CLOUD'));
+    await settleIo(tester);
+    expect(find.textContaining('ENCRYPTION · LOCKED'), findsOneWidget);
+    expect(find.textContaining('plaintext'), findsNothing);
+
+    await tester.tap(find.text('UNLOCK'));
+    await tester.pump();
+    final Finder fields = find.descendant(
+      of: find.byType(AlertDialog),
+      matching: find.byType(TextField),
+    );
+    expect(find.text('UNLOCK END-TO-END ENCRYPTION'), findsOneWidget);
+    expect(find.text(E2eePassphraseDialog.lossWarning), findsNothing);
+    expect(fields, findsOneWidget);
+
+    await tester.enterText(fields, 'wrong horse!');
+    await tester.pump();
+    await tester.tap(find.widgetWithText(FilledButton, 'UNLOCK'));
+    await pumpUntil(tester, () => find.text('Invalid E2EE passphrase').evaluate().isNotEmpty);
+    expect(e2ee.isUnlocked, isFalse);
+
+    await tester.enterText(fields, 'correct horse');
+    await tester.pump();
+    await tester.tap(find.widgetWithText(FilledButton, 'UNLOCK'));
+    await pumpUntil(tester, () => e2ee.isUnlocked);
+    await tester.pump(const Duration(milliseconds: 300)); // dialog pop transition
+    expect(find.text('UNLOCK END-TO-END ENCRYPTION'), findsNothing);
+    expect(find.text(QueueTab.lockedBanner), findsNothing);
+    expect(find.text('ENCRYPTION · end-to-end, sealed on this device'), findsOneWidget);
+  });
+
+  testWidgets('a set-up that loses the race becomes an unlock with the winning passphrase (#317)', (
+    WidgetTester tester,
+  ) async {
+    AppDatabase.resetForTesting();
+    final Database db = sqlite3.openInMemory();
+    await AppDatabase.getInstance(overrideDb: db);
+    addTearDown(() {
+      AppDatabase.resetForTesting();
+      db.close();
+    });
+    final FakeE2eeSettingsStore settings = FakeE2eeSettingsStore();
+    final E2eeService e2ee = await e2eeWith(settings);
+    final RecordingsController controller = await buildRecordingsController(appDir);
+    await pumpQueue(tester, controller, e2ee: e2ee);
+    await e2ee.followIdentity('u');
+    await tester.pump();
+
+    await tester.tap(find.text('SET UP ENCRYPTION'));
+    await tester.pump();
+    final Finder fields = find.descendant(
+      of: find.byType(AlertDialog),
+      matching: find.byType(TextField),
+    );
+    await tester.enterText(fields.first, 'my own horse');
+    await tester.enterText(fields.last, 'my own horse');
+    await tester.pump();
+
+    // Another device publishes first, while this dialog is open.
+    final E2eeService other = await e2eeWith(settings);
+    await other.followIdentity('u');
+    await other.enroll('their horse!');
+
+    await tester.tap(find.widgetWithText(FilledButton, 'SET UP'));
+    await pumpUntil(tester, () => find.text(E2eePassphraseDialog.alreadySetUp).evaluate().isNotEmpty);
+    expect(e2ee.isUnlocked, isFalse);
+    expect(find.text('UNLOCK END-TO-END ENCRYPTION'), findsOneWidget);
+    expect(find.text(E2eePassphraseDialog.lossWarning), findsNothing);
+    expect(fields, findsOneWidget);
+    expect(settings.rows['u']!.keyCheckHash, isNotNull);
+
+    await tester.enterText(fields, 'their horse!');
+    await tester.pump();
+    await tester.tap(find.widgetWithText(FilledButton, 'UNLOCK'));
+    await pumpUntil(tester, () => e2ee.isUnlocked);
+    await tester.pump(const Duration(milliseconds: 300));
+    expect(find.text(QueueTab.lockedBanner), findsNothing);
+    expect(find.text(QueueTab.notEncryptedBanner), findsNothing);
+  });
+
+  testWidgets('an unanswered lookup reads as locked; UNLOCK then finds no row and offers set-up (#317)', (
+    WidgetTester tester,
+  ) async {
+    AppDatabase.resetForTesting();
+    final Database db = sqlite3.openInMemory();
+    await AppDatabase.getInstance(overrideDb: db);
+    addTearDown(() {
+      AppDatabase.resetForTesting();
+      db.close();
+    });
+    final FakeE2eeSettingsStore settings = FakeE2eeSettingsStore()
+      ..readError = StateError('offline');
+    final E2eeService e2ee = await e2eeWith(settings);
+    final RecordingsController controller = await buildRecordingsController(appDir);
+    await pumpQueue(tester, controller, e2ee: e2ee);
+    await e2ee.followIdentity('u');
+    await tester.pump();
+
+    // Unknown is shown as locked: the one answer that permits plaintext
+    // has to come from the server, and it did not.
+    expect(e2ee.keyOnServer, isNull);
+    expect(find.text(QueueTab.lockedBanner), findsOneWidget);
+    expect(find.text(QueueTab.notEncryptedBanner), findsNothing);
+
+    await tester.tap(find.text('UNLOCK'));
+    await tester.pump();
+    // The dialog matches the banner's word, not a set-up with the warning.
+    expect(find.text('UNLOCK END-TO-END ENCRYPTION'), findsOneWidget);
+    expect(find.text(E2eePassphraseDialog.lossWarning), findsNothing);
+    final Finder fields = find.descendant(
+      of: find.byType(AlertDialog),
+      matching: find.byType(TextField),
+    );
+    expect(fields, findsOneWidget);
+
+    // The server is back and says there is no row: the form becomes a set-up.
+    settings.readError = null;
+    await tester.enterText(fields, 'correct horse');
+    await tester.pump();
+    await tester.tap(find.widgetWithText(FilledButton, 'UNLOCK'));
+    await pumpUntil(tester, () => find.text(E2eePassphraseDialog.notSetUpYet).evaluate().isNotEmpty);
+    expect(find.text('SET UP END-TO-END ENCRYPTION'), findsOneWidget);
+    expect(find.text(E2eePassphraseDialog.lossWarning), findsOneWidget);
+    expect(fields, findsNWidgets(2));
+    expect(e2ee.keyOnServer, isFalse);
+    await tester.tap(find.text('CANCEL'));
+    await tester.pump(const Duration(milliseconds: 300));
+    expect(find.text(QueueTab.notEncryptedBanner), findsOneWidget);
+    expect(find.text(QueueTab.lockedBanner), findsNothing);
   });
 
   testWidgets('the default All filter lists every item', (

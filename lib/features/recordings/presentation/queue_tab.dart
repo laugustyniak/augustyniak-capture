@@ -17,6 +17,7 @@ import '../../settings/domain/queue_density.dart';
 import '../../sync/data/e2ee_service.dart';
 import '../../sync/domain/media_sync.dart';
 import '../../sync/domain/sync_snapshot.dart';
+import '../../sync/presentation/e2ee_passphrase_dialog.dart';
 import '../domain/agent_artifact.dart';
 import '../domain/capture_category.dart';
 import '../domain/capture_priority.dart';
@@ -91,17 +92,24 @@ class QueueTab extends StatefulWidget {
 
   /// Whether cloud sync seals rows and files before they leave. Null where
   /// Supabase is not configured, so nothing here mentions encryption;
-  /// non-null, a signed-in user without a key sees [notEncryptedBanner]
-  /// for as long as that holds, and the sync panel names the state.
+  /// non-null, a signed-in user without a key sees [notEncryptedBanner] or
+  /// [lockedBanner] for as long as that holds, each with the button that
+  /// ends it, and the sync panel names the state.
   final E2eeService? e2ee;
 
-  /// Shown while signed in with no encryption key on this device. Every
-  /// sync run in that state — launch, edit-debounce or SYNC CLOUD — sends
-  /// notes and files in plaintext, so the line stays up, not only during
-  /// a run.
+  /// Shown while signed in with no encryption key anywhere. Every sync run
+  /// in that state — launch, edit-debounce or SYNC CLOUD — sends notes and
+  /// files in plaintext, so the line stays up, not only during a run.
   static const String notEncryptedBanner =
       'NOT ENCRYPTED · cloud sync sends notes and files in plaintext; '
       'no encryption key on this device';
+
+  /// Shown while signed in to an encrypted account on a device without its
+  /// key (a new install, or after LOCK). Runs are refused, not let out in
+  /// plaintext, until the passphrase unlocks the device (#317).
+  static const String lockedBanner =
+      'ENCRYPTION LOCKED · cloud sync is paused until you unlock this '
+      'device with your passphrase';
 
   /// Row height in the master list. Owned by settings; the toolbar's toggle
   /// writes back through [onDensityChanged], and a host that passes none
@@ -552,15 +560,8 @@ class _QueueTabState extends State<QueueTab> {
                       ListenableBuilder(
                         listenable: e2ee,
                         builder: (BuildContext context, Widget? _) =>
-                            e2ee.hasIdentity &&
-                                    !e2ee.isUnlocked &&
-                                    !e2ee.isRestoring
-                                ? Padding(
-                                    padding: const EdgeInsets.only(top: 10),
-                                    child: ErrorBanner(
-                                      message: QueueTab.notEncryptedBanner,
-                                    ),
-                                  )
+                            e2ee.isPlaintext || e2ee.isLocked
+                                ? _EncryptionBanner(e2ee: e2ee)
                                 : const SizedBox.shrink(),
                       ),
                     // Pinned above the scroll area, not scrolled with it.
@@ -1833,17 +1834,60 @@ class _DensityToggle extends StatelessWidget {
   }
 }
 
+/// The red line plus the one button that ends the state: SET UP ENCRYPTION
+/// for an account that was never set up, UNLOCK for one this device holds
+/// no key to. The dialog reports back through the service the banner
+/// already listens to, so there is nothing to return.
+class _EncryptionBanner extends StatelessWidget {
+  _EncryptionBanner({required this.e2ee});
+
+  final E2eeService e2ee;
+
+  @override
+  Widget build(BuildContext context) {
+    final bool locked = e2ee.isLocked;
+    return Padding(
+      padding: const EdgeInsets.only(top: 10),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: <Widget>[
+          ErrorBanner(
+            message: locked ? QueueTab.lockedBanner : QueueTab.notEncryptedBanner,
+          ),
+          Align(
+            alignment: Alignment.centerRight,
+            child: TextButton.icon(
+              onPressed: () => showE2eePassphraseDialog(context, e2ee),
+              icon: Icon(
+                locked ? Icons.lock_open_rounded : Icons.enhanced_encryption_rounded,
+                size: 16,
+              ),
+              label: Text(locked ? 'UNLOCK' : 'SET UP ENCRYPTION'),
+              style: TextButton.styleFrom(foregroundColor: Console.red),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
 class _CloudSyncStatus extends StatelessWidget {
   const _CloudSyncStatus({required this.progress, this.e2ee});
 
   final CloudSyncProgress progress;
   final E2eeService? e2ee;
 
-  /// The line under NOTES and FILES. Red when a signed-in install is
-  /// syncing in plaintext: that is the state #297 found shipping silently.
-  static String encryptionStatus({required bool unlocked}) => unlocked
-      ? 'ENCRYPTION · end-to-end, sealed on this device'
-      : 'ENCRYPTION · NOT ENCRYPTED, notes and files leave in plaintext';
+  /// The line under NOTES and FILES. Red unless sealed: plaintext is the
+  /// state #297 found shipping silently, and locked means the run that
+  /// opened this panel was refused.
+  static String encryptionStatus(E2eeService e2ee) {
+    if (e2ee.isUnlocked) return 'ENCRYPTION · end-to-end, sealed on this device';
+    if (e2ee.keyOnServer == false) {
+      return 'ENCRYPTION · NOT ENCRYPTED, notes and files leave in plaintext';
+    }
+    return 'ENCRYPTION · LOCKED, sync paused until this device is unlocked';
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -1926,7 +1970,7 @@ class _CloudSyncStatus extends StatelessWidget {
               ListenableBuilder(
                 listenable: e2ee,
                 builder: (BuildContext context, Widget? _) => Text(
-                  encryptionStatus(unlocked: e2ee.isUnlocked),
+                  encryptionStatus(e2ee),
                   style: ConsoleText.chip.copyWith(
                     color: e2ee.isUnlocked ? Console.muted : Console.red,
                   ),

@@ -1266,6 +1266,7 @@ class ConsoleField extends StatelessWidget {
     this.monospace = false,
     this.prefixIcon,
     this.suffixIcon,
+    this.obscureText = false,
   });
 
   final TextEditingController controller;
@@ -1290,14 +1291,20 @@ class ConsoleField extends StatelessWidget {
   final Widget? prefixIcon;
   final Widget? suffixIcon;
 
+  /// A passphrase field. Forces a single line, as `TextField` requires.
+  final bool obscureText;
+
   @override
   Widget build(BuildContext context) {
     return TextField(
       controller: controller,
       focusNode: focusNode,
       autofocus: autofocus,
-      maxLines: maxLines,
-      minLines: minLines,
+      obscureText: obscureText,
+      enableSuggestions: !obscureText,
+      autocorrect: !obscureText,
+      maxLines: obscureText ? 1 : maxLines,
+      minLines: obscureText ? null : minLines,
       textInputAction: textInputAction,
       onSubmitted: onSubmitted,
       onChanged: onChanged,

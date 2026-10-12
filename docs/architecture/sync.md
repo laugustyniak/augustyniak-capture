@@ -449,30 +449,116 @@ next run tries again. The keyring read is time-boxed
 as "no key" rather than refusing every run for the session. `lock()` and
 `forgetKey` end a restore in flight, so a key just locked cannot land a
 moment later. Each resolver is called per run, so a key that
-arrives later applies to the next run and never to one in flight. **Nothing in the app yet derives a key** — the
-passphrase set-up/unlock flow and the `user_e2ee_settings` read/write are
-Slice 4 of `docs/plans/2026-10-06-e2ee-sync-and-storage.md`, tracked as
-#317 — so until that lands every install syncs in plaintext.
-That state is not silent, in three places. `E2eeService` is a
-`ChangeNotifier`, and the Queue shows `QueueTab.notEncryptedBanner` (red,
-persistent, not tied to a run) for as long as a user is signed in without
-a key and no restore is in flight (`isRestoring`; runs are refused
-meanwhile, so there is nothing to warn about yet) — the launch sync and the edit-debounce sync open no panel, so a
+arrives later applies to the next run and never to one in flight.
+
+**The passphrase flow (#317).** Whether an account is encrypted is a server
+fact: one `user_e2ee_settings` row per owner (`kdf_salt`, `kdf_algorithm`,
+`key_check_hash`, `kdf_iterations`), read and inserted through
+`E2eeSettingsStore` (`domain/e2ee_settings_store.dart`;
+`SupabaseE2eeSettingsStore` in `data/`, insert-only, no client-side delete
+because the table grants none). `followIdentity` reads the keyring first
+and, only when it holds nothing, asks the store — the answer is
+`E2eeService.keyOnServer`: true, false, or null when the lookup failed or
+timed out (`keyringTimeout` boxes it too). That splits "no key here" into
+two states the Queue and the resolvers treat differently:
+
+- **Plaintext** (`isPlaintext`: `keyOnServer == false`) — the account was
+  never set up. Runs leave plain, with the `warn` line, under the red
+  `QueueTab.notEncryptedBanner` and its `SET UP ENCRYPTION` button.
+- **Locked** (`isLocked`: `keyOnServer != false`) — the account has a key
+  this device lacks: a second device, a device after `LOCK` or `FORGET
+  KEY`, or a device that could not reach the server to ask. Runs are
+  **refused** (`sync skipped: encryption is locked on this device…`, or
+  `…could not check whether this account is encrypted`), never let out in
+  plaintext next to sealed rows under the same owner, under
+  `QueueTab.lockedBanner` and its `UNLOCK` button. Unknown is treated as
+  locked on purpose: "none" is the only answer that permits plaintext, so
+  it has to come from the server. `UNLOCK` in that state opens the unlock
+  form; `unlock` re-reads the row, and if the server now answers "none"
+  the dialog turns into a set-up (`E2eeNotSetUpException`).
+
+"None" is read once, at sign-in, and another device may set the account
+up during the session. So the plain transport and store a plaintext run
+gets are wrapped (`_PlaintextGuardTransport`, `_PlaintextGuardMediaStore`)
+with one more row read in front of their first call: a row that appeared
+since refuses the run (`sync skipped: encryption was set up on another
+device…`) and flips the device to locked, and the Queue follows. The check
+is per run, not per call — a row written while a run is already under way
+lets that run finish plain, and the next one is refused. Only a "row
+exists" answer moves the state: a lookup that fails refuses that run and
+nothing more (an offline blip must not pin an account that never set up to
+locked), and an answer that lands after a set-up or unlock went through is
+dropped.
+
+`E2eeService.enroll(passphrase)` is the set-up: derive a fresh salt and key,
+**insert the row, then** write the keyring and hold the key — in that order,
+so a failed insert leaves no key that could seal rows the server has no
+parameters for, and as an insert rather than an upsert, so a device that
+lost a race against another device's set-up gets
+`E2eeSettingsConflictException`, becomes locked (the row exists, whoever
+wrote it) and is switched to the unlock form instead of publishing a
+second key over the first device's envelopes. An insert that fails any
+other way (a timeout, a dropped connection) may have committed
+server-side, so it leaves `keyOnServer` unknown — locked — until the next
+read. `E2eeService.unlock(passphrase)` reads the row and derives with
+*its* salt and iteration count; a wrong passphrase is
+`InvalidE2eePassphraseException` and the device stays locked. Both take
+no user id: the key binds to the followed identity and no other, and both
+re-check after every `await` that the identity and generation captured at
+entry still hold (`_checkStill`), so a key derived for A never lands while
+B is signed in or after a sign-out. (`setupPassphrase` and
+`unlockWithPassphrase`, the primitives without the row, are
+`@visibleForTesting`: nothing in the app holds a key the server has no
+parameters for.) The table grants its owner `update` as well, but this
+client only ever inserts: an update would re-key the account and orphan
+every envelope sealed under the first key. The UI is `showE2eePassphraseDialog`
+(`presentation/e2ee_passphrase_dialog.dart`), opened from the Queue banner
+and from the Account card's ENCRYPTION row, which also carries `LOCK` (drop
+the key from memory for this session) and `FORGET KEY` (remove it from this
+device's keyring too, after a confirmation). Set-up shows the loss warning
+verbatim from the plan — nothing on the server can open an envelope, so
+nobody can recover a forgotten passphrase — and needs the passphrase twice,
+eight characters or more. **Rows already on the server in plaintext when a
+key is set up stay plaintext until they are next edited**: the engine
+pushes only changed rows, and this slice does not re-push the library. A
+user who wants the back-catalogue sealed edits it, or sets up encryption
+before the first sync; a one-time re-push is a separate change if it is
+ever wanted.
+
+None of this is silent. `E2eeService` is a `ChangeNotifier`, and the Queue
+shows the matching banner (red, persistent, not tied to a run) for as long
+as a signed-in user has no key here and no restore is in flight
+(`isRestoring`; runs are refused meanwhile, so there is nothing to warn
+about yet) — the launch sync and the edit-debounce sync open no panel, so a
 line that only showed during a run would miss exactly the runs that leave
 plaintext unattended. The sync status panel adds `ENCRYPTION · NOT
-ENCRYPTED, notes and files leave in plaintext` or `ENCRYPTION ·
-end-to-end, sealed on this device` for a signed-in user. And
-`wrapTransport` logs one `warn` line through the controller's `LogSink`
-on every run it hands back plain, so the Logs tab records each one. Tests:
+ENCRYPTED, notes and files leave in plaintext`, `ENCRYPTION · LOCKED, sync
+paused until this device is unlocked` or `ENCRYPTION · end-to-end, sealed
+on this device` for a signed-in user. And `wrapTransport` logs one `warn`
+line through the controller's `LogSink` on every run it hands back plain,
+so the Logs tab records each one. Tests:
 `test/sync/e2ee_wiring_test.dart` drives the controller's Supabase slot
 through the same resolver shape and reads the wire (sealed with a key,
 plaintext without plus the warn line, the signed-in owner and the
 controller's `LogSink` handed through, and a source pin on `app.dart`'s
 wraps and `followIdentity`); `test/sync/e2ee_service_test.dart` covers A
 to B without a key, restore from the keyring, the same-id no-op, the
-late restore after sign-out, and the two refused runs; `test/widget/queue_tab_test.dart` covers the
-banner appearing on sign-in, the panel line, and both clearing once a key
-arrives.
+late restore after sign-out, the two refused runs, and the passphrase
+flow (set-up writes the row with the build's iteration count, unlock
+right and wrong, the lost race leaving the device locked, the failed
+insert leaving it unknown, the unanswered lookup, the per-run re-check
+refusing a run once another device set up, a sign-out during set-up and
+a user switch during unlock landing nothing, lock and forget leaving the
+device locked);
+`test/sync/supabase_e2ee_settings_store_test.dart` pins the row shape and
+that a malformed row throws rather than reading as "no key";
+`test/widget/queue_tab_test.dart` covers the banner appearing on sign-in,
+the panel line, set-up from the banner with the loss warning shown first
+and the next run sealed, a second device locked, refused and unlocked, a
+lost race turning the dialog into an unlock, and an unanswered lookup
+turning UNLOCK into a set-up once the server answers "none";
+`test/widget/account_section_test.dart` covers the ENCRYPTION row, LOCK
+and FORGET KEY.
 
 Four rules, each with a test that fails when it is broken
 (`test/sync/e2ee_cipher_test.dart`, `test/sync/encrypted_sync_transport_test.dart`,
@@ -547,6 +633,12 @@ lib/features/sync/
   domain/media_sync.dart          MediaSyncService, MediaSyncJob, MediaObjectStore
                                   DisabledMediaObjectStore — throws at use
   data/supabase_media_store.dart  the private `captures` bucket
+  domain/e2ee_settings_store.dart E2eeSettingsStore (read, insert-only create),
+                                  E2eePublicParams, E2eeSettingsConflictException
+  data/e2ee_service.dart          E2eeService — the key, followIdentity, enroll,
+                                  unlock, wrapTransport/wrapMediaStore
+  data/supabase_e2ee_settings_store.dart  `user_e2ee_settings`, one row per owner
+  presentation/e2ee_passphrase_dialog.dart  set-up / unlock dialog
 ```
 
 `SyncEngine` is constructed with a `SyncTransport`, a `SyncBookkeeping`

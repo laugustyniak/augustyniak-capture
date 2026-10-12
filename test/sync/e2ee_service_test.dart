@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
@@ -7,9 +8,12 @@ import 'package:augustyniak_capture/features/sync/data/e2ee_service.dart';
 import 'package:augustyniak_capture/features/sync/data/encrypted_media_store.dart';
 import 'package:augustyniak_capture/features/sync/data/encrypted_sync_transport.dart';
 import 'package:augustyniak_capture/features/sync/domain/e2ee_cipher.dart';
+import 'package:augustyniak_capture/features/sync/domain/e2ee_settings_store.dart';
 import 'package:augustyniak_capture/features/sync/domain/media_sync.dart';
+import 'package:augustyniak_capture/features/sync/domain/sync_table.dart';
 import 'package:augustyniak_capture/features/sync/domain/sync_transport.dart';
 
+import 'fake_e2ee_settings_store.dart';
 import 'fake_sync_transport.dart';
 
 class _FakeMediaStore implements MediaObjectStore {
@@ -24,12 +28,15 @@ class _FakeMediaStore implements MediaObjectStore {
 }
 
 /// Answers `read` only once [gate] completes, to order a slow keyring read
-/// after a later identity change.
+/// after a later identity change; `write` likewise waits on [writeGate]
+/// when one is set.
 class _GatedSecureStore implements SecureValueStore {
   _GatedSecureStore(this.inner, this.gate);
 
   final SecureValueStore inner;
   Completer<String?> gate;
+  Completer<void>? writeGate;
+  int writes = 0;
 
   @override
   Future<bool> containsKey(String key) => inner.containsKey(key);
@@ -41,7 +48,19 @@ class _GatedSecureStore implements SecureValueStore {
   Future<String?> read(String key) => gate.future;
 
   @override
-  Future<void> write(String key, String value) => inner.write(key, value);
+  Future<void> write(String key, String value) async {
+    writes += 1;
+    if (writeGate case final Completer<void> gate) await gate.future;
+    await inner.write(key, value);
+  }
+}
+
+/// Refuses every write: a keyring that is locked or unavailable.
+class _ReadOnlySecureStore extends InMemorySecureStore {
+  @override
+  Future<void> write(String key, String value) async {
+    throw StateError('keyring unavailable');
+  }
 }
 
 class InMemorySecureStore implements SecureValueStore {
@@ -228,12 +247,18 @@ void main() {
   });
 
   group('wrapping (#297)', () {
-    test('locked, both wrappers hand back the plain dependency untouched', () async {
+    test('no key anywhere: both wrappers hand the plain dependency through, unsealed', () async {
       await service.followIdentity('u');
-      final SyncTransport inner = FakeSyncTransport();
+      final FakeSyncTransport inner = FakeSyncTransport();
       final MediaObjectStore store = _FakeMediaStore();
-      expect(identical(service.wrapTransport(inner, ownerId: 'u'), inner), isTrue);
-      expect(identical(service.wrapMediaStore(store, ownerId: 'u'), store), isTrue);
+      final SyncTransport plain = service.wrapTransport(inner, ownerId: 'u');
+      expect(plain, isNot(isA<EncryptedSyncTransport>()));
+      final Map<String, Object?> row = <String, Object?>{'id': 'r', 'title': 'Plain', 'version': 1};
+      await plain.push(SyncTable.recordings, <Map<String, Object?>>[row]);
+      expect(inner.pushes.single.$2.single['title'], 'Plain');
+      final MediaObjectStore plainStore = service.wrapMediaStore(store, ownerId: 'u');
+      expect(plainStore, isNot(isA<EncryptedMediaStore>()));
+      expect(await plainStore.download('k'), isEmpty);
     });
 
     test('a run for a user other than the followed one is refused, not sealed or sent plain', () async {
@@ -376,6 +401,327 @@ void main() {
       expect(notified, 3);
       await service.forgetKey(userId: 'u');
       expect(notified, 4);
+    });
+  });
+
+  group('passphrase flow (#317)', () {
+    late FakeE2eeSettingsStore settings;
+    late E2eeService device;
+
+    E2eeService newDevice({InMemorySecureStore? keyring}) {
+      final E2eeService other = E2eeService(
+        secureStore: keyring ?? InMemorySecureStore(),
+        kdf: E2eeKeyDerivation(iterations: 1000),
+        settings: settings,
+        keyringTimeout: const Duration(milliseconds: 50),
+      );
+      addTearDown(other.dispose);
+      return other;
+    }
+
+    setUp(() {
+      settings = FakeE2eeSettingsStore();
+      device = newDevice(keyring: secureStore);
+    });
+
+    test('no row: set-up derives a key and publishes its parameters', () async {
+      await device.followIdentity('u');
+      expect(device.isPlaintext, isTrue);
+      await device.enroll('correct horse');
+      final E2eePublicParams? row = settings.rows['u'];
+      expect(row, isNotNull);
+      expect(row!.iterations, 1000);
+      expect(row.keyCheckHash, startsWith(E2eeKeyDerivation.keyCheckPrefix));
+      expect(row.algorithm, 'pbkdf2_sha256');
+      expect(device.isUnlocked, isTrue);
+      expect(device.keyOnServer, isTrue);
+      expect(secureStore.values, contains('ai.augustyniak.capture.e2ee.mek.u'));
+      expect(device.wrapTransport(FakeSyncTransport(), ownerId: 'u'), isA<EncryptedSyncTransport>());
+    });
+
+    test('the default derivation publishes E2eeKeyDerivation.defaultIterations', () async {
+      final E2eeService stock = E2eeService(secureStore: InMemorySecureStore(), settings: settings);
+      addTearDown(stock.dispose);
+      await stock.followIdentity('u');
+      await stock.enroll('correct horse');
+      expect(settings.rows['u']!.iterations, E2eeKeyDerivation.defaultIterations);
+    });
+
+    test('row present: unlock with the right passphrase, a wrong one is refused and stays locked', () async {
+      await device.followIdentity('u');
+      await device.enroll('correct horse');
+
+      final E2eeService second = newDevice();
+      await second.followIdentity('u');
+      expect(second.isLocked, isTrue);
+      expect(second.isUnlocked, isFalse);
+
+      await expectLater(second.unlock('wrong horse'), throwsA(isA<InvalidE2eePassphraseException>()));
+      expect(second.isUnlocked, isFalse);
+      expect(second.isLocked, isTrue);
+      expect(() => second.wrapTransport(FakeSyncTransport(), ownerId: 'u'), throwsStateError);
+
+      await second.unlock('correct horse');
+      expect(second.isUnlocked, isTrue);
+      // Both devices derived the same key: what one sealed the other opens.
+      final E2eeCipher a = device.cipher!;
+      final E2eeCipher b = second.cipher!;
+      final List<int> aad = utf8.encode('u');
+      final String sealed = await a.seal('note', aad: aad);
+      expect(await b.unseal(sealed, aad: aad), 'note');
+    });
+
+    test('a second device finds the account encrypted: locked, and runs are refused, not plaintext', () async {
+      await device.followIdentity('u');
+      await device.enroll('correct horse');
+      final E2eeService second = newDevice();
+      await second.followIdentity('u');
+      expect(second.keyOnServer, isTrue);
+      expect(second.isLocked, isTrue);
+      expect(second.isPlaintext, isFalse);
+      expect(
+        () => second.wrapTransport(FakeSyncTransport(), ownerId: 'u'),
+        throwsA(isA<StateError>().having((StateError e) => e.message, 'message', contains('locked'))),
+      );
+      expect(() => second.wrapMediaStore(_FakeMediaStore(), ownerId: 'u'), throwsStateError);
+    });
+
+    test('losing the set-up race activates nothing and reports the conflict', () async {
+      await device.followIdentity('u');
+      final E2eeService second = newDevice();
+      await second.followIdentity('u');
+      await second.enroll('their horse');
+      final String winner = settings.rows['u']!.keyCheckHash;
+      // This device still believes there is no row; its insert must not win.
+      await expectLater(device.enroll('my horse'), throwsA(isA<E2eeSettingsConflictException>()));
+      expect(device.isUnlocked, isFalse);
+      expect(secureStore.values, isEmpty);
+      expect(settings.rows['u']!.keyCheckHash, winner);
+      // The row exists, so from here this device is locked, not plaintext.
+      expect(device.keyOnServer, isTrue);
+      expect(device.isLocked, isTrue);
+      expect(device.isPlaintext, isFalse);
+      expect(() => device.wrapTransport(FakeSyncTransport(), ownerId: 'u'), throwsStateError);
+      // And it can now unlock with the passphrase that won.
+      await device.unlock('their horse');
+      expect(device.isUnlocked, isTrue);
+    });
+
+    test('a failed row write leaves no key held, and nothing plain until the row is re-read', () async {
+      await device.followIdentity('u');
+      settings.createError = StateError('offline');
+      await expectLater(device.enroll('correct horse'), throwsStateError);
+      expect(device.isUnlocked, isFalse);
+      expect(secureStore.values, isEmpty);
+      // The insert may have committed server-side; nobody knows.
+      expect(device.keyOnServer, isNull);
+      expect(device.isLocked, isTrue);
+      expect(() => device.wrapTransport(FakeSyncTransport(), ownerId: 'u'), throwsStateError);
+      // `unlock` re-reads: no row after all, so set-up is offered again.
+      settings.createError = null;
+      await expectLater(device.unlock('correct horse'), throwsA(isA<E2eeNotSetUpException>()));
+      expect(device.keyOnServer, isFalse);
+      expect(device.isPlaintext, isTrue);
+    });
+
+    test('a plaintext run re-checks the row and is refused once another device set up', () async {
+      await device.followIdentity('u');
+      final FakeSyncTransport inner = FakeSyncTransport();
+      final SyncTransport plain = device.wrapTransport(inner, ownerId: 'u');
+      expect(plain, isNot(isA<EncryptedSyncTransport>()));
+      // No row: the run goes through to the plain transport.
+      await plain.push(SyncTable.recordings, <Map<String, Object?>>[]);
+      expect(inner.pushes, hasLength(1));
+
+      final E2eeService second = newDevice();
+      await second.followIdentity('u');
+      await second.enroll('their horse!');
+
+      // The service still says plaintext (read once, at sign-in)...
+      expect(device.isPlaintext, isTrue);
+      final SyncTransport guarded = device.wrapTransport(FakeSyncTransport(), ownerId: 'u');
+      final MediaObjectStore guardedStore = device.wrapMediaStore(_FakeMediaStore(), ownerId: 'u');
+      // ...but the run asks again before its first call, and is refused.
+      await expectLater(
+        guarded.push(SyncTable.recordings, <Map<String, Object?>>[]),
+        throwsA(isA<StateError>().having((StateError e) => e.message, 'message', contains('another device'))),
+      );
+      await expectLater(guardedStore.exists('k'), throwsStateError);
+      expect(device.keyOnServer, isTrue);
+      expect(device.isLocked, isTrue);
+      expect(() => device.wrapTransport(FakeSyncTransport(), ownerId: 'u'), throwsStateError);
+    });
+
+    test('a keyring that refuses the key leaves the device locked, not plaintext', () async {
+      final E2eeService noKeyring = E2eeService(
+        secureStore: _ReadOnlySecureStore(),
+        kdf: E2eeKeyDerivation(iterations: 1000),
+        settings: settings,
+      );
+      addTearDown(noKeyring.dispose);
+      await noKeyring.followIdentity('u');
+      await expectLater(noKeyring.enroll('correct horse'), throwsStateError);
+      // The row went up before the keyring refused, so the account is set
+      // up and this device cannot seal: locked, every run refused.
+      expect(settings.rows['u'], isNotNull);
+      expect(noKeyring.isUnlocked, isFalse);
+      expect(noKeyring.keyOnServer, isTrue);
+      expect(noKeyring.isLocked, isTrue);
+      expect(() => noKeyring.wrapTransport(FakeSyncTransport(), ownerId: 'u'), throwsStateError);
+    });
+
+    test('a plaintext run whose re-check fails is refused alone; the account stays plaintext', () async {
+      await device.followIdentity('u');
+      final SyncTransport plain = device.wrapTransport(FakeSyncTransport(), ownerId: 'u');
+      settings.readError = StateError('offline');
+      await expectLater(
+        plain.serverNow(),
+        throwsA(isA<StateError>().having((StateError e) => e.message, 'message', contains('could not check'))),
+      );
+      // An offline blip must not pin an account that never set up to locked.
+      expect(device.keyOnServer, isFalse);
+      expect(device.isPlaintext, isTrue);
+      settings.readError = null;
+      final FakeSyncTransport inner = FakeSyncTransport();
+      final SyncTransport next = device.wrapTransport(inner, ownerId: 'u');
+      await next.pull(SyncTable.recordings, since: null, after: null, limit: 10);
+      expect(await next.serverNow(), isA<DateTime>());
+    });
+
+    test('a re-check answer that lands after this device set up is dropped', () async {
+      await device.followIdentity('u');
+      final Completer<void> gate = settings.readGate = Completer<void>();
+      final SyncTransport plain = device.wrapTransport(FakeSyncTransport(), ownerId: 'u');
+      final Future<DateTime> run = plain.serverNow();
+      for (int i = 0; i < 200 && settings.reads == 1; i++) {
+        await Future<void>.delayed(Duration.zero);
+      }
+      settings.readGate = null;
+      await device.enroll('correct horse');
+      expect(device.isUnlocked, isTrue);
+      gate.complete(); // the stale "no row" arrives now
+      await run;
+      expect(device.keyOnServer, isTrue);
+      device.lock();
+      expect(device.isLocked, isTrue);
+      expect(device.isPlaintext, isFalse);
+    });
+
+    test('a sign-out during set-up activates nothing, for anyone', () async {
+      await device.followIdentity('u');
+      settings.createGate = Completer<void>();
+      final Future<void> enrolling = device.enroll('correct horse');
+      for (int i = 0; i < 200 && settings.creates == 0; i++) {
+        await Future<void>.delayed(Duration.zero);
+      }
+      expect(settings.creates, 1);
+      await device.followIdentity(null);
+      settings.createGate!.complete();
+      await expectLater(enrolling, throwsStateError);
+      expect(device.hasIdentity, isFalse);
+      expect(device.isUnlocked, isFalse);
+      expect(secureStore.values, isEmpty);
+      // The row was inserted for u — that is u's, and u can unlock with it.
+      expect(settings.rows['u'], isNotNull);
+    });
+
+    test('a sign-out during the keyring write holds no key', () async {
+      final _GatedSecureStore gated = _GatedSecureStore(secureStore, Completer<String?>()..complete(null));
+      final E2eeService slow = E2eeService(
+        secureStore: gated,
+        kdf: E2eeKeyDerivation(iterations: 1000),
+        settings: settings,
+      );
+      addTearDown(slow.dispose);
+      await slow.followIdentity('u');
+      final Completer<void> writeGate = gated.writeGate = Completer<void>();
+      final Future<void> enrolling = slow.enroll('correct horse');
+      // Let the derivation and the row insert run up to the keyring write.
+      for (int i = 0; i < 200 && gated.writes == 0; i++) {
+        await Future<void>.delayed(Duration.zero);
+      }
+      expect(gated.writes, 1);
+      expect(settings.rows['u'], isNotNull);
+      await slow.followIdentity(null);
+      writeGate.complete();
+      await expectLater(enrolling, throwsStateError);
+      expect(slow.isUnlocked, isFalse);
+      expect(slow.hasIdentity, isFalse);
+    });
+
+    test('a user switch during unlock lands no key under the new user', () async {
+      await device.followIdentity('u');
+      await device.enroll('correct horse');
+      final E2eeService second = newDevice();
+      await second.followIdentity('u');
+      final Completer<void> gate = settings.readGate = Completer<void>();
+      final Future<void> unlocking = second.unlock('correct horse');
+      await Future<void>.delayed(Duration.zero);
+      settings.readGate = null; // v's own lookup is not held
+      final Future<void> following = second.followIdentity('v');
+      gate.complete(); // u's row now arrives, after the identity moved on
+      await expectLater(unlocking, throwsStateError);
+      await following;
+      expect(second.isUnlocked, isFalse);
+      expect(second.keyOnServer, isFalse); // v has no row
+      expect(secureStore.values.keys, isNot(contains('ai.augustyniak.capture.e2ee.mek.v')));
+    });
+
+    test('an unanswered or failed row lookup refuses runs rather than reading as "no key"', () async {
+      settings.readError = StateError('offline');
+      await device.followIdentity('u');
+      expect(device.keyOnServer, isNull);
+      expect(device.isLocked, isTrue);
+      expect(
+        () => device.wrapTransport(FakeSyncTransport(), ownerId: 'u'),
+        throwsA(isA<StateError>().having((StateError e) => e.message, 'message', contains('could not check'))),
+      );
+
+      settings.readError = null;
+      settings.readGate = Completer<void>();
+      final E2eeService slow = newDevice();
+      final Future<void> restoring = slow.followIdentity('u');
+      expect(slow.isRestoring, isTrue);
+      await restoring; // 50 ms timeout
+      expect(slow.keyOnServer, isNull);
+      expect(() => slow.wrapTransport(FakeSyncTransport(), ownerId: 'u'), throwsStateError);
+    });
+
+    test('lock keeps the account encrypted: this device is locked, not plaintext', () async {
+      await device.followIdentity('u');
+      await device.enroll('correct horse');
+      device.lock();
+      expect(device.isLocked, isTrue);
+      expect(device.isPlaintext, isFalse);
+      expect(() => device.wrapTransport(FakeSyncTransport(), ownerId: 'u'), throwsStateError);
+      await device.forgetKey(userId: 'u');
+      expect(secureStore.values, isEmpty);
+      expect(device.isLocked, isTrue);
+      // The row is still there, so the next launch finds the device locked.
+      final E2eeService relaunch = newDevice(keyring: secureStore);
+      await relaunch.followIdentity('u');
+      expect(relaunch.isLocked, isTrue);
+    });
+
+    test('a keyring key skips the server lookup; a restored device is unlocked', () async {
+      await device.followIdentity('u');
+      await device.enroll('correct horse');
+      settings.reads = 0;
+      final E2eeService relaunch = newDevice(keyring: secureStore);
+      await relaunch.followIdentity('u');
+      expect(relaunch.isUnlocked, isTrue);
+      expect(relaunch.keyOnServer, isTrue);
+      expect(settings.reads, 0);
+    });
+
+    test('enroll and unlock need a followed identity and a settings store', () async {
+      await expectLater(device.enroll('correct horse'), throwsStateError);
+      await expectLater(device.unlock('correct horse'), throwsStateError);
+      await service.followIdentity('u'); // `service` has no settings store
+      await expectLater(service.enroll('correct horse'), throwsStateError);
+      await device.followIdentity('u');
+      await expectLater(device.unlock('correct horse'), throwsA(isA<E2eeNotSetUpException>())); // no row
+      expect(device.keyOnServer, isFalse);
     });
   });
 }
