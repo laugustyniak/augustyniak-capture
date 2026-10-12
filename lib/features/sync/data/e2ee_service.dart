@@ -14,15 +14,22 @@ class InvalidE2eePassphraseException implements Exception {
   String toString() => 'InvalidE2eePassphraseException: $message';
 }
 
+/// What the server keeps about a user's key: enough for a second device to
+/// re-derive it from the passphrase, and nothing that opens an envelope.
+/// [iterations] travels with the salt so the KDF cost can be raised for new
+/// keys without orphaning the ones already derived — see
+/// [E2eeKeyDerivation].
 class E2eePublicParams {
   const E2eePublicParams({
     required this.saltBase64,
     required this.keyCheckHash,
+    required this.iterations,
     this.algorithm = 'pbkdf2_sha256',
   });
 
   final String saltBase64;
   final String keyCheckHash;
+  final int iterations;
   final String algorithm;
 }
 
@@ -70,29 +77,47 @@ class E2eeService {
       base64Encode(keyBytes),
     );
 
-    _cipher = E2eeCipher(key: key);
+    _cipher = await E2eeCipher.forMasterKey(key);
 
     return E2eePublicParams(
       saltBase64: base64Encode(salt),
       keyCheckHash: keyCheckHash,
+      iterations: _kdf.iterations,
     );
   }
 
   /// Verifies a passphrase against the remote salt and keyCheckHash, derives the MEK,
   /// saves it to the local OS keyring, and activates encryption.
   /// Throws [InvalidE2eePassphraseException] if passphrase is incorrect.
+  ///
+  /// [iterations] is the count the key was set up with, read from the same
+  /// server row as the salt — not this build's default, which may since
+  /// have been raised.
   Future<bool> unlockWithPassphrase({
     required String userId,
     required String passphrase,
     required String saltBase64,
     required String expectedCheckHash,
+    required int iterations,
   }) async {
+    if (!expectedCheckHash.startsWith(E2eeKeyDerivation.keyCheckPrefix)) {
+      // A pre-#298 row stored `sha256(key || salt)`; nothing derives that
+      // any more, and reporting it as a wrong passphrase would send the user
+      // retyping a passphrase that is right.
+      throw const InvalidE2eePassphraseException(
+        'This key was set up by an older build and cannot be verified; '
+        'set up the passphrase again',
+      );
+    }
     final Uint8List salt = base64Decode(saltBase64);
-    final SecretKey key = await _kdf.deriveKey(
+    final E2eeKeyDerivation kdf = iterations == _kdf.iterations
+        ? _kdf
+        : E2eeKeyDerivation(iterations: iterations);
+    final SecretKey key = await kdf.deriveKey(
       passphrase: passphrase,
       salt: salt,
     );
-    final String actualHash = await _kdf.computeKeyCheckHash(
+    final String actualHash = await kdf.computeKeyCheckHash(
       key: key,
       salt: salt,
     );
@@ -107,7 +132,7 @@ class E2eeService {
       base64Encode(keyBytes),
     );
 
-    _cipher = E2eeCipher(key: key);
+    _cipher = await E2eeCipher.forMasterKey(key);
     return true;
   }
 
@@ -119,7 +144,7 @@ class E2eeService {
       final Uint8List bytes = base64Decode(stored);
       if (bytes.length != 32) return false;
 
-      _cipher = E2eeCipher(key: SecretKey(bytes));
+      _cipher = await E2eeCipher.forMasterKey(SecretKey(bytes));
       return true;
     } catch (_) {
       return false;
