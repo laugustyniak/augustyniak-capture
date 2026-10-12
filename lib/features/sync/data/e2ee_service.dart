@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'dart:io';
 
 import 'package:cryptography/cryptography.dart';
 import 'package:flutter/foundation.dart';
@@ -6,10 +7,14 @@ import 'package:flutter/foundation.dart';
 import '../../auth/data/secure_auth_storage.dart';
 import '../../logs/domain/log_event.dart';
 import '../domain/e2ee_cipher.dart';
+import '../domain/e2ee_settings_store.dart';
 import '../domain/media_sync.dart';
+import '../domain/sync_table.dart';
 import '../domain/sync_transport.dart';
 import 'encrypted_media_store.dart';
 import 'encrypted_sync_transport.dart';
+
+export '../domain/e2ee_settings_store.dart' show E2eePublicParams;
 
 class InvalidE2eePassphraseException implements Exception {
   const InvalidE2eePassphraseException([this.message = 'Invalid E2EE passphrase']);
@@ -19,23 +24,15 @@ class InvalidE2eePassphraseException implements Exception {
   String toString() => 'InvalidE2eePassphraseException: $message';
 }
 
-/// What the server keeps about a user's key: enough for a second device to
-/// re-derive it from the passphrase, and nothing that opens an envelope.
-/// [iterations] travels with the salt so the KDF cost can be raised for new
-/// keys without orphaning the ones already derived — see
-/// [E2eeKeyDerivation].
-class E2eePublicParams {
-  const E2eePublicParams({
-    required this.saltBase64,
-    required this.keyCheckHash,
-    required this.iterations,
-    this.algorithm = 'pbkdf2_sha256',
-  });
+/// [E2eeService.unlock] on an account the server has no row for: the
+/// device believed it was locked and the server says there is nothing to
+/// unlock, so the caller offers set-up instead.
+class E2eeNotSetUpException implements Exception {
+  const E2eeNotSetUpException();
 
-  final String saltBase64;
-  final String keyCheckHash;
-  final int iterations;
-  final String algorithm;
+  @override
+  String toString() =>
+      'E2eeNotSetUpException: encryption is not set up for this account';
 }
 
 /// Service managing the client-side lifecycle of the E2EE Master Encryption Key (MEK).
@@ -49,26 +46,41 @@ class E2eePublicParams {
 /// signed-in user changes and restores the new user's key from the keyring,
 /// so a key can never seal rows under another owner's id.
 ///
-/// A [ChangeNotifier] so the Queue can say which of the two it is: notifies
-/// whenever [cipher] or [hasIdentity] changes.
+/// Whether the account is encrypted is a server fact ([E2eeSettingsStore]):
+/// with a row there and no key here the device is *locked* and every run is
+/// refused, because a plaintext push from a new device would sit next to
+/// sealed rows under the same owner. Only an account with no row syncs in
+/// plaintext, and then the Queue says so.
+///
+/// A [ChangeNotifier] so the Queue can say which of the three it is:
+/// notifies whenever [cipher], [hasIdentity] or [keyOnServer] changes.
 class E2eeService extends ChangeNotifier {
   E2eeService({
     SecureValueStore? secureStore,
     E2eeKeyDerivation? kdf,
+    E2eeSettingsStore? settings,
     this.keyringTimeout = defaultKeyringTimeout,
   })  : _secureStore = secureStore ?? const FlutterSecureValueStore(),
-        _kdf = kdf ?? E2eeKeyDerivation();
+        _kdf = kdf ?? E2eeKeyDerivation(),
+        _settings = settings;
 
   final SecureValueStore _secureStore;
   final E2eeKeyDerivation _kdf;
 
+  /// Null where there is no server to ask (tests, a build without Supabase):
+  /// every account then reads as never set up.
+  final E2eeSettingsStore? _settings;
+
   /// A keyring that never answers (a locked prompt) must not refuse every
   /// run for the rest of the session; past this a read counts as "no key".
+  /// The server row lookup is boxed the same way, and past it counts as
+  /// "unknown" — which refuses runs, see [keyOnServer].
   final Duration keyringTimeout;
   static const Duration defaultKeyringTimeout = Duration(seconds: 10);
 
   E2eeCipher? _cipher;
   String? _userId;
+  bool? _keyOnServer;
   int _generation = 0;
   Future<void>? _restoring;
   bool _disposed = false;
@@ -76,19 +88,43 @@ class E2eeService extends ChangeNotifier {
   bool get isUnlocked => _cipher != null;
   E2eeCipher? get cipher => _cipher;
 
+  /// Whether the followed account has a `user_e2ee_settings` row: true once
+  /// set up (here or on another device), false when the server confirmed
+  /// there is none, null while unknown — not looked up yet, or the lookup
+  /// failed. Unknown is treated like true wherever it matters: a run is
+  /// refused rather than let out in plaintext over rows that may be sealed.
+  bool? get keyOnServer => _keyOnServer;
+
+  /// Signed in, settled, no key here, and the server has (or may have) one:
+  /// runs are refused until [unlock]. The state a second device starts in.
+  bool get isLocked =>
+      hasIdentity && !isRestoring && !isUnlocked && _keyOnServer != false;
+
+  /// Signed in, settled, no key anywhere: runs leave in plaintext, and the
+  /// Queue keeps saying so until [enroll].
+  bool get isPlaintext =>
+      hasIdentity && !isRestoring && !isUnlocked && _keyOnServer == false;
+
   /// Whether [followIdentity] last saw a signed-in user. With an identity
   /// and no key, every sync run leaves in plaintext — the state the Queue
   /// has to show.
   bool get hasIdentity => _userId != null;
 
-  /// Whether the followed user's key is still being read from the keyring.
-  /// Runs are refused meanwhile (see [wrapTransport]), so the Queue has no
-  /// plaintext to warn about yet.
+  /// Whether the followed user's key is still being read from the keyring,
+  /// or the server still asked whether one exists. Runs are refused
+  /// meanwhile (see [wrapTransport]), so the Queue has no plaintext to warn
+  /// about yet.
   bool get isRestoring => _restoring != null;
 
   void _setCipher(E2eeCipher? cipher) {
     if (_disposed || identical(cipher, _cipher)) return;
     _cipher = cipher;
+    notifyListeners();
+  }
+
+  void _setKeyOnServer(bool? value) {
+    if (_disposed || value == _keyOnServer) return;
+    _keyOnServer = value;
     notifyListeners();
   }
 
@@ -107,16 +143,156 @@ class E2eeService extends ChangeNotifier {
     final int generation = ++_generation;
     _userId = userId;
     _cipher = null;
+    _keyOnServer = null;
     _restoring = null;
     if (!_disposed) notifyListeners();
     if (userId == null) return Future<void>.value();
-    final Future<void> restore = _readKeyring(userId).then((E2eeCipher? restored) {
+    final Future<void> restore = _readKeyring(userId).then((E2eeCipher? restored) async {
       if (generation != _generation) return;
+      // A key in the keyring was put there by set-up or unlock, both of
+      // which saw the row; only a device without one has to ask.
+      final bool? onServer = restored != null ? true : await _readServerKey(userId);
+      if (generation != _generation) return;
+      _keyOnServer = onServer;
       _restoring = null;
-      if (!_disposed) notifyListeners(); // `isRestoring` changed
+      if (!_disposed) notifyListeners(); // `isRestoring`, `keyOnServer` changed
       _setCipher(restored);
     });
     return _restoring = restore;
+  }
+
+  /// Whether the server holds parameters for [userId]; null when it could
+  /// not be asked, which [wrapTransport] treats as "refuse the run".
+  Future<bool?> _readServerKey(String userId) async {
+    final E2eeSettingsStore? settings = _settings;
+    if (settings == null) return false;
+    try {
+      final E2eePublicParams? params =
+          await settings.read(userId).timeout(keyringTimeout);
+      return params != null;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  /// The signed-in user the passphrase flow acts for: [enroll] and [unlock]
+  /// take no id because the key must bind to the followed identity and no
+  /// other, and a dialog would otherwise carry a stale one across a sign-out.
+  String _requireIdentity() {
+    final String? userId = _userId;
+    if (userId == null) throw StateError('sign in before setting up encryption');
+    return userId;
+  }
+
+  /// After every `await` in a flow that ends in a held key: the identity
+  /// captured at entry must still be the followed one and nothing
+  /// ([followIdentity], [lock], another flow) may have moved the service on
+  /// since — otherwise a key derived for A lands while B is signed in, or
+  /// lands at all after a sign-out.
+  void _checkStill(String userId, int generation) {
+    if (_userId != userId || _generation != generation) {
+      throw StateError('signed-in user changed');
+    }
+  }
+
+  E2eeSettingsStore _requireSettings() {
+    final E2eeSettingsStore? settings = _settings;
+    if (settings == null) {
+      throw StateError('encryption settings are not available in this build');
+    }
+    return settings;
+  }
+
+  /// First-time set-up for the followed account: derives a key from
+  /// [passphrase], publishes its public parameters, then activates it here.
+  /// The row is written **before** the key is held, so a failed write leaves
+  /// no key that could seal rows the server has no parameters for; and it
+  /// is an insert, never an upsert, so a device that lost a race gets
+  /// [E2eeSettingsConflictException] and unlocks instead of publishing a
+  /// second key over the first device's envelopes.
+  Future<void> enroll(String passphrase) async {
+    final String userId = _requireIdentity();
+    final E2eeSettingsStore settings = _requireSettings();
+    int generation = _generation;
+    final (SecretKey key, E2eePublicParams params) = await _deriveFresh(passphrase);
+    _checkStill(userId, generation);
+    try {
+      await settings.create(userId, params);
+    } on E2eeSettingsConflictException {
+      // The row exists, whoever wrote it: this device is locked from here.
+      if (_userId == userId) _setKeyOnServer(true);
+      rethrow;
+    } catch (_) {
+      // A timeout or a dropped connection may have committed server-side;
+      // nobody knows, so nothing may leave plain until it is re-read.
+      if (_userId == userId) _setKeyOnServer(null);
+      rethrow;
+    }
+    // The row is there now, whatever happens to the keyring below: a
+    // device that cannot hold the key is locked, not plaintext. A restore
+    // still in flight for this user carries a stale "no row" and must not
+    // land it over this, so it is ended here, not only in `_activate`.
+    if (_userId == userId) {
+      generation = ++_generation;
+      _restoring = null;
+      _setKeyOnServer(true);
+    }
+    _checkStill(userId, generation);
+    await _activate(userId, key, generation: generation);
+  }
+
+  /// Unlock on a device without the key: reads the account's parameters,
+  /// checks [passphrase] against them and, when it matches, holds the key.
+  /// Throws [InvalidE2eePassphraseException] for a wrong passphrase and
+  /// [E2eeNotSetUpException] when the account was never set up — which
+  /// also corrects [keyOnServer], so a device that only *thought* it was
+  /// locked (the lookup had failed) can go on to set-up.
+  Future<void> unlock(String passphrase) async {
+    final String userId = _requireIdentity();
+    final E2eeSettingsStore settings = _requireSettings();
+    final int generation = _generation;
+    final E2eePublicParams? params;
+    try {
+      params = await settings.read(userId).timeout(keyringTimeout);
+    } catch (_) {
+      if (_userId == userId) _setKeyOnServer(null);
+      rethrow;
+    }
+    _checkStill(userId, generation);
+    if (params == null) {
+      _setKeyOnServer(false);
+      throw const E2eeNotSetUpException();
+    }
+    _setKeyOnServer(true);
+    final SecretKey key = await _verify(passphrase, params);
+    _checkStill(userId, generation);
+    await _activate(userId, key, generation: generation);
+  }
+
+  /// A plaintext run's one check: `keyOnServer == false` was read once, at
+  /// sign-in, and another device may have set the account up since. The
+  /// plain transport and store handed out by [wrapTransport] and
+  /// [wrapMediaStore] ask again before their first call and refuse the run
+  /// if a row appeared — the state flips to locked, and the Queue follows.
+  /// Only that answer moves the state: a lookup that fails refuses this
+  /// run and nothing more, so an offline blip does not pin an account that
+  /// never set up encryption to locked; and a stale "no row" that lands
+  /// after a set-up went through is a no-op, not a write back to plaintext.
+  Future<void> _assertStillPlaintext(String userId) async {
+    final bool? onServer = await _readServerKey(userId);
+    switch (onServer) {
+      case false:
+        return;
+      case true:
+        if (_userId == userId) _setKeyOnServer(true);
+        throw StateError(
+          'sync skipped: encryption was set up on another device; unlock with your passphrase',
+        );
+      case null:
+        throw StateError(
+          'sync skipped: could not check whether this account is encrypted',
+        );
+    }
   }
 
   /// Binds a key being set up, unlocked or restored to [userId]: refused for
@@ -145,6 +321,24 @@ class E2eeService extends ChangeNotifier {
     }
   }
 
+  /// With no key here, a run may leave in plaintext only once the server
+  /// confirmed the account was never set up. A row there means this device
+  /// is locked; an unanswered lookup means nobody knows, and the run waits.
+  void _checkPlaintextAllowed() {
+    switch (_keyOnServer) {
+      case false:
+        return;
+      case true:
+        throw StateError(
+          'sync skipped: encryption is locked on this device; unlock with your passphrase',
+        );
+      case null:
+        throw StateError(
+          'sync skipped: could not check whether this account is encrypted',
+        );
+    }
+  }
+
   @override
   void dispose() {
     _disposed = true;
@@ -165,13 +359,14 @@ class E2eeService extends ChangeNotifier {
     _checkOwner(ownerId);
     final E2eeCipher? cipher = _cipher;
     if (cipher == null) {
+      _checkPlaintextAllowed();
       // The launch sync and the edit-debounce sync show no panel, so this
       // line is the one trace of a plaintext run those paths leave.
       log.log(
         'Sync: no encryption key on this device; rows leave in plaintext',
         level: LogLevel.warn,
       );
-      return inner;
+      return _PlaintextGuardTransport(inner, () => _assertStillPlaintext(ownerId));
     }
     return EncryptedSyncTransport(
       inner: inner,
@@ -188,7 +383,10 @@ class E2eeService extends ChangeNotifier {
   }) {
     _checkOwner(ownerId);
     final E2eeCipher? cipher = _cipher;
-    if (cipher == null) return inner;
+    if (cipher == null) {
+      _checkPlaintextAllowed();
+      return _PlaintextGuardMediaStore(inner, () => _assertStillPlaintext(ownerId));
+    }
     return EncryptedMediaStore(inner: inner, cipher: cipher, ownerId: ownerId);
   }
 
@@ -197,11 +395,26 @@ class E2eeService extends ChangeNotifier {
 
   /// Sets up a new passphrase, generates a fresh salt, derives the 256-bit MEK,
   /// persists the MEK in the local OS keyring, and returns the public KDF parameters.
+  ///
+  /// The primitive under [enroll], without the server row: it holds a key
+  /// the server has no parameters for, which is what [enroll] exists to
+  /// prevent, so nothing in the app calls it.
+  @visibleForTesting
   Future<E2eePublicParams> setupPassphrase({
     required String userId,
     required String passphrase,
   }) async {
     _claim(userId);
+    final int generation = _generation;
+    final (SecretKey key, E2eePublicParams params) = await _deriveFresh(passphrase);
+    await _activate(userId, key, generation: generation);
+    return params;
+  }
+
+  /// A fresh salt and the key [passphrase] derives under it, with the public
+  /// parameters a second device needs to derive the same key. Pure: nothing
+  /// is held or written until [_activate].
+  Future<(SecretKey, E2eePublicParams)> _deriveFresh(String passphrase) async {
     final List<int> salt = _kdf.generateSalt();
     final SecretKey key = await _kdf.deriveKey(
       passphrase: passphrase,
@@ -211,29 +424,80 @@ class E2eeService extends ChangeNotifier {
       key: key,
       salt: salt,
     );
+    return (
+      key,
+      E2eePublicParams(
+        saltBase64: base64Encode(salt),
+        keyCheckHash: keyCheckHash,
+        iterations: _kdf.iterations,
+      ),
+    );
+  }
 
+  /// Persists [key] in the keyring under [userId] and starts sealing with
+  /// it. Every path here saw the account's row (or, for [setupPassphrase],
+  /// is the caller about to write it), so the account counts as set up.
+  /// Checked against [generation] after the keyring write, before the key
+  /// is held — the one `await` here that can straddle an identity change —
+  /// and ends any restore in flight so it cannot land on top of the newer
+  /// key.
+  Future<void> _activate(
+    String userId,
+    SecretKey key, {
+    required int generation,
+  }) async {
+    final E2eeCipher cipher = await E2eeCipher.forMasterKey(key);
     final List<int> keyBytes = await key.extractBytes();
     await _secureStore.write(
       _keyStoreKey(userId),
       base64Encode(keyBytes),
     );
+    _checkStill(userId, generation);
+    _generation++;
+    _restoring = null;
+    _keyOnServer = true;
+    _setCipher(cipher);
+  }
 
-    _setCipher(await E2eeCipher.forMasterKey(key));
-
-    return E2eePublicParams(
-      saltBase64: base64Encode(salt),
-      keyCheckHash: keyCheckHash,
-      iterations: _kdf.iterations,
-    );
+  /// The key [passphrase] derives under [params], or
+  /// [InvalidE2eePassphraseException] when its check tag does not match.
+  /// Derives with the row's own iteration count, never this build's
+  /// default, which may since have been raised.
+  Future<SecretKey> _verify(String passphrase, E2eePublicParams params) async {
+    if (params.algorithm != 'pbkdf2_sha256') {
+      throw InvalidE2eePassphraseException(
+        'This key uses a derivation this build does not support '
+        '(${params.algorithm})',
+      );
+    }
+    if (!params.keyCheckHash.startsWith(E2eeKeyDerivation.keyCheckPrefix)) {
+      // A pre-#298 row stored `sha256(key || salt)`; nothing derives that
+      // any more, and reporting it as a wrong passphrase would send the user
+      // retyping a passphrase that is right.
+      throw const InvalidE2eePassphraseException(
+        'This key was set up by an older build and cannot be verified by '
+        'this one',
+      );
+    }
+    final Uint8List salt = base64Decode(params.saltBase64);
+    final E2eeKeyDerivation kdf = params.iterations == _kdf.iterations
+        ? _kdf
+        : E2eeKeyDerivation(iterations: params.iterations);
+    final SecretKey key = await kdf.deriveKey(passphrase: passphrase, salt: salt);
+    final String actualHash = await kdf.computeKeyCheckHash(key: key, salt: salt);
+    if (actualHash != params.keyCheckHash) {
+      throw const InvalidE2eePassphraseException();
+    }
+    return key;
   }
 
   /// Verifies a passphrase against the remote salt and keyCheckHash, derives the MEK,
   /// saves it to the local OS keyring, and activates encryption.
   /// Throws [InvalidE2eePassphraseException] if passphrase is incorrect.
   ///
-  /// [iterations] is the count the key was set up with, read from the same
-  /// server row as the salt — not this build's default, which may since
-  /// have been raised.
+  /// The primitive under [unlock], with the row's parameters passed in
+  /// rather than read; nothing in the app calls it.
+  @visibleForTesting
   Future<bool> unlockWithPassphrase({
     required String userId,
     required String passphrase,
@@ -242,48 +506,30 @@ class E2eeService extends ChangeNotifier {
     required int iterations,
   }) async {
     _claim(userId);
-    if (!expectedCheckHash.startsWith(E2eeKeyDerivation.keyCheckPrefix)) {
-      // A pre-#298 row stored `sha256(key || salt)`; nothing derives that
-      // any more, and reporting it as a wrong passphrase would send the user
-      // retyping a passphrase that is right.
-      throw const InvalidE2eePassphraseException(
-        'This key was set up by an older build and cannot be verified; '
-        'set up the passphrase again',
-      );
-    }
-    final Uint8List salt = base64Decode(saltBase64);
-    final E2eeKeyDerivation kdf = iterations == _kdf.iterations
-        ? _kdf
-        : E2eeKeyDerivation(iterations: iterations);
-    final SecretKey key = await kdf.deriveKey(
-      passphrase: passphrase,
-      salt: salt,
+    final int generation = _generation;
+    final SecretKey key = await _verify(
+      passphrase,
+      E2eePublicParams(
+        saltBase64: saltBase64,
+        keyCheckHash: expectedCheckHash,
+        iterations: iterations,
+      ),
     );
-    final String actualHash = await kdf.computeKeyCheckHash(
-      key: key,
-      salt: salt,
-    );
-
-    if (actualHash != expectedCheckHash) {
-      throw const InvalidE2eePassphraseException();
-    }
-
-    final List<int> keyBytes = await key.extractBytes();
-    await _secureStore.write(
-      _keyStoreKey(userId),
-      base64Encode(keyBytes),
-    );
-
-    _setCipher(await E2eeCipher.forMasterKey(key));
+    await _activate(userId, key, generation: generation);
     return true;
   }
 
   /// Attempts to restore an already unlocked MEK from the local keyring on app launch.
+  ///
+  /// The primitive under [followIdentity]'s restore; nothing in the app
+  /// calls it directly.
+  @visibleForTesting
   Future<bool> tryRestoreFromKeyring({required String userId}) async {
     _claim(userId);
     final int generation = _generation;
     final E2eeCipher? restored = await _readKeyring(userId);
     if (restored == null || generation != _generation) return false;
+    _setKeyOnServer(true);
     _setCipher(restored);
     return true;
   }
@@ -304,7 +550,9 @@ class E2eeService extends ChangeNotifier {
     }
   }
 
-  /// Clears active cipher from memory.
+  /// Clears active cipher from memory. [keyOnServer] is untouched: the
+  /// account stays encrypted, this device is merely locked, and runs are
+  /// refused until [unlock] or the keyring restore on the next launch.
   void lock() {
     // Ends a restore in flight too: a key the user just locked must not
     // land again a moment later.
@@ -313,9 +561,73 @@ class E2eeService extends ChangeNotifier {
     _setCipher(null);
   }
 
-  /// Clears active cipher and removes MEK from local keyring.
+  /// Clears active cipher and removes MEK from local keyring. The server
+  /// row stays — there is no client-side delete, by design — so the next
+  /// launch finds the account encrypted and this device locked.
   Future<void> forgetKey({required String userId}) async {
     lock();
     await _secureStore.delete(_keyStoreKey(userId));
+  }
+}
+
+/// The plain transport of a plaintext run, with `E2eeService`'s re-check in
+/// front of its first call: one server read per run, shared by push and
+/// pull, so a row another device wrote since sign-in refuses the run
+/// instead of letting plaintext land next to sealed rows.
+class _PlaintextGuardTransport implements SyncTransport {
+  _PlaintextGuardTransport(this._inner, this._check);
+
+  final SyncTransport _inner;
+  final Future<void> Function() _check;
+  late final Future<void> _checked = _check();
+
+  @override
+  Future<SyncPushResult> push(SyncTable table, List<Map<String, Object?>> rows) async {
+    await _checked;
+    return _inner.push(table, rows);
+  }
+
+  @override
+  Future<SyncPage> pull(
+    SyncTable table, {
+    required DateTime? since,
+    required Map<String, Object?>? after,
+    required int limit,
+  }) async {
+    await _checked;
+    return _inner.pull(table, since: since, after: after, limit: limit);
+  }
+
+  @override
+  Future<DateTime> serverNow() async {
+    await _checked;
+    return _inner.serverNow();
+  }
+}
+
+/// [_PlaintextGuardTransport]'s counterpart for the media store.
+class _PlaintextGuardMediaStore implements MediaObjectStore {
+  _PlaintextGuardMediaStore(this._inner, this._check);
+
+  final MediaObjectStore _inner;
+  final Future<void> Function() _check;
+  late final Future<void> _checked = _check();
+
+  @override
+  Future<bool> exists(String key) async {
+    await _checked;
+    return _inner.exists(key);
+  }
+
+  @override
+  Future<void> upload(String key, File source, {required String sha256}) async {
+    await _checked;
+    return _inner.upload(key, source, sha256: sha256);
+  }
+
+  @override
+  Future<List<int>> download(String key) async {
+    await _checked;
+    return _inner.download(key);
   }
 }

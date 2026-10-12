@@ -12,6 +12,7 @@ import '../features/recordings/presentation/recordings_page.dart';
 import '../features/settings/domain/app_settings.dart';
 import '../features/settings/domain/app_theme_mode.dart';
 import '../features/sync/data/e2ee_service.dart';
+import '../features/sync/data/supabase_e2ee_settings_store.dart';
 import '../features/sync/data/supabase_media_store.dart';
 import '../features/sync/data/supabase_sync_transport.dart';
 
@@ -57,7 +58,8 @@ class _AugustyniakCaptureAppState extends State<AugustyniakCaptureApp> {
   /// transport and store — see `E2eeService.wrapTransport`. It follows the
   /// identity (`E2eeService.followIdentity`): the key is restored from the
   /// OS keyring when a user appears and dropped when the user changes or
-  /// goes. Nothing here derives one, which is the passphrase flow's job (#317).
+  /// goes. The passphrase flow that derives one lives behind the Queue's
+  /// banner and the Account card; both reach this same instance.
   E2eeService? _e2ee;
 
   @override
@@ -68,7 +70,7 @@ class _AugustyniakCaptureAppState extends State<AugustyniakCaptureApp> {
       _authGateway = gateway;
       final AuthController auth = AuthController(gateway)..initialize();
       _authController = auth;
-      _e2ee = E2eeService();
+      _e2ee = E2eeService(settings: SupabaseE2eeSettingsStore(client));
       auth.addListener(_followIdentity);
       _followIdentity();
     }

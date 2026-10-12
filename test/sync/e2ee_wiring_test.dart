@@ -197,8 +197,10 @@ void main() {
 
     await controller.syncCloud();
 
-    expect(identical(calls.single.$3, inner), isTrue);
-    final Map<String, Object?> row =
+    // Plain, not sealed: the guard in front of the plain transport only
+    // re-checks the server row, and the rows reach the fake unchanged.
+    expect(calls.single.$3, isNot(isA<EncryptedSyncTransport>()));
+    final Map<String, Object?> row=
         inner.tables[SyncTable.recordings]!.values.single;
     expect(row['title'], 'Plain title');
     expect(row['encrypted_payload'], isNull);
@@ -237,7 +239,8 @@ void main() {
     // pinned at the source: remove either wrap and this fails before a
     // release pushes plaintext again.
     final String shell = File('lib/app/app.dart').readAsStringSync();
-    expect(shell, contains('E2eeService()'));
+    expect(shell, contains('E2eeService('));
+    expect(shell, contains('SupabaseE2eeSettingsStore('));
     expect(shell, contains('.wrapTransport('));
     expect(shell, contains('.wrapMediaStore('));
     expect(shell, contains('.followIdentity('));
