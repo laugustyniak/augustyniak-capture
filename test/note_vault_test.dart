@@ -77,6 +77,7 @@ void main() {
     expect(content, startsWith('---\n'));
     expect(content, contains('title: "Notatka o wdrożeniu"'));
     expect(content, contains('created: 2026-08-05T14:32:11.000'));
+    expect(content, contains('\ndate: 2026-08-05\n'));
     expect(content, contains('category: idea'));
     expect(content, contains('project: "Augustyniak Capture"'));
     expect(content, contains('tags: ["flutter", "obsidian"]'));
@@ -85,6 +86,96 @@ void main() {
     expect(content, contains('# Notatka o wdrożeniu'));
     expect(content, contains('> Krótkie streszczenie.'));
     expect(content, contains('Treść transkryptu.'));
+  });
+
+  test('the vault type is always note; the capture kind sits beside it', () async {
+    await build().mirror(note());
+
+    final String content = soleNote().readAsStringSync();
+    expect(content, contains('\ntype: note\n'));
+    expect(content, contains('\ncapture-type: audioRecording\n'));
+    expect(content, isNot(contains('\ntype: audioRecording')));
+  });
+
+  test('a typed note is capture-type text', () async {
+    await build().mirror(note(type: CaptureType.text, durationMs: 0));
+
+    expect(soleNote().readAsStringSync(), contains('\ncapture-type: text\n'));
+  });
+
+  test('a new note links the capture map of content under related', () async {
+    await build().mirror(note());
+
+    expect(
+      soleNote().readAsStringSync(),
+      contains('\nrelated: ["[[${VaultDefaults.relatedNote}]]"]\n'),
+    );
+  });
+
+  /// Splices [lines] into the front matter of the sole note, just above the
+  /// closing fence — what `vault-indexer enrich` does to every note it scores.
+  void enrichSoleNote(String lines) {
+    final File file = soleNote();
+    final String content = file.readAsStringSync();
+    final int fence = content.indexOf('\n---\n', 4);
+    file.writeAsStringSync(
+      '${content.substring(0, fence + 1)}$lines${content.substring(fence + 1)}',
+    );
+  }
+
+  test('keys somebody else added to the front matter survive an update', () async {
+    final MarkdownNoteVault subject = build();
+    await subject.mirror(note(title: 'Bez tytułu'));
+    enrichSoleNote(
+      'pagerank: 0.000115\ncluster: "ai-agents, research"\naliases:\n  - Wdrożenie\n',
+    );
+
+    final VaultWrite update = await subject.mirror(
+      note(title: 'Nazwane przez model'),
+    );
+
+    expect(update.outcome, VaultOutcome.updated);
+    final String content = soleNote().readAsStringSync();
+    expect(content, contains('title: "Nazwane przez model"'));
+    expect(content, contains('\npagerank: 0.000115\n'));
+    expect(content, contains('\ncluster: "ai-agents, research"\n'));
+    expect(content, contains('\naliases:\n  - Wdrożenie\n'));
+    // Ours still win where the keys collide.
+    expect(content, contains('\ntype: note\n'));
+    expect('type: '.allMatches(content), hasLength(2)); // type + capture-type
+  });
+
+  test('a related list the reader extended is kept as theirs', () async {
+    final MarkdownNoteVault subject = build();
+    await subject.mirror(note(title: 'Bez tytułu'));
+    final File file = soleNote();
+    file.writeAsStringSync(
+      file.readAsStringSync().replaceFirst(
+        'related: ["[[${VaultDefaults.relatedNote}]]"]\n',
+        'related:\n  - "[[${VaultDefaults.relatedNote}]]"\n  - "[[MOC-Buy-it.ai]]"\n',
+      ),
+    );
+
+    await subject.mirror(note(title: 'Nazwane przez model'));
+
+    final String content = soleNote().readAsStringSync();
+    expect(
+      content,
+      contains(
+        '\nrelated:\n  - "[[${VaultDefaults.relatedNote}]]"\n  - "[[MOC-Buy-it.ai]]"\n',
+      ),
+    );
+    expect('related:'.allMatches(content), hasLength(1));
+  });
+
+  test('foreign keys alone do not make an unchanged note rewrite', () async {
+    final MarkdownNoteVault subject = build();
+    await subject.mirror(note());
+    enrichSoleNote('pagerank: 0.000115\n');
+    final DateTime stamped = soleNote().lastModifiedSync();
+
+    expect((await subject.mirror(note())).outcome, VaultOutcome.unchanged);
+    expect(soleNote().lastModifiedSync(), stamped);
   });
 
   test('mirroring the same note twice writes nothing the second time', () async {
