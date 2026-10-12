@@ -298,7 +298,7 @@ class E2eeService extends ChangeNotifier {
       if (stored == null) return null;
       final Uint8List bytes = base64Decode(stored);
       if (bytes.length != 32) return null;
-      return E2eeCipher.forMasterKey(SecretKey(bytes));
+      return await E2eeCipher.forMasterKey(SecretKey(bytes));
     } catch (_) {
       return null;
     }
