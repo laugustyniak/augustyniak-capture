@@ -197,6 +197,12 @@ class VaultDefaults {
 
   /// Obsidian's own convention for where embedded media lives.
   static const String attachments = 'attachments';
+
+  /// The map-of-content note every mirrored capture links to under `related`,
+  /// so that a fresh note is never an orphan in the reader's graph — their
+  /// linter treats a note with no outgoing wikilink as an error, and the only
+  /// link a capture otherwise carries is the embed of its own audio.
+  static const String relatedNote = 'MOC-Augustyniak-Capture';
 }
 
 /// The default: no second location, so nothing is copied anywhere.

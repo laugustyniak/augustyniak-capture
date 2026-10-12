@@ -504,12 +504,15 @@ Second Brain/                 ← your vault, your filing system
 ---
 title: "Sprint planning — migration postponed"
 created: 2026-08-05T14:32:11.482Z
-type: audioRecording
+date: 2026-08-05
+type: note
+capture-type: audioRecording
 category: meetingNote
 project: "augustyniak-capture"
 tags: ["backend", "migration"]
 duration: 3m 04s
 source: "3f2a1c4e-….m4a"
+related: ["[[MOC-Augustyniak-Capture]]"]
 capture-id: 3f2a1c4e-…-c81b
 capture-hash: 8f14e45fceea167a5a36dedd4bea2543…
 ---
@@ -594,6 +597,12 @@ links them, and reorders lists by modification time. So:
 4. **An unchanged note is not rewritten at all.** A no-op write would still bump
    the mtime and shove the note to the top of your "recently modified" list on
    every unrelated pipeline tick.
+5. **Front matter the app did not write is kept.** `type` is always `note`, so
+   the file fits a vault whose `type` is a closed list of note kinds; what was
+   captured sits in `capture-type`. `related` is seeded with one map-of-content
+   link so the note is never an orphan, and once you extend that list it is
+   yours. Anything your indexer appends below `capture-hash` — `pagerank`,
+   `cluster`, `aliases` — comes back verbatim on the next update.
 
 Every mirror reports which of these applied, and a sweep over the queue counts
 them for the Config tab:
