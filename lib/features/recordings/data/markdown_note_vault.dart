@@ -300,9 +300,10 @@ class MarkdownNoteVault implements NoteVault {
     }
     final String? project = _projectNameFor(note);
     if (project != null) buffer.writeln('project: ${_yaml(project)}');
-    if (note.tags.isNotEmpty) {
-      buffer.writeln('tags: [${note.tags.map(_yaml).join(', ')}]');
-    }
+    final List<String> tags = note.tags.isEmpty
+        ? const <String>[VaultDefaults.defaultTag]
+        : note.tags;
+    buffer.writeln('tags: [${tags.map(_yaml).join(', ')}]');
     if (note.type.hasDuration && note.durationMs > 0) {
       buffer.writeln('duration: ${_formatDuration(note.durationMs)}');
     }
