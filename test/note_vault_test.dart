@@ -88,6 +88,24 @@ void main() {
     expect(content, contains('Treść transkryptu.'));
   });
 
+  test('a note with no tags carries the default tag', () async {
+    await build().mirror(note(tags: const <String>[]));
+
+    final String content = soleNote().readAsStringSync();
+    expect(content, contains('\ntags: ["capture"]\n'));
+    expect(content, isNot(contains('tags: []')));
+  });
+
+  test('a mirrored note with no tags is stable on the second run', () async {
+    final MarkdownNoteVault subject = build();
+    await subject.mirror(note(tags: const <String>[]));
+
+    expect(
+      (await subject.mirror(note(tags: const <String>[]))).outcome,
+      VaultOutcome.unchanged,
+    );
+  });
+
   test('the vault type is always note; the capture kind sits beside it', () async {
     await build().mirror(note());
 

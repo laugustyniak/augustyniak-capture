@@ -601,7 +601,10 @@ links them, and reorders lists by modification time. So:
    the file fits a vault whose `type` is a closed list of note kinds; what was
    captured sits in `capture-type`. `related` is seeded with one map-of-content
    link so the note is never an orphan, and once you extend that list it is
-   yours. Anything your indexer appends below `capture-hash` — `pagerank`,
+   yours. `tags` is always present: a capture that enrichment left untagged
+   carries `tags: ["capture"]`, because your linter wants the key on every
+   note and a tag you add by hand in the vault would be gone on the next
+   rewrite. Anything your indexer appends below `capture-hash` — `pagerank`,
    `cluster`, `aliases` — comes back verbatim on the next update.
 
 Every mirror reports which of these applied, and a sweep over the queue counts
