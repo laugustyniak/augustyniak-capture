@@ -42,6 +42,11 @@ class _CommandSectionState extends State<CommandSection> {
   String? _checkError;
   bool _checking = false;
 
+  /// Why the last save was refused. Cleared on the next keystroke: reverting
+  /// the field to the stored value makes it clean, so no save would run to
+  /// clear it otherwise.
+  String? _saveError;
+
   String get _storedUrl => widget.controller.settings.commandBaseUrl ?? '';
 
   /// The stored value, sealed blob included. Showing the blob is right: it is
@@ -88,23 +93,37 @@ class _CommandSectionState extends State<CommandSection> {
   /// Both fields in one save: they are useless apart,
   /// and a pair written in two saves has a moment on disk where the token
   /// belongs to an address that is no longer there.
-  Future<void> _commit() async {
+  ///
+  /// A refused address stays in the field, marked UNSAVED, with the reason
+  /// under it: the stored pair is untouched (#299). Answers whether it saved.
+  Future<bool> _commit() async {
     final String url = _url.text.trim();
     final String token = _token.text.trim();
     setState(() {
-      _syncedUrl = url;
-      _syncedToken = token;
       // A changed address makes the previous answer a claim about somewhere
       // else, so it goes rather than sitting there looking current.
       _checked = null;
       _checkError = null;
+      _saveError = null;
     });
-    await widget.controller.setCommandConfig(baseUrl: url, token: token);
+    try {
+      await widget.controller.setCommandConfig(baseUrl: url, token: token);
+    } on InsecureCommandAddress catch (refused) {
+      if (!mounted) return false;
+      setState(() => _saveError = refused.toString());
+      return false;
+    }
+    if (!mounted) return false;
+    setState(() {
+      _syncedUrl = url;
+      _syncedToken = token;
+    });
+    return true;
   }
 
   Future<void> _check() async {
     if (_checking) return;
-    if (_urlDirty || _tokenDirty) await _commit();
+    if ((_urlDirty || _tokenDirty) && !await _commit()) return;
     setState(() {
       _checking = true;
       _checked = null;
@@ -160,6 +179,13 @@ class _CommandSectionState extends State<CommandSection> {
                     ),
                   ),
                   const SizedBox(width: 10),
+                  // A public http:// address stored before the save-time
+                  // guard existed: the client is disabled and this says why.
+                  if (SettingsController.commandAddressIsInsecure(_storedUrl))
+                    ...<Widget>[
+                      StatusPill(label: 'NO TLS', color: Console.red),
+                      const SizedBox(width: 10),
+                    ],
                   Text(
                     configured ? 'CONFIGURED' : 'OFF',
                     style: ConsoleText.micro.copyWith(
@@ -178,7 +204,7 @@ class _CommandSectionState extends State<CommandSection> {
                 fontSize: 12,
                 textInputAction: TextInputAction.next,
                 onSubmitted: (String _) => _commit(),
-                onChanged: (String _) => setState(() {}),
+                onChanged: (String _) => setState(() => _saveError = null),
                 hintText: 'https://fleet.example.com',
               ),
               const SizedBox(height: 12),
@@ -191,7 +217,7 @@ class _CommandSectionState extends State<CommandSection> {
                 fontSize: 12,
                 textInputAction: TextInputAction.done,
                 onSubmitted: (String _) => _commit(),
-                onChanged: (String _) => setState(() {}),
+                onChanged: (String _) => setState(() => _saveError = null),
                 hintText: 'stored encrypted, like every other token here',
               ),
               const SizedBox(height: 12),
@@ -227,6 +253,13 @@ class _CommandSectionState extends State<CommandSection> {
                 const SizedBox(height: 10),
                 Text(
                   _checkError!,
+                  style: ConsoleText.micro.copyWith(color: Console.red),
+                ),
+              ],
+              if (_saveError != null) ...<Widget>[
+                const SizedBox(height: 10),
+                Text(
+                  _saveError!,
                   style: ConsoleText.micro.copyWith(color: Console.red),
                 ),
               ],
