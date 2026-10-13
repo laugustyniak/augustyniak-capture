@@ -91,12 +91,24 @@ void main() {
   int recordingPushes(FakeSyncTransport transport) =>
       transport.pushes.where((p) => p.$1 == SyncTable.recordings).length;
 
+  /// `addTextNote` returns before the processing drain has run; the drain
+  /// rewrites the whole `recordings` table from the controller's list, so a
+  /// write that lands after `tearDown` reset `AppDatabase` seeds the next
+  /// test's database with this test's row (#320). Polled, never slept.
+  Future<void> settled(RecordingsController controller) async {
+    for (int i = 0; i < 500 && controller.isProcessing; i++) {
+      await Future<void>.delayed(const Duration(milliseconds: 10));
+    }
+    expect(controller.isProcessing, isFalse);
+  }
+
   test('a user edit while signed in pushes once after the debounce', () async {
     final FakeSyncTransport transport = FakeSyncTransport();
     final RecordingsController controller = build(transport, signedIn: true);
     addTearDown(controller.dispose);
     await controller.initialize();
     await controller.addTextNote('first body');
+    await settled(controller);
     final String id = controller.recordings.single.id;
 
     // Two edits inside one debounce window coalesce into a single run.
@@ -121,6 +133,7 @@ void main() {
     addTearDown(controller.dispose);
     await controller.initialize();
     await controller.addTextNote('first body');
+    await settled(controller);
     final String id = controller.recordings.single.id;
 
     await controller.setTitle(id, 'Edited title');
