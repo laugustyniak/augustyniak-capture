@@ -1,6 +1,7 @@
 import 'package:flutter/foundation.dart';
 import 'package:uuid/uuid.dart';
 
+import '../../../core/http/transport_guard.dart';
 import '../../costs/domain/model_price.dart';
 import '../../costs/domain/price_book.dart';
 import '../../costs/domain/usage_sink.dart';
@@ -23,6 +24,19 @@ import '../domain/audio_config.dart';
 import '../domain/provider_profile.dart';
 import '../domain/queue_density.dart';
 import '../domain/token_cipher.dart';
+
+/// [SettingsController.setCommandConfig] refused a plain `http://` address to
+/// a public host, where the fleet token would travel in the clear.
+class InsecureCommandAddress implements Exception {
+  const InsecureCommandAddress(this.baseUrl);
+
+  final String baseUrl;
+
+  @override
+  String toString() =>
+      'Not saved: $baseUrl would send the fleet token over plain HTTP to a '
+      'public host. Use https://, or a loopback or private-network address.';
+}
 
 /// Owns runtime settings: transcription provider profiles and capture
 /// parameters. Every mutation persists the whole `settings.json`, mirroring how
@@ -298,6 +312,11 @@ class SettingsController extends ChangeNotifier {
   /// — the same rule `ProviderProfile.toService` follows. Half-typed
   /// configuration is the normal state of a text field, and it must not be able
   /// to fail anything but the call that needs it.
+  ///
+  /// **A public `http://` address degrades to disabled as well.** [setCommandConfig]
+  /// refuses to store one, but a value written before that guard existed is
+  /// still on disk, and the fleet token opens a host that runs agents on the
+  /// user's repositories — it never goes out in the clear (#299).
   CommandClient get commandClient {
     final String raw = _settings.commandBaseUrl?.trim() ?? '';
     final String token = _settings.commandToken ?? '';
@@ -305,7 +324,12 @@ class SettingsController extends ChangeNotifier {
     if (_command != null && _commandSignature == signature) return _command!;
 
     final Uri? url = Uri.tryParse(raw);
-    _command = raw.isEmpty || url == null || !url.hasScheme || url.host.isEmpty
+    _command =
+        raw.isEmpty ||
+            url == null ||
+            !url.hasScheme ||
+            url.host.isEmpty ||
+            transportIsInsecure(url)
         ? const DisabledCommandClient()
         : HttpCommandClient(
             baseUrl: url,
@@ -509,12 +533,31 @@ class SettingsController extends ChangeNotifier {
   Future<void> resetEnrichmentInstructions() =>
       _persist(_settings.copyWith(resetEnrichmentInstructions: true));
 
+  /// Whether [commandClient] would refuse [baseUrl]: plain `http://` to a host
+  /// that is not loopback or RFC 1918. The Command section asks before it
+  /// saves; [setCommandConfig] throws on the same answer.
+  static bool commandAddressIsInsecure(String baseUrl) {
+    final Uri? url = Uri.tryParse(baseUrl.trim());
+    return url != null && transportIsInsecure(url);
+  }
+
   /// The control plane's address and fleet token.
   ///
   /// One setter for both: they are useless apart, and a pair written in two
   /// saves has a moment on disk where the token belongs to an address that is
   /// no longer there.
+  ///
+  /// **A public `http://` address is refused, not reported.** A provider
+  /// profile gets a `NO TLS` pill because `http://localhost` model servers are
+  /// shipped presets; the fleet token is a different kind of secret — it opens
+  /// a host that can run agents on the user's repositories — and nothing on a
+  /// public host answers over plain HTTP on purpose. Loopback and private IPv4
+  /// stay allowed, exactly as for providers. Throws [InsecureCommandAddress]
+  /// before anything is written, so the stored pair is untouched.
   Future<void> setCommandConfig({String? baseUrl, String? token}) async {
+    if (baseUrl != null && commandAddressIsInsecure(baseUrl)) {
+      throw InsecureCommandAddress(baseUrl.trim());
+    }
     await _persist(
       _settings.copyWith(
         commandBaseUrl: baseUrl,
