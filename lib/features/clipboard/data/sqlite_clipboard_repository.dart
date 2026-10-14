@@ -164,6 +164,32 @@ class SqliteClipboardRepository implements ClipboardRepository {
     }
   }
 
+  @override
+  Future<int> pruneOlderThan(DateTime cutoff) async {
+    final AppDatabase db = _appDatabase ?? await AppDatabase.getInstance();
+    final int cutoffMs = cutoff.millisecondsSinceEpoch;
+    final ResultSet expired = db.rawDb.select(
+      '''
+      SELECT image_path FROM clipboard_items
+      WHERE copied_at < ? AND image_path IS NOT NULL;
+    ''',
+      <Object?>[cutoffMs],
+    );
+
+    db.rawDb.execute(
+      'DELETE FROM clipboard_items WHERE copied_at < ?;',
+      <Object?>[cutoffMs],
+    );
+    final int removed = db.rawDb.updatedRows;
+
+    // Files after the row, see `_trimToMax`.
+    for (final Row row in expired) {
+      await _deleteImage(row['image_path'] as String?);
+    }
+    if (removed > 0) await getItems();
+    return removed;
+  }
+
   /// Best-effort: a PNG that cannot be removed costs disk space, never the
   /// history operation that was asked for.
   Future<void> _deleteImage(String? path) async {

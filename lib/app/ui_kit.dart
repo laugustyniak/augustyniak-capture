@@ -1267,11 +1267,13 @@ class ConsoleField extends StatelessWidget {
     this.prefixIcon,
     this.suffixIcon,
     this.obscureText = false,
+    this.keyboardType,
   });
 
   final TextEditingController controller;
   final FocusNode? focusNode;
   final String? hintText;
+  final TextInputType? keyboardType;
   final int? maxLines;
   final int? minLines;
   final bool autofocus;
@@ -1300,6 +1302,7 @@ class ConsoleField extends StatelessWidget {
       controller: controller,
       focusNode: focusNode,
       autofocus: autofocus,
+      keyboardType: keyboardType,
       obscureText: obscureText,
       enableSuggestions: !obscureText,
       autocorrect: !obscureText,

@@ -22,6 +22,22 @@ static void clipboard_method_cb(FlMethodChannel* channel, FlMethodCall* call,
   const gchar* method = fl_method_call_get_name(call);
   g_autofree gchar* path = nullptr;
 
+  if (g_strcmp0(method, "isClipboardSensitive") == 0) {
+    // No freedesktop standard marks a clipboard entry secret. The one hint in
+    // use is KDE's `x-kde-passwordManagerHint` target, which KeePassXC,
+    // Bitwarden and Klipper itself honour; GNOME has nothing, so a copy from
+    // a source that does not set it is observed as before (#302). Checking
+    // for the target is one round trip to the selection owner, the same cost
+    // `gtk_clipboard_wait_for_uris` already pays.
+    gboolean sensitive = gtk_clipboard_wait_is_target_available(
+        clipboard, gdk_atom_intern_static_string("x-kde-passwordManagerHint"));
+    g_autoptr(FlValue) flag = fl_value_new_bool(sensitive);
+    g_autoptr(FlMethodResponse) response =
+        FL_METHOD_RESPONSE(fl_method_success_response_new(flag));
+    fl_method_call_respond(call, response, nullptr);
+    return;
+  }
+
   if (g_strcmp0(method, "getPasteFile") == 0) {
     g_auto(GStrv) uris = gtk_clipboard_wait_for_uris(clipboard);
     if (uris != nullptr) {

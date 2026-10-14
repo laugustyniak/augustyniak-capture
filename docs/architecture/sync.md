@@ -257,6 +257,23 @@ is nothing to go stale — whichever write's `_persistAll` runs second
 persists the union of both. `test/sync/applied_recordings_concurrency_test.dart`
 proves it against a deliberately slowed `saveAll`.
 
+### Clipboard: opt-in (#302)
+
+`clipboard_items` rides a run only when `AppSettings.syncClipboard` is on
+(`SyncEngine(syncClipboard:)`, read per run from the controller's
+resolver, off by default). The clipboard holds whatever was last copied,
+and a source that did not mark its copy sensitive — see
+`docs/architecture/clipboard.md` — is persisted in the clear, so the rows
+that would ride are the ones most likely to be a password; and E2EE is
+per-account opt-in, so "synced" and "sealed" are not the same fact. Off
+means the table is neither pushed, swept nor pulled, and neither its
+bookkeeping nor its cursor is touched, so turning it on later resumes from
+where it stopped rather than re-sending the history. Turning it off does
+**not** tombstone the rows pushed while it was on: a tombstone is applied
+by every other device as a local delete, and the user asked to stop
+syncing, not to lose the history everywhere. The `sync_state` row for
+`clipboard_items` is simply not written while it is off.
+
 ### Clipboard: a known gap, accepted for this slice
 
 `ClipboardRepository` has no collection-update method, so

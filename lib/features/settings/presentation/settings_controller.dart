@@ -696,6 +696,12 @@ class SettingsController extends ChangeNotifier {
   String? get vaultPath => _settings.vaultPath;
   String get vaultFolder => _settings.vaultFolder;
   bool get vaultCopySources => _settings.vaultCopySources;
+  int get clipboardRetentionDays => _settings.clipboardRetentionDays;
+
+  /// The window the clipboard watcher prunes to, or null to keep everything.
+  Duration? get clipboardRetention =>
+      clipboardRetentionDays == 0 ? null : Duration(days: clipboardRetentionDays);
+  bool get syncClipboard => _settings.syncClipboard;
   bool get mirrorsToVault => _settings.mirrorsToVault;
 
   /// Point the mirror at a directory, or clear it with a blank value.
@@ -729,6 +735,17 @@ class SettingsController extends ChangeNotifier {
   Future<void> setVaultCopySources(bool value) async {
     if (value == _settings.vaultCopySources) return;
     await _persist(_settings.copyWith(vaultCopySources: value));
+  }
+
+  Future<void> setClipboardRetentionDays(int value) async {
+    final int days = value.clamp(0, AppSettings.maxClipboardRetentionDays);
+    if (days == _settings.clipboardRetentionDays) return;
+    await _persist(_settings.copyWith(clipboardRetentionDays: days));
+  }
+
+  Future<void> setSyncClipboard(bool value) async {
+    if (value == _settings.syncClipboard) return;
+    await _persist(_settings.copyWith(syncClipboard: value));
   }
 
   /// How long a focus session runs, and what plays when it ends.

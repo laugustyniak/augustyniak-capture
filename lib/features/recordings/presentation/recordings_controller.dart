@@ -127,6 +127,7 @@ class RecordingsController extends ChangeNotifier {
     ClipboardRepository? clipboardRepository,
     String? Function()? appVersion,
     Future<String?> Function()? syncDeviceId,
+    bool Function()? syncClipboard,
     // `RepositorySyncApplier`'s only way to touch the live `ProjectsController`
     // — the same reason `deleteRecording` below is a bound callback rather
     // than a repository: a second writer against `ProjectsRepository`
@@ -153,6 +154,7 @@ class RecordingsController extends ChangeNotifier {
        _clipboardRepository = clipboardRepository,
        _appVersion = appVersion,
        _syncDeviceId = syncDeviceId,
+       _syncClipboard = syncClipboard,
        _applySyncedProjects = applySyncedProjects,
        _applySyncedProjectDelete = applySyncedProjectDelete,
        _mediaStoreResolver = mediaStoreResolver,
@@ -239,6 +241,7 @@ class RecordingsController extends ChangeNotifier {
   final ClipboardRepository? _clipboardRepository;
   final String? Function()? _appVersion;
   final Future<String?> Function()? _syncDeviceId;
+  final bool Function()? _syncClipboard;
   final Future<void> Function(List<Project> upserts)? _applySyncedProjects;
   final Future<void> Function(String id)? _applySyncedProjectDelete;
   final MediaObjectStore Function(String ownerId)? _mediaStoreResolver;
@@ -1381,6 +1384,7 @@ class RecordingsController extends ChangeNotifier {
                   deleteRecording: deleteRecording,
                   recordingExists: _hasRecording,
                 ),
+                syncClipboard: _syncClipboard?.call() ?? false,
               ).run(snapshot);
             }
           : null,

@@ -161,6 +161,15 @@ class ConfigTab extends StatefulWidget {
 
 class _ConfigTabState extends State<ConfigTab> {
   late ConfigCategory _selectedCategory = widget.initialCategory;
+  late final TextEditingController _clipboardRetention = TextEditingController(
+    text: '${widget.controller.clipboardRetentionDays}',
+  );
+
+  @override
+  void dispose() {
+    _clipboardRetention.dispose();
+    super.dispose();
+  }
 
   @override
   void didUpdateWidget(ConfigTab oldWidget) {
@@ -377,14 +386,74 @@ class _ConfigTabState extends State<ConfigTab> {
               value: 'Ready for iOS & Android',
               valueColor: Console.accent,
             ),
-            InfoRow(
-              label: 'CLIPBOARD SYNC',
-              value: 'Multi-Clipboard Active',
+            // Same padding and label column as `InfoRow`, with a switch
+            // where the value would be.
+            Padding(
+              padding: const EdgeInsets.symmetric(vertical: 5),
+              child: Row(
+                children: <Widget>[
+                  SizedBox(
+                    width: 110,
+                    child: Text(
+                      'CLIPBOARD SYNC',
+                      style: ConsoleText.micro.copyWith(
+                        fontSize: 9.5,
+                        fontWeight: FontWeight.w600,
+                        letterSpacing: .6,
+                      ),
+                    ),
+                  ),
+                  const Spacer(),
+                  Switch(
+                    key: const ValueKey<String>('sync-clipboard'),
+                    value: widget.controller.syncClipboard,
+                    onChanged: (bool value) async {
+                      await widget.controller.setSyncClipboard(value);
+                      if (mounted) setState(() {});
+                    },
+                  ),
+                ],
+              ),
+            ),
+            Text(
+              'Off by default: the clipboard holds whatever was last copied.',
+              style: TextStyle(
+                color: Console.mutedSoft,
+                fontSize: 10,
+                height: 1.45,
+              ),
             ),
             InfoRow(
               label: 'CLIPBOARD CAPACITY',
               value: '100,000 items (100k)',
               monospace: true,
+            ),
+            const SizedBox(height: 8),
+            Text('CLIPBOARD RETENTION', style: ConsoleText.fieldLabel),
+            const SizedBox(height: 6),
+            ConsoleField(
+              key: const ValueKey<String>('clipboard-retention'),
+              controller: _clipboardRetention,
+              monospace: true,
+              fontSize: 12,
+              keyboardType: TextInputType.number,
+              textInputAction: TextInputAction.done,
+              onSubmitted: (String value) async {
+                await widget.controller.setClipboardRetentionDays(
+                  int.tryParse(value.trim()) ?? 30,
+                );
+                _clipboardRetention.text =
+                    '${widget.controller.clipboardRetentionDays}';
+              },
+            ),
+            const SizedBox(height: 6),
+            Text(
+              'days, 0 keeps everything',
+              style: TextStyle(
+                color: Console.mutedSoft,
+                fontSize: 10,
+                height: 1.45,
+              ),
             ),
             const SizedBox(height: 8),
             Text(
