@@ -228,7 +228,9 @@ never had removes nothing). More than `SyncEngine.defaultTombstoneHoldThreshold`
 absolute on purpose: a fraction of the library would let a large library lose
 dozens of captures without a prompt. `SupabaseSyncResult.tombstonesHeld` counts
 the held ones (they are still in `tombstonesApplied`) and the report says
-"N held in trash". The count is per batch, i.e. per pulled page. **Every `delete*` on
+"N held in trash". A batch is every page of one run's recordings pull — `_pullAll`
+gathers the pages before applying — so splitting a bulk delete across pages does not
+slip under the cap; conflict rows returned by the push are a separate, smaller batch. **Every `delete*` on
 `SyncApplier` tolerates an id it has never heard of** — a tombstone for a
 row this device never had is a no-op, never a throw.
 
