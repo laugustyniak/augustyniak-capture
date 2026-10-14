@@ -198,6 +198,21 @@ that reason.
 
 Global shortcuts on **Linux** additionally need `sudo apt-get install keybinder-3.0` (`hotkey_manager`'s system dependency). Without it the registrar fails at runtime and the shortcuts degrade to unavailable — everything else still works.
 
+## Android Auto
+
+The car app (`android/app/src/main/kotlin/ai/augustyniak/capture/car/`, plan in `docs/plans/2026-10-14-in-car-audio-capture.md`) is a Car App Library screen with REC and STOP. It needs `androidx.car.app:app` and `androidx.car.app:app-projected`, a service in the manifest with the `androidx.car.app.category.IOT` category, `androidx.car.app.minCarApiLevel` 5 and `res/xml/automotive_app_desc.xml` with `<uses name="template" />`. `test/android_car_manifest_test.dart` pins those, because a missing one still builds and the app simply never appears on the car display. The merged `minSdk` stays at the Flutter default; the library itself needs 21.
+
+**Release build.** `flutter build appbundle` produces `build/app/outputs/bundle/release/app-release.aab`, signed with the `release` signing config when `android/key.properties` exists and with the debug key otherwise (see the signing paragraph above). Play rejects a debug-signed upload, and an upload key that is not the one on file cannot be fixed afterwards, so verify the signer before uploading.
+
+**Distribution is Google Play only.** The Android Auto "Unknown sources" developer setting does not apply to apps built with the Car App Library. A build installed with adb or `/deploy` is not from a trusted source, and Android Auto hides the app until it is reinstalled from Play. The trap to remember: the app works on the phone and simply does not show up in the car.
+
+1. Create the app in the Play Console under `ai.augustyniak.capture` and open an Internal testing track. Add the tester accounts and install from the opt-in link. An Internal test track skips Play review; Internal App Sharing also works for a single build.
+2. Enrol in Play App Signing and upload the **existing release key** rather than letting Play generate one. Play-signed builds and `/deploy` builds then carry the same signature, so one can update the other in place. With two different signatures every switch needs an uninstall, and an uninstall deletes the recordings in the app container. Take a backup first (`docs/architecture/backup.md`) whenever a reinstall is unavoidable.
+3. Each upload needs a higher `versionCode` than the last; it comes from `pubspec.yaml` (`version: x.y.z+N`).
+4. Whether the IOT category is accepted on the internal track is unconfirmed until the first upload.
+
+**Desktop Head Unit (development only).** The DHU, installed from the SDK Manager under Android Auto Desktop Head Unit Emulator, lets a debug build be tried without a car: enable developer mode in Android Auto on the phone, start its head unit server, run `adb forward tcp:5277 tcp:5277`, then start `desktop-head-unit`. A debug build accepts any host (`CaptureCarAppService.createHostValidator`), so the "from Play" rule does not apply to it. It is not a substitute for the Play install: a release build only runs on a real head unit or the DHU once it comes from Play.
+
 ## Supabase OAuth callback
 
 Native Google login returns to
