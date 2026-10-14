@@ -101,7 +101,7 @@ jobs:
 
       - name: Fetch a speech model
         run: |
-          curl -sfL --retry 3 -o build/model.bin \
+          curl -sSfL --retry 3 -o build/model.bin \
             https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-tiny-q5_1.bin
           echo "818710568da3ca15689e31a743197b520007872ff9576237bda97bd1b469c3d7  build/model.bin" \
             | shasum -a 256 -c -
@@ -163,7 +163,7 @@ jobs:
         shell: bash
         run: |
           mkdir -p build/engine
-          curl -sfL --retry 3 -o build/engine/model.bin \
+          curl -sSfL --retry 3 -o build/engine/model.bin \
             https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-tiny-q5_1.bin
           echo "818710568da3ca15689e31a743197b520007872ff9576237bda97bd1b469c3d7  build/engine/model.bin" \
             | sha256sum -c -

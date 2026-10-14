@@ -144,6 +144,25 @@ void main() {
       expect(installed.verified, isFalse);
     });
 
+    test('a refused download takes an older marker with it', () async {
+      // The model file was removed behind the store's back and the marker
+      // stayed. A download that fails must not leave that marker for a file
+      // copied in by hand to inherit.
+      final WhisperModelStore store = storeWith(
+        _FakeHttp(body: payload, declaredLength: payload.length),
+      );
+      final String path = await store.plannedPath('test-model');
+      final File marker = File('$path${WhisperModelStore.verifiedSuffix}')
+        ..createSync(recursive: true)
+        ..writeAsStringSync(payloadHash);
+
+      await expectLater(
+        store.download(_model(sha256Pin: 'd' * 64)),
+        throwsA(isA<ModelDownloadException>()),
+      );
+      expect(marker.existsSync(), isFalse);
+    });
+
     test('an unpinned model leaves no marker', () async {
       final WhisperModelStore store = storeWith(
         _FakeHttp(body: payload, declaredLength: payload.length),
@@ -387,9 +406,9 @@ void main() {
 
     test('every CI fetch of the model checks against the catalog pin', () {
       // `.github/workflows/ci.yml` downloads `tiny-q5_1` for the native gates
-      // (macOS with `shasum`, Windows with `sha256sum`). Each fetch has to be
-      // followed by a checksum line carrying the catalog value, and nothing
-      // but this test ties the workflow to the catalog.
+      // (macOS with `shasum`, Windows with `sha256sum`). The workflow has to
+      // carry as many checksum lines with the catalog value as it has
+      // fetches, and nothing but this test ties the two together.
       final String workflow = File(
         '.github/workflows/ci.yml',
       ).readAsStringSync();
@@ -398,7 +417,7 @@ void main() {
         r'resolve/main/ggml-tiny-q5_1\.bin',
       ).allMatches(workflow).length;
       final int checks = RegExp(
-        '"${tiny.sha256}  [^"]+" \\\\\n\\s*\\| (shasum -a 256|sha256sum) -c -',
+        '"${tiny.sha256}  [^"]+" \\\\\r?\n\\s*\\| (shasum -a 256|sha256sum) -c -',
       ).allMatches(workflow).length;
       expect(fetches, greaterThan(0));
       expect(checks, fetches);

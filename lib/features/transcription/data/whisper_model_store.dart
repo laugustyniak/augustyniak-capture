@@ -196,6 +196,11 @@ class WhisperModelStore {
 
     final File partial = File('$path$partialSuffix');
     if (await partial.exists()) await partial.delete();
+    // A marker left by an earlier install goes before anything is fetched, so
+    // a refused download, or a crash anywhere in here, leaves a model that
+    // reports unverified — never one wearing a verdict an older file earned.
+    final File marker = File('$path$verifiedSuffix');
+    if (await marker.exists()) await marker.delete();
 
     final http.StreamedResponse response = await _client.send(
       http.Request('GET', model.url),
@@ -279,17 +284,13 @@ class WhisperModelStore {
     }
 
     await partial.rename(path);
-    // The marker follows the rename, so a crash between the two leaves an
-    // installed model that reports unverified — never the reverse.
     bool marked = false;
     if (pinned != null) {
       try {
-        await File(
-          '$path$verifiedSuffix',
-        ).writeAsString(collector.value.toString(), flush: true);
+        await marker.writeAsString(collector.value.toString(), flush: true);
         marked = true;
       } on IOException {
-        marked = false;
+        // Installed, and honestly unverified until fetched again.
       }
     }
     return InstalledModel(
