@@ -218,4 +218,84 @@ void main() {
     expect(n, 1);
     expect(seen, <String>[idA, idB].sublist(0, 1) + <String>[]);
   });
+
+  group('audio (.m4a)', () {
+    InboxDrainer audioDrainer(
+      Future<bool> Function(String, File)? ingestAudio,
+    ) => InboxDrainer(
+      inbox: inbox,
+      ingest: (_, _) async => true,
+      ingestAudio: ingestAudio,
+      logSink: logs,
+    );
+
+    test('m4a is ingested and deleted on true', () async {
+      final File f = put('$idA.m4a', 'audio-bytes');
+      final int n = await audioDrainer((String id, File file) async {
+        seen.add('$id|${file.path}');
+        return true;
+      }).drain();
+      expect(n, 1);
+      expect(seen, <String>['$idA|${f.path}']);
+      expect(f.existsSync(), isFalse);
+    });
+
+    test('m4a is kept on false', () async {
+      final File f = put('$idA.m4a', 'audio-bytes');
+      final int n = await audioDrainer((_, _) async => false).drain();
+      expect(n, 0);
+      expect(f.existsSync(), isTrue);
+    });
+
+    test('m4a with a non-uuid name is skipped', () async {
+      final File f = put('notes.m4a', 'audio-bytes');
+      final int n = await audioDrainer((String id, File file) async {
+        seen.add(id);
+        return true;
+      }).drain();
+      expect(n, 0);
+      expect(seen, isEmpty);
+      expect(f.existsSync(), isTrue);
+    });
+
+    test('m4a is ignored when ingestAudio is null', () async {
+      final File f = put('$idA.m4a', 'audio-bytes');
+      final int n = await audioDrainer(null).drain();
+      expect(n, 0);
+      expect(f.existsSync(), isTrue);
+    });
+
+    test('m4a ingest throwing keeps the file and continues', () async {
+      final File bad = put('$idA.m4a', 'x', ageSeconds: 100);
+      final File good = put('$idB.m4a', 'y', ageSeconds: 10);
+      final int n = await audioDrainer((String id, File file) async {
+        if (id == idA) throw StateError('boom');
+        return true;
+      }).drain();
+      expect(n, 1);
+      expect(bad.existsSync(), isTrue);
+      expect(good.existsSync(), isFalse);
+    });
+
+    test('an empty m4a is not treated as an empty note', () async {
+      final File f = put('$idA.m4a', '');
+      await audioDrainer((_, _) async => false).drain();
+      expect(f.existsSync(), isTrue);
+    });
+  });
+
+  test(
+    'a stale m4a.tmp is kept and logged, a stale txt.tmp is swept',
+    () async {
+      final File car = put('$idA.m4a.tmp', 'partial', ageSeconds: 7200);
+      final File txt = put('$idB.txt.tmp', 'partial', ageSeconds: 7200);
+      await drainer((_, _) async => true).drain();
+      expect(car.existsSync(), isTrue);
+      expect(txt.existsSync(), isFalse);
+      expect(
+        logs.messages.where((String m) => m.contains('m4a.tmp')),
+        hasLength(1),
+      );
+    },
+  );
 }
