@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Pre-API-31 auto-backup rules (android:fullBackupContent). Nothing is eligible:
+  the SQLite database holds sealed provider tokens (plaintext ones when the
+  keyring is down), the files hold the recordings, and sharedpref holds the
+  secure-storage fallback. See docs/platform-setup.md (#300).
+-->
+<full-backup-content>
+    <exclude domain="root" />
+    <exclude domain="file" />
+    <exclude domain="database" />
+    <exclude domain="sharedpref" />
+    <exclude domain="external" />
+</full-backup-content>
