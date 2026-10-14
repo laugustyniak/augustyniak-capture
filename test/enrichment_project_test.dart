@@ -354,6 +354,7 @@ void main() {
         _Repo(dir),
         enrichment: _Enrichment(const EnrichmentResult(projectId: 'a')),
       )..activeProjectId = 'a';
+      await c.initialize();
       await c.addTextNote('x');
       await c.waitForProcessing();
       expect(c.recordings.single.projectAuto, isTrue);
@@ -365,6 +366,7 @@ void main() {
         _Repo(dir),
         enrichment: _Enrichment(const EnrichmentResult()),
       );
+      await c.initialize();
       await c.addTextNote('x');
       await c.waitForProcessing();
       expect(c.recordings.single.projectAuto, isFalse);
@@ -377,6 +379,7 @@ void main() {
         enrichment: _Enrichment(const EnrichmentResult(projectId: 'b')),
         source: source,
       )..activeProjectId = 'a';
+      await c.initialize();
       await c.addTextNote('x');
       await c.waitForProcessing();
       final Recording item = c.recordings.single;
@@ -394,6 +397,7 @@ void main() {
             EnrichmentResult(projectId: answer, projectAnswered: true),
           ),
         )..activeProjectId = 'a';
+        await c.initialize();
         await c.addTextNote('x');
         await c.waitForProcessing();
         expect(c.recordings.first.projectId, isNull, reason: '$answer');
@@ -407,6 +411,7 @@ void main() {
         enrichment: _Enrichment(const EnrichmentResult()),
         source: _Source(EnrichmentContext.none),
       )..activeProjectId = 'a';
+      await c.initialize();
       await c.addTextNote('x');
       await c.waitForProcessing();
       expect(c.recordings.single.projectId, 'a');
@@ -421,6 +426,7 @@ void main() {
           enrichment: _Enrichment(const EnrichmentResult(projectId: 'b')),
           source: source,
         )..activeProjectId = 'a';
+        await c.initialize();
         await c.addTextNote('x');
         await c.waitForProcessing();
         final String id = c.recordings.single.id;
@@ -496,6 +502,7 @@ void main() {
         ..activeProjectId = 'a';
       // Gate only the request under test, not the capture's own first pass.
       enrichment.gate = Completer<void>();
+      await c.initialize();
       await c.addTextNote('x');
       await enrichment.started.future;
       final String id = c.recordings.single.id;
@@ -518,6 +525,7 @@ void main() {
         enrichment: _Enrichment(const EnrichmentResult(projectId: 'b')),
         source: _Source(EnrichmentContext.none),
       )..activeProjectId = 'a';
+      await c.initialize();
       await c.addTextNote('x');
       await c.waitForProcessing();
       expect(c.recordings.single.projectId, 'a');
@@ -531,6 +539,7 @@ void main() {
           const EnrichmentContext(projects: <EnrichmentProjectOption>[_alpha]),
         ),
       )..activeProjectId = 'a';
+      await c.initialize();
       await c.addTextNote('x');
       await c.waitForProcessing();
       // 'b' exists but was never offered, so it is not accepted; the list was
@@ -554,6 +563,7 @@ void main() {
         enrichment: enrichment,
         source: _Source(many),
       )..activeProjectId = 'a';
+      await c.initialize();
       await c.addTextNote('x');
       await c.waitForProcessing();
       final List<String> ids = enrichment.lastContext!
@@ -571,6 +581,7 @@ void main() {
       );
       final RecordingsController c = build(_Repo(dir), enrichment: enrichment)
         ..activeProjectId = 'a';
+      await c.initialize();
       await c.addTextNote('x');
       await c.waitForProcessing();
       final String id = c.recordings.single.id;
@@ -610,6 +621,7 @@ void main() {
         _Repo(dir),
         enrichment: _Enrichment(const EnrichmentResult()),
       )..activeProjectId = 'a';
+      await c.initialize();
       await c.addTextNote('x');
       await c.waitForProcessing();
       expect(c.recordings.single.projectId, 'a');
@@ -639,6 +651,7 @@ void main() {
           }),
         )..activeProjectId = 'a';
         addTearDown(c.dispose);
+        await c.initialize();
         await c.addTextNote('x');
         await c.waitForProcessing();
         await c.waitForConnectionAnalysis();
