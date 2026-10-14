@@ -257,8 +257,11 @@ class _ProjectCapturesSheetState extends State<ProjectCapturesSheet> {
                                         .canRoute(recording),
                                     onRoute: () => widget.recordingsController
                                         .route(recording.id),
-                                    canHandoff: widget.recordingsController
-                                        .canHandoff(recording),
+                                    canHandoff:
+                                        widget.recordingsController
+                                            .canHandoff(recording) ||
+                                        widget.recordingsController
+                                            .canSend(recording),
                                     onHandoff: () => showHandoffSheet(
                                       context,
                                       controller: widget.recordingsController,

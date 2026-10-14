@@ -102,6 +102,15 @@ abstract interface class AgentHandoff {
   /// capture lands in the same file rather than scattering briefs.
   String taskPathFor(String captureId);
 
+  /// The scratch folder [handoff] will run in for a capture that has no
+  /// repository of its own, or null when the capture uses a project's
+  /// repository (or cannot be handed off at all).
+  ///
+  /// Synchronous and deterministic for the same reason as [taskPathFor]: the
+  /// sheet shows where the session will run before anything is created, and the
+  /// artifact scan reads results from the same place.
+  String? workspacePathFor(String captureId, String? projectId);
+
   /// The default opening prompt: **the capture's own text**, so the agent
   /// starts on the task itself rather than on an errand to go and read it.
   ///
@@ -138,12 +147,35 @@ class DisabledAgentHandoff implements AgentHandoff {
   String taskPathFor(String captureId) => '';
 
   @override
+  String? workspacePathFor(String captureId, String? projectId) => null;
+
+  @override
   String promptFor(RoutedCapture capture) => '';
 
   @override
   Future<AgentHandoffResult> handoff(AgentHandoffRequest request) async {
     throw const AgentHandoffUnavailableException();
   }
+}
+
+/// Whether [id] can be used as a single path segment.
+///
+/// Capture ids arrive from sync and from backup import, which check only that
+/// they are strings, and a handoff turns one into a directory name and a file
+/// name. `..`, a separator or an absolute path would make that a write outside
+/// the folder it was meant for.
+bool isSafeCaptureId(String id) => _safeCaptureId.hasMatch(id);
+
+final RegExp _safeCaptureId = RegExp(r'^[A-Za-z0-9_-]{1,64}$');
+
+/// A handoff was refused because the capture's id is not a safe path segment.
+class UnsafeCaptureIdException implements Exception {
+  const UnsafeCaptureIdException();
+
+  @override
+  String toString() =>
+      'This capture has an id that cannot be used as a file name, so it '
+      'cannot be handed to an agent.';
 }
 
 class AgentHandoffUnavailableException implements Exception {

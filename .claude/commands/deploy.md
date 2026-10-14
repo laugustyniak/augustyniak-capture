@@ -28,6 +28,8 @@ Rules that are not negotiable:
   replacing the build is really intended.
 - **Never kill the running desktop app.** The Linux install replaces the bundle
   under it, so tell the user to restart the app to pick the new build up.
+- The desktop deploy also installs the MCP server (`~/.local/bin/augustyniak-capture-mcp`).
+  A failed MCP build is a WARNING line, not a failed deploy; report it as such.
 - Never pass a token or key on the command line. Each host reads its own
   `~/.config/augustyniak-capture/deploy.defines.json`.
 - A SKIP is not a failure. A Mac that is asleep or a phone that is not

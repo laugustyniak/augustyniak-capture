@@ -197,23 +197,31 @@ no `repoPath`, still not Command-bound) resolves to a **scratch workspace**
 
 - created on first send, never deleted by the app (an agent may have written
   results into it; the same reason `.agent-tasks/` is append-only);
-- the brief is written there as `brief.md` with `renderCaptureBrief`;
+- the brief is written there as `.agent-tasks/<capture-id>.md` with
+  `renderCaptureBrief` (**changed from `brief.md`:** the scratch folder behaves
+  like a repository root, so `taskPathFor`, the append-only write and the
+  artifact scanner need no second format);
 - the Zellij session name is derived from the capture id instead of the
   project name, so two projectless captures do not attach to each other.
 
-`AgentArtifactScanner` learns the scratch directory as a third root so whatever
-the agent writes there shows up on the card like a `.agent-tasks` result.
+The scanner treats the scratch directory as the capture's repository root
+(`refreshArtifacts` builds a stand-in `Project` from
+`AgentHandoff.workspacePathFor`) so whatever the agent writes there shows up on
+the card like a `.agent-tasks` result.
 
 ### Gemini CLI
 
-`AgentKind.gemini` and `ProjectAgent.gemini('gemini')`, with
+`AgentKind.geminiCli` (persisted as `geminiCli`) and
+`ProjectAgent.gemini('gemini')`, with
 `promptArguments` → `['-i', safe]` (interactive with an opening prompt) and
 `skipPermissionsArguments` → `['--yolo']`. Both spellings were verified
 against `gemini --help` of `@google/gemini-cli` 0.62.0 during the spike:
 `-i, --prompt-interactive` "Execute the provided prompt and continue in
-interactive mode", `-y, --yolo` "Automatically accept all actions". An older build reading a project whose `defaultAgent` is
-`gemini` gets null from `AgentKind.fromName`, which already degrades to no
-default.
+interactive mode", `-y, --yolo` "Automatically accept all actions". The enum value is **not** named `gemini`: that
+spelling is already on disk and `AgentKind.fromName('gemini')` maps it to
+`antigravity` for legacy rows, so reusing it would silently turn those rows
+into a different program. An older build reading `geminiCli` gets null from
+`fromName`, which already degrades to no default.
 
 ### Windows terminal
 
@@ -283,7 +291,7 @@ Tests:
 ### Slice 2 — terminal session without a project, Gemini CLI
 
 - Scratch workspace resolution, session name from capture id, scanner root.
-- `AgentKind.gemini`, `ProjectAgent.gemini`, verified flag spellings.
+- `AgentKind.geminiCli`, `ProjectAgent.gemini`, verified flag spellings.
 
 Tests: `_resolve` answers the scratch workspace for no project and for an
 empty `repoPath`, and still answers nothing for a Command-bound project; two

@@ -8,6 +8,7 @@ import '../../clipboard/domain/clipboard_item.dart';
 import '../../projects/domain/project.dart';
 import '../../recordings/domain/recording.dart';
 import '../../recordings/domain/recording_revision.dart';
+import 'e2ee_cipher.dart';
 import 'sync_table.dart';
 
 /// Canonical server-row shape for each synced type, and the hash the engine
@@ -59,6 +60,18 @@ class SyncRowCodec {
   static String rowId(SyncTable table, Map<String, Object?> row) =>
       table.keyColumns.map((String c) => '${row[c]}').join('/');
 
+  /// A row that still carries an E2EE envelope when it reaches the codec was
+  /// never opened — no cipher in the pipeline, or one that could not open
+  /// it. Its content columns are the nulls the server stores, not the
+  /// capture's content, so decoding it would apply a blank. Every
+  /// `*FromRow` refuses such a row instead, which the engine counts as a
+  /// skip and holds the cursor for. `EncryptedSyncTransport` removes the
+  /// envelope from a row it opened.
+  static bool _stillSealed(Map<String, Object?> row) {
+    final Object? envelope = row['encrypted_payload'];
+    return envelope is String && E2eeCipher.isSealed(envelope);
+  }
+
   // ---- recordings ---------------------------------------------------------
 
   static Map<String, Object?> recording(Recording r) {
@@ -89,6 +102,19 @@ class SyncRowCodec {
         'priorityReason': json['priorityReason'],
       if (json.containsKey('priorityBasis'))
         'priorityBasis': json['priorityBasis'],
+      // `project_id` is a column, but who chose it is not: without this a
+      // second device would read a model's stamp as the user's own pick.
+      if (json.containsKey('projectAuto'))
+        'projectAuto': json['projectAuto'],
+      // Derived like the rank, and its ownership (a dismissal) must follow it.
+      if (json.containsKey('suggestedRoute'))
+        'suggestedRoute': json['suggestedRoute'],
+      // A proposal rides `payload` like the rank: it is derived, but accepting
+      // it on another device is the point of syncing it. It is never put in
+      // the `transcript` column.
+      if (json.containsKey('cleanup')) 'cleanup': json['cleanup'],
+      if (json.containsKey('instruction'))
+        'instruction': json['instruction'],
     };
     return <String, Object?>{
       'id': r.id,
@@ -132,6 +158,7 @@ class SyncRowCodec {
     Map<String, Object?> row, {
     Recording? local,
   }) {
+    if (_stillSealed(row)) return null;
     final Object? id = row['id'];
     final DateTime? createdAt = _date(row['created_at']);
     if (id is! String || createdAt == null) return null;
@@ -174,6 +201,10 @@ class SyncRowCodec {
       'priority': payload['priority'],
       'priorityReason': payload['priorityReason'],
       'priorityBasis': payload['priorityBasis'],
+      'projectAuto': payload['projectAuto'],
+      'suggestedRoute': payload['suggestedRoute'],
+      'cleanup': payload['cleanup'],
+      'instruction': payload['instruction'],
       'routes': payload['routes'] ?? <Object?>[],
       'artifacts': payload['artifacts'] ?? <Object?>[],
       if (payload.containsKey('segments'))
@@ -248,7 +279,7 @@ class SyncRowCodec {
   };
 
   static Project? projectFromRow(Map<String, Object?> row) {
-    if (row['id'] is! String) return null;
+    if (_stillSealed(row) || row['id'] is! String) return null;
     final Object? payloadRaw = row['payload'];
     final Map<String, dynamic> json = <String, dynamic>{
       if (payloadRaw is Map) ...Map<String, dynamic>.from(payloadRaw),
@@ -277,6 +308,7 @@ class SyncRowCodec {
       };
 
   static ClipboardItem? clipboardItemFromRow(Map<String, Object?> row) {
+    if (_stillSealed(row)) return null;
     final DateTime? copiedAt = _date(row['copied_at']);
     if (row['id'] is! String || copiedAt == null) return null;
     try {
@@ -309,6 +341,7 @@ class SyncRowCodec {
   /// Degrades to null on a row missing a required field, rather than
   /// throwing — the project-wide `fromJson` rule.
   static RecordingRevision? revisionFromRow(Map<String, Object?> row) {
+    if (_stillSealed(row)) return null;
     final Object? recordingId = row['recording_id'];
     final Object? field = row['field'];
     final DateTime? at = _date(row['at']);

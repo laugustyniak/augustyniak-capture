@@ -73,7 +73,7 @@ void main() {
       final RecordingsController controller = RecordingsController(
         repository: RecordingsRepository(directoryProvider: () async => dir),
         transcriptionService: const DisabledTranscriptionService(),
-        syncTransportResolver: () => transport,
+        syncTransportResolver: (_, _) => transport,
         authGateway: _FakeAuthGateway(),
         projectsRepository: ProjectsRepository(directoryProvider: () async => dir),
         clipboardRepository: LocalJsonClipboardRepository(
@@ -111,7 +111,7 @@ void main() {
       final RecordingsController controller = RecordingsController(
         repository: RecordingsRepository(directoryProvider: () async => dir),
         transcriptionService: const DisabledTranscriptionService(),
-        syncTransportResolver: () => transport,
+        syncTransportResolver: (_, _) => transport,
         authGateway: _FakeAuthGateway(),
         projectsRepository: ProjectsRepository(directoryProvider: () async => dir),
         clipboardRepository: LocalJsonClipboardRepository(

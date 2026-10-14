@@ -43,6 +43,10 @@ class ProjectInboxRouter implements CaptureRouter {
   bool canRoute(String? projectId) => _resolve(projectId) != null;
 
   @override
+  RouteKind? resolvedKind(RoutedCapture capture) =>
+      _resolve(capture.projectId) == null ? null : RouteKind.file;
+
+  @override
   Future<RouteRecord> route(RoutedCapture capture) async {
     final Project? project = _resolve(capture.projectId);
     if (project == null) throw const CaptureRoutingUnavailableException();

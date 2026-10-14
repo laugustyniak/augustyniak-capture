@@ -22,12 +22,14 @@ import '../domain/provider_profile.dart';
 import '../domain/queue_density.dart';
 import '../domain/token_cipher.dart';
 import 'backup_section.dart';
+import 'byoc_storage_section.dart';
 import 'command_section.dart';
 import 'enrichment_context_section.dart';
 import 'settings_controller.dart';
 import 'vault_section.dart';
 import '../../momentum/domain/closure_event.dart';
 import '../../momentum/presentation/momentum_section.dart';
+import '../../sync/data/e2ee_service.dart';
 
 /// Categories for organizing configuration settings into dedicated views.
 enum ConfigCategory {
@@ -48,6 +50,7 @@ class ConfigTab extends StatefulWidget {
     super.key,
     required this.controller,
     this.authController,
+    this.e2ee,
     this.recordingsController,
     required this.storagePath,
     required this.recordingsCount,
@@ -83,6 +86,9 @@ class ConfigTab extends StatefulWidget {
 
   final SettingsController controller;
   final AuthController? authController;
+
+  /// Passed through to `AccountSection`; null where Supabase is not configured.
+  final E2eeService? e2ee;
   final RecordingsController? recordingsController;
   final String? storagePath;
   final int recordingsCount;
@@ -526,6 +532,13 @@ class _ConfigTabState extends State<ConfigTab> {
                 widget.controller.tokenEncryptionActive,
               ),
             ),
+            if (widget.controller.filePermissionIssue
+                case final String issue)
+              InfoRow(
+                label: 'FILE MODES',
+                value: issue,
+                valueColor: Console.amber,
+              ),
             const SizedBox(height: 10),
             Align(
               alignment: Alignment.centerRight,
@@ -557,9 +570,11 @@ class _ConfigTabState extends State<ConfigTab> {
   List<Widget> _buildSyncCategory(BuildContext context) {
     return <Widget>[
       // Primary cloud block: the account this library will belong to.
-      AccountSection(controller: widget.authController),
+      AccountSection(controller: widget.authController, e2ee: widget.e2ee),
       const SizedBox(height: 22),
       CommandSection(controller: widget.controller),
+      const SizedBox(height: 22),
+      ByocStorageSection(controller: widget.controller),
     ];
   }
 

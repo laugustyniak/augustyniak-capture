@@ -1233,5 +1233,40 @@ void main() {
       await controller.resetZoom();
       expect(controller.textScale, 1.0);
     });
+
+    group('ByocS3Storage Settings', () {
+      test('SettingsController can update and clear S3 config', () async {
+        final repository = _FakeSettingsRepository();
+        final controller = SettingsController(repository: repository);
+        await controller.initialize();
+
+        await controller.updateS3Storage(
+          endpoint: 'https://test-endpoint.com',
+          bucket: 'my-test-bucket',
+          region: 'us-east-1',
+          accessKeyId: 'test-key',
+          secretAccessKey: 'test-secret',
+          prefix: 'data/',
+        );
+
+        expect(controller.settings.s3Endpoint, 'https://test-endpoint.com');
+        expect(controller.settings.s3Bucket, 'my-test-bucket');
+        expect(controller.settings.s3Region, 'us-east-1');
+        expect(controller.settings.s3AccessKeyId, 'test-key');
+        expect(controller.settings.s3SecretAccessKey, 'test-secret');
+        expect(controller.settings.s3Prefix, 'data/');
+        expect(controller.settings.hasCustomS3Storage, isTrue);
+
+        await controller.clearS3Storage();
+
+        expect(controller.settings.s3Endpoint, isNull);
+        expect(controller.settings.s3Bucket, isNull);
+        expect(controller.settings.s3Region, isNull);
+        expect(controller.settings.s3AccessKeyId, isNull);
+        expect(controller.settings.s3SecretAccessKey, isNull);
+        expect(controller.settings.s3Prefix, isNull);
+        expect(controller.settings.hasCustomS3Storage, isFalse);
+      });
+    });
   });
 }

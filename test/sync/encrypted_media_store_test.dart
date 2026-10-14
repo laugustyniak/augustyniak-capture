@@ -2,6 +2,7 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:crypto/crypto.dart' as crypto;
+import 'package:cryptography/cryptography.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:augustyniak_capture/features/sync/data/encrypted_media_store.dart';
 import 'package:augustyniak_capture/features/sync/domain/e2ee_cipher.dart';
@@ -29,6 +30,12 @@ class FakeMediaStore implements MediaObjectStore {
   }
 }
 
+Future<E2eeCipher> _cipher(String passphrase) async {
+  final E2eeKeyDerivation kdf = E2eeKeyDerivation(iterations: 1000);
+  final SecretKey key = await kdf.deriveKey(passphrase: passphrase, salt: kdf.generateSalt());
+  return E2eeCipher(key: key);
+}
+
 void main() {
   late E2eeCipher cipher;
   late FakeMediaStore innerStore;
@@ -36,12 +43,9 @@ void main() {
   late Directory tempDir;
 
   setUp(() async {
-    final kdf = E2eeKeyDerivation();
-    final salt = kdf.generateSalt();
-    final key = await kdf.deriveKey(passphrase: 'audio-encryption-key', salt: salt);
-    cipher = E2eeCipher(key: key);
+    cipher = await _cipher('audio-encryption-key');
     innerStore = FakeMediaStore();
-    encryptedStore = EncryptedMediaStore(inner: innerStore, cipher: cipher);
+    encryptedStore = EncryptedMediaStore(inner: innerStore, cipher: cipher, ownerId: 'user123');
     tempDir = await Directory.systemTemp.createTemp('e2ee_media_test');
   });
 
@@ -52,17 +56,17 @@ void main() {
   });
 
   test('upload encrypts audio file bytes before sending to underlying store', () async {
-    final audioFile = File('${tempDir.path}/sample.m4a');
-    final plainAudioBytes = utf8.encode('RIFF....Simulated audio capture bytes');
+    final File audioFile = File('${tempDir.path}/sample.m4a');
+    final List<int> plainAudioBytes = utf8.encode('RIFF....Simulated audio capture bytes');
     await audioFile.writeAsBytes(plainAudioBytes);
-    final plainSha256 = crypto.sha256.convert(plainAudioBytes).toString();
+    final String plainSha256 = crypto.sha256.convert(plainAudioBytes).toString();
 
-    const storageKey = 'user123/captures/rec1/sample.m4a';
+    const String storageKey = 'user123/captures/rec1/sample.m4a';
     await encryptedStore.upload(storageKey, audioFile, sha256: plainSha256);
 
     // Stored bytes in backend are encrypted, NOT plaintext
     expect(innerStore.storage.containsKey(storageKey), isTrue);
-    final storedRawBytes = innerStore.storage[storageKey]!;
+    final List<int> storedRawBytes = innerStore.storage[storageKey]!;
     expect(storedRawBytes, isNot(equals(plainAudioBytes)));
 
     // Uploaded SHA-256 metadata matches ciphertext bytes
@@ -70,33 +74,63 @@ void main() {
   });
 
   test('download retrieves and decrypts ciphertext into original audio bytes', () async {
-    final audioFile = File('${tempDir.path}/take.m4a');
-    final originalBytes = utf8.encode('Original high quality audio capture');
+    final File audioFile = File('${tempDir.path}/take.m4a');
+    final List<int> originalBytes = utf8.encode('Original high quality audio capture');
     await audioFile.writeAsBytes(originalBytes);
-    final contentHash = crypto.sha256.convert(originalBytes).toString();
+    final String contentHash = crypto.sha256.convert(originalBytes).toString();
 
-    const storageKey = 'user123/captures/rec2/take.m4a';
+    const String storageKey = 'user123/captures/rec2/take.m4a';
     await encryptedStore.upload(storageKey, audioFile, sha256: contentHash);
 
     // Download through EncryptedMediaStore
-    final decryptedBytes = await encryptedStore.download(storageKey);
+    final List<int> decryptedBytes = await encryptedStore.download(storageKey);
 
     expect(decryptedBytes, equals(originalBytes));
     // The hash of decrypted bytes matches the local recording contentHash!
     expect(crypto.sha256.convert(decryptedBytes).toString(), contentHash);
   });
 
+  test('a blob moved under another key does not open', () async {
+    // The server (or anyone with bucket access) copies rec-1's object to
+    // rec-2's key. The bytes are intact and the key is right; only the
+    // context differs, and that is what the associated data pins.
+    final File audioFile = File('${tempDir.path}/moved.m4a');
+    await audioFile.writeAsBytes(utf8.encode('Audio of recording one'));
+    await encryptedStore.upload('user123/rec-1/a.m4a', audioFile, sha256: 'h');
+    innerStore.storage['user123/rec-2/a.m4a'] = innerStore.storage['user123/rec-1/a.m4a']!;
+
+    expect(await encryptedStore.download('user123/rec-1/a.m4a'), utf8.encode('Audio of recording one'));
+    expect(
+      () => encryptedStore.download('user123/rec-2/a.m4a'),
+      throwsA(isA<E2eeDecryptionException>()),
+    );
+  });
+
+  test('the same key under another owner does not open the blob', () async {
+    // Two owners sharing one master key (one person, two accounts): the
+    // inner store prefixes the owner folder outside the cipher, so the
+    // associated data has to carry it or a copy across folders would open.
+    final File audioFile = File('${tempDir.path}/owner.m4a');
+    await audioFile.writeAsBytes(utf8.encode('Audio of owner one'));
+    await encryptedStore.upload('rec-1/a.m4a', audioFile, sha256: 'h');
+    final EncryptedMediaStore otherOwner =
+        EncryptedMediaStore(inner: innerStore, cipher: cipher, ownerId: 'user456');
+
+    expect(
+      () => otherOwner.download('rec-1/a.m4a'),
+      throwsA(isA<E2eeDecryptionException>()),
+    );
+  });
+
   test('download with wrong cipher throws E2eeDecryptionException', () async {
-    final audioFile = File('${tempDir.path}/private.m4a');
+    final File audioFile = File('${tempDir.path}/private.m4a');
     await audioFile.writeAsBytes(utf8.encode('Secret recording'));
-    const storageKey = 'user123/captures/rec3/private.m4a';
+    const String storageKey = 'user123/captures/rec3/private.m4a';
     await encryptedStore.upload(storageKey, audioFile, sha256: 'somehash');
 
     // Different cipher
-    final kdf = E2eeKeyDerivation();
-    final otherKey = await kdf.deriveKey(passphrase: 'wrong-password', salt: kdf.generateSalt());
-    final badCipher = E2eeCipher(key: otherKey);
-    final badStore = EncryptedMediaStore(inner: innerStore, cipher: badCipher);
+    final E2eeCipher badCipher = await _cipher('wrong-password');
+    final EncryptedMediaStore badStore = EncryptedMediaStore(inner: innerStore, cipher: badCipher, ownerId: 'user123');
 
     expect(() => badStore.download(storageKey), throwsA(isA<E2eeDecryptionException>()));
   });

@@ -20,6 +20,9 @@ class _FailingRouter implements CaptureRouter {
   bool canRoute(String? projectId) => true;
 
   @override
+  RouteKind? resolvedKind(RoutedCapture capture) => RouteKind.file;
+
+  @override
   Future<RouteRecord> route(RoutedCapture capture) async {
     throw const FileSystemException('repo is gone');
   }

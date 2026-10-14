@@ -18,10 +18,22 @@
     -->
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
 
+    <!--
+      No OS backup of this app's data. The default (allowBackup="true") puts the
+      token database, the recordings and the clipboard history into Google
+      auto-backup and, on older API levels, `adb backup`; the app's own backup
+      feature is the documented answer to a reinstall, so the OS copy adds
+      exposure without adding recovery. The two rule files are the API 31+ and
+      pre-31 spellings of "exclude everything", so a future allowBackup flip
+      still ships nothing by default.
+    -->
     <application
         android:label="Augustyniak Capture"
         android:name="${applicationName}"
-        android:icon="@mipmap/ic_launcher">
+        android:icon="@mipmap/ic_launcher"
+        android:allowBackup="false"
+        android:fullBackupContent="@xml/backup_rules"
+        android:dataExtractionRules="@xml/data_extraction_rules">
         <activity
             android:name=".MainActivity"
             android:exported="true"

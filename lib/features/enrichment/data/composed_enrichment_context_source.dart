@@ -15,10 +15,12 @@ class ComposedEnrichmentContextSource implements EnrichmentContextSource {
     required String? Function() profile,
     required Project? Function(String projectId) projectById,
     String? Function()? soulPath,
+    List<Project> Function()? projects,
     ProjectContextReader reader = const ProjectContextReader(),
     SoulReader soulReader = const SoulReader(),
   }) : _profile = profile,
        _soulPath = soulPath ?? (() => null),
+       _projects = projects ?? (() => const <Project>[]),
        _projectById = projectById,
        _reader = reader,
        _soulReader = soulReader;
@@ -30,6 +32,7 @@ class ComposedEnrichmentContextSource implements EnrichmentContextSource {
   /// soul, exactly as before this existed.
   final String? Function() _soulPath;
   final SoulReader _soulReader;
+  final List<Project> Function() _projects;
   final Project? Function(String projectId) _projectById;
   final ProjectContextReader _reader;
 
@@ -54,6 +57,14 @@ class ComposedEnrichmentContextSource implements EnrichmentContextSource {
           '${soul.error == null ? '' : ': ${soul.error}'}'
           ' — using the typed profile';
     }
+    final List<EnrichmentProjectOption> options = <EnrichmentProjectOption>[
+      for (final Project candidate in _projects())
+        EnrichmentProjectOption(
+          id: candidate.id,
+          name: candidate.name,
+          description: candidate.description,
+        ),
+    ];
     final String profile = soul.text;
     final String? profileSource = soul.origin == SoulOrigin.file
         ? soul.fileName
@@ -67,6 +78,7 @@ class ComposedEnrichmentContextSource implements EnrichmentContextSource {
         profile: profile,
         profileSource: profileSource,
         profileFallback: profileFallback,
+        projects: options,
       );
     }
 
@@ -79,6 +91,7 @@ class ComposedEnrichmentContextSource implements EnrichmentContextSource {
         profile: profile,
         profileSource: profileSource,
         profileFallback: profileFallback,
+        projects: options,
       );
     }
 
@@ -90,6 +103,7 @@ class ComposedEnrichmentContextSource implements EnrichmentContextSource {
         profile: profile,
         profileSource: profileSource,
         profileFallback: profileFallback,
+        projects: options,
         // The project's own `description` is the fallback, not the primary:
         // it is a one-line label typed once, while the repository file is
         // maintained as the work changes. Using it when no file is found is
@@ -105,6 +119,7 @@ class ComposedEnrichmentContextSource implements EnrichmentContextSource {
         profile: profile,
         profileSource: profileSource,
         profileFallback: profileFallback,
+        projects: options,
         project: project.description,
         projectSource: project.description == null
             ? null

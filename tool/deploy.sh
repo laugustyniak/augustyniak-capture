@@ -37,6 +37,12 @@
 #   tool/deploy.sh --skip-build        # reinstall the bundle already built
 #   tool/deploy.sh --android           # release APK onto every adb device
 #
+# A desktop install also builds and installs the read-only MCP server
+# (`bin/capture_mcp.dart`) through `tool/deploy-mcp.sh`, to
+# `~/.local/opt/<cli>-mcp/` with a symlink in `~/.local/bin`. That is a
+# secondary artefact: if it fails, the deploy warns and keeps the exit status
+# of the app install. `--skip-build` reuses its bundle too; `--android` skips it.
+#
 # `--android` replaces the host install rather than adding to it: one target
 # per run, so a failure names the platform it belongs to. `tool/deploy-all.sh`
 # is the entry point that does every target in turn.
@@ -152,6 +158,15 @@ fi
 build_revision="$(git describe --always --dirty --abbrev=12)"
 build_args+=("--dart-define=APP_GIT_SHA=$build_revision")
 
+# The MCP server is secondary to the app, so a failure here is a warning and
+# never changes the deploy's exit status.
+install_mcp() {
+  local args=("$cli_name")
+  [ "$skip_build" = 0 ] || args+=(--skip-build)
+  tool/deploy-mcp.sh "${args[@]}" \
+    || echo "deploy: WARNING — MCP bundle was not installed (the app install is unaffected)" >&2
+}
+
 install_linux() {
   local bundle="build/linux/x64/release/bundle"
   local opt_dir="$HOME/.local/opt/$cli_name"
@@ -214,17 +229,28 @@ MimeType=x-scheme-handler/$application_id;
 StartupWMClass=$application_id
 EOF
 
-  command -v desktop-file-validate >/dev/null 2>&1 \
-    && desktop-file-validate "$apps_dir/$application_id.desktop"
-  command -v update-desktop-database >/dev/null 2>&1 \
-    && update-desktop-database "$apps_dir" 2>/dev/null
-  command -v gtk-update-icon-cache >/dev/null 2>&1 \
-    && gtk-update-icon-cache -f -t "$icons_dir" 2>/dev/null
+  # Best-effort: under `set -e` a failing `A && B` list would end the deploy
+  # after the install is already in place, so each step is guarded by `if`.
+  # Stderr stays visible, since it carries the reason.
+  if command -v desktop-file-validate >/dev/null 2>&1; then
+    desktop-file-validate "$apps_dir/$application_id.desktop" \
+      || echo "deploy: warning: desktop-file-validate failed" >&2
+  fi
+  if command -v update-desktop-database >/dev/null 2>&1; then
+    update-desktop-database "$apps_dir" \
+      || echo "deploy: warning: update-desktop-database failed" >&2
+  fi
+  if command -v gtk-update-icon-cache >/dev/null 2>&1; then
+    gtk-update-icon-cache -f -t "$icons_dir" \
+      || echo "deploy: warning: gtk-update-icon-cache failed" >&2
+  fi
 
   echo "deploy: installed $display_name"
   echo "        bundle   $opt_dir"
   echo "        command  $bin_dir/$cli_name"
   echo "        launcher $apps_dir/$application_id.desktop"
+
+  install_mcp
 
   if [ "$run_after" = 1 ]; then
     exec "$bin_dir/$cli_name"
@@ -272,6 +298,8 @@ install_macos() {
   # in the function: a refusing `codesign` would otherwise fail a deploy that
   # has already landed.
   codesign -d -r- "/Applications/$display_name.app" 2>&1 | sed 's/^/        /' || true
+
+  install_mcp
 
   if [ "$run_after" = 1 ]; then
     open -a "/Applications/$display_name.app"

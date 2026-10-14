@@ -27,7 +27,21 @@ enum RouteKind {
   /// The cost is stated rather than hidden: an older build reading a row with
   /// this kind drops it, because [fromName] refuses to guess. The capture
   /// survives; only its "where did it go" line does not.
-  command;
+  command,
+
+  /// Sent to a general-purpose assistant — a web page, the system share sheet,
+  /// the clipboard — rather than to anything this app can watch.
+  ///
+  /// **Not `agent`, and reusing it was considered and rejected.** That kind
+  /// means a session was opened on this machine, in the capture's repository,
+  /// and the app saw it start. Here nothing is opened that the app can see:
+  /// `launchUrl` returning true means a browser opened, not that a prompt was
+  /// sent, and a share sheet or a clipboard write confirms even less. Delivery
+  /// is unconfirmed, which is why the capture is *not* closed by recording one.
+  ///
+  /// The cost is the same as [command] was accepted at: an older build reading
+  /// a row with this kind drops it, because [fromName] refuses to guess.
+  assistant;
 
   /// Null for an unrecognised name, which drops that one row on load.
   ///

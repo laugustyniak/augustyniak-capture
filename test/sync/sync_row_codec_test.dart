@@ -309,4 +309,61 @@ void main() {
       reason: 'a timestamptz column must never receive an offsetless local string',
     );
   });
+
+  group('a row that still carries an E2EE envelope is refused', () {
+    // `EncryptedSyncTransport` removes `encrypted_payload` from a row it
+    // opened; one that still has it was never opened (no key, wrong key, or
+    // a transplanted envelope) and its content columns are the server's
+    // nulls. Decoding it would apply a blank — so the codec skips it and the
+    // engine holds the cursor.
+    const String sealed = 'enc:v2:AAAA';
+
+    test('recording', () {
+      final Map<String, Object?> row = <String, Object?>{
+        'id': 'rec-1',
+        'file_path': 'rec-1.m4a',
+        'duration_ms': 1,
+        'type': 'audioRecording',
+        'status': 'completed',
+        'created_at': '2026-10-06T10:00:00+00:00',
+        'title': null,
+        'transcript': null,
+      };
+      expect(SyncRowCodec.recordingFromRow(row), isNotNull);
+      expect(SyncRowCodec.recordingFromRow(<String, Object?>{...row, 'encrypted_payload': sealed}), isNull);
+      // A row that carries something in the column that is not an envelope
+      // is not a sealed row.
+      expect(SyncRowCodec.recordingFromRow(<String, Object?>{...row, 'encrypted_payload': null}), isNotNull);
+    });
+
+    test('project', () {
+      final Map<String, Object?> row = <String, Object?>{'id': 'p-1', 'name': 'n', 'repository_path': null};
+      expect(SyncRowCodec.projectFromRow(row), isNotNull);
+      expect(SyncRowCodec.projectFromRow(<String, Object?>{...row, 'encrypted_payload': sealed}), isNull);
+    });
+
+    test('clipboard item', () {
+      final Map<String, Object?> row = <String, Object?>{
+        'id': 'c-1',
+        'type': 'text',
+        'copied_at': '2026-10-06T10:00:00+00:00',
+        'text': null,
+      };
+      expect(SyncRowCodec.clipboardItemFromRow(row), isNotNull);
+      expect(SyncRowCodec.clipboardItemFromRow(<String, Object?>{...row, 'encrypted_payload': sealed}), isNull);
+    });
+
+    test('revision', () {
+      final Map<String, Object?> row = <String, Object?>{
+        'recording_id': 'rec-1',
+        'at': '2026-10-06T10:00:00+00:00',
+        'field': 'title',
+        'from_value': null,
+        'to_value': null,
+        'source': 'user',
+      };
+      expect(SyncRowCodec.revisionFromRow(row), isNotNull);
+      expect(SyncRowCodec.revisionFromRow(<String, Object?>{...row, 'encrypted_payload': sealed}), isNull);
+    });
+  });
 }

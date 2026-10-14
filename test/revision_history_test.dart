@@ -6,6 +6,7 @@ import 'package:augustyniak_capture/features/enrichment/domain/enrichment_servic
 import 'package:augustyniak_capture/features/recordings/data/recordings_repository.dart';
 import 'package:augustyniak_capture/features/recordings/data/revisions_repository.dart';
 import 'package:augustyniak_capture/features/recordings/domain/capture_category.dart';
+import 'package:augustyniak_capture/features/recordings/domain/cleanup_proposal.dart';
 import 'package:augustyniak_capture/features/recordings/domain/recording.dart';
 import 'package:augustyniak_capture/features/recordings/domain/recording_revision.dart';
 import 'package:augustyniak_capture/features/recordings/presentation/recordings_controller.dart';
@@ -157,6 +158,26 @@ void main() {
         'the original words',
         reason: 'the overwritten text is the only copy left anywhere',
       );
+    });
+
+    test('accepting a clean-up keeps the raw transcript as history', () async {
+      const String raw = 'eee so we need to uh call the client';
+      final (RecordingsController c, _FakeRevisions revisions) = await build(
+        Recording.fromJson(
+          _seed(transcript: raw).toJson()
+            ..['cleanup'] = CleanupProposal(
+              text: 'So we need to call the client.',
+              source: CleanupProposal.fingerprint(raw),
+            ).toJson(),
+        ),
+      );
+
+      expect(await c.acceptCleanup('r1'), isTrue);
+
+      final RecordingRevision entry = revisions.appended.single;
+      expect(entry.field, 'transcript');
+      expect(entry.from, raw);
+      expect(entry.source, RevisionSource.user);
     });
 
     test('clearing a category records the removal', () async {

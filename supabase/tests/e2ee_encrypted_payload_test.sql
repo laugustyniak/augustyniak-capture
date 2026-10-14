@@ -1,5 +1,5 @@
 begin;
-select plan(8);
+select plan(14);
 
 insert into auth.users (id, email) values
   ('33333333-3333-3333-3333-333333333333', 'e2ee_a@example.com'),
@@ -13,14 +13,35 @@ $$;
 
 select pg_temp.sign_in('33333333-3333-3333-3333-333333333333');
 
--- 1. Insert E2EE settings for user A
-insert into public.user_e2ee_settings (kdf_salt, kdf_algorithm, key_check_hash)
-values ('salt123', 'pbkdf2_sha256', 'hash_verification_tag');
+-- 1. Insert E2EE settings for user A, with the iteration count the key was
+--    derived with (issue #298).
+insert into public.user_e2ee_settings (kdf_salt, kdf_algorithm, key_check_hash, kdf_iterations)
+values ('salt123', 'pbkdf2_sha256', 'kc1:hash_verification_tag', 600000);
 
 select is(
   (select count(*)::int from public.user_e2ee_settings where owner_id = '33333333-3333-3333-3333-333333333333'),
   1,
   'user A can insert and see their own E2EE settings'
+);
+
+select is(
+  (select kdf_iterations from public.user_e2ee_settings where owner_id = '33333333-3333-3333-3333-333333333333'),
+  600000,
+  'kdf_iterations is stored next to the salt'
+);
+
+select throws_ok(
+  $$ update public.user_e2ee_settings set kdf_iterations = 10 where owner_id = '33333333-3333-3333-3333-333333333333' $$,
+  '23514',
+  null,
+  'an iteration count below the floor is refused'
+);
+
+select throws_ok(
+  $$ update public.user_e2ee_settings set kdf_iterations = 20000000 where owner_id = '33333333-3333-3333-3333-333333333333' $$,
+  '23514',
+  null,
+  'an iteration count above the ceiling is refused'
 );
 
 -- 2. Verify encrypted_payload column on recordings
@@ -47,6 +68,22 @@ select is(
   'pushed encrypted_payload landed on server'
 );
 
+-- 3b. A revision pushed under E2EE carries its envelope and no clear values
+--     (issue #298: from_value/to_value were the last plaintext content).
+select is(
+  (select public.sync_push('revisions',
+    '[{"recording_id":"rec-e2ee-2","at":"2026-10-06T10:00:00Z","field":"transcript","from_value":null,"to_value":null,"source":"user","encrypted_payload":"enc:v2:revisioncipher"}]'))->>'applied',
+  '1',
+  'sync_push applies a revision with encrypted_payload'
+);
+
+select is(
+  (select encrypted_payload from public.revisions
+    where recording_id = 'rec-e2ee-2' and field = 'transcript'),
+  'enc:v2:revisioncipher',
+  'pushed revision envelope landed on server with clear values null'
+);
+
 -- 4. Switch to user B
 select pg_temp.sign_in('44444444-4444-4444-4444-444444444444');
 
@@ -64,7 +101,8 @@ select is(
   'user B cannot select user A recordings'
 );
 
--- 7. User B can insert their own E2EE settings
+-- 7. User B can insert their own E2EE settings; a row written without the
+--    count (a pre-#298 client) describes its key with the old constant.
 insert into public.user_e2ee_settings (kdf_salt, kdf_algorithm, key_check_hash)
 values ('salt456', 'pbkdf2_sha256', 'hash_verification_tag_b');
 
@@ -74,10 +112,16 @@ select is(
   'user B can insert their own E2EE settings'
 );
 
+select is(
+  (select kdf_iterations from public.user_e2ee_settings where owner_id = '44444444-4444-4444-4444-444444444444'),
+  100000,
+  'a row without kdf_iterations defaults to the pre-#298 constant'
+);
+
 -- 8. Owner change trigger rejection
 select throws_ok(
   $$ update public.user_e2ee_settings set owner_id = '33333333-3333-3333-3333-333333333333' where owner_id = '44444444-4444-4444-4444-444444444444' $$,
-  'check_violation',
+  '23514',
   'owner_id is immutable',
   'reject_owner_change trigger fires on user_e2ee_settings'
 );

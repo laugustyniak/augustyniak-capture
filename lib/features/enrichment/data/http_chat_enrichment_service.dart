@@ -10,10 +10,13 @@ import '../../costs/domain/usage_sink.dart';
 import '../../recordings/domain/capture_category.dart';
 import '../../recordings/domain/capture_priority.dart';
 import '../../recordings/domain/connection_reasoner.dart';
+import '../../recordings/domain/suggested_route.dart';
 import '../domain/enrichment_context.dart';
 import '../domain/enrichment_prompt.dart';
 import '../domain/enrichment_result.dart';
 import '../domain/enrichment_service.dart';
+import '../domain/instruction_writer.dart';
+import '../domain/transcript_cleaner.dart';
 
 /// OpenAI-compatible `/v1/chat/completions` client.
 ///
@@ -22,7 +25,11 @@ import '../domain/enrichment_service.dart';
 /// against OpenAI, Groq and a local Ollama without a code change, because all
 /// three speak this body.
 class HttpChatEnrichmentService
-    implements EnrichmentService, ConnectionReasoner {
+    implements
+        EnrichmentService,
+        ConnectionReasoner,
+        TranscriptCleaner,
+        InstructionWriter {
   HttpChatEnrichmentService({
     required this.endpoint,
     this.bearerToken,
@@ -222,6 +229,136 @@ class HttpChatEnrichmentService
     return parseResponse(body);
   }
 
+  /// One request per [cleanupChunks] piece, in order, joined by a blank line.
+  ///
+  /// Plain text, not JSON mode: the answer *is* the text, and wrapping it in an
+  /// object only adds a way to lose it. Each chunk is checked with
+  /// [keptEnough] before the next is sent — one implausibly short answer
+  /// refuses the whole proposal rather than splicing a summary into the
+  /// middle of a transcript.
+  @override
+  Future<String> cleanUp(
+    String text, {
+    EnrichmentContext context = EnrichmentContext.none,
+  }) async {
+    final String trimmed = text.trim();
+    if (trimmed.length > CleanupLimits.maxChars) {
+      throw CleanupTooLongException(trimmed.length);
+    }
+    final String system = buildCleanupSystemPrompt(context: context);
+    final List<String> cleaned = <String>[];
+    for (final String chunk in cleanupChunks(trimmed)) {
+      final http.Response response = await _client
+          .post(
+            endpoint,
+            headers: <String, String>{
+              'content-type': 'application/json; charset=utf-8',
+              if (bearerToken != null && bearerToken!.isNotEmpty)
+                'Authorization': 'Bearer $bearerToken',
+            },
+            body: utf8.encode(
+              jsonEncode(<String, dynamic>{
+                if (model != null && model!.isNotEmpty) 'model': model,
+                'messages': <Map<String, String>>[
+                  <String, String>{'role': 'system', 'content': system},
+                  <String, String>{'role': 'user', 'content': chunk},
+                ],
+              }),
+            ),
+          )
+          .timeout(const Duration(seconds: 90));
+      if (response.statusCode < 200 || response.statusCode >= 300) {
+        throw HttpException(
+          describeProviderFailure(
+            'Clean-up',
+            response.statusCode,
+            response.body,
+          ),
+        );
+      }
+      final String body = utf8.decode(response.bodyBytes);
+      _recordUsage(body);
+      final String answer = _stripFence(parseTextContent(body));
+      if (!keptEnough(chunk, answer)) {
+        throw const CleanupDroppedContentException();
+      }
+      cleaned.add(answer.trim());
+    }
+    return cleaned.join('\n\n');
+  }
+
+  /// One request, plain text like [cleanUp]. No kept-ratio check: an
+  /// instruction legitimately drops the fillers and repetitions a dictation is
+  /// made of, so its length says nothing about whether content was lost.
+  @override
+  Future<String> writeInstruction(
+    String text, {
+    EnrichmentContext context = EnrichmentContext.none,
+    String glossary = '',
+  }) async {
+    final String trimmed = text.trim();
+    if (trimmed.length > InstructionLimits.maxChars) {
+      throw InstructionTooLongException(trimmed.length);
+    }
+    final String system = buildInstructionSystemPrompt(
+      context: context,
+      glossary: glossary,
+    );
+    final http.Response response = await _client
+        .post(
+          endpoint,
+          headers: <String, String>{
+            'content-type': 'application/json; charset=utf-8',
+            if (bearerToken != null && bearerToken!.isNotEmpty)
+              'Authorization': 'Bearer $bearerToken',
+          },
+          body: utf8.encode(
+            jsonEncode(<String, dynamic>{
+              if (model != null && model!.isNotEmpty) 'model': model,
+              'messages': <Map<String, String>>[
+                <String, String>{'role': 'system', 'content': system},
+                <String, String>{'role': 'user', 'content': trimmed},
+              ],
+            }),
+          ),
+        )
+        .timeout(const Duration(seconds: 90));
+    if (response.statusCode < 200 || response.statusCode >= 300) {
+      throw HttpException(
+        describeProviderFailure(
+          'Instruction',
+          response.statusCode,
+          response.body,
+        ),
+      );
+    }
+    final String body = utf8.decode(response.bodyBytes);
+    _recordUsage(body);
+    return _stripFence(parseTextContent(body)).trim();
+  }
+
+  /// The message content of a chat completion, as text. Throws when there is
+  /// none — the caller logs it and proposes nothing.
+  static String parseTextContent(String body) {
+    final dynamic envelope = jsonDecode(body);
+    final dynamic choices = envelope is Map<String, dynamic>
+        ? envelope['choices']
+        : null;
+    final dynamic first = choices is List<dynamic> && choices.isNotEmpty
+        ? choices.first
+        : null;
+    final dynamic message = first is Map<String, dynamic>
+        ? first['message']
+        : null;
+    final dynamic content = message is Map<String, dynamic>
+        ? message['content']
+        : null;
+    if (content is! String || content.trim().isEmpty) {
+      throw const FormatException('Response contains no message content.');
+    }
+    return content;
+  }
+
   /// Accounting must never cost a capture: a malformed usage block, or a sink
   /// that throws, is swallowed here rather than turned into a failed
   /// enrichment. Same contract as `ClipboardSink`.
@@ -274,6 +411,8 @@ class HttpChatEnrichmentService
     final CapturePriority? priority = CapturePriority.tryName(
       decoded['priority'],
     );
+    final ({bool answered, SuggestedRouteKind? kind, String? reason}) route =
+        _parseRoute(decoded);
     return EnrichmentResult(
       title: _cleanText(decoded['title'], limit: maxTitleChars),
       category: CaptureCategory.fromName(
@@ -289,6 +428,37 @@ class HttpChatEnrichmentService
               decoded['priorityReason'],
               limit: maxPriorityReasonChars,
             ),
+      projectAnswered:
+          decoded.containsKey('project') &&
+          (decoded['project'] == null || decoded['project'] is String),
+      projectId: decoded['project'] is String &&
+              (decoded['project'] as String).trim().isNotEmpty
+          ? (decoded['project'] as String).trim()
+          : null,
+      routeAnswered: route.answered,
+      routeKind: route.kind,
+      routeReason: route.reason,
+    );
+  }
+
+  /// `route` is `null` (leave it on the desk) or `{kind, reason}`. Anything
+  /// else, an unknown kind included, is "said nothing": the controller then
+  /// stores nothing and leaves an existing suggestion alone.
+  static ({bool answered, SuggestedRouteKind? kind, String? reason})
+  _parseRoute(Map<String, dynamic> decoded) {
+    const none = (answered: false, kind: null, reason: null);
+    if (!decoded.containsKey('route')) return none;
+    final Object? raw = decoded['route'];
+    if (raw == null) {
+      return (answered: true, kind: SuggestedRouteKind.none, reason: null);
+    }
+    if (raw is! Map) return none;
+    final SuggestedRouteKind? kind = SuggestedRouteKind.fromName(raw['kind']);
+    if (kind == null) return none;
+    return (
+      answered: true,
+      kind: kind,
+      reason: _cleanText(raw['reason'], limit: SuggestedRoute.maxReasonChars),
     );
   }
 

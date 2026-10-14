@@ -12,6 +12,7 @@ import 'package:path_provider/path_provider.dart';
 
 import '../../../app/ui_kit.dart';
 import '../../../core/database/app_database.dart';
+import '../../../core/security/owner_only_file.dart';
 import '../../auth/domain/auth_gateway.dart';
 import '../../auth/presentation/auth_controller.dart';
 import '../../backup/data/file_picker_archive_location.dart';
@@ -32,6 +33,8 @@ import '../../costs/domain/price_book.dart';
 import '../../costs/domain/usage_event.dart';
 import '../../costs/domain/usage_model_keys.dart';
 import '../../connections/data/http_daily_connections_service.dart';
+import '../../enrichment/domain/transcript_cleaner.dart';
+import '../../enrichment/domain/instruction_writer.dart';
 import '../../enrichment/data/composed_enrichment_context_source.dart';
 import '../domain/connection_reasoner.dart';
 import '../../logs/data/log_store.dart';
@@ -56,6 +59,7 @@ import '../../projects/presentation/projects_tab.dart';
 import '../../settings/presentation/config_tab.dart';
 import '../../settings/presentation/models_tab.dart';
 import '../../settings/presentation/settings_controller.dart';
+import '../../sync/data/e2ee_service.dart';
 import '../../shortcuts/data/linux_hotkey_registrar.dart';
 import '../../shortcuts/data/system_hotkey_registrar.dart';
 import '../../shortcuts/data/system_window_presenter.dart';
@@ -72,6 +76,7 @@ import '../../timer/data/file_focus_session_log.dart';
 import '../../timer/domain/focus_session.dart';
 import '../../timer/presentation/focus_timer_controller.dart';
 import '../../timer/presentation/timer_tab.dart';
+import '../../work_dashboard/presentation/work_dashboard_tab.dart';
 import '../../transcription/data/audio_splitter.dart';
 import '../../transcription/data/chunked_transcription_service.dart';
 import '../../transcription/data/audio_decoder.dart';
@@ -81,11 +86,13 @@ import '../../transcription/domain/transcription_limits.dart';
 import '../../gamification/presentation/celebration_overlay.dart';
 import '../../gamification/presentation/gamification_controller.dart';
 import '../../clipboard/data/sqlite_clipboard_repository.dart';
+import '../data/sqlite_embedding_store.dart';
 import '../data/foreground_capture_session.dart';
 import '../data/inbox_drainer.dart';
 import '../data/media_picker.dart';
 import '../data/markdown_note_vault.dart';
 import '../domain/capture_session.dart';
+import '../data/plugin_capture_sender.dart';
 import '../data/project_agent_handoff.dart';
 import '../data/command_router.dart';
 import '../data/project_inbox_router.dart';
@@ -120,6 +127,7 @@ class RecordingsPage extends StatefulWidget {
     this.authGateway,
     this.syncTransportResolver,
     this.mediaStoreResolver,
+    this.e2eeService,
   });
 
   /// Where the shell publishes the persisted theme so `AugustyniakCaptureApp`,
@@ -145,11 +153,17 @@ class RecordingsPage extends StatefulWidget {
   /// A resolver, never a snapshot — the seam shape every runtime-swappable
   /// dependency in this app follows. Null whenever Supabase was not
   /// initialised, which leaves Supabase sync off.
-  final SyncTransport Function()? syncTransportResolver;
+  final SyncTransport Function(String ownerId, LogSink log)?
+      syncTransportResolver;
 
   /// Supabase Storage for capture media; null under the same condition as
   /// [syncTransportResolver].
   final MediaObjectStore Function(String ownerId)? mediaStoreResolver;
+
+  /// The key holder behind both resolvers, passed down only so the Queue's
+  /// sync status can say whether rows left sealed or in plaintext. Null
+  /// under the same condition as [syncTransportResolver].
+  final E2eeService? e2eeService;
 
   @override
   State<RecordingsPage> createState() => _RecordingsPageState();
@@ -161,7 +175,8 @@ class _RecordingsPageState extends State<RecordingsPage>
   // the navigation itself.
   static const int queueIndex = 0;
   static const int timerIndex = 1;
-  static const int modelsIndex = 4;
+  static const int workIndex = 2;
+  static const int modelsIndex = 5;
 
   static const List<({IconData icon, String label, String shortLabel})>
   destinations = <({IconData icon, String label, String shortLabel})>[
@@ -173,6 +188,7 @@ class _RecordingsPageState extends State<RecordingsPage>
     // Beside the Queue rather than beside Config: a focus session is something
     // you *do*, on the same footing as capturing, not something you set up once.
     (icon: Icons.timer_outlined, label: 'TIMER', shortLabel: 'TIMER'),
+    (icon: Icons.dashboard_outlined, label: 'WORK', shortLabel: 'WORK'),
     (icon: Icons.account_tree_outlined, label: 'PROJECTS', shortLabel: 'PROJ'),
     (icon: Icons.content_paste_rounded, label: 'CLIPBOARD', shortLabel: 'CLIP'),
     (icon: Icons.memory_rounded, label: 'MODELS', shortLabel: 'MODELS'),
@@ -253,6 +269,26 @@ class _RecordingsPageState extends State<RecordingsPage>
   /// the fallback that is read and the copy that is retired.
   final FileMasterKeyStore _legacyKeyFile = FileMasterKeyStore();
 
+  /// `<application support>/sessions`, where a capture with no repository gets
+  /// its own scratch folder for a terminal agent. Resolved once at startup —
+  /// the handoff reads this through a resolver, and the platform call is async —
+  /// and left null where the terminal launcher is unsupported or the directory
+  /// cannot be resolved, which keeps the handoff exactly as it was.
+  Directory? _sessionsRoot;
+
+  /// Fails closed: until this completes (a few milliseconds after launch) the
+  /// resolver answers null and projectless captures are offered no terminal.
+  Future<void> _resolveSessionsRoot() async {
+    try {
+      final Directory support = await getApplicationSupportDirectory();
+      _sessionsRoot = Directory(p.join(support.path, 'sessions'));
+    } catch (exception) {
+      // No directory, no scratch folders: projectless captures simply keep
+      // offering no terminal agent.
+      logs.log('Sessions folder unavailable: $exception', level: LogLevel.warn);
+    }
+  }
+
   @override
   void initState() {
     super.initState();
@@ -261,6 +297,9 @@ class _RecordingsPageState extends State<RecordingsPage>
     // actually looking; a timer would spend battery when nobody is.
     WidgetsBinding.instance.addObserver(this);
     logs = LogStore(archive: FileLogArchive());
+    // A chmod that failed before this line is still kept in `ownerOnlyIssue`
+    // for the Config tab; from here on it is also a console line.
+    reportOwnerOnlyFailuresTo(logs);
     // Built once and shared by the settings and recordings controllers: both
     // sides of a job — the HTTP call the settings-built service makes, and
     // the beginJob/endJob scope the recordings controller wraps it in — must
@@ -329,6 +368,7 @@ class _RecordingsPageState extends State<RecordingsPage>
     final AgentSessionLauncher? launcher = TerminalLauncher.isSupportedPlatform
         ? ZellijAgentSessionLauncher()
         : null;
+    if (launcher != null) unawaited(_resolveSessionsRoot());
     projects = ProjectsController(
       repository: ProjectsRepository(),
       launcher: launcher,
@@ -386,6 +426,7 @@ class _RecordingsPageState extends State<RecordingsPage>
         profile: () => settings.enrichmentInstructions,
         soulPath: () => settings.soulPath,
         projectById: _projectById,
+        projects: () => projects.projects,
       ),
       // The queue's only way out. Reads the project list live for the same
       // reason the enrichment context does: a project can be created, renamed
@@ -413,7 +454,17 @@ class _RecordingsPageState extends State<RecordingsPage>
       // than offering one that can only fail.
       agentHandoff: launcher == null
           ? const DisabledAgentHandoff()
-          : ProjectAgentHandoff(projectById: _projectById, launcher: launcher),
+          : ProjectAgentHandoff(
+              projectById: _projectById,
+              launcher: launcher,
+              sessionsRoot: () => _sessionsRoot,
+            ),
+      // The fourth way out, and the only one that needs no project: a
+      // capture's text goes to a web assistant, the share sheet or the
+      // clipboard. Never disabled — Web and Copy exist on every platform.
+      captureSender: createPluginCaptureSender(
+        clipboard: const SystemClipboardSink(),
+      ),
       // The second copy of every capture, as markdown. Reads its directory
       // through callbacks for the same reason the router reads its projects
       // live: the user can point it somewhere else at any time, and the very
@@ -722,6 +773,15 @@ class _RecordingsPageState extends State<RecordingsPage>
     } catch (exception) {
       logs.log('Cost store unavailable: $exception', level: LogLevel.warn);
     }
+    // Same guard for the related-captures vectors: derived data, so a store
+    // that will not open leaves the in-memory default and costs nothing else.
+    try {
+      controller.embeddingStore = SqliteEmbeddingStore(
+        (await AppDatabase.getInstance()).rawDb,
+      );
+    } catch (exception) {
+      logs.log('Embedding store unavailable: $exception', level: LogLevel.warn);
+    }
     // Settings first so the very first recording already uses the saved
     // provider and capture parameters.
     await settings.initialize();
@@ -848,6 +908,19 @@ class _RecordingsPageState extends State<RecordingsPage>
     controller.connectionReasoner = settings.enrichmentService is ConnectionReasoner
         ? settings.enrichmentService as ConnectionReasoner
         : const ReviewConnectionReasoner();
+    // Clean-up rides the enrichment profile too: the same chat endpoint, asked
+    // for plain text instead of JSON.
+    controller.transcriptCleaner = settings.enrichmentService is TranscriptCleaner
+        ? settings.enrichmentService as TranscriptCleaner
+        : const DisabledTranscriptCleaner();
+    controller.autoCleanup = settings.autoCleanup;
+    controller.instructionWriter =
+        settings.enrichmentService is InstructionWriter
+        ? settings.enrichmentService as InstructionWriter
+        : const DisabledInstructionWriter();
+    controller.autoInstruction = settings.autoInstruction;
+    controller.asrGlossary = settings.asrGlossary;
+    controller.embeddingService = settings.embeddingService;
     // OCR rides the enrichment profile (vision-capable chat endpoint) and has
     // no platform fallback behind it: with no profile active this is the
     // disabled service on desktop exactly as on mobile, so an image capture
@@ -1200,12 +1273,27 @@ class _RecordingsPageState extends State<RecordingsPage>
                                   // through.
                                   usageRepository: _usageRepository,
                                   storagePrice: settings.storagePrice,
+                                  e2ee: widget.e2eeService,
                                 ),
                                 ConsolePageWidth(
                                   child: TimerTab(
                                     controller: timer,
                                     settings: settings,
                                     momentum: momentum,
+                                  ),
+                                ),
+                                ConsolePageWidth(
+                                  child: WorkDashboardTab(
+                                    projects: projects,
+                                    recordings: controller,
+                                    timer: timer,
+                                    active: navigationIndex == workIndex,
+                                    onNavigateToQueue: (String projectId) {
+                                      setState(() {
+                                        activeQueueProjectFilterId = projectId;
+                                        navigationIndex = queueIndex;
+                                      });
+                                    },
                                   ),
                                 ),
                                 ConsolePageWidth(
@@ -1242,6 +1330,7 @@ class _RecordingsPageState extends State<RecordingsPage>
                                   child: ConfigTab(
                                     controller: settings,
                                     authController: widget.authController,
+                                    e2ee: widget.e2eeService,
                                     recordingsController: controller,
                                     storagePath: storagePath,
                                     recordingsCount:
@@ -1439,7 +1528,7 @@ class _RecordingsPageState extends State<RecordingsPage>
             // reads as broken; one with no count reads as a plain link.
             count: index == queueIndex
                 ? total
-                : index == 3
+                : index == 4
                 ? clipboardWatcher.items.length
                 : null,
             warn: index == modelsIndex && settings.activeProfile == null,
