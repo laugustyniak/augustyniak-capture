@@ -1895,7 +1895,8 @@ class _HeldDeletesBanner extends StatelessWidget {
           ErrorBanner(
             message:
                 'Another device deleted recordings · $files '
-                '${files == 1 ? 'file' : 'files'} held in trash',
+                '${files == 1 ? 'file' : 'files'} kept in the recordings '
+                "folder's .trash · CONFIRM removes them after 30 days",
           ),
           Align(
             alignment: Alignment.centerRight,

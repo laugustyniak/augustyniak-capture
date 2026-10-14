@@ -70,7 +70,9 @@ class RecordingsRepository {
   /// How long a trashed file is kept before [pruneTrash] removes it (#304).
   static const Duration trashRetention = Duration(days: 30);
 
-  static final RegExp _trashName = RegExp(r'^(held-)?(\d+)-.+$');
+  /// Exactly 13 digits (epoch milliseconds): a hand-copied UUID-named file in
+  /// `.trash` starts with hex digits and must not parse as an ancient stamp.
+  static final RegExp _trashName = RegExp(r'^(held-)?(\d{13})-.+$');
 
   /// `<recordings>/.trash/`, created on first use.
   ///
@@ -91,22 +93,54 @@ class RecordingsRepository {
   /// Move every artifact [deleteArtifacts] would remove into [trashDirectory],
   /// renaming it to `<ms>-<name>` — or `held-<ms>-<name>` when [held], which
   /// [pruneTrash] never touches until [releaseHeldTrash] confirms it. A source
-  /// that is already gone is skipped, as in [deleteArtifacts].
-  Future<void> trashArtifacts(
+  /// that is already gone is skipped, as in [deleteArtifacts]. Returns how many
+  /// files moved.
+  ///
+  /// All or nothing: a `rename` that fails (a source on another filesystem
+  /// raises `EXDEV`) falls back to copy-then-delete, and if an artifact still
+  /// cannot move, those already moved are put back and the error is rethrown.
+  /// The row is kept on a throw, so it must never point at files that are
+  /// already in `.trash`; and a tombstone that cannot be applied would otherwise
+  /// be retried by every sync run for ever.
+  ///
+  /// Two captures trashed in the same millisecond with the same basename would
+  /// collide; the name is a file id, so that needs the same file twice in one
+  /// millisecond, and is accepted.
+  Future<int> trashArtifacts(
     Recording recording, {
     required bool held,
     DateTime? now,
   }) async {
     final int stamp = (now ?? DateTime.now()).millisecondsSinceEpoch;
     final String prefix = held ? 'held-$stamp-' : '$stamp-';
+    final List<(String, String)> moved = <(String, String)>[];
     Directory? trash;
-    for (final String? path in _artifactPaths(recording)) {
-      if (path == null || path.isEmpty) continue;
-      final File file = File(path);
-      if (!await file.exists()) continue;
-      trash ??= await trashDirectory();
-      await file.rename(p.join(trash.path, '$prefix${p.basename(path)}'));
+    try {
+      for (final String? path in _artifactPaths(recording)) {
+        if (path == null || path.isEmpty) continue;
+        final File file = File(path);
+        if (!await file.exists()) continue;
+        trash ??= await trashDirectory();
+        final String target = p.join(trash.path, '$prefix${p.basename(path)}');
+        try {
+          await file.rename(target);
+        } on FileSystemException {
+          await file.copy(target);
+          await file.delete();
+        }
+        moved.add((path, target));
+      }
+    } catch (_) {
+      for (final (String from, String to) in moved.reversed) {
+        try {
+          await File(to).rename(from);
+        } catch (_) {
+          // Best effort: a file that will not go back is still in `.trash`.
+        }
+      }
+      rethrow;
     }
+    return moved.length;
   }
 
   Future<List<File>> _trashFiles() async {

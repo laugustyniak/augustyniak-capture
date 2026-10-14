@@ -151,6 +151,55 @@ void main() {
       expect(applier.deletedWithHold.any(((String, bool) e) => e.$2), isFalse);
     });
 
+    test('the budget spans push-conflict rows and pulled rows in one run', () async {
+      Recording rec(String id, String title) => recording(id: id, title: title);
+      final List<String> conflictIds = <String>[for (int i = 0; i < 6; i++) 'c$i'];
+      final List<String> pulledIds = <String>[for (int i = 0; i < 6; i++) 'p$i'];
+      final List<String> all = <String>[...conflictIds, ...pulledIds];
+      await engine.run(
+        SyncSnapshot(recordings: <Recording>[for (final String id in all) rec(id, 't')]),
+      );
+      await transport.push(SyncTable.recordings, [
+        for (final String id in all)
+          {'id': id, 'version': 2, 'deleted_at': t0.toIso8601String()},
+      ]);
+      advance(const Duration(minutes: 1));
+      // The c* rows were edited here too, so their push meets the server's
+      // tombstone as a conflict; the p* rows arrive as ordinary pulled rows.
+      final r = await engine.run(
+        SyncSnapshot(
+          recordings: <Recording>[
+            for (final String id in conflictIds) rec(id, 'edited'),
+            for (final String id in pulledIds) rec(id, 't'),
+          ],
+        ),
+      );
+
+      expect(r.conflicts, 6);
+      expect(r.tombstonesApplied, 12);
+      // 6 <= 10 in the conflict batch: not held, and not retroactively held.
+      // The pull then brings the run's total to 12 > 10: its 6 are held.
+      expect(r.tombstonesHeld, 6);
+      expect(
+        applier.deletedWithHold.where(((String, bool) e) => e.$1.startsWith('c')).any(((String, bool) e) => e.$2),
+        isFalse,
+      );
+      expect(
+        applier.deletedWithHold.where(((String, bool) e) => e.$1.startsWith('p')).every(((String, bool) e) => e.$2),
+        isTrue,
+      );
+    });
+
+    test('the count starts over on the next run', () async {
+      await pullTombstones(serverDeletes: 6, localPresent: 6);
+      applier.deletedWithHold.clear();
+      // A second run with another 6 present tombstones: a slow drip of
+      // fewer than ten a run is deliberately not covered.
+      await engine.run(SyncSnapshot(recordings: <Recording>[]));
+      final r = await pullTombstones(serverDeletes: 6, localPresent: 6);
+      expect(r.tombstonesHeld, 0);
+    });
+
     test('the threshold is a constructor parameter', () async {
       engine = SyncEngine(
         transport: transport,

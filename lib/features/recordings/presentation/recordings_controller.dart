@@ -1457,8 +1457,8 @@ class RecordingsController extends ChangeNotifier {
   /// scan costs a recovery rather than a start-up.
   Future<void> recoverOrphans() async {
     if (_disposed) return;
-    await _housekeepTrash();
     if (_indexUnreadable) return;
+    await _housekeepTrash();
     try {
       final List<Recording> orphans = await _repository.findOrphans(
         _recordings,
@@ -2238,12 +2238,16 @@ class RecordingsController extends ChangeNotifier {
     String id, {
     required bool hold,
   }) async {
+    // The banner count moves by what was just trashed — no directory scan per
+    // tombstone, a bulk delete is hundreds of them. The housekeeping after the
+    // sync run recounts from disk. `_removeRecording` notifies once at the end.
     await _removeRecording(
       id,
-      dispose: (Recording item) =>
-          _repository.trashArtifacts(item, held: hold),
+      dispose: (Recording item) async {
+        final int moved = await _repository.trashArtifacts(item, held: hold);
+        if (hold) _heldSyncTrashFiles += moved;
+      },
     );
-    await _refreshHeldTrash();
   }
 
   /// Files waiting in `.trash/` as `held-*`: deletes another device made that

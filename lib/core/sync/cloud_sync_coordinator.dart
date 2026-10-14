@@ -41,8 +41,9 @@ class CloudSyncReport {
           '${result.pushed} pushed',
           '${result.pulled} pulled',
           if (result.conflicts > 0) '${result.conflicts} conflicts',
-          if (result.tombstonesApplied > 0) '${result.tombstonesApplied} removed',
-          if (result.tombstonesHeld > 0) '${result.tombstonesHeld} held in trash',
+          if (result.tombstonesApplied > 0)
+            '${result.tombstonesApplied} removed'
+                '${result.tombstonesHeld > 0 ? ' (${result.tombstonesHeld} held in trash)' : ''}',
           if (result.skipped > 0) '${result.skipped} skipped',
         ];
         lines.add('Supabase: ${counts.join(' · ')}');

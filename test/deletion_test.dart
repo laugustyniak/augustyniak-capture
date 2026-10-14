@@ -45,11 +45,31 @@ class _UntrashableRepository extends _TempRepository {
   _UntrashableRepository(super.root);
 
   @override
-  Future<void> trashArtifacts(
+  Future<int> trashArtifacts(
     Recording recording, {
     required bool held,
     DateTime? now,
   }) async => throw const FileSystemException('device is read-only');
+}
+
+/// Counts the trash IO the controller asks for.
+class _CountingTrashRepository extends _TempRepository {
+  _CountingTrashRepository(super.root);
+
+  int heldCounts = 0;
+  int prunes = 0;
+
+  @override
+  Future<int> heldTrashCount() {
+    heldCounts++;
+    return super.heldTrashCount();
+  }
+
+  @override
+  Future<int> pruneTrash({DateTime? now}) {
+    prunes++;
+    return super.pruneTrash(now: now);
+  }
 }
 
 /// Grants the mic and writes the file `start` was handed, so a capture reaches
@@ -446,6 +466,56 @@ void main() {
       expect(controller.recordings, hasLength(1));
       expect(File(item.filePath).existsSync(), isTrue);
       expect(controller.error, contains('Could not'));
+    });
+
+    test('a held delete bumps the count without scanning the trash', () async {
+      final _CountingTrashRepository repository = _CountingTrashRepository(
+        root,
+      );
+      final (RecordingsController controller, Recording item) = await oneNote(
+        repository,
+      );
+      final int scansBefore = repository.heldCounts;
+
+      await controller.applySyncedRecordingDelete(item.id, hold: true);
+
+      expect(controller.heldSyncTrashFiles, 1);
+      expect(repository.heldCounts, scansBefore);
+    });
+
+    test('held files already on disk show after a restart', () async {
+      final Directory trash = Directory(p.join(root.path, '.trash'))
+        ..createSync(recursive: true);
+      File(p.join(trash.path, 'held-1760400000000-a.m4a'))
+          .writeAsStringSync('x');
+      File(p.join(trash.path, 'held-1760400000000-b.m4a'))
+          .writeAsStringSync('x');
+      final RecordingsController controller = controllerFor(
+        _TempRepository(root),
+      );
+      await controller.initialize();
+      expect(controller.heldSyncTrashFiles, 0);
+
+      await controller.recoverOrphans();
+
+      expect(controller.heldSyncTrashFiles, 2);
+    });
+
+    test('recoverOrphans does no trash IO when the index is unreadable', () async {
+      await File(p.join(root.path, 'recordings.json'))
+          .writeAsString('{"not": "a list"}');
+      final _CountingTrashRepository repository = _CountingTrashRepository(
+        root,
+      );
+      final RecordingsController controller = controllerFor(repository);
+      await controller.initialize();
+      expect(controller.isIndexUnreadable, isTrue);
+      final int scansBefore = repository.heldCounts;
+
+      await controller.recoverOrphans();
+
+      expect(repository.prunes, 0);
+      expect(repository.heldCounts, scansBefore);
     });
 
     test('an unknown id is a silent no-op', () async {

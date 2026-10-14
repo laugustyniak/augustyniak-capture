@@ -135,7 +135,10 @@ void main() {
     await pumpQueue(tester, controller);
 
     expect(
-      find.text('Another device deleted recordings · 3 files held in trash'),
+      find.text(
+        "Another device deleted recordings · 3 files kept in the recordings "
+        "folder's .trash · CONFIRM removes them after 30 days",
+      ),
       findsOneWidget,
     );
 
@@ -143,7 +146,7 @@ void main() {
     await tester.runAsync(() => Future<void>.delayed(Duration.zero));
     await tester.pump();
 
-    expect(find.textContaining('held in trash'), findsNothing);
+    expect(find.textContaining('.trash'), findsNothing);
     expect(controller.heldSyncTrashFiles, 0);
   });
 

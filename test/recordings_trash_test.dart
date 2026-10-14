@@ -107,6 +107,55 @@ void main() {
       expect(await repository.heldTrashCount(), 1);
     });
 
+    test('a failing artifact puts the moved ones back and rethrows', () async {
+      write('abc.m4a');
+      write('abc-1.m4a');
+      // A directory sits where segment 1 would be trashed: rename onto it and
+      // the copy fallback both fail.
+      Directory(p.join(trash().path, '$nowMs-abc-1.m4a'))
+          .createSync(recursive: true);
+
+      await expectLater(
+        repository.trashArtifacts(twoSegments(), held: false, now: now),
+        throwsA(isA<FileSystemException>()),
+      );
+
+      expect(File(p.join(dir.path, 'abc.m4a')).existsSync(), isTrue);
+      expect(File(p.join(dir.path, 'abc-1.m4a')).existsSync(), isTrue);
+      expect(
+        trash().listSync().whereType<File>(),
+        isEmpty,
+        reason: 'nothing may be left in .trash for a row that is kept',
+      );
+    });
+
+    test('trashes an artifact that lives outside the recordings dir', () async {
+      final Directory other = await Directory.systemTemp.createTemp(
+        'recordings-trash-other',
+      );
+      addTearDown(() => other.delete(recursive: true));
+      final File outside = write('abc.m4a', into: other);
+      final Recording elsewhere = Recording(
+        id: 'abc',
+        filePath: outside.path,
+        createdAt: DateTime.utc(2026, 8, 28),
+        durationMs: 1000,
+        sizeBytes: 10,
+        status: RecordingStatus.completed,
+        type: CaptureType.audioRecording,
+      );
+
+      final int moved = await repository.trashArtifacts(
+        elsewhere,
+        held: false,
+        now: now,
+      );
+
+      expect(moved, 1);
+      expect(outside.existsSync(), isFalse);
+      expect(trashed(), <String>['$nowMs-abc.m4a']);
+    });
+
     test('findOrphans does not re-adopt a file sitting in .trash', () async {
       const String name = '3f2b8c1e-0a4d-4e7f-9b61-2c5d8e7a1f90.m4a';
       write(name, into: trash());
@@ -149,6 +198,14 @@ void main() {
         );
       },
     );
+
+    test('leaves a UUID-named file that is not a 13-digit stamp', () async {
+      write('12345678-0a4d-4e7f-9b61-2c5d8e7a1f90.m4a', into: trash());
+      write('3f2b8c1e-0a4d-4e7f-9b61-2c5d8e7a1f90.m4a', into: trash());
+
+      expect(await repository.pruneTrash(now: now), 0);
+      expect(trashed(), hasLength(2));
+    });
 
     test('is a no-op when there is no trash yet', () async {
       expect(await repository.pruneTrash(now: now), 0);

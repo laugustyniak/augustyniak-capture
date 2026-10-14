@@ -114,7 +114,7 @@ void main() {
       ),
     ).sync();
 
-    expect(report.message, contains('12 removed · 12 held in trash'));
+    expect(report.message, contains('12 removed (12 held in trash)'));
 
     final CloudSyncReport none = await CloudSyncCoordinator(
       syncSupabase: () async => const SupabaseSyncResult(tombstonesApplied: 1),

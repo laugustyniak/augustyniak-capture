@@ -72,6 +72,11 @@ class SyncEngine {
   final int _pageSize;
   final int _tombstoneHoldThreshold;
 
+  /// Tombstones for locally present recordings seen so far in the current
+  /// [run], across every batch and page. The hold budget is per run: a
+  /// push-conflict batch and the pull that follows it draw on the same ten.
+  int _presentTombstonesThisRun = 0;
+
   /// Off: `clipboard_items` is neither pushed, swept nor pulled this run —
   /// bookkeeping and cursor for it are left exactly as they were, so switching
   /// it back on resumes rather than re-syncs. The server rows pushed while it
@@ -93,6 +98,7 @@ class SyncEngine {
     int pulled = 0;
     int tombstones = 0;
     int tombstonesHeld = 0;
+    _presentTombstonesThisRun = 0;
     // Shared with the pull loop below: a tombstone resolved while applying a
     // push conflict removes its id here so the same run's pull pass — which
     // may re-see the row inside the lag window — does not delete it twice.
@@ -590,7 +596,11 @@ class SyncEngine {
     final int present = rows
         .where((Map<String, Object?> r) => r['deleted_at'] != null && local.containsKey(r['id']))
         .length;
-    final bool hold = present > _tombstoneHoldThreshold;
+    // Cumulative within the run, so splitting a bulk delete across a conflict
+    // batch and pulled pages cannot slip under the threshold. An earlier batch
+    // that was within budget is not retroactively held.
+    _presentTombstonesThisRun += present;
+    final bool hold = _presentTombstonesThisRun > _tombstoneHoldThreshold;
     final List<Recording> upserts = [];
     final List<RecordingRevision> revisions = [];
     // (id, version, hash) — the actual `_bookkeeping.put` calls are deferred
