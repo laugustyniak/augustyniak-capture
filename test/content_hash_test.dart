@@ -189,6 +189,7 @@ void main() {
     );
     addTearDown(controller.dispose);
 
+    await controller.initialize();
     await controller.addTextNote('captured before hashing finishes');
 
     expect(hasher.started, isTrue);

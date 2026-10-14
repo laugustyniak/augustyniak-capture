@@ -315,8 +315,9 @@ class _ClipboardHistorySheetState extends State<ClipboardHistorySheet> {
     if (text.trim().isEmpty) return;
     if (widget.onConvertText != null) {
       await widget.onConvertText!(text);
-    } else {
-      await widget.recordingsController!.addTextNote(text);
+    } else if (!await widget.recordingsController!.addTextNote(text)) {
+      // Nothing was saved (still loading, busy, recording): do not claim it was.
+      return;
     }
     if (context.mounted) _confirmHandoff(context, 'Sent to the capture queue');
   }

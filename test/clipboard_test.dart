@@ -145,6 +145,7 @@ void main() {
     final _RecordingClipboard clipboard = _RecordingClipboard();
     final RecordingsController controller = build(clipboard: clipboard);
 
+    await controller.initialize();
     await controller.addTextNote('notatka pisana ręcznie');
     await controller.waitForProcessing();
     expect(controller.recordings.single.status, RecordingStatus.completed);

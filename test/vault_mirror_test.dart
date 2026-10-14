@@ -356,11 +356,13 @@ void main() {
       transcription: _StubTranscription('Stara notatka.'),
       picked: audioSource(),
     );
+    await before.initialize();
     await before.addTextNote('notatka pisana ręcznie');
     await before.waitForProcessing();
     expect(notes(), isEmpty);
 
     final RecordingsController after = build(vault: realVault());
+    await after.initialize();
     await after.addTextNote('notatka pisana ręcznie');
     await after.waitForProcessing();
     // Re-running the sweep must not add a second copy of the same note.
@@ -379,6 +381,7 @@ void main() {
 
     expect(await controller.vaultStats(), const VaultSyncStats(total: 0, mirrored: 0));
 
+    await controller.initialize();
     await controller.addTextNote('Pierwsza notatka');
     await controller.waitForProcessing();
 
@@ -398,6 +401,7 @@ void main() {
       transcription: _StubTranscription('Notatka do zsynchronizowania.'),
     );
 
+    await controller.initialize();
     await controller.addTextNote('Pojedyncza notatka');
     await controller.waitForProcessing();
 

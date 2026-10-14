@@ -180,6 +180,7 @@ void main() {
     );
     addTearDown(c.dispose);
 
+    await c.initialize();
     await c.addTextNote('spotkanie z klientem');
     await c.waitForProcessing();
 
@@ -248,6 +249,7 @@ void main() {
       addTearDown(c.dispose);
 
       c.activeProjectId = 'p1';
+      await c.initialize();
       await c.addTextNote('spotkanie z klientem');
       await c.waitForProcessing();
 
@@ -275,6 +277,7 @@ void main() {
       );
       addTearDown(c.dispose);
 
+      await c.initialize();
       await c.addTextNote('spotkanie z klientem');
       await c.waitForProcessing();
 
@@ -296,6 +299,7 @@ void main() {
     );
     addTearDown(c.dispose);
 
+    await c.initialize();
     await c.addTextNote('spotkanie z klientem');
     await c.waitForProcessing();
 
@@ -319,6 +323,7 @@ void main() {
     );
     addTearDown(c.dispose);
 
+    await c.initialize();
     await c.addTextNote('spotkanie z klientem');
     await c.waitForProcessing();
 
@@ -345,6 +350,7 @@ void main() {
     );
     addTearDown(c.dispose);
 
+    await c.initialize();
     await c.addTextNote('spotkanie z klientem');
     await c.waitForProcessing();
 
@@ -369,6 +375,7 @@ void main() {
     );
     addTearDown(c.dispose);
 
+    await c.initialize();
     await c.addTextNote('spotkanie z klientem');
     await c.waitForProcessing();
     final String id = c.recordings.single.id;
@@ -398,6 +405,7 @@ void main() {
     );
     addTearDown(c.dispose);
 
+    await c.initialize();
     await c.addTextNote('spotkanie z klientem');
     await c.waitForProcessing();
     final String id = c.recordings.single.id;
@@ -427,6 +435,7 @@ void main() {
     );
     addTearDown(c.dispose);
 
+    await c.initialize();
     await c.addTextNote('spotkanie z klientem');
     await c.waitForProcessing();
 
@@ -449,6 +458,7 @@ void main() {
     );
     addTearDown(c.dispose);
 
+    await c.initialize();
     await c.addTextNote('treść');
     await c.waitForProcessing();
 
@@ -466,6 +476,7 @@ void main() {
     final RecordingsController c = _controller(_FakeRepo(dir));
     addTearDown(c.dispose);
 
+    await c.initialize();
     await c.addTextNote('treść');
     await c.waitForProcessing();
 
@@ -485,6 +496,7 @@ void main() {
     );
     addTearDown(c.dispose);
 
+    await c.initialize();
     await c.addTextNote('cokolwiek');
     await c.waitForProcessing();
 
@@ -502,6 +514,7 @@ void main() {
     );
     addTearDown(c.dispose);
 
+    await c.initialize();
     await c.addTextNote('pierwsza');
     await c.waitForProcessing();
     c.enrichmentService = second;
@@ -527,6 +540,7 @@ void main() {
       );
       addTearDown(c.dispose);
 
+      await c.initialize();
       await c.addTextNote('spotkanie z klientem');
       await enrichment.started.future;
 
@@ -554,6 +568,7 @@ void main() {
     );
     addTearDown(c.dispose);
 
+    await c.initialize();
     await c.addTextNote('treść');
     await c.waitForProcessing();
 
@@ -567,6 +582,7 @@ void main() {
     final RecordingsController c = _controller(_FakeRepo(dir));
     addTearDown(c.dispose);
 
+    await c.initialize();
     await c.addTextNote('treść');
     await c.waitForProcessing();
 
@@ -583,6 +599,7 @@ void main() {
     );
     addTearDown(c.dispose);
 
+    await c.initialize();
     await c.addTextNote('spotkanie');
     await c.waitForProcessing();
     await c.setCategory(c.recordings.single.id, CaptureCategory.task);
@@ -600,6 +617,7 @@ void main() {
     );
     addTearDown(c.dispose);
 
+    await c.initialize();
     await c.addTextNote('spotkanie');
     await c.waitForProcessing();
     await c.setCategory(c.recordings.single.id, null);
@@ -625,6 +643,7 @@ void main() {
       );
       addTearDown(c.dispose);
 
+      await c.initialize();
       await c.addTextNote('zadzwonić do klienta');
       await c.waitForProcessing();
 
@@ -643,6 +662,7 @@ void main() {
       );
       addTearDown(c.dispose);
 
+      await c.initialize();
       await c.addTextNote('zadzwonić do klienta');
       await c.waitForProcessing();
       final String id = c.recordings.single.id;
@@ -669,6 +689,7 @@ void main() {
       );
       addTearDown(c.dispose);
 
+      await c.initialize();
       await c.addTextNote('zadzwonić do klienta');
       await c.waitForProcessing();
       final String id = c.recordings.single.id;
@@ -700,6 +721,7 @@ void main() {
       );
       addTearDown(c.dispose);
 
+      await c.initialize();
       await c.addTextNote('zadzwonić do klienta');
       await c.waitForProcessing();
       final String id = c.recordings.single.id;
@@ -721,6 +743,7 @@ void main() {
       );
       addTearDown(c.dispose);
 
+      await c.initialize();
       await c.addTextNote('spotkanie');
       await c.waitForProcessing();
 
