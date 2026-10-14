@@ -7,6 +7,7 @@ import 'package:path_provider/path_provider.dart';
 import 'package:sqlite3/sqlite3.dart';
 
 import '../../../core/database/app_database.dart';
+import '../../../core/security/owner_only_file.dart';
 import '../domain/capture_category.dart';
 import '../domain/capture_segment.dart';
 import '../domain/capture_type.dart';
@@ -65,10 +66,20 @@ class RecordingsRepository {
     }
   }
 
+  bool _directoryRestricted = false;
+
+  /// The directory, created on first use and restricted to the owner once per
+  /// repository. The index, every source file, the posters and the `.jsonl`
+  /// logs live in it, and every one of them was readable by every account on
+  /// a shared desktop while only the tokens were locked down (#301).
   Future<Directory> recordingsDirectory() async {
     final Directory directory = await _directoryProvider();
     if (!await directory.exists()) {
       await directory.create(recursive: true);
+    }
+    if (!_directoryRestricted) {
+      _directoryRestricted = true;
+      await restrictDirectoryToOwner(directory.path);
     }
     return directory;
   }

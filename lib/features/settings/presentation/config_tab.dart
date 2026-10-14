@@ -532,6 +532,13 @@ class _ConfigTabState extends State<ConfigTab> {
                 widget.controller.tokenEncryptionActive,
               ),
             ),
+            if (widget.controller.filePermissionIssue
+                case final String issue)
+              InfoRow(
+                label: 'FILE MODES',
+                value: issue,
+                valueColor: Console.amber,
+              ),
             const SizedBox(height: 10),
             Align(
               alignment: Alignment.centerRight,

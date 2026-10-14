@@ -2,6 +2,7 @@ import 'dart:io';
 
 import 'package:augustyniak_capture/core/database/app_database.dart';
 import 'package:augustyniak_capture/core/security/owner_only_file.dart';
+import 'package:augustyniak_capture/features/logs/domain/log_event.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:path/path.dart' as p;
 
@@ -19,6 +20,7 @@ void main() {
   });
 
   tearDown(() {
+    resetOwnerOnlyReportingForTesting();
     if (dir.existsSync()) dir.deleteSync(recursive: true);
   });
 
@@ -64,4 +66,61 @@ void main() {
     expect(modeOf(wal), 0x180);
     expect(modeOf(shm), 0x180);
   }, skip: Platform.isWindows);
+
+  test('a directory becomes reachable by its owner only', () async {
+    // One call covers the index, every source file and the logs inside it —
+    // and there is no window at the umask's mode between a write landing and
+    // a per-file chmod.
+    final Directory recordings = Directory(p.join(dir.path, 'recordings'))
+      ..createSync();
+    Process.runSync('chmod', <String>['755', recordings.path]);
+
+    await restrictDirectoryToOwner(recordings.path);
+
+    expect(recordings.statSync().mode & 0x1FF, 0x1C0); // 0700
+  }, skip: Platform.isWindows);
+
+  test('a missing path is not reported', () async {
+    await restrictToOwner(p.join(dir.path, 'never-written'));
+    await restrictDirectoryToOwner(p.join(dir.path, 'never-made'));
+
+    expect(ownerOnlyIssue, isNull);
+  }, skip: Platform.isWindows);
+
+  test(
+    'a chmod that fails is reported once, to the sink and the getter',
+    () async {
+      // procfs refuses a mode change on a file that stats fine: the path
+      // exists, chmod cannot change it, and that is the shape of every real
+      // failure here — the save worked, the tightening did not, and nothing
+      // used to say so.
+      const String immutable = '/proc/self/status';
+      final List<String> lines = <String>[];
+      reportOwnerOnlyFailuresTo(_ListSink(lines));
+
+      await restrictToOwner(immutable);
+      await restrictToOwner(immutable);
+
+      expect(ownerOnlyIssue, contains(immutable));
+      expect(ownerOnlyIssue, contains('chmod 600'));
+      expect(lines, hasLength(1));
+      expect(lines.single, ownerOnlyIssue);
+    },
+    skip: !Platform.isLinux,
+  );
+}
+
+class _ListSink implements LogSink {
+  _ListSink(this.lines);
+
+  final List<String> lines;
+
+  @override
+  void log(
+    String message, {
+    LogLevel level = LogLevel.info,
+    String? recordingId,
+  }) {
+    lines.add(message);
+  }
 }

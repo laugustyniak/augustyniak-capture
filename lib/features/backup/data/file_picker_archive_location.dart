@@ -3,6 +3,7 @@ import 'dart:typed_data';
 
 import 'package:file_picker/file_picker.dart';
 
+import '../../../core/security/owner_only_file.dart';
 import '../domain/capture_archive.dart';
 
 /// System save/open dialogs, behind [ArchiveLocationPicker].
@@ -65,7 +66,12 @@ class FilePickerArchiveLocation implements ArchiveLocationPicker {
 
     // On the SAF path the bytes are already written and `chosen` merely names
     // where; copying onto it again would either fail or duplicate the work.
-    if (bytes == null) await staged.copy(chosen);
+    if (bytes == null) {
+      await staged.copy(chosen);
+      // The staging directory is 0700; the destination is wherever the user
+      // pointed, and holds every recording and transcript (#301).
+      await restrictToOwner(chosen);
+    }
     return chosen;
   }
 

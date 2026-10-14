@@ -12,6 +12,7 @@ import 'package:path_provider/path_provider.dart';
 
 import '../../../app/ui_kit.dart';
 import '../../../core/database/app_database.dart';
+import '../../../core/security/owner_only_file.dart';
 import '../../auth/domain/auth_gateway.dart';
 import '../../auth/presentation/auth_controller.dart';
 import '../../backup/data/file_picker_archive_location.dart';
@@ -290,6 +291,9 @@ class _RecordingsPageState extends State<RecordingsPage>
     // actually looking; a timer would spend battery when nobody is.
     WidgetsBinding.instance.addObserver(this);
     logs = LogStore(archive: FileLogArchive());
+    // A chmod that failed before this line is still kept in `ownerOnlyIssue`
+    // for the Config tab; from here on it is also a console line.
+    reportOwnerOnlyFailuresTo(logs);
     // Built once and shared by the settings and recordings controllers: both
     // sides of a job — the HTTP call the settings-built service makes, and
     // the beginJob/endJob scope the recordings controller wraps it in — must

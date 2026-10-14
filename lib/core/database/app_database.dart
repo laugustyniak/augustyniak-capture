@@ -33,6 +33,9 @@ class AppDatabase {
 
     final Directory dir = await getApplicationSupportDirectory();
     await dir.create(recursive: true);
+    // The whole directory, so the key file and the database sidecars inside
+    // it are unreachable to other accounts even before each is tightened.
+    await restrictDirectoryToOwner(dir.path);
     final String path = p.join(dir.path, 'app_database.sqlite');
     final Database db = sqlite3.open(path);
 
@@ -248,11 +251,12 @@ class AppDatabase {
     // 2. Migrate Settings
     final File settingsFile = File(p.join(docsDir.path, 'recordings', 'settings.json'));
     if (await settingsFile.exists()) {
-      // The legacy file is deliberately never deleted — it is the only copy if
-      // this migration is ever found wrong — so it keeps holding whatever
-      // tokens were current when SQLite took over, including plaintext ones
-      // from a launch with no key store. It was written at the umask's mode by
-      // a build that predates this; tighten it wherever it is found.
+      // The legacy file outlives this call — it is the only copy until the row
+      // has been read back — so it keeps holding whatever tokens were current
+      // when SQLite took over, including plaintext ones from a launch with no
+      // key store. It was written at the umask's mode by a build that predates
+      // this; tighten it wherever it is found. `SettingsRepository.load`
+      // deletes it once the row has been read back and parsed (#301).
       await restrictToOwner(settingsFile.path);
       try {
         final String raw = await settingsFile.readAsString();

@@ -2,6 +2,7 @@ import 'package:flutter/foundation.dart';
 import 'package:uuid/uuid.dart';
 
 import '../../../core/http/transport_guard.dart';
+import '../../../core/security/owner_only_file.dart';
 import '../../costs/domain/model_price.dart';
 import '../../costs/domain/price_book.dart';
 import '../../costs/domain/usage_sink.dart';
@@ -150,6 +151,12 @@ class SettingsController extends ChangeNotifier {
   /// a reason that has not been established yet must not read as "no problem"
   /// combined with [tokenEncryptionActive], which is false at that point too.
   String? get tokenEncryptionIssue => _repository.tokenEncryptionIssue;
+
+  /// The first file-permission tightening that failed this session, if any:
+  /// the tokens, the recordings or both sit at the umask's mode. Reported the
+  /// way [tokenEncryptionIssue] is, because the fix is the same kind of
+  /// out-of-app work.
+  String? get filePermissionIssue => ownerOnlyIssue;
 
   /// True when secrets on disk are encrypted and this launch cannot open them:
   /// a stored value still carries the `enc:v1:` marker after [initialize] has
