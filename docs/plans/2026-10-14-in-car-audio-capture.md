@@ -27,11 +27,18 @@ Stage 2 of in-car capture. Stage 1 (#266, merged in #270) lets Siri and the Goog
 - A crash or a killed process during a recording leaves `<uuid>.m4a.tmp` behind. It is logged but not ingested.
 - The MessageTemplate title and header action use the pre-API-7 builder methods, which are deprecated but are the ones that work at API level 5.
 - The Desktop Head Unit was not available when this was built. The recording path was verified by unit tests of the file handling and by a debug and a release build, not on a head unit.
-- CarPlay is not implemented. See the request below.
+- CarPlay is not implemented. See the request below; its four spoken commands are part of the scope once Apple approves it.
 
 ## CarPlay entitlement request
 
 Submit at https://developer.apple.com/contact/carplay/ for `com.apple.developer.carplay-voice-based-conversation`. Without approval a provisioning profile cannot include the entitlement, even for personal use, so no CarPlay code is written until it is granted.
+
+Apple describes the category as apps that, after launch, "appropriately respond to questions or requests and perform actions". A recorder that only listens fits that weakly, so the request describes a small set of spoken commands. **They are a commitment, not a pitch**: the CarPlay implementation must ship every command listed below, and nothing the request promises may be left out of it.
+
+- "save" ends the note and stores it; the app answers "Saved" only once the audio is on disk.
+- "cancel" ends the note and keeps nothing; the app answers "Cancelled".
+- "read back my last note" speaks the transcript of the most recent capture, or "Not transcribed yet" when there is none.
+- "how many notes today" speaks the count of today's captures.
 
 Ready to paste:
 
@@ -41,10 +48,15 @@ Ready to paste:
 >
 > **What the app does.** Augustyniak Capture is a personal voice recorder. The user speaks a note, the app stores the audio on the device, and later turns it into text.
 >
-> **CarPlay flow.** The experience is voice-first. The user launches the app from CarPlay and it starts listening immediately. The user speaks a note. When the user finishes, the app answers "Saved". There is no wake word and no menu to navigate.
+> **CarPlay flow.** The experience is voice-first. The user launches the app from CarPlay and it starts listening immediately. There is no wake word and no menu to navigate. The user speaks a note, and the app responds to spoken requests:
 >
-> **What is shown while driving.** Nothing beyond the system CarPlay voice interface. The app shows no text and no imagery while the car is moving.
+> - "save": the app stores the note and answers "Saved" once the audio is on the device.
+> - "cancel": the app discards the note and answers "Cancelled".
+> - "read back my last note": the app speaks the text of the most recent note.
+> - "how many notes today": the app speaks the number of notes captured today.
+>
+> **What is shown while driving.** Nothing beyond the system CarPlay voice interface. All responses are spoken. The app shows no text and no imagery while the car is moving.
 >
 > **What is captured and where it goes.** The audio is written to the device first, and a confirmation is spoken only after the file is stored. The app then sends it to the transcription provider the user configured themselves, and to the user's own private sync storage. No audio goes to any service the user did not choose, and nothing is used for advertising or analytics.
 >
-> **Who it is for.** It is a personal productivity capture tool for one user, not a conversational assistant for the public.
+> **Who it is for.** It is a personal productivity tool: a driver captures and reviews their own notes by voice, without touching the screen.
