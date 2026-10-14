@@ -319,8 +319,9 @@ class _ModelRow extends StatelessWidget {
     // "Checked and correct" and "nothing to check against" are different
     // claims, and only the first is worth making silently.
     final String size = formatBytes(here.bytes) ?? '0 B';
-    return here.verified
-        ? 'Installed · $size · checksum verified'
-        : 'Installed · $size · no published checksum to verify against';
+    if (here.verified) return 'Installed · $size · checksum verified';
+    return model.sha256 == null
+        ? 'Installed · $size · no published checksum to verify against'
+        : 'Installed · $size · not verified · delete and install again to check';
   }
 }
