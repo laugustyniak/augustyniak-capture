@@ -735,6 +735,7 @@ class _RecordingsPageState extends State<RecordingsPage>
         ),
         ingest: (String id, String body) =>
             controller.addTextNote(body, id: id),
+        ingestAudio: (String id, File f) => controller.addAudioFile(id, f),
         logSink: logs,
       );
       await drainer.drain();
