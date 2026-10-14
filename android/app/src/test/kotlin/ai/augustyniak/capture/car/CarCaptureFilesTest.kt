@@ -44,7 +44,7 @@ class CarCaptureFilesTest {
         val tmp = CarCaptureFiles.tmpFile(inbox, id)
         tmp.writeBytes(byteArrayOf(1, 2, 3))
 
-        val result = CarCaptureFiles.finalize(tmp)
+        val result = CarCaptureFiles.finalize(tmp, samples = 100L)
 
         assertTrue(result is CarCaptureFiles.Result.Saved)
         val saved = (result as CarCaptureFiles.Result.Saved).file
@@ -59,7 +59,7 @@ class CarCaptureFilesTest {
         val tmp = CarCaptureFiles.tmpFile(inbox, id)
         tmp.writeBytes(ByteArray(0))
 
-        val result = CarCaptureFiles.finalize(tmp)
+        val result = CarCaptureFiles.finalize(tmp, samples = 100L)
 
         assertTrue(result is CarCaptureFiles.Result.Failed)
         assertFalse(File(inbox, "$id.m4a").exists())
@@ -68,9 +68,23 @@ class CarCaptureFilesTest {
     @Test
     fun finalizeFailsOnAMissingTmp() {
         val id = CarCaptureFiles.newId()
-        val result = CarCaptureFiles.finalize(CarCaptureFiles.tmpFile(inbox, id))
+        val result = CarCaptureFiles.finalize(CarCaptureFiles.tmpFile(inbox, id), samples = 100L)
 
         assertTrue(result is CarCaptureFiles.Result.Failed)
         assertFalse(File(inbox, "$id.m4a").exists())
+    }
+
+    @Test
+    fun finalizeFailsOnZeroSamplesAndLeavesNeitherFile() {
+        // The muxer wrote a valid but empty MP4: non-empty bytes, no audio.
+        val id = CarCaptureFiles.newId()
+        val tmp = CarCaptureFiles.tmpFile(inbox, id)
+        tmp.writeBytes(byteArrayOf(1, 2, 3))
+
+        val result = CarCaptureFiles.finalize(tmp, samples = 0L)
+
+        assertTrue(result is CarCaptureFiles.Result.Failed)
+        assertFalse(File(inbox, "$id.m4a").exists())
+        assertFalse(tmp.exists())
     }
 }

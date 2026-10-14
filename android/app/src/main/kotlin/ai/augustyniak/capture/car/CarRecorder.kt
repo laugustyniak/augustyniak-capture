@@ -61,6 +61,7 @@ class CarRecorder(
             tmp = file
             Thread({ run(next, file) }, "car-recorder").start()
         } catch (e: Exception) {
+            try { record?.stopRecording() } catch (_: Exception) {}
             abandonFocus()
             throw e
         }
@@ -80,6 +81,7 @@ class CarRecorder(
         var muxer: MediaMuxer? = null
         var muxerStarted = false
         var failure: String? = null
+        var samples = 0L
         try {
             val format = MediaFormat.createAudioFormat(
                 MediaFormat.MIMETYPE_AUDIO_AAC,
@@ -97,8 +99,8 @@ class CarRecorder(
             var track = -1
             val info = MediaCodec.BufferInfo()
             val pcm = ByteArray(BUFFER_BYTES)
-            var samples = 0L
             var inputDone = false
+            var deadlineNs = 0L
             var outputDone = false
 
             while (!outputDone) {
@@ -112,6 +114,7 @@ class CarRecorder(
                                 index, 0, 0, ptsUs, MediaCodec.BUFFER_FLAG_END_OF_STREAM,
                             )
                             inputDone = true
+                            deadlineNs = System.nanoTime() + EOS_TIMEOUT_NS
                         } else {
                             val buffer = codec.getInputBuffer(index)!!
                             buffer.clear()
@@ -120,6 +123,11 @@ class CarRecorder(
                             samples += read / 2
                         }
                     }
+                }
+                if (inputDone && System.nanoTime() > deadlineNs) {
+                    // The encoder never signalled the end of the stream. The tmp
+                    // stays on disk: it may hold what was recorded so far.
+                    throw java.io.IOException("encoder did not finish")
                 }
                 val out = codec.dequeueOutputBuffer(info, TIMEOUT_US)
                 when {
@@ -162,7 +170,7 @@ class CarRecorder(
         val result = if (failure != null) {
             CarCaptureFiles.Result.Failed(failure)
         } else {
-            CarCaptureFiles.finalize(file)
+            CarCaptureFiles.finalize(file, samples)
         }
         main.post { onFinished(result) }
     }
@@ -214,5 +222,6 @@ class CarRecorder(
         const val BIT_RATE = 64_000
         const val BUFFER_BYTES = 4096
         const val TIMEOUT_US = 10_000L
+        const val EOS_TIMEOUT_NS = 5_000_000_000L
     }
 }
