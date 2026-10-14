@@ -30,11 +30,13 @@ if(MSVC)
 endif()
 
 # Pinned by commit, not by the tag it names (`v1.7.4`): a tag can be moved on
-# the remote, and a shallow clone takes whatever it points at that day. The
-# shallow clone still works with a hash because the tag's commit is among the
-# tips it fetches; move the tag and configure fails loudly instead of building
-# something else. Bump the hash and the name in the same change.
-set(AUG_WHISPER_TAG "8a9ad7844d6e2a10cddf4b92de4089d7ac2b14a9" CACHE STRING
+# the remote, and a shallow clone takes whatever it points at that day. CMake
+# clones `--depth 1 --no-single-branch` and then checks the hash out, so this
+# works while the tag still points here and fails loudly once it does not
+# (confirmed with CMake 3.28.3 and the NDK's 3.22.1). Renamed from
+# `AUG_WHISPER_TAG` so a build directory configured before the pin does not
+# keep the tag in its cache. Bump the hash and the name in the same change.
+set(AUG_WHISPER_REF "8a9ad7844d6e2a10cddf4b92de4089d7ac2b14a9" CACHE STRING
   "whisper.cpp commit to build against (v1.7.4)")
 
 # Everything whisper.cpp offers beyond the library itself is cost we do not pay:
@@ -74,7 +76,7 @@ set(BUILD_SHARED_LIBS      OFF CACHE BOOL "" FORCE)
 # nothing on the one platform that takes it.
 set(AUG_FETCH_ARGS
   GIT_REPOSITORY https://github.com/ggerganov/whisper.cpp.git
-  GIT_TAG        ${AUG_WHISPER_TAG}
+  GIT_TAG        ${AUG_WHISPER_REF}
   GIT_SHALLOW    TRUE
 )
 if(CMAKE_VERSION VERSION_GREATER_EQUAL 3.28)

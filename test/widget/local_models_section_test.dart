@@ -173,11 +173,8 @@ void main() {
     await pumpSection(tester, controller, store);
 
     expect(find.text('INSTALLED'), findsOneWidget);
-    // The honest wording while no checksum is pinned.
-    expect(
-      find.textContaining('no published checksum'),
-      findsOneWidget,
-    );
+    // The fake never hashed the file, and the catalog pins one: say so.
+    expect(find.textContaining('not verified'), findsOneWidget);
 
     await tester.tap(find.text('USE'));
     await tester.pump();

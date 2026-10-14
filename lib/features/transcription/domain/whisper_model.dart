@@ -37,10 +37,12 @@ class WhisperModel {
   /// Every entry this app ships carries one, copied from the Hugging Face LFS
   /// pointer (`raw/main/ggml-<id>.bin`, its `oid sha256:` line) and checked
   /// once against a real download; `test/whisper_model_store_test.dart`
-  /// refuses a catalog entry without one. A wrong pin refuses every honest
-  /// download, which is the intended failure: it is how a replaced upstream
-  /// file or a TLS-interposing proxy surfaces, instead of installing a model
-  /// that transcribes whatever the attacker wants.
+  /// refuses a catalog entry without one. The pin comes from the same host
+  /// that serves the file, so it is trust at pin time, not independent
+  /// provenance: what it catches is a file that differs from the one this
+  /// build was cut against, whether upstream replaced it or something on the
+  /// path rewrote it. A wrong pin refuses every honest download, which is the
+  /// intended failure.
   ///
   /// Nullable for the store's own contract rather than for the catalog: a
   /// model handed in without a pin installs and is reported
