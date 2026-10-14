@@ -53,17 +53,111 @@ class RecordingsRepository {
 
   void expectRowCount(int count) => _knownCount = count;
 
+  List<String?> _artifactPaths(Recording recording) => <String?>[
+    for (final CaptureSegment segment in recording.segments) segment.filePath,
+    recording.thumbPath,
+    p.join(p.dirname(recording.filePath), '${recording.id}.thumb.jpg'),
+  ];
+
   Future<void> deleteArtifacts(Recording recording) async {
-    final List<String?> paths = <String?>[
-      for (final CaptureSegment segment in recording.segments) segment.filePath,
-      recording.thumbPath,
-      p.join(p.dirname(recording.filePath), '${recording.id}.thumb.jpg'),
-    ];
-    for (final String? path in paths) {
+    for (final String? path in _artifactPaths(recording)) {
       if (path == null || path.isEmpty) continue;
       final File file = File(path);
       if (await file.exists()) await file.delete();
     }
+  }
+
+  /// How long a trashed file is kept before [pruneTrash] removes it (#304).
+  static const Duration trashRetention = Duration(days: 30);
+
+  static final RegExp _trashName = RegExp(r'^(held-)?(\d+)-.+$');
+
+  /// `<recordings>/.trash/`, created on first use.
+  ///
+  /// A *subdirectory*, deliberately: [findOrphans] lists the recordings
+  /// directory without recursing, so a file moved in here is never re-adopted
+  /// into the queue. A flat file in the recordings directory would be.
+  Future<Directory> trashDirectory() async {
+    final Directory directory = Directory(
+      p.join((await recordingsDirectory()).path, '.trash'),
+    );
+    if (!await directory.exists()) {
+      await directory.create(recursive: true);
+      await restrictDirectoryToOwner(directory.path);
+    }
+    return directory;
+  }
+
+  /// Move every artifact [deleteArtifacts] would remove into [trashDirectory],
+  /// renaming it to `<ms>-<name>` — or `held-<ms>-<name>` when [held], which
+  /// [pruneTrash] never touches until [releaseHeldTrash] confirms it. A source
+  /// that is already gone is skipped, as in [deleteArtifacts].
+  Future<void> trashArtifacts(
+    Recording recording, {
+    required bool held,
+    DateTime? now,
+  }) async {
+    final int stamp = (now ?? DateTime.now()).millisecondsSinceEpoch;
+    final String prefix = held ? 'held-$stamp-' : '$stamp-';
+    Directory? trash;
+    for (final String? path in _artifactPaths(recording)) {
+      if (path == null || path.isEmpty) continue;
+      final File file = File(path);
+      if (!await file.exists()) continue;
+      trash ??= await trashDirectory();
+      await file.rename(p.join(trash.path, '$prefix${p.basename(path)}'));
+    }
+  }
+
+  Future<List<File>> _trashFiles() async {
+    final Directory trash = Directory(
+      p.join((await recordingsDirectory()).path, '.trash'),
+    );
+    if (!await trash.exists()) return <File>[];
+    return <File>[
+      await for (final FileSystemEntity e in trash.list())
+        if (e is File) e,
+    ];
+  }
+
+  /// Delete trash entries older than [trashRetention]. Held entries and names
+  /// that do not parse are left alone. Returns how many were removed.
+  Future<int> pruneTrash({DateTime? now}) async {
+    final int cutoff = (now ?? DateTime.now())
+        .subtract(trashRetention)
+        .millisecondsSinceEpoch;
+    int removed = 0;
+    for (final File file in await _trashFiles()) {
+      final RegExpMatch? match = _trashName.firstMatch(p.basename(file.path));
+      if (match == null || match.group(1) != null) continue;
+      final int? stamp = int.tryParse(match.group(2)!);
+      if (stamp == null || stamp >= cutoff) continue;
+      await file.delete();
+      removed++;
+    }
+    return removed;
+  }
+
+  /// How many `held-*` entries wait for the user's confirmation.
+  Future<int> heldTrashCount() async => (await _trashFiles())
+      .where((File f) => p.basename(f.path).startsWith('held-'))
+      .length;
+
+  /// Confirm held deletes: `held-<ms>-<name>` becomes `<now>-<name>`, so the
+  /// retention clock starts at confirmation. Returns how many were released.
+  Future<int> releaseHeldTrash({DateTime? now}) async {
+    final int stamp = (now ?? DateTime.now()).millisecondsSinceEpoch;
+    int released = 0;
+    for (final File file in await _trashFiles()) {
+      final RegExpMatch? match = _trashName.firstMatch(p.basename(file.path));
+      if (match == null || match.group(1) == null) continue;
+      final String base = p.basename(file.path).substring(
+        'held-${match.group(2)}-'.length,
+      );
+      await file.rename(p.join(p.dirname(file.path), '$stamp-$base'));
+      released++;
+    }
+    return released;
   }
 
   bool _directoryRestricted = false;
