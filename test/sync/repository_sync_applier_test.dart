@@ -37,7 +37,7 @@ void main() {
     Future<void> Function(List<Recording>)? applySyncedRecordings,
     Future<void> Function(List<Project>)? applySyncedProjects,
     Future<void> Function(String)? applySyncedProjectDelete,
-    Future<void> Function(String)? deleteRecording,
+    Future<void> Function(String, {required bool hold})? applySyncedRecordingDelete,
     bool Function(String)? recordingExists,
   }) {
     return RepositorySyncApplier(
@@ -46,7 +46,8 @@ void main() {
       applySyncedProjectDelete: applySyncedProjectDelete ?? (String _) async {},
       clipboard: clipboard,
       revisions: null,
-      deleteRecording: deleteRecording ?? (String _) async {},
+      applySyncedRecordingDelete:
+          applySyncedRecordingDelete ?? (String _, {required bool hold}) async {},
       recordingExists: recordingExists ?? (String _) => false,
     );
   }
@@ -83,23 +84,25 @@ void main() {
 
   group('deleteRecording — the refusal check', () {
     test('completes normally when the delete actually happened', () async {
-      final List<String> calledWith = <String>[];
+      final List<(String, bool)> calledWith = <(String, bool)>[];
       final RepositorySyncApplier applier = buildApplier(
-        deleteRecording: (String id) async => calledWith.add(id),
+        applySyncedRecordingDelete: (String id, {required bool hold}) async =>
+            calledWith.add((id, hold)),
         recordingExists: (String id) => false, // gone, as expected
       );
 
       await applier.deleteRecording('a');
+      await applier.deleteRecording('b', hold: true);
 
-      expect(calledWith, <String>['a']);
+      expect(calledWith, <(String, bool)>[('a', false), ('b', true)]);
     });
 
     test('throws when the row is still present after a refused delete', () async {
       final RepositorySyncApplier applier = buildApplier(
-        // Simulates `RecordingsController.deleteRecording` returning
+        // Simulates `RecordingsController.applySyncedRecordingDelete` returning
         // normally on a refusal (index unreadable, a file that would not
         // delete) rather than throwing.
-        deleteRecording: (String id) async {},
+        applySyncedRecordingDelete: (String id, {required bool hold}) async {},
         recordingExists: (String id) => true, // still there — refused
       );
 

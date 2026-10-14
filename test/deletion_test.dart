@@ -40,6 +40,18 @@ class _UndeletableRepository extends _TempRepository {
       throw const FileSystemException('device is read-only');
 }
 
+/// A disk that refuses to move a file into the trash.
+class _UntrashableRepository extends _TempRepository {
+  _UntrashableRepository(super.root);
+
+  @override
+  Future<void> trashArtifacts(
+    Recording recording, {
+    required bool held,
+    DateTime? now,
+  }) async => throw const FileSystemException('device is read-only');
+}
+
 /// Grants the mic and writes the file `start` was handed, so a capture reaches
 /// its verify-then-persist path — and so `discardRecording` has a real file to
 /// remove rather than a path that was never written.
@@ -350,6 +362,102 @@ void main() {
       await controller.waitForProcessing();
 
       expect(controller.recordings.single.status, RecordingStatus.completed);
+    });
+  });
+
+  group('a delete applied from sync goes to the trash (#304)', () {
+    List<String> trashNames() {
+      final Directory trash = Directory(p.join(root.path, '.trash'));
+      if (!trash.existsSync()) return <String>[];
+      return trash
+          .listSync()
+          .map((FileSystemEntity e) => p.basename(e.path))
+          .toList()
+        ..sort();
+    }
+
+    Future<(RecordingsController, Recording)> oneNote(
+      RecordingsRepository repository,
+    ) async {
+      final RecordingsController controller = controllerFor(repository);
+      await controller.initialize();
+      await controller.addTextNote('keep my bytes');
+      await controller.waitForProcessing();
+      return (controller, controller.recordings.single);
+    }
+
+    test('drops the row and keeps the bytes under .trash', () async {
+      final (RecordingsController controller, Recording item) = await oneNote(
+        _TempRepository(root),
+      );
+
+      await controller.applySyncedRecordingDelete(item.id, hold: false);
+
+      expect(controller.recordings, isEmpty);
+      expect(File(item.filePath).existsSync(), isFalse);
+      final List<String> names = trashNames();
+      expect(names, hasLength(1));
+      expect(names.single, matches(RegExp(r'^\d+-' + RegExp.escape(p.basename(item.filePath)) + r'$')));
+      expect(
+        File(p.join(root.path, '.trash', names.single)).readAsStringSync(),
+        'keep my bytes',
+      );
+      expect(controller.heldSyncTrashFiles, 0);
+      // The trash is not an orphan source: nothing walks back into the queue.
+      await controller.recoverOrphans();
+      expect(controller.recordings, isEmpty);
+    });
+
+    test('a held delete waits for confirmation', () async {
+      final (RecordingsController controller, Recording item) = await oneNote(
+        _TempRepository(root),
+      );
+
+      await controller.applySyncedRecordingDelete(item.id, hold: true);
+
+      expect(controller.recordings, isEmpty);
+      expect(trashNames().single, startsWith('held-'));
+      expect(controller.heldSyncTrashFiles, 1);
+
+      await controller.confirmHeldSyncDeletes();
+
+      expect(controller.heldSyncTrashFiles, 0);
+      expect(trashNames().single, isNot(startsWith('held-')));
+    });
+
+    test('a user delete still unlinks and leaves no trash entry', () async {
+      final (RecordingsController controller, Recording item) = await oneNote(
+        _TempRepository(root),
+      );
+
+      await controller.deleteRecording(item.id);
+
+      expect(File(item.filePath).existsSync(), isFalse);
+      expect(trashNames(), isEmpty);
+    });
+
+    test('a file that will not move leaves the row alone', () async {
+      final (RecordingsController controller, Recording item) = await oneNote(
+        _UntrashableRepository(root),
+      );
+
+      await controller.applySyncedRecordingDelete(item.id, hold: false);
+
+      expect(controller.recordings, hasLength(1));
+      expect(File(item.filePath).existsSync(), isTrue);
+      expect(controller.error, contains('Could not'));
+    });
+
+    test('an unknown id is a silent no-op', () async {
+      final RecordingsController controller = controllerFor(
+        _TempRepository(root),
+      );
+      await controller.initialize();
+
+      await controller.applySyncedRecordingDelete('nope', hold: true);
+
+      expect(controller.error, isNull);
+      expect(trashNames(), isEmpty);
     });
   });
 }

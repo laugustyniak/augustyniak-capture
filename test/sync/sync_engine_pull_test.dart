@@ -97,8 +97,71 @@ void main() {
     final r = await engine.run(SyncSnapshot(recordings: [recording(id: 'a', title: 'mine')]));
     expect(r.tombstonesApplied, 1);
     expect(applier.deleted, ['a']);
+    expect(applier.deletedWithHold, [('a', false)]);
+    expect(r.tombstonesHeld, 0);
     expect(applier.revisions.single.field, 'title');
     expect(bookkeeping.loadTable('recordings').containsKey('a'), isFalse);
+  });
+
+  group('blast-radius cap on pulled recording tombstones (#304)', () {
+    Future<SupabaseSyncResult> pullTombstones({
+      required int serverDeletes,
+      required int localPresent,
+    }) async {
+      final List<Recording> mine = <Recording>[
+        for (int i = 0; i < serverDeletes; i++)
+          if (i < localPresent) recording(id: 'r$i', title: 't'),
+      ];
+      // Everything is on the server first, so each tombstone is a version bump.
+      await engine.run(
+        SyncSnapshot(
+          recordings: <Recording>[
+            for (int i = 0; i < serverDeletes; i++) recording(id: 'r$i', title: 't'),
+          ],
+        ),
+      );
+      await transport.push(SyncTable.recordings, [
+        for (int i = 0; i < serverDeletes; i++)
+          {'id': 'r$i', 'version': 2, 'deleted_at': t0.toIso8601String()},
+      ]);
+      advance(const Duration(minutes: 1));
+      // Bookkeeping says these were pushed; locally only [mine] still exist.
+      return engine.run(SyncSnapshot(recordings: mine));
+    }
+
+    test('more than the threshold present locally: every delete is held', () async {
+      final r = await pullTombstones(serverDeletes: 11, localPresent: 11);
+      expect(r.tombstonesApplied, 11);
+      expect(r.tombstonesHeld, 11);
+      expect(applier.deletedWithHold, hasLength(11));
+      expect(applier.deletedWithHold.every(((String, bool) e) => e.$2), isTrue);
+    });
+
+    test('exactly the threshold present locally: not held', () async {
+      final r = await pullTombstones(serverDeletes: 10, localPresent: 10);
+      expect(r.tombstonesApplied, 10);
+      expect(r.tombstonesHeld, 0);
+      expect(applier.deletedWithHold.any(((String, bool) e) => e.$2), isFalse);
+    });
+
+    test('tombstones for rows this device never had do not count', () async {
+      final r = await pullTombstones(serverDeletes: 11, localPresent: 3);
+      expect(r.tombstonesApplied, 3);
+      expect(r.tombstonesHeld, 0);
+      expect(applier.deletedWithHold.any(((String, bool) e) => e.$2), isFalse);
+    });
+
+    test('the threshold is a constructor parameter', () async {
+      engine = SyncEngine(
+        transport: transport,
+        bookkeeping: bookkeeping,
+        applier: applier,
+        clock: () => t0,
+        tombstoneHoldThreshold: 2,
+      );
+      final r = await pullTombstones(serverDeletes: 3, localPresent: 3);
+      expect(r.tombstonesHeld, 3);
+    });
   });
 
   test('transcript never shrinks: local kept, row re-pushed', () async {
@@ -559,7 +622,7 @@ void main() {
         applySyncedProjectDelete: (String _) async {},
         clipboard: clipboard,
         revisions: null,
-        deleteRecording: (String _) async {},
+        applySyncedRecordingDelete: (String _, {required bool hold}) async {},
         recordingExists: (String _) => false,
       );
       final SyncEngine realEngine = SyncEngine(

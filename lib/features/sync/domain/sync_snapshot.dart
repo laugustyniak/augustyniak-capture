@@ -46,6 +46,7 @@ class SupabaseSyncResult {
     this.pulled = 0,
     this.conflicts = 0,
     this.tombstonesApplied = 0,
+    this.tombstonesHeld = 0,
     this.skipped = 0,
     this.failureReason,
   });
@@ -54,6 +55,10 @@ class SupabaseSyncResult {
   final int pulled;
   final int conflicts;
   final int tombstonesApplied;
+
+  /// Of [tombstonesApplied], how many were applied under the blast-radius
+  /// cap: their files went to the trash marked held, awaiting confirmation.
+  final int tombstonesHeld;
   final int skipped;
   final String? failureReason;
 
