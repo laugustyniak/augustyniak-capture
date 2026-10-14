@@ -4,6 +4,7 @@ import 'dart:io';
 import 'package:cryptography/cryptography.dart';
 import 'package:path/path.dart' as p;
 
+import '../../../core/security/owner_only_file.dart';
 import '../domain/capture_type.dart';
 import '../domain/note_vault.dart';
 import '../domain/untrusted_markdown.dart';
@@ -230,9 +231,14 @@ class MarkdownNoteVault implements NoteVault {
   /// than usual: a torn write leaves a file whose hash no longer matches its
   /// body, which this class would then read back as somebody else's edit and
   /// refuse to touch for good.
+  ///
+  /// Tightened before the rename: the vault is wherever the user pointed it,
+  /// outside the directory the app restricts as a whole, and a note is a
+  /// transcript (#301).
   Future<void> _write(File file, String content) async {
     final File temp = File('${file.path}.tmp');
     await temp.writeAsString(content, flush: true);
+    await restrictToOwner(temp.path);
     await temp.rename(file.path);
   }
 
@@ -404,6 +410,7 @@ class MarkdownNoteVault implements NoteVault {
       return;
     }
     await source.copy(destination.path);
+    await restrictToOwner(destination.path);
   }
 
   /// `2026-08-05-1432-a-note-about-vaults-3f9a1c2e.md`

@@ -28,6 +28,10 @@ class SettingsRepository {
   /// Optional file override for legacy test compatibility
   Future<File?> settingsFile() async => null;
 
+  /// Where the pre-SQLite `settings.json` lives; a test seam like
+  /// [settingsFile].
+  Future<Directory> documentsDirectory() => getApplicationDocumentsDirectory();
+
   Future<AppDatabase> _getDb() async {
     return AppDatabase.getInstance(overrideDb: _dbOverride);
   }
@@ -80,7 +84,7 @@ class SettingsRepository {
     if (results.isEmpty) {
       AppSettings settings = const AppSettings();
       try {
-        final Directory docsDir = await getApplicationDocumentsDirectory();
+        final Directory docsDir = await documentsDirectory();
         final File legacyFile = File(
           p.join(docsDir.path, 'recordings', 'settings.json'),
         );
@@ -120,7 +124,32 @@ class SettingsRepository {
       } catch (_) {}
     }
 
+    // Not while a token is still sealed: the row then holds blobs the key
+    // cannot open, and the legacy file may hold their plaintext — the one
+    // recovery path a user whose key is gone still has. It goes on the launch
+    // the tokens open again; until then it sits at the 0600 the migration
+    // gave it. Tested against the raw payload for the same reason
+    // `_prepareCipher` is: a secret added later is covered the day it lands.
+    if (!jsonEncode(settings.toJson()).contains(TokenCipher.sealedPrefix)) {
+      await _retireLegacyFile();
+    }
     return settings;
+  }
+
+  /// Delete the pre-SQLite `settings.json` once the row has been read back,
+  /// parsed and every token in it opened — this call sits after all three,
+  /// which is the proof the migration took. Until then the file is the only
+  /// copy; after it, it is a second copy of the tokens, plaintext ones
+  /// included, at a path the key store never rewrites (#301). Best-effort: a
+  /// file that will not delete stays at the `0600` the migration gave it.
+  Future<void> _retireLegacyFile() async {
+    try {
+      final Directory docsDir = await documentsDirectory();
+      final File legacyFile = File(
+        p.join(docsDir.path, 'recordings', 'settings.json'),
+      );
+      if (await legacyFile.exists()) await legacyFile.delete();
+    } catch (_) {}
   }
 
   Future<void> save(AppSettings settings) async {
