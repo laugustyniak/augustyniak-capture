@@ -91,6 +91,60 @@ void main() {
       }
     });
 
+    test('pruneOlderThan drops the stale rows and their PNGs, and persists',
+        () async {
+      await repository.initialize();
+      final DateTime now = DateTime.utc(2026, 10, 14, 12);
+      final File stalePng = File('${tempDir.path}/stale.png');
+      await stalePng.writeAsBytes(<int>[0x89, 0x50, 0x4E, 0x47]);
+
+      await repository.addItem(
+        ClipboardItem(
+          id: 'stale-image',
+          type: ClipboardItemType.image,
+          copiedAt: now.subtract(const Duration(days: 40)),
+          imagePath: stalePng.path,
+          preview: '[Image]',
+        ),
+      );
+      await repository.addItem(
+        ClipboardItem(
+          id: 'stale-missing-image',
+          type: ClipboardItemType.image,
+          copiedAt: now.subtract(const Duration(days: 35)),
+          imagePath: '${tempDir.path}/already-gone.png',
+          preview: '[Image]',
+        ),
+      );
+      await repository.addItem(
+        ClipboardItem(
+          id: 'fresh',
+          type: ClipboardItemType.text,
+          copiedAt: now.subtract(const Duration(days: 1)),
+          text: 'fresh',
+        ),
+      );
+
+      final int removed = await repository.pruneOlderThan(
+        now.subtract(const Duration(days: 30)),
+      );
+
+      expect(removed, 2);
+      expect(repository.items.map((ClipboardItem i) => i.id), <String>['fresh']);
+      expect(await stalePng.exists(), isFalse);
+
+      final LocalJsonClipboardRepository reloaded = LocalJsonClipboardRepository(
+        storageDirectoryProvider: () async => tempDir,
+      );
+      await reloaded.initialize();
+      expect(reloaded.items.map((ClipboardItem i) => i.id), <String>['fresh']);
+
+      expect(
+        await repository.pruneOlderThan(now.subtract(const Duration(days: 30))),
+        0,
+      );
+    });
+
     test('add, toggle collections and clear items', () async {
       await repository.initialize();
       expect(repository.items, isEmpty);
@@ -265,6 +319,135 @@ void main() {
     });
   });
 
+  group('sensitive clipboard (#302)', () {
+    test('a sensitive copy is not recorded; the flag, not the text, decides',
+        () async {
+      final _MemoryClipboardRepository repository = _MemoryClipboardRepository();
+      final _FakeClipboardGateway gateway = _FakeClipboardGateway(
+        text: 'hunter2',
+      )..sensitive = true;
+      final ClipboardWatcherService service = ClipboardWatcherService(
+        repository: repository,
+        gateway: gateway,
+      );
+
+      await service.checkNow();
+      expect(repository.items, isEmpty);
+
+      gateway.sensitive = false;
+      await service.checkNow();
+      expect(repository.items.single.text, 'hunter2');
+      service.dispose();
+    });
+
+    test('a sensitive image is not recorded', () async {
+      final _MemoryClipboardRepository repository = _MemoryClipboardRepository();
+      final _FakeClipboardGateway gateway = _FakeClipboardGateway(
+        imagePath: '/tmp/secret.png',
+      )..sensitive = true;
+      final ClipboardWatcherService service = ClipboardWatcherService(
+        repository: repository,
+        gateway: gateway,
+      );
+
+      await service.checkNow();
+      expect(repository.items, isEmpty);
+      service.dispose();
+    });
+
+    test('the system gateway answers false when the platform has no handler',
+        () async {
+      expect(await SystemClipboardGateway().isSensitive(), isFalse);
+    });
+  });
+
+  group('clipboard retention (#302)', () {
+    final DateTime now = DateTime.utc(2026, 10, 14, 12);
+    late _MemoryClipboardRepository repository;
+    late DateTime clock;
+
+    setUp(() {
+      clock = now;
+      repository = _MemoryClipboardRepository();
+      repository._items.addAll(<ClipboardItem>[
+        ClipboardItem(
+          id: 'fresh',
+          type: ClipboardItemType.text,
+          text: 'fresh',
+          copiedAt: now.subtract(const Duration(days: 1)),
+        ),
+        ClipboardItem(
+          id: 'stale',
+          type: ClipboardItemType.text,
+          text: 'stale',
+          copiedAt: now.subtract(const Duration(days: 31)),
+        ),
+      ]);
+    });
+
+    ClipboardWatcherService build(Duration? Function() retention) =>
+        ClipboardWatcherService(
+          repository: repository,
+          gateway: _FakeClipboardGateway(),
+          retention: retention,
+          clock: () => clock,
+        );
+
+    test('an entry past the window is pruned on the next poll', () async {
+      final ClipboardWatcherService service = build(
+        () => const Duration(days: 30),
+      );
+      await service.checkNow();
+      expect(
+        repository.items.map((ClipboardItem i) => i.id).toList(),
+        <String>['fresh'],
+      );
+      service.dispose();
+    });
+
+    test('a null window keeps everything', () async {
+      final ClipboardWatcherService service = build(() => null);
+      await service.checkNow();
+      expect(repository.items, hasLength(2));
+      expect(repository.pruneCalls, 0);
+      service.dispose();
+    });
+
+    test('a prune that throws does not cost the poll', () async {
+      final _ThrowingPruneRepository throwing = _ThrowingPruneRepository();
+      final _FakeClipboardGateway gateway = _FakeClipboardGateway(
+        text: 'still observed',
+      );
+      final ClipboardWatcherService service = ClipboardWatcherService(
+        repository: throwing,
+        gateway: gateway,
+        retention: () => const Duration(days: 30),
+        clock: () => clock,
+      );
+      await service.checkNow();
+      expect(throwing.pruneCalls, 1);
+      expect(
+        throwing.items.map((ClipboardItem i) => i.text),
+        <String>['still observed'],
+      );
+      service.dispose();
+    });
+
+    test('pruning runs at most once a minute', () async {
+      final ClipboardWatcherService service = build(
+        () => const Duration(days: 30),
+      );
+      await service.checkNow();
+      await service.checkNow();
+      expect(repository.pruneCalls, 1);
+
+      clock = clock.add(const Duration(seconds: 61));
+      await service.checkNow();
+      expect(repository.pruneCalls, 2);
+      service.dispose();
+    });
+  });
+
   group('ClipboardWatcherService & Sheet Widget', () {
     /// Builds the sheet over an already-populated repository.
     ///
@@ -278,6 +461,9 @@ void main() {
       final ClipboardWatcherService service = ClipboardWatcherService(
         repository: repository,
         gateway: gateway ?? _FakeClipboardGateway(),
+        // The sheet tests seed fixed 2026-08 dates; the default 30-day window
+        // would prune them against the real clock.
+        retention: () => null,
       );
       await tester.pumpWidget(
         MaterialApp(
@@ -324,6 +510,7 @@ void main() {
         final ClipboardWatcherService service = ClipboardWatcherService(
           repository: repository,
           gateway: gateway,
+          retention: () => null,
         );
 
         await tester.pumpWidget(
@@ -1166,8 +1353,25 @@ ClipboardItem _imageItem(String id, String path) => ClipboardItem(
   imagePath: path,
 );
 
+class _ThrowingPruneRepository extends _MemoryClipboardRepository {
+  @override
+  Future<int> pruneOlderThan(DateTime cutoff) async {
+    pruneCalls++;
+    throw StateError('database is locked');
+  }
+}
+
 class _MemoryClipboardRepository implements ClipboardRepository {
   final List<ClipboardItem> _items = <ClipboardItem>[];
+  int pruneCalls = 0;
+
+  @override
+  Future<int> pruneOlderThan(DateTime cutoff) async {
+    pruneCalls++;
+    final int before = _items.length;
+    _items.removeWhere((ClipboardItem item) => item.copiedAt.isBefore(cutoff));
+    return before - _items.length;
+  }
 
   @override
   List<ClipboardItem> get items => List<ClipboardItem>.unmodifiable(_items);
@@ -1231,6 +1435,7 @@ class _FakeClipboardGateway implements ClipboardGateway {
 
   String? text;
   String? imagePath;
+  bool sensitive = false;
   String? copiedText;
   String? copiedImagePath;
   final Object? imageReadError;
@@ -1249,4 +1454,7 @@ class _FakeClipboardGateway implements ClipboardGateway {
 
   @override
   Future<String?> getText() async => text;
+
+  @override
+  Future<bool> isSensitive() async => sensitive;
 }

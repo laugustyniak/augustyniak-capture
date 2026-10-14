@@ -39,12 +39,25 @@ class MainFlutterWindow: NSWindow {
       } else if call.method == "autoPaste" {
         self.autoPaste()
         result(true)
+      } else if call.method == "isClipboardSensitive" {
+        result(self.clipboardIsSensitive())
       } else {
         result(FlutterMethodNotImplemented)
       }
     }
 
     super.awakeFromNib()
+  }
+
+  /// The two pasteboard types password managers and OTP apps declare so a
+  /// clipboard history leaves their copy alone (nspasteboard.org): "Concealed"
+  /// for a secret, "Transient" for content that is about to be replaced.
+  /// Neither is set by the system; a source that does not opt in is observed
+  /// as before (#302).
+  private func clipboardIsSensitive() -> Bool {
+    let types = NSPasteboard.general.types ?? []
+    return types.contains(NSPasteboard.PasteboardType("org.nspasteboard.ConcealedType"))
+      || types.contains(NSPasteboard.PasteboardType("org.nspasteboard.TransientType"))
   }
 
   private func clipboardHistoryDirectory() -> URL? {
