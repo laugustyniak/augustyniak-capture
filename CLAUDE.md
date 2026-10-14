@@ -136,7 +136,7 @@ Any new capture path must mirror those five steps exactly. **A capture may hold 
 
 **2. The index survives a bad read.** `saveAll` rewrites the *whole* `recordings.json`, so anything that makes the in-memory list wrong makes it permanently wrong on disk — which is how history was lost before, when `loadAll` answered `[]` to both "no index yet" and "could not read the index". `loadAll` therefore has **three** outcomes, not two; `_indexUnreadable` refuses every write for the rest of the session; a shrink nobody announced is backed up first; and orphaned sources are re-adopted. Details, the SQLite mirror in front of it and the `recordings.db-stale` marker: `docs/architecture/persistence.md`.
 
-Neither rule is weakened by the two removal paths (`discardRecording`, `deleteRecording`): they govern a capture the app has *accepted*, and both of those are the user saying it should not have been.
+Neither rule is weakened by the three removal paths (`discardRecording`, `deleteRecording`, and the sync-applied `applySyncedRecordingDelete`, which moves the files into `.trash/` instead of unlinking them): they govern a capture the app has *accepted*, and the first two of those are the user saying it should not have been.
 
 ## The features
 

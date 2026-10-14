@@ -217,22 +217,39 @@ tombstoned and lose it again. The bytes sit in `.trash/` for the user to copy
 out by hand. The user's own delete button (`deleteRecording`) is unchanged and
 still unlinks.
 
-**Blast-radius cap.** `SyncEngine._applyRecordings` counts, per applied batch,
-the tombstones whose row this device actually holds (a tombstone for a row it
-never had removes nothing). More than `SyncEngine.defaultTombstoneHoldThreshold`
-(10, a constructor parameter) and every delete in that batch is applied with
-`hold: true`: the files land in `.trash/` as `held-<epochMs>-<name>`, which
-`pruneTrash` never touches. The Queue shows "Another device deleted recordings
-· N files held in trash" with CONFIRM; `confirmHeldSyncDeletes` renames them to
+**Blast-radius cap.** `SyncEngine._applyRecordings` counts the tombstones whose
+row this device actually holds (a tombstone for a row it never had removes
+nothing). The count is cumulative **within one `run()`**: every recordings batch
+adds to it, and once it passes `SyncEngine.defaultTombstoneHoldThreshold` (10,
+a constructor parameter) every further delete in that run is applied with
+`hold: true`. A batch is every page of one run's recordings pull (`_pullAll`
+gathers the pages before applying), and the conflict rows returned by the push
+draw on the same budget, so splitting a bulk delete across pages or across
+push and pull does not slip under the cap. The conflict batch is applied first:
+if it is within budget it is not held, and it is not retroactively held when
+the pull then pushes the run's total over the threshold. The counter starts
+over at the top of each run, so a slow drip of ten or fewer per run across many
+runs is **not** covered; a rolling window needs persisted bookkeeping and is a
+follow-up.
+
+Held files land in `.trash/` as `held-<epochMs>-<name>`, which `pruneTrash`
+never touches. The Queue shows "Another device deleted recordings · N files
+kept in the recordings folder's .trash · CONFIRM removes them after 30 days"
+with a CONFIRM button; `confirmHeldSyncDeletes` renames them to
 `<nowMs>-<name>`, so the 30 days start at confirmation. The threshold is
 absolute on purpose: a fraction of the library would let a large library lose
 dozens of captures without a prompt. `SupabaseSyncResult.tombstonesHeld` counts
 the held ones (they are still in `tombstonesApplied`) and the report says
-"N held in trash". A batch is every page of one run's recordings pull — `_pullAll`
-gathers the pages before applying — so splitting a bulk delete across pages does not
-slip under the cap; conflict rows returned by the push are a separate, smaller batch. **Every `delete*` on
-`SyncApplier` tolerates an id it has never heard of** — a tombstone for a
-row this device never had is a no-op, never a throw.
+"N removed (M held in trash)".
+
+`trashArtifacts` is all or nothing. A `rename` that fails falls back to
+copy-then-delete (a source on another filesystem raises `EXDEV`); if an
+artifact still cannot move, the ones already moved are put back and the error
+is rethrown, so the kept row never points at files already in `.trash/` and a
+tombstone that cannot be applied does not leave half a capture behind.
+
+**Every `delete*` on `SyncApplier` tolerates an id it has never heard of** — a
+tombstone for a row this device never had is a no-op, never a throw.
 
 **A live push racing a tombstone always loses to the tombstone**: deletion
 beats a concurrent edit. The editing device is still bookkept at the
