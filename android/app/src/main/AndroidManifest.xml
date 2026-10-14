@@ -104,6 +104,26 @@
             android:name=".CaptureForegroundService"
             android:exported="false"
             android:foregroundServiceType="microphone" />
+        <!--
+          Android Auto car app (ai.augustyniak.capture.car): REC and STOP on the
+          car display, audio from the car microphone, written into the same
+          inbox as CreateNoteActivity. Exported because the Android Auto host is
+          another app; the host is checked in CaptureCarAppService. IOT is the
+          closest fit for a voice capture tool among the categories Google
+          offers. The microphone arrives over the host's pipe, not from the
+          phone, so this needs no foreground service.
+        -->
+        <service
+            android:name=".car.CaptureCarAppService"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="androidx.car.app.CarAppService" />
+                <category android:name="androidx.car.app.category.IOT" />
+            </intent-filter>
+        </service>
+        <meta-data android:name="androidx.car.app.minCarApiLevel" android:value="5" />
+        <meta-data android:name="com.google.android.gms.car.application"
+            android:resource="@xml/automotive_app_desc" />
         <meta-data android:name="flutterEmbedding" android:value="2" />
     </application>
 </manifest>

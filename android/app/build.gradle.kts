@@ -128,12 +128,17 @@ android {
 }
 
 dependencies {
+    // Android Auto car app (ai.augustyniak.capture.car). Plain Android, no Flutter.
+    implementation("androidx.car.app:app:1.7.0")
+    // CarAudioRecord.create() throws without a projected (or automotive) impl.
+    implementation("androidx.car.app:app-projected:1.7.0")
     // Instrumentation only — none of this reaches a release artifact.
     // Pinned to match: the integration_test plugin resolves
     // `androidx.test:runner` to strictly 1.3.0, and a newer rules artifact
     // drags a newer runner in with it and fails resolution.
     androidTestImplementation("androidx.test:runner:1.3.0")
     androidTestImplementation("androidx.test:rules:1.2.0")
+    testImplementation("junit:junit:4.13.2")
 }
 
 kotlin {

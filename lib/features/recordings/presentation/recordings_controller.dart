@@ -2417,6 +2417,69 @@ class RecordingsController extends ChangeNotifier {
     }
   }
 
+  /// Ingest a finished `.m4a` written by the Android Auto car app into the
+  /// inbox. Same ordering as [addTextNote] and [addUpload]: copy the source into
+  /// the app directory and verify it, index with status `saved`, and only then
+  /// process. The source is copied, never moved or deleted; the caller removes
+  /// it once this returns true.
+  ///
+  /// [id] is the inbox file's uuid, so re-ingestion is idempotent: an existing
+  /// row answers true without writing, before the busy check. False means
+  /// nothing was saved: still loading, busy, recording, an empty or missing
+  /// source, or a failure.
+  Future<bool> addAudioFile(String id, File source) async {
+    if (!_initialized) {
+      if (!_indexUnreadable) {
+        _error = 'Captures are still loading — try again.';
+        notifyListeners();
+      }
+      return false;
+    }
+    if (_recordings.any((Recording r) => r.id == id)) return true;
+    if (_isRecording || _isBusy) return false;
+
+    _isBusy = true;
+    _error = null;
+    notifyListeners();
+
+    try {
+      final Recording imported = await _importer.importFile(
+        id: id,
+        type: CaptureType.audioRecording,
+        source: source,
+        mimeType: 'audio/mp4',
+        createdAt: await source.lastModified(),
+      );
+      final Recording saved = imported.copyWith(
+        projectId: activeProjectId,
+        projectAuto: activeProjectId != null,
+      );
+
+      // Critical invariant: index only after the source is copied and verified.
+      _recordings = <Recording>[saved, ..._recordings];
+      await _persistAll();
+      unawaited(_computeContentHash(saved.id));
+      unawaited(_gamificationController?.onCaptureCreated(_recordings.length));
+      _logSink.log(
+        'Car audio saved · ${await File(saved.filePath).length()} B',
+        recordingId: saved.id,
+      );
+
+      await _enqueueProcessing(saved.id);
+      return true;
+    } catch (exception) {
+      _error = exception.toString();
+      _logSink.log(
+        'Failed to import car audio: $exception',
+        level: LogLevel.error,
+      );
+      return false;
+    } finally {
+      _isBusy = false;
+      notifyListeners();
+    }
+  }
+
   /// Import an existing file (audio, image or video) as a new item. Mirrors the
   /// ordering of [stopRecording]: pick, copy the source into the app directory
   /// and verify it (via [MediaImporter]), index with status `saved`, and only

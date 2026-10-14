@@ -17,11 +17,16 @@ class InboxDrainer {
   InboxDrainer({
     required this.inbox,
     required this.ingest,
+    this.ingestAudio,
     required LogSink logSink,
   }) : _logSink = logSink;
 
   final Directory inbox;
   final Future<bool> Function(String id, String body) ingest;
+
+  /// Takes a finished `<uuid>.m4a` from the Android Auto car app. When null,
+  /// `.m4a` files are ignored and stay in the inbox.
+  final Future<bool> Function(String id, File file)? ingestAudio;
   final LogSink _logSink;
 
   static final RegExp _uuid = RegExp(
@@ -48,14 +53,22 @@ class InboxDrainer {
   Future<int> _drain() async {
     if (!await inbox.exists()) return 0;
     final List<(File, DateTime)> files = <(File, DateTime)>[];
+    int partialAudio = 0;
     try {
       await for (final FileSystemEntity e in inbox.list()) {
         if (e is! File) continue;
         // Per entry: a producer renaming its .tmp between the listing and the
         // stat must cost that entry, not the whole pass.
         try {
-          if (p.extension(e.path) == '.txt') {
+          final String extension = p.extension(e.path);
+          if (extension == '.txt' ||
+              (extension == '.m4a' && ingestAudio != null)) {
             files.add((e, await e.lastModified()));
+          } else if (e.path.endsWith('.m4a.tmp') &&
+              DateTime.now().difference(await e.lastModified()) > _staleTmp) {
+            // An interrupted car recording: never swept, it may be the only
+            // copy of what the user said.
+            partialAudio++;
           } else if (e.path.endsWith('.txt.tmp') &&
               DateTime.now().difference(await e.lastModified()) > _staleTmp) {
             // A producer that crashed mid-write; a live one renames within
@@ -71,6 +84,12 @@ class InboxDrainer {
       _log('Inbox unreadable: $exception');
       return 0;
     }
+    if (partialAudio > 0) {
+      _log(
+        'Inbox: $partialAudio interrupted car recording(s) '
+        '(*.m4a.tmp) kept for manual recovery',
+      );
+    }
     files.sort(
       ((File, DateTime) a, (File, DateTime) b) => a.$2.compareTo(b.$2),
     );
@@ -85,6 +104,13 @@ class InboxDrainer {
         continue;
       }
       try {
+        if (p.extension(file.path) == '.m4a') {
+          if (await ingestAudio!(id, file)) {
+            await file.delete();
+            persisted++;
+          }
+          continue;
+        }
         final String body = utf8.decode(await file.readAsBytes());
         if (body.trim().isEmpty) {
           await file.delete();
