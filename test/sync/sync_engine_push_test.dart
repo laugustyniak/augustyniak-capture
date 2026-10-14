@@ -58,6 +58,7 @@ void main() {
       transport: transport,
       bookkeeping: bookkeeping,
       applier: NoopApplier(),
+      syncClipboard: true,
     );
   });
 
@@ -274,6 +275,31 @@ void main() {
       expect(bookkeeping.loadTable('clipboard_items'), isEmpty);
     },
   );
+
+  test('clipboard sync off: no clipboard push, no sweep of earlier rows', () async {
+    await engine.run(SyncSnapshot(clipboardItems: [clipboardItem(id: 'c1')]));
+    expect(bookkeeping.loadTable('clipboard_items'), isNotEmpty);
+    transport.pushes.clear();
+
+    final SyncEngine off = SyncEngine(
+      transport: transport,
+      bookkeeping: bookkeeping,
+      applier: NoopApplier(),
+    );
+    await off.run(SyncSnapshot(clipboardItems: [clipboardItem(id: 'c2')]));
+    await off.run(const SyncSnapshot());
+
+    expect(
+      transport.pushes.where((p) => p.$1 == SyncTable.clipboardItems),
+      isEmpty,
+    );
+    expect(
+      transport.tables[SyncTable.clipboardItems]!['c1']!['deleted_at'],
+      isNull,
+    );
+    expect(transport.tables[SyncTable.clipboardItems]!.containsKey('c2'), isFalse);
+    expect(bookkeeping.loadTable('clipboard_items').containsKey('c1'), isTrue);
+  });
 
   test(
     'a revision for a recording not in the snapshot is dropped from the '

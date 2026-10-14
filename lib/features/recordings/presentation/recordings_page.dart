@@ -513,6 +513,7 @@ class _RecordingsPageState extends State<RecordingsPage>
       clipboardRepository: clipboardRepository,
       appVersion: () => _appVersion,
       syncDeviceId: settings.ensureSyncDeviceId,
+      syncClipboard: () => settings.syncClipboard,
       // A pulled project applies through `projects` itself — never through a
       // second `ProjectsRepository` writing underneath it — so this
       // controller's own next `create`/`update`/`select` cannot silently
@@ -555,6 +556,7 @@ class _RecordingsPageState extends State<RecordingsPage>
     clipboardWatcher = ClipboardWatcherService(
       repository: clipboardRepository,
       autoPaste: _buildAutoPaste(),
+      retention: () => settings.clipboardRetention,
     );
     shortcuts = ShortcutsCoordinator(
       recordings: controller,

@@ -31,6 +31,7 @@ void main() {
       bookkeeping: bookkeeping,
       applier: applier,
       clock: () => t0,
+      syncClipboard: true,
     );
   });
 
@@ -482,6 +483,33 @@ void main() {
     },
   );
 
+  test('clipboard sync off: clipboard rows are not pulled and no cursor moves',
+      () async {
+    await transport.push(SyncTable.clipboardItems, [
+      {...SyncRowCodec.clipboardItem(clipboardItem(id: 'c')), 'version': 1},
+    ]);
+    await seedServer(recording(id: 'a'));
+    advance(const Duration(minutes: 1));
+    final SyncEngine off = SyncEngine(
+      transport: transport,
+      bookkeeping: bookkeeping,
+      applier: applier,
+      clock: () => t0,
+    );
+
+    await off.run(
+      const SyncSnapshot(device: {'id': 'dev', 'name': 'n', 'platform': 'linux'}),
+    );
+
+    expect(applier.clipboardItems, isEmpty);
+    expect(bookkeeping.cursor('clipboard_items'), isNull);
+    expect(applier.recordings.keys, ['a']);
+    expect(
+      transport.tables[SyncTable.syncState]!.keys.toSet(),
+      {'dev/projects', 'dev/recordings', 'dev/revisions'},
+    );
+  });
+
   test('cursors are mirrored to a sync_state row per table for this device', () async {
     await seedServer(recording(id: 'a'));
     advance(const Duration(minutes: 1));
@@ -539,6 +567,7 @@ void main() {
         bookkeeping: bookkeeping,
         applier: realApplier,
         clock: () => t0,
+        syncClipboard: true,
       );
 
       await transport.push(SyncTable.clipboardItems, [

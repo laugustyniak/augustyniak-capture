@@ -40,9 +40,12 @@ class InstalledModel {
   final String path;
   final int bytes;
 
-  /// False when the catalog carries no pinned hash for this model. Surfaced
-  /// rather than assumed: "checked and correct" and "nothing to check against"
-  /// are different claims, and only the first is worth making.
+  /// True only when this store hashed the bytes against the catalog pin and
+  /// left its marker beside the file. False for a model with no pin, for an
+  /// install from before the catalog was pinned, and for a file dropped into
+  /// the directory by hand. Surfaced rather than assumed: "checked and
+  /// correct" and "nothing to check against" are different claims, and only
+  /// the first is worth making.
   final bool verified;
 }
 
@@ -74,6 +77,14 @@ class WhisperModelStore {
   /// does not fail loudly, it produces worse text — which is the quietest
   /// failure this feature could have.
   static const String partialSuffix = '.part';
+
+  /// Written beside a model once its bytes matched the pin, holding the hash
+  /// that matched. `installed()` reads it instead of hashing half a gigabyte
+  /// on every scan. A file this store never checked has no marker and reports
+  /// unverified until it is deleted and fetched again; a marker naming a hash
+  /// other than the catalog's current pin counts as absent, so changing a pin
+  /// un-verifies whatever the old one accepted.
+  static const String verifiedSuffix = '.sha256';
 
   static Future<Directory> _defaultDirectory() async {
     final Directory support = await getApplicationSupportDirectory();
@@ -114,7 +125,7 @@ class WhisperModelStore {
           id: model.id,
           path: path,
           bytes: await File(path).length(),
-          verified: model.sha256 != null,
+          verified: await _isVerified(model, path),
         ),
       );
     }
@@ -139,7 +150,22 @@ class WhisperModelStore {
       await partial.delete();
       removed = true;
     }
+    final File marker = File('$path$verifiedSuffix');
+    if (await marker.exists()) await marker.delete();
     return removed;
+  }
+
+  Future<bool> _isVerified(WhisperModel model, String path) async {
+    final String? pinned = model.sha256;
+    if (pinned == null) return false;
+    final File marker = File('$path$verifiedSuffix');
+    if (!await marker.exists()) return false;
+    try {
+      final String recorded = (await marker.readAsString()).trim();
+      return recorded.toLowerCase() == pinned.toLowerCase();
+    } on IOException {
+      return false;
+    }
   }
 
   /// Fetches [model], verifies it, and installs it.
@@ -164,12 +190,17 @@ class WhisperModelStore {
         id: model.id,
         path: path,
         bytes: await destination.length(),
-        verified: model.sha256 != null,
+        verified: await _isVerified(model, path),
       );
     }
 
     final File partial = File('$path$partialSuffix');
     if (await partial.exists()) await partial.delete();
+    // A marker left by an earlier install goes before anything is fetched, so
+    // a refused download, or a crash anywhere in here, leaves a model that
+    // reports unverified — never one wearing a verdict an older file earned.
+    final File marker = File('$path$verifiedSuffix');
+    if (await marker.exists()) await marker.delete();
 
     final http.StreamedResponse response = await _client.send(
       http.Request('GET', model.url),
@@ -253,11 +284,20 @@ class WhisperModelStore {
     }
 
     await partial.rename(path);
+    bool marked = false;
+    if (pinned != null) {
+      try {
+        await marker.writeAsString(collector.value.toString(), flush: true);
+        marked = true;
+      } on IOException {
+        // Installed, and honestly unverified until fetched again.
+      }
+    }
     return InstalledModel(
       id: model.id,
       path: path,
       bytes: received,
-      verified: pinned != null,
+      verified: marked,
     );
   }
 }

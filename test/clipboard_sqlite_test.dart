@@ -111,6 +111,39 @@ void main() {
     expect(repository.items, isEmpty);
   });
 
+  test('pruneOlderThan removes the old row and its PNG, keeps the fresh one',
+      () async {
+    final SqliteClipboardRepository repository = SqliteClipboardRepository();
+    final File oldPng = imageFile('old.png');
+    final File freshPng = imageFile('fresh.png');
+    await repository.addItem(image('old', oldPng.path, 1));
+    await repository.addItem(image('fresh', freshPng.path, 30));
+
+    final int removed = await repository.pruneOlderThan(
+      DateTime.utc(2026, 8, 9, 12, 15),
+    );
+
+    expect(removed, 1);
+    expect(repository.items.map((ClipboardItem i) => i.id), <String>['fresh']);
+    expect(await oldPng.exists(), isFalse);
+    expect(await freshPng.exists(), isTrue);
+  });
+
+  test('pruneOlderThan with a PNG already gone still removes the row', () async {
+    final SqliteClipboardRepository repository = SqliteClipboardRepository();
+    await repository.addItem(
+      image('old', p.join(dir.path, 'never-written.png'), 1),
+    );
+    await repository.addItem(text('fresh', 'kept', 30));
+
+    final int removed = await repository.pruneOlderThan(
+      DateTime.utc(2026, 8, 9, 12, 15),
+    );
+
+    expect(removed, 1);
+    expect(repository.items.map((ClipboardItem i) => i.id), <String>['fresh']);
+  });
+
   test('SqliteClipboardRepository normalizes legacy [Obrazek] preview to [Image]', () async {
     final SqliteClipboardRepository repository = SqliteClipboardRepository();
     db.execute('''

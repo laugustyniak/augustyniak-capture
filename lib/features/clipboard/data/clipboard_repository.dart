@@ -37,6 +37,10 @@ abstract class ClipboardRepository {
   Future<void> toggleItemCollection(String id, String collectionName);
   Future<void> deleteItem(String id);
   Future<void> clearHistory();
+
+  /// Remove every entry copied before [cutoff], taking its image file with
+  /// it the way eviction past [maxItems] does. Returns how many rows went.
+  Future<int> pruneOlderThan(DateTime cutoff);
 }
 
 class LocalJsonClipboardRepository implements ClipboardRepository {
@@ -252,6 +256,30 @@ class LocalJsonClipboardRepository implements ClipboardRepository {
     }
     _items.clear();
     await _save();
+  }
+
+  @override
+  Future<int> pruneOlderThan(DateTime cutoff) async {
+    if (!_initialized) await initialize();
+    final List<ClipboardItem> removed = <ClipboardItem>[];
+    final List<ClipboardItem> kept = <ClipboardItem>[];
+    for (final ClipboardItem item in _items) {
+      (item.copiedAt.isBefore(cutoff) ? removed : kept).add(item);
+    }
+    if (removed.isEmpty) return 0;
+    _items = kept;
+    for (final ClipboardItem removedItem in removed) {
+      if (removedItem.imagePath != null) {
+        try {
+          final File imageFile = File(removedItem.imagePath!);
+          if (await imageFile.exists()) {
+            await imageFile.delete();
+          }
+        } catch (_) {}
+      }
+    }
+    await _save();
+    return removed.length;
   }
 
   Future<void> _save() async {

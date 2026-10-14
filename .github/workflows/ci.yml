@@ -101,9 +101,10 @@ jobs:
 
       - name: Fetch a speech model
         run: |
-          curl -sL --retry 3 -o build/model.bin \
+          curl -sSfL --retry 3 -o build/model.bin \
             https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-tiny-q5_1.bin
-          test -s build/model.bin
+          echo "818710568da3ca15689e31a743197b520007872ff9576237bda97bd1b469c3d7  build/model.bin" \
+            | shasum -a 256 -c -
 
       # The sample ships inside the whisper.cpp checkout the build just fetched,
       # so nothing extra is downloaded and the audio is real speech rather than
@@ -162,9 +163,10 @@ jobs:
         shell: bash
         run: |
           mkdir -p build/engine
-          curl -sL --retry 3 -o build/engine/model.bin \
+          curl -sSfL --retry 3 -o build/engine/model.bin \
             https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-tiny-q5_1.bin
-          test -s build/engine/model.bin
+          echo "818710568da3ca15689e31a743197b520007872ff9576237bda97bd1b469c3d7  build/engine/model.bin" \
+            | sha256sum -c -
 
       # Same loudness rule as the macOS job: the native test skips itself when
       # its artifacts are absent, so a renamed path would report green forever.

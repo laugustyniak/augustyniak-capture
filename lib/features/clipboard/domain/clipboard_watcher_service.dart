@@ -11,6 +11,13 @@ abstract interface class ClipboardGateway {
   Future<String?> getImagePath();
   Future<void> copyImage(String path);
   Future<String?> getText();
+
+  /// Whether the source marked the current clipboard content as sensitive —
+  /// a password manager's copy, a one-time code. Read through the native
+  /// channel (`isClipboardSensitive`); a platform without the method, or
+  /// one whose clipboard cannot be read right now, answers false.
+  Future<bool> isSensitive();
+
   Future<void> copyText(String text);
 }
 
@@ -38,6 +45,18 @@ class SystemClipboardGateway implements ClipboardGateway {
   }
 
   @override
+  Future<bool> isSensitive() async {
+    try {
+      return await _nativeChannel.invokeMethod<bool>('isClipboardSensitive') ??
+          false;
+    } catch (_) {
+      // No native handler on this platform (Linux without the hint, iOS),
+      // or a channel error: the content is observed as before.
+      return false;
+    }
+  }
+
+  @override
   Future<void> copyText(String text) =>
       Clipboard.setData(ClipboardData(text: text));
 }
@@ -48,17 +67,33 @@ class ClipboardWatcherService extends ChangeNotifier {
     this.pollInterval = const Duration(milliseconds: 750),
     ClipboardGateway? gateway,
     AutoPaste autoPaste = const ChannelAutoPaste(),
+
+    /// Entries older than this are pruned on the next poll (#302). Null keeps
+    /// everything; the default is 30 days. Read on every prune, so a Config
+    /// change applies without a restart.
+    Duration? Function() retention = _defaultRetention,
+    DateTime Function() clock = DateTime.now,
   }) : _repository = repository,
        _gateway = gateway ?? SystemClipboardGateway(),
-       _autoPaste = autoPaste;
+       _autoPaste = autoPaste,
+       _retention = retention,
+       _clock = clock;
+
+  static Duration? _defaultRetention() => const Duration(days: 30);
+
+  /// Shortest gap between two prunes.
+  static const Duration pruneEvery = Duration(minutes: 1);
 
   final ClipboardRepository _repository;
   final ClipboardGateway _gateway;
   final AutoPaste _autoPaste;
+  final Duration? Function() _retention;
+  final DateTime Function() _clock;
   final Duration pollInterval;
   final Uuid _uuid = const Uuid();
 
   Timer? _timer;
+  DateTime? _lastPrune;
   String? _lastText;
   String? _lastImagePath;
   bool _isWatching = false;
@@ -90,6 +125,14 @@ class ClipboardWatcherService extends ChangeNotifier {
     if (_checkInFlight) return;
     _checkInFlight = true;
     try {
+      await _pruneExpired();
+
+      // A source that marked its content sensitive (#302) gets nothing
+      // recorded — not the image, not the text. `_lastText`/`_lastImagePath`
+      // stay as they were, so when the clipboard returns to the previous
+      // content nothing is re-indexed either.
+      if (await _gateway.isSensitive()) return;
+
       // 1. Check for native image on clipboard
       String? imagePath;
       try {
@@ -134,6 +177,23 @@ class ClipboardWatcherService extends ChangeNotifier {
       // Platform channels may throw when clipboard access fails
     } finally {
       _checkInFlight = false;
+    }
+  }
+
+  /// Once a minute at most: a DELETE every 750 ms would be pure churn, and
+  /// a window measured in days does not need better than that.
+  Future<void> _pruneExpired() async {
+    final Duration? window = _retention();
+    if (window == null) return;
+    final DateTime now = _clock();
+    if (_lastPrune != null && now.difference(_lastPrune!) < pruneEvery) return;
+    _lastPrune = now;
+    try {
+      if (await _repository.pruneOlderThan(now.subtract(window)) > 0) {
+        notifyListeners();
+      }
+    } catch (_) {
+      // A failed prune costs disk, never the poll that reads the clipboard.
     }
   }
 

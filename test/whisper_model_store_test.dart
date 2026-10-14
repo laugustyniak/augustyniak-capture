@@ -97,6 +97,83 @@ void main() {
         File('${installed.path}${WhisperModelStore.partialSuffix}').existsSync(),
         isFalse,
       );
+      // The marker is what lets a later scan say "verified" without hashing
+      // the file again.
+      expect(
+        File(
+          '${installed.path}${WhisperModelStore.verifiedSuffix}',
+        ).readAsStringSync(),
+        payloadHash,
+      );
+      final InstalledModel again = await store.download(
+        _model(sha256Pin: payloadHash),
+      );
+      expect(again.verified, isTrue);
+    });
+
+    test('a file this store never hashed reports unverified', () async {
+      // An install from before the catalog was pinned, or a file dropped into
+      // the directory by hand: present, pinned in the catalog, never checked.
+      // Reporting it verified would be the lie the pin exists to prevent.
+      final WhisperModelStore store = storeWith(_FakeHttp(status: 500));
+      final String path = await store.plannedPath('test-model');
+      File(path)
+        ..createSync(recursive: true)
+        ..writeAsBytesSync(payload);
+
+      final InstalledModel installed = await store.download(
+        _model(sha256Pin: payloadHash),
+      );
+      expect(installed.verified, isFalse);
+    });
+
+    test('a marker for a different pin counts as absent', () async {
+      // Changing a pin must un-verify whatever the old one accepted.
+      final WhisperModelStore store = storeWith(_FakeHttp(status: 500));
+      final String path = await store.plannedPath('test-model');
+      File(path)
+        ..createSync(recursive: true)
+        ..writeAsBytesSync(payload);
+      File(
+        '$path${WhisperModelStore.verifiedSuffix}',
+      ).writeAsStringSync('e' * 64);
+
+      final InstalledModel installed = await store.download(
+        _model(sha256Pin: payloadHash),
+      );
+      expect(installed.verified, isFalse);
+    });
+
+    test('a refused download takes an older marker with it', () async {
+      // The model file was removed behind the store's back and the marker
+      // stayed. A download that fails must not leave that marker for a file
+      // copied in by hand to inherit.
+      final WhisperModelStore store = storeWith(
+        _FakeHttp(body: payload, declaredLength: payload.length),
+      );
+      final String path = await store.plannedPath('test-model');
+      final File marker = File('$path${WhisperModelStore.verifiedSuffix}')
+        ..createSync(recursive: true)
+        ..writeAsStringSync(payloadHash);
+
+      await expectLater(
+        store.download(_model(sha256Pin: 'd' * 64)),
+        throwsA(isA<ModelDownloadException>()),
+      );
+      expect(marker.existsSync(), isFalse);
+    });
+
+    test('an unpinned model leaves no marker', () async {
+      final WhisperModelStore store = storeWith(
+        _FakeHttp(body: payload, declaredLength: payload.length),
+      );
+      final InstalledModel installed = await store.download(_model());
+      expect(
+        File(
+          '${installed.path}${WhisperModelStore.verifiedSuffix}',
+        ).existsSync(),
+        isFalse,
+      );
     });
 
     test('progress is reported while streaming, not only at the end', () async {
@@ -262,6 +339,29 @@ void main() {
       final WhisperModelStore store = storeWith(_FakeHttp());
       expect(await store.installed(), isEmpty);
     });
+
+    test('installed reads the marker rather than trusting the pin', () async {
+      final WhisperModelStore store = storeWith(_FakeHttp());
+      final WhisperModel tiny = WhisperModelCatalog.byId('tiny-q5_1')!;
+      final String path = await store.plannedPath(tiny.id);
+      File(path)
+        ..createSync(recursive: true)
+        ..writeAsBytesSync(payload);
+
+      List<InstalledModel> found = await store.installed();
+      expect(found.single.id, tiny.id);
+      expect(found.single.verified, isFalse);
+
+      final File marker = File('$path${WhisperModelStore.verifiedSuffix}');
+      marker.writeAsStringSync(tiny.sha256!);
+      found = await store.installed();
+      expect(found.single.verified, isTrue);
+
+      // Delete takes the marker with it, so a later hand-copied file cannot
+      // inherit a verdict it never earned.
+      expect(await store.delete(tiny.id), isTrue);
+      expect(marker.existsSync(), isFalse);
+    });
   });
 
   group('the catalog', () {
@@ -284,20 +384,43 @@ void main() {
       expect(WhisperModelCatalog.byId('base-q5_1'), isNotNull);
     });
 
-    test('every shipped entry is honest about being unpinned', () {
-      // Pinning is a follow-up that requires downloading each file once. Until
-      // then the store reports the install as unverified rather than implying a
-      // check that never ran.
+    test('every shipped entry carries a sha256 pin', () {
+      // A missing pin would install unverified and say so, which is honest
+      // and not good enough for a binary that decides what every transcript
+      // says. The pins are the Hugging Face LFS `oid sha256:` values; one was
+      // checked against a real download when they were added (#303).
+      final Set<String> seen = <String>{};
       for (final WhisperModel model in WhisperModelCatalog.all) {
         expect(
           model.sha256,
-          isNull,
-          reason:
-              'a pinned hash must be measured, not written from memory — if '
-              'this fails, the pin was added and this expectation should '
-              'become a format check',
+          matches(RegExp(r'^[0-9a-f]{64}$')),
+          reason: '${model.id} must pin a lowercase sha256',
+        );
+        expect(
+          seen.add(model.sha256!),
+          isTrue,
+          reason: '${model.id} repeats another entry\'s pin',
         );
       }
+    });
+
+    test('every CI fetch of the model checks against the catalog pin', () {
+      // `.github/workflows/ci.yml` downloads `tiny-q5_1` for the native gates
+      // (macOS with `shasum`, Windows with `sha256sum`). The workflow has to
+      // carry as many checksum lines with the catalog value as it has
+      // fetches, and nothing but this test ties the two together.
+      final String workflow = File(
+        '.github/workflows/ci.yml',
+      ).readAsStringSync();
+      final WhisperModel tiny = WhisperModelCatalog.byId('tiny-q5_1')!;
+      final int fetches = RegExp(
+        r'resolve/main/ggml-tiny-q5_1\.bin',
+      ).allMatches(workflow).length;
+      final int checks = RegExp(
+        '"${tiny.sha256}  [^"]+" \\\\\r?\n\\s*\\| (shasum -a 256|sha256sum) -c -',
+      ).allMatches(workflow).length;
+      expect(fetches, greaterThan(0));
+      expect(checks, fetches);
     });
   });
 }

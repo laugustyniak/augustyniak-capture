@@ -1,11 +1,14 @@
 package ai.augustyniak.capture
 
+import android.content.ClipDescription
+import android.content.ClipboardManager
 import android.graphics.Bitmap
 import android.media.MediaCodec
 import android.media.MediaExtractor
 import android.media.MediaFormat
 import android.media.MediaMetadataRetriever
 import android.media.MediaMuxer
+import android.os.Build
 import android.os.Handler
 import android.os.Looper
 import io.flutter.embedding.android.FlutterActivity
@@ -39,6 +42,8 @@ class MainActivity : FlutterActivity() {
             if (call.method == "getClipboardHistoryDirectory") {
                 val directory = File(filesDir, CLIPBOARD_DIRECTORY).apply { mkdirs() }
                 result.success(directory.path)
+            } else if (call.method == "isClipboardSensitive") {
+                result.success(clipboardIsSensitive())
             } else {
                 result.notImplemented()
             }
@@ -47,6 +52,22 @@ class MainActivity : FlutterActivity() {
             flutterEngine.dartExecutor.binaryMessenger,
             SESSION_CHANNEL,
         ).setMethodCallHandler(::handleSessionCall)
+    }
+
+    /**
+     * Whether the source flagged the current clip as sensitive (#302).
+     *
+     * `ClipDescription.EXTRA_IS_SENSITIVE` is the hint password managers set
+     * from API 33 on; below that there is no flag to read. The description is
+     * null when this app is not focused (Android 10+ hides the clipboard from
+     * background apps), which also answers false — the watcher cannot read
+     * the text in that state either.
+     */
+    private fun clipboardIsSensitive(): Boolean {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) return false
+        val clipboard = getSystemService(ClipboardManager::class.java) ?: return false
+        val extras = clipboard.primaryClipDescription?.extras ?: return false
+        return extras.getBoolean(ClipDescription.EXTRA_IS_SENSITIVE, false)
     }
 
     /**

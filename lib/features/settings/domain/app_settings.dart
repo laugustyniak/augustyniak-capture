@@ -31,6 +31,8 @@ class AppSettings {
     this.vaultPath,
     this.vaultFolder = VaultDefaults.folder,
     this.vaultCopySources = true,
+    this.clipboardRetentionDays = 30,
+    this.syncClipboard = false,
     this.timerMinutes = TimerDefaults.defaultMinutes,
     this.timerAlarm = AlarmSound.fallback,
     this.commandBaseUrl,
@@ -131,6 +133,21 @@ class AppSettings {
   final String? vaultPath;
   final String vaultFolder;
   final bool vaultCopySources;
+
+  /// Days a clipboard entry is kept before the watcher prunes it (#302); 0
+  /// keeps everything. Capped at [maxClipboardRetentionDays].
+  final int clipboardRetentionDays;
+
+  /// A hundred years. `Duration(days: n)` wraps its int64 microseconds past
+  /// about 106 million days, and a wrapped window is negative: the cutoff
+  /// lands in the future and the prune deletes every entry. A hand-typed
+  /// `999999999` must not be able to do that.
+  static const int maxClipboardRetentionDays = 36500;
+
+  /// Whether clipboard rows ride the metadata sync (#302). Off by default: a
+  /// clipboard holds whatever was last copied, passwords included, and E2EE is
+  /// per-account opt-in.
+  final bool syncClipboard;
 
   bool get mirrorsToVault => (vaultPath ?? '').trim().isNotEmpty;
 
@@ -238,6 +255,8 @@ class AppSettings {
     bool clearVaultPath = false,
     String? vaultFolder,
     bool? vaultCopySources,
+    int? clipboardRetentionDays,
+    bool? syncClipboard,
     int? timerMinutes,
     AlarmSound? timerAlarm,
     String? commandBaseUrl,
@@ -291,6 +310,9 @@ class AppSettings {
       vaultPath: clearVaultPath ? null : (vaultPath ?? this.vaultPath),
       vaultFolder: vaultFolder ?? this.vaultFolder,
       vaultCopySources: vaultCopySources ?? this.vaultCopySources,
+      clipboardRetentionDays:
+          clipboardRetentionDays ?? this.clipboardRetentionDays,
+      syncClipboard: syncClipboard ?? this.syncClipboard,
       timerMinutes: timerMinutes ?? this.timerMinutes,
       timerAlarm: timerAlarm ?? this.timerAlarm,
       commandBaseUrl: clearCommandBaseUrl
@@ -339,6 +361,8 @@ class AppSettings {
       if (s3SecretAccessKey != null && s3SecretAccessKey!.trim().isNotEmpty) 's3SecretAccessKey': s3SecretAccessKey,
       if (s3Prefix != null && s3Prefix!.trim().isNotEmpty) 's3Prefix': s3Prefix,
       if (syncDeviceId != null) 'syncDeviceId': syncDeviceId,
+      'clipboardRetentionDays': clipboardRetentionDays,
+      'syncClipboard': syncClipboard,
       if (vaultPath != null) ...<String, dynamic>{
         'vaultPath': vaultPath,
         'vaultFolder': vaultFolder,
@@ -458,6 +482,15 @@ class AppSettings {
       vaultCopySources: json['vaultCopySources'] is bool
           ? json['vaultCopySources'] as bool
           : true,
+      clipboardRetentionDays: json['clipboardRetentionDays'] is int
+          ? (json['clipboardRetentionDays'] as int).clamp(
+              0,
+              maxClipboardRetentionDays,
+            )
+          : 30,
+      syncClipboard: json['syncClipboard'] is bool
+          ? json['syncClipboard'] as bool
+          : false,
       timerMinutes: json['timerMinutes'] is int
           ? json['timerMinutes'] as int
           : TimerDefaults.defaultMinutes,

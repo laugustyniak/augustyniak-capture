@@ -24,6 +24,7 @@ const int syncBatchSize = 200;
 /// The four tables pulled every run. `segments` rides inside a recording's
 /// `payload`/columns and has no separate pull; `devices` and `sync_state`
 /// are write-only bookkeeping the device never reads back.
+/// `clipboard_items` only when `syncClipboard` is on (#302).
 const List<SyncTable> _pulledTables = <SyncTable>[
   SyncTable.projects,
   SyncTable.recordings,
@@ -42,17 +43,33 @@ class SyncEngine {
     required SyncApplier applier,
     DateTime Function()? clock,
     int pageSize = 500,
+    bool syncClipboard = false,
   }) : _transport = transport,
        _bookkeeping = bookkeeping,
        _applier = applier,
        _clock = clock ?? (() => DateTime.now().toUtc()),
-       _pageSize = pageSize;
+       _pageSize = pageSize,
+       _syncClipboard = syncClipboard;
 
   final SyncTransport _transport;
   final SyncBookkeeping _bookkeeping;
   final SyncApplier _applier;
   final DateTime Function() _clock;
   final int _pageSize;
+
+  /// Off: `clipboard_items` is neither pushed, swept nor pulled this run —
+  /// bookkeeping and cursor for it are left exactly as they were, so switching
+  /// it back on resumes rather than re-syncs. The server rows pushed while it
+  /// was on are not tombstoned by switching it off: a tombstone would delete
+  /// the other devices' copies too.
+  final bool _syncClipboard;
+
+  List<SyncTable> get _tablesToPull => _syncClipboard
+      ? _pulledTables
+      : <SyncTable>[
+          for (final SyncTable t in _pulledTables)
+            if (t != SyncTable.clipboardItems) t,
+        ];
 
   Future<SupabaseSyncResult> run(SyncSnapshot snapshot) async {
     int pushed = 0;
@@ -162,10 +179,12 @@ class SyncEngine {
         for (final Map<String, Object?> seg in SyncRowCodec.segments(r))
           SyncRowCodec.rowId(SyncTable.segments, seg): seg,
     });
-    yield _Outbox(SyncTable.clipboardItems, {
-      for (final ClipboardItem c in s.clipboardItems)
-        c.id: SyncRowCodec.clipboardItem(c),
-    });
+    if (_syncClipboard) {
+      yield _Outbox(SyncTable.clipboardItems, {
+        for (final ClipboardItem c in s.clipboardItems)
+          c.id: SyncRowCodec.clipboardItem(c),
+      });
+    }
     yield _Outbox(SyncTable.revisions, {
       // A revision for a recording not in this snapshot — deleted locally
       // in a session before this one started keeping revisions bookkept, or
@@ -445,7 +464,7 @@ class SyncEngine {
     Set<String> tombstonedIds,
   ) async {
     final _PullOutcome total = _PullOutcome();
-    for (final SyncTable table in _pulledTables) {
+    for (final SyncTable table in _tablesToPull) {
       final DateTime? since = _bookkeeping.cursor(table.serverName);
       DateTime? newest = since;
       Map<String, Object?>? after;
@@ -516,7 +535,7 @@ class SyncEngine {
     if (s.device['id'] is String) {
       final String deviceId = s.device['id']! as String;
       final _Outbox syncStateOutbox = _Outbox(SyncTable.syncState, {
-        for (final SyncTable t in _pulledTables)
+        for (final SyncTable t in _tablesToPull)
           '$deviceId/${t.serverName}': <String, Object?>{
             'device_id': deviceId,
             'table_name': t.serverName,
