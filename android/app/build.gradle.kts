@@ -134,6 +134,7 @@ dependencies {
     // drags a newer runner in with it and fails resolution.
     androidTestImplementation("androidx.test:runner:1.3.0")
     androidTestImplementation("androidx.test:rules:1.2.0")
+    testImplementation("junit:junit:4.13.2")
 }
 
 kotlin {
