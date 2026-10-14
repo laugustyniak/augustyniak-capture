@@ -1422,7 +1422,8 @@ class RecordingsController extends ChangeNotifier {
     );
 
     _lastCloudSyncReport = await coordinator.sync(onProgress: onProgress);
-    await _housekeepTrash();
+    // Only a run that reached the metadata slot can have pulled a tombstone.
+    if (_lastCloudSyncReport!.supabase != null) await _housekeepTrash();
     // A pulled row that was mid-pipeline on the device that made it can now
     // be processed here; the funnel filters everything else out by status.
     if ((_lastCloudSyncReport!.media?.downloaded ?? 0) > 0) {

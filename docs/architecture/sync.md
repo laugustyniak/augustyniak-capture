@@ -202,11 +202,33 @@ For each pulled row, keyed by local hash state:
 | clean | live | replace; `sync_rows` ← (version, hash) |
 | dirty | live, version = ours | ours is newer; leave it, the push side sends it |
 | dirty | live, version > ours | **server wins.** Each overwritten field is appended as `RecordingRevision(source: RevisionSource.sync)`; then replace |
-| any | `deleted_at` set | if dirty, write revisions first so HISTORY shows what was thrown away; then the `deleteRecording` callback — the locked removal path, source file included; `sync_rows` row removed |
+| any | `deleted_at` set | if dirty, write revisions first so HISTORY shows what was thrown away; then `SyncApplier.deleteRecording(id, hold:)` → `RecordingsController.applySyncedRecordingDelete` — the row is dropped, the source files go to `.trash/` rather than being unlinked; `sync_rows` row removed |
 
 A pulled tombstone is the user's own intent from another device, not a cloud
-failure, which is why it may reach the source file: it runs through the same
-entry point the delete button calls and nothing else. **Every `delete*` on
+failure, which is why it may touch the source file at all. It does **not**
+unlink it (#304): a stolen session, a bad server or one bulk delete on one
+device would otherwise wipe every device in a single cycle, with nothing on
+this side corresponding to the index's second durability rule. The controller
+moves the files into `<recordingsDir>/.trash/` as `<epochMs>-<name>` and
+`RecordingsRepository.pruneTrash` removes them 30 days later
+(`trashRetention`; run after each sync and once from `recoverOrphans`). There
+is no restore button: restoring would push a row the server has already
+tombstoned and lose it again. The bytes sit in `.trash/` for the user to copy
+out by hand. The user's own delete button (`deleteRecording`) is unchanged and
+still unlinks.
+
+**Blast-radius cap.** `SyncEngine._applyRecordings` counts, per applied batch,
+the tombstones whose row this device actually holds (a tombstone for a row it
+never had removes nothing). More than `SyncEngine.defaultTombstoneHoldThreshold`
+(10, a constructor parameter) and every delete in that batch is applied with
+`hold: true`: the files land in `.trash/` as `held-<epochMs>-<name>`, which
+`pruneTrash` never touches. The Queue shows "Another device deleted recordings
+· N files held in trash" with CONFIRM; `confirmHeldSyncDeletes` renames them to
+`<nowMs>-<name>`, so the 30 days start at confirmation. The threshold is
+absolute on purpose: a fraction of the library would let a large library lose
+dozens of captures without a prompt. `SupabaseSyncResult.tombstonesHeld` counts
+the held ones (they are still in `tombstonesApplied`) and the report says
+"N held in trash". The count is per batch, i.e. per pulled page. **Every `delete*` on
 `SyncApplier` tolerates an id it has never heard of** — a tombstone for a
 row this device never had is a no-op, never a throw.
 
