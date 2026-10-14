@@ -29,7 +29,13 @@ if(MSVC)
   remove_definitions(-DUNICODE -D_UNICODE)
 endif()
 
-set(AUG_WHISPER_TAG "v1.7.4" CACHE STRING "whisper.cpp tag to build against")
+# Pinned by commit, not by the tag it names (`v1.7.4`): a tag can be moved on
+# the remote, and a shallow clone takes whatever it points at that day. The
+# shallow clone still works with a hash because the tag's commit is among the
+# tips it fetches; move the tag and configure fails loudly instead of building
+# something else. Bump the hash and the name in the same change.
+set(AUG_WHISPER_TAG "8a9ad7844d6e2a10cddf4b92de4089d7ac2b14a9" CACHE STRING
+  "whisper.cpp commit to build against (v1.7.4)")
 
 # Everything whisper.cpp offers beyond the library itself is cost we do not pay:
 # its examples pull SDL2, its tests add minutes, and neither ships in the app.

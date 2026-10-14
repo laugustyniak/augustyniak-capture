@@ -284,20 +284,33 @@ void main() {
       expect(WhisperModelCatalog.byId('base-q5_1'), isNotNull);
     });
 
-    test('every shipped entry is honest about being unpinned', () {
-      // Pinning is a follow-up that requires downloading each file once. Until
-      // then the store reports the install as unverified rather than implying a
-      // check that never ran.
+    test('every shipped entry carries a sha256 pin', () {
+      // A missing pin would install unverified and say so, which is honest
+      // and not good enough for a binary that decides what every transcript
+      // says. The pins are the Hugging Face LFS `oid sha256:` values; one was
+      // checked against a real download when they were added (#303).
+      final Set<String> seen = <String>{};
       for (final WhisperModel model in WhisperModelCatalog.all) {
         expect(
           model.sha256,
-          isNull,
-          reason:
-              'a pinned hash must be measured, not written from memory — if '
-              'this fails, the pin was added and this expectation should '
-              'become a format check',
+          matches(RegExp(r'^[0-9a-f]{64}$')),
+          reason: '${model.id} must pin a lowercase sha256',
+        );
+        expect(
+          seen.add(model.sha256!),
+          isTrue,
+          reason: '${model.id} repeats another entry\'s pin',
         );
       }
+    });
+
+    test('the CI model fetch checks against the catalog pin', () {
+      // `.github/workflows/ci.yml` downloads `tiny-q5_1` for the native gate
+      // and verifies it with `shasum -a 256 -c`. The two pins have to agree,
+      // and nothing but this test ties the workflow to the catalog.
+      final String workflow = File('.github/workflows/ci.yml').readAsStringSync();
+      final WhisperModel tiny = WhisperModelCatalog.byId('tiny-q5_1')!;
+      expect(workflow, contains('${tiny.sha256}  build/model.bin'));
     });
   });
 }

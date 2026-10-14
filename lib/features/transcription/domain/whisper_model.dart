@@ -32,17 +32,20 @@ class WhisperModel {
   /// accuracy, and a list of file names does not say that.
   final String note;
 
-  /// Pinned integrity, when it is known.
+  /// Pinned integrity.
   ///
-  /// **Null here means unpinned, not "no check".** Every entry this app ships
-  /// is currently unpinned: a hash can only be stated by downloading the file
-  /// and computing it, and inventing one would be worse than admitting there
-  /// is none — a wrong pin refuses every honest download while a fabricated
-  /// one that happens to match nothing is a check that never runs.
+  /// Every entry this app ships carries one, copied from the Hugging Face LFS
+  /// pointer (`raw/main/ggml-<id>.bin`, its `oid sha256:` line) and checked
+  /// once against a real download; `test/whisper_model_store_test.dart`
+  /// refuses a catalog entry without one. A wrong pin refuses every honest
+  /// download, which is the intended failure: it is how a replaced upstream
+  /// file or a TLS-interposing proxy surfaces, instead of installing a model
+  /// that transcribes whatever the attacker wants.
   ///
-  /// The store verifies against this when it is present and reports the
-  /// install as unverified when it is not, so the difference reaches the user
-  /// instead of being smoothed over. Pinning them is tracked separately.
+  /// Nullable for the store's own contract rather than for the catalog: a
+  /// model handed in without a pin installs and is reported
+  /// `InstalledModel.verified: false`, so "checked and correct" and "nothing
+  /// to check against" stay different claims.
   final String? sha256;
 
   /// `ggml-base-q5_1.bin`
@@ -69,6 +72,8 @@ class WhisperModelCatalog {
       id: 'tiny-q5_1',
       label: 'Tiny (quantized)',
       url: Uri.parse('$_base/ggml-tiny-q5_1.bin'),
+      sha256:
+          '818710568da3ca15689e31a743197b520007872ff9576237bda97bd1b469c3d7',
       approximateBytes: 32 * 1024 * 1024,
       note: 'Smallest and fastest. Usable for short, clear dictation.',
     ),
@@ -76,6 +81,8 @@ class WhisperModelCatalog {
       id: 'base-q5_1',
       label: 'Base (quantized)',
       url: Uri.parse('$_base/ggml-base-q5_1.bin'),
+      sha256:
+          '422f1ae452ade6f30a004d7e5c6a43195e4433bc370bf23fac9cc591f01a8898',
       approximateBytes: 60 * 1024 * 1024,
       note: 'The sensible default on a phone.',
     ),
@@ -83,6 +90,8 @@ class WhisperModelCatalog {
       id: 'small-q5_1',
       label: 'Small (quantized)',
       url: Uri.parse('$_base/ggml-small-q5_1.bin'),
+      sha256:
+          'ae85e4a935d7a567bd102fe55afc16bb595bdb618e11b2fc7591bc08120411bb',
       approximateBytes: 190 * 1024 * 1024,
       note: 'Noticeably better on accented and inflected speech.',
     ),
@@ -90,6 +99,8 @@ class WhisperModelCatalog {
       id: 'medium-q5_0',
       label: 'Medium (quantized)',
       url: Uri.parse('$_base/ggml-medium-q5_0.bin'),
+      sha256:
+          '19fea4b380c3a618ec4723c3eef2eb785ffba0d0538cf43f8f235e7b3b34220f',
       approximateBytes: 540 * 1024 * 1024,
       note: 'Desktop-sized. Slow on a phone, and worth it on a laptop.',
     ),
