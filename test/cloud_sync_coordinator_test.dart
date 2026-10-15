@@ -106,6 +106,22 @@ void main() {
     );
   });
 
+  test('held tombstones are reported as held in trash', () async {
+    final CloudSyncReport report = await CloudSyncCoordinator(
+      syncSupabase: () async => const SupabaseSyncResult(
+        tombstonesApplied: 12,
+        tombstonesHeld: 12,
+      ),
+    ).sync();
+
+    expect(report.message, contains('12 removed (12 held in trash)'));
+
+    final CloudSyncReport none = await CloudSyncCoordinator(
+      syncSupabase: () async => const SupabaseSyncResult(tombstonesApplied: 1),
+    ).sync();
+    expect(none.message, isNot(contains('held in trash')));
+  });
+
   test('keeps storage success visible when supabase fails', () async {
     final CloudSyncReport report = await CloudSyncCoordinator(
       syncSupabase: () async =>

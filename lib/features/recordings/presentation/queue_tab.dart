@@ -564,6 +564,11 @@ class _QueueTabState extends State<QueueTab> {
                                 ? _EncryptionBanner(e2ee: e2ee)
                                 : const SizedBox.shrink(),
                       ),
+                    if (controller.heldSyncTrashFiles > 0)
+                      _HeldDeletesBanner(
+                        files: controller.heldSyncTrashFiles,
+                        onConfirm: controller.confirmHeldSyncDeletes,
+                      ),
                     // Pinned above the scroll area, not scrolled with it.
                     //
                     // These four are the screen's entire navigation, and as list children
@@ -1864,6 +1869,41 @@ class _EncryptionBanner extends StatelessWidget {
               ),
               label: Text(locked ? 'UNLOCK' : 'SET UP ENCRYPTION'),
               style: TextButton.styleFrom(foregroundColor: Console.red),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// A large batch of deletes pulled from another device, parked in the local
+/// trash until the user accepts it (#304). Nothing was unlinked yet.
+class _HeldDeletesBanner extends StatelessWidget {
+  _HeldDeletesBanner({required this.files, required this.onConfirm});
+
+  final int files;
+  final VoidCallback onConfirm;
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.only(top: 10),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: <Widget>[
+          ErrorBanner(
+            message:
+                'Another device deleted recordings · $files '
+                '${files == 1 ? 'file' : 'files'} kept in the recordings '
+                "folder's .trash · CONFIRM removes them after 30 days",
+          ),
+          Align(
+            alignment: Alignment.centerRight,
+            child: TextButton(
+              onPressed: onConfirm,
+              style: TextButton.styleFrom(foregroundColor: Console.red),
+              child: const Text('CONFIRM'),
             ),
           ),
         ],

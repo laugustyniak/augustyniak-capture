@@ -1389,7 +1389,7 @@ class RecordingsController extends ChangeNotifier {
                   applySyncedProjectDelete: _applySyncedProjectDelete,
                   clipboard: _clipboardRepository,
                   revisions: _revisionsRepository,
-                  deleteRecording: deleteRecording,
+                  applySyncedRecordingDelete: applySyncedRecordingDelete,
                   recordingExists: _hasRecording,
                 ),
                 syncClipboard: _syncClipboard?.call() ?? false,
@@ -1422,6 +1422,8 @@ class RecordingsController extends ChangeNotifier {
     );
 
     _lastCloudSyncReport = await coordinator.sync(onProgress: onProgress);
+    // Only a run that reached the metadata slot can have pulled a tombstone.
+    if (_lastCloudSyncReport!.supabase != null) await _housekeepTrash();
     // A pulled row that was mid-pipeline on the device that made it can now
     // be processed here; the funnel filters everything else out by status.
     if ((_lastCloudSyncReport!.media?.downloaded ?? 0) > 0) {
@@ -1454,7 +1456,9 @@ class RecordingsController extends ChangeNotifier {
   /// existing item, and it swallows its own errors into the log, so a failed
   /// scan costs a recovery rather than a start-up.
   Future<void> recoverOrphans() async {
-    if (_indexUnreadable || _disposed) return;
+    if (_disposed) return;
+    if (_indexUnreadable) return;
+    await _housekeepTrash();
     try {
       final List<Recording> orphans = await _repository.findOrphans(
         _recordings,
@@ -2221,7 +2225,80 @@ class RecordingsController extends ChangeNotifier {
   /// other write is: `saveAll` rewrites the whole file, and a delete is the one
   /// write that is *supposed* to lose rows, so the shrink guard would not catch
   /// it either.
-  Future<void> deleteRecording(String id) async {
+  Future<void> deleteRecording(String id) =>
+      _removeRecording(id, dispose: _repository.deleteArtifacts);
+
+  /// The delete a pulled sync tombstone asks for (#304). Same guards and the
+  /// same files-first, index-second order as [deleteRecording], but the source
+  /// files are moved into the recordings directory's `.trash/` instead of
+  /// being unlinked, so a stolen session or a bad server cannot destroy the
+  /// bytes in one sync cycle. [hold] marks them as waiting for the user's
+  /// [confirmHeldSyncDeletes]; the engine sets it when the batch is large.
+  Future<void> applySyncedRecordingDelete(
+    String id, {
+    required bool hold,
+  }) async {
+    // The banner count moves by what was just trashed — no directory scan per
+    // tombstone, a bulk delete is hundreds of them. The housekeeping after the
+    // sync run recounts from disk. `_removeRecording` notifies once at the end.
+    await _removeRecording(
+      id,
+      dispose: (Recording item) async {
+        final int moved = await _repository.trashArtifacts(item, held: hold);
+        if (hold) _heldSyncTrashFiles += moved;
+      },
+    );
+  }
+
+  /// Files waiting in `.trash/` as `held-*`: deletes another device made that
+  /// this device has not been told to finish. Refreshed after load and after
+  /// every sync run.
+  int get heldSyncTrashFiles => _heldSyncTrashFiles;
+  int _heldSyncTrashFiles = 0;
+
+  /// Accept the held deletes: their 30-day retention clock starts now.
+  Future<void> confirmHeldSyncDeletes() async {
+    try {
+      await _repository.releaseHeldTrash();
+    } catch (exception) {
+      _logSink.log(
+        'Could not confirm held deletes: $exception',
+        level: LogLevel.warn,
+      );
+    }
+    await _refreshHeldTrash();
+  }
+
+  Future<void> _refreshHeldTrash() async {
+    try {
+      final int count = await _repository.heldTrashCount();
+      if (count == _heldSyncTrashFiles) return;
+      _heldSyncTrashFiles = count;
+      if (!_disposed) notifyListeners();
+    } catch (_) {}
+  }
+
+  /// Best-effort, on the best-effort sink contract: a trash that will not
+  /// prune costs disk space, never a capture.
+  Future<void> _housekeepTrash() async {
+    try {
+      final int removed = await _repository.pruneTrash();
+      if (removed > 0) {
+        _logSink.log(
+          'Removed $removed expired file(s) from the sync trash.',
+          level: LogLevel.info,
+        );
+      }
+    } catch (exception) {
+      _logSink.log('Trash cleanup failed: $exception', level: LogLevel.warn);
+    }
+    await _refreshHeldTrash();
+  }
+
+  Future<void> _removeRecording(
+    String id, {
+    required Future<void> Function(Recording item) dispose,
+  }) async {
     if (_indexUnreadable) {
       _error =
           'Deletion is disabled — the recordings index could not be read, so '
@@ -2244,7 +2321,7 @@ class RecordingsController extends ChangeNotifier {
     // download finishing while `deleteArtifacts` runs is not written back.
     _deleting.add(id);
     try {
-      await _deleteRecordingArtifactsAndRow(id, item);
+      await _deleteRecordingArtifactsAndRow(id, item, dispose);
     } finally {
       _deleting.remove(id);
     }
@@ -2253,7 +2330,11 @@ class RecordingsController extends ChangeNotifier {
   /// Ids whose [deleteRecording] is in progress.
   final Set<String> _deleting = <String>{};
 
-  Future<void> _deleteRecordingArtifactsAndRow(String id, Recording item) async {
+  Future<void> _deleteRecordingArtifactsAndRow(
+    String id,
+    Recording item,
+    Future<void> Function(Recording item) dispose,
+  ) async {
     if (_playingId == id) {
       try {
         await _player.stop();
@@ -2265,7 +2346,7 @@ class RecordingsController extends ChangeNotifier {
     }
 
     try {
-      await _repository.deleteArtifacts(item);
+      await dispose(item);
     } catch (exception) {
       // Index untouched on purpose: the row is the only thing that still knows
       // where the file is, so it stays until the file is actually gone.

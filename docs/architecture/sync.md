@@ -202,13 +202,58 @@ For each pulled row, keyed by local hash state:
 | clean | live | replace; `sync_rows` ← (version, hash) |
 | dirty | live, version = ours | ours is newer; leave it, the push side sends it |
 | dirty | live, version > ours | **server wins.** Each overwritten field is appended as `RecordingRevision(source: RevisionSource.sync)`; then replace |
-| any | `deleted_at` set | if dirty, write revisions first so HISTORY shows what was thrown away; then the `deleteRecording` callback — the locked removal path, source file included; `sync_rows` row removed |
+| any | `deleted_at` set | if dirty, write revisions first so HISTORY shows what was thrown away; then `SyncApplier.deleteRecording(id, hold:)` → `RecordingsController.applySyncedRecordingDelete` — the row is dropped, the source files go to `.trash/` rather than being unlinked; `sync_rows` row removed |
 
 A pulled tombstone is the user's own intent from another device, not a cloud
-failure, which is why it may reach the source file: it runs through the same
-entry point the delete button calls and nothing else. **Every `delete*` on
-`SyncApplier` tolerates an id it has never heard of** — a tombstone for a
-row this device never had is a no-op, never a throw.
+failure, which is why it may touch the source file at all. It does **not**
+unlink it (#304): a stolen session, a bad server or one bulk delete on one
+device would otherwise wipe every device in a single cycle, with nothing on
+this side corresponding to the index's second durability rule. The controller
+moves the files into `<recordingsDir>/.trash/` as `<epochMs>-<name>` and
+`RecordingsRepository.pruneTrash` removes them 30 days later
+(`trashRetention`; run after each sync and once from `recoverOrphans`). There
+is no restore button: restoring would push a row the server has already
+tombstoned and lose it again. The bytes sit in `.trash/` for the user to copy
+out by hand. The user's own delete button (`deleteRecording`) is unchanged and
+still unlinks.
+
+**Blast-radius cap.** `SyncEngine._applyRecordings` counts the tombstones whose
+row this device actually holds (a tombstone for a row it never had removes
+nothing). The count is cumulative **within one `run()`**: every recordings batch
+adds to it, and once it passes `SyncEngine.defaultTombstoneHoldThreshold` (10,
+a constructor parameter) every further delete in that run is applied with
+`hold: true`. A batch is every page of one run's recordings pull (`_pullAll`
+gathers the pages before applying), and the conflict rows returned by the push
+draw on the same budget, so splitting a bulk delete across pages or across
+push and pull does not slip under the cap. The conflict batch is applied first:
+if it is within budget it is not held, and it is not retroactively held when
+the pull then pushes the run's total over the threshold. The counter starts
+over at the top of each run, so a slow drip of ten or fewer per run across many
+runs is **not** covered; a rolling window needs persisted bookkeeping and is a
+follow-up.
+
+Held files land in `.trash/` as `held-<epochMs>-<name>`, which `pruneTrash`
+never touches. The Queue shows "Another device deleted recordings · N files
+kept in the recordings folder's .trash · CONFIRM removes them after 30 days"
+with a CONFIRM button; `confirmHeldSyncDeletes` renames them to
+`<nowMs>-<name>`, so the 30 days start at confirmation. The threshold is
+absolute on purpose: a fraction of the library would let a large library lose
+dozens of captures without a prompt. `SupabaseSyncResult.tombstonesHeld` counts
+the held ones (they are still in `tombstonesApplied`) and the report says
+"N removed (M held in trash)".
+
+`trashArtifacts` is all or nothing, and every move — forward and the rollback
+— goes through one primitive: `rename`, or copy-then-delete when `rename`
+refuses (a source on another filesystem raises `EXDEV`). A copy that fails, or
+whose source then refuses to delete, is removed again, so the bytes are in one
+place whichever way it ends and a retried tombstone cannot stack a second copy.
+If an artifact still cannot move, the ones already moved are put back through
+the same primitive and the error is rethrown, so the kept row never points at
+files already in `.trash/`. The primitive is injectable (`renameFile`) because
+a single filesystem never refuses a `rename`; the tests force the refusal.
+
+**Every `delete*` on `SyncApplier` tolerates an id it has never heard of** — a
+tombstone for a row this device never had is a no-op, never a throw.
 
 **A live push racing a tombstone always loses to the tombstone**: deletion
 beats a concurrent edit. The editing device is still bookkept at the

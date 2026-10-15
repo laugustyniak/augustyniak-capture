@@ -14,7 +14,11 @@ abstract interface class SyncApplier {
   Future<void> upsertProjects(List<Project> rows);
   Future<void> upsertClipboardItems(List<ClipboardItem> rows);
   Future<void> appendRevisions(List<RecordingRevision> rows);
-  Future<void> deleteRecording(String id);
+
+  /// Remove a recording a tombstone says is gone. [hold] is set when the
+  /// engine judged the batch too large to trust on its own: the applier must
+  /// keep the bytes recoverable and mark them as awaiting confirmation.
+  Future<void> deleteRecording(String id, {bool hold = false});
   Future<void> deleteProject(String id);
   Future<void> deleteClipboardItem(String id);
 }
@@ -37,6 +41,14 @@ const List<SyncTable> _pulledTables = <SyncTable>[
 /// pulls every table since its cursor and applies the server's view through
 /// a [SyncApplier] — see the spec's "Pull" and "Apply" sections.
 class SyncEngine {
+  /// Pulled tombstones that remove local recordings, in one applied batch,
+  /// above which every delete in the batch is held for confirmation (#304).
+  ///
+  /// Absolute rather than a fraction of the library: a fraction would let a
+  /// large library lose dozens of captures without a prompt, and the damage a
+  /// stolen session or a bad server can do is counted in captures, not percent.
+  static const int defaultTombstoneHoldThreshold = 10;
+
   SyncEngine({
     required SyncTransport transport,
     required SyncBookkeeping bookkeeping,
@@ -44,18 +56,26 @@ class SyncEngine {
     DateTime Function()? clock,
     int pageSize = 500,
     bool syncClipboard = false,
+    int tombstoneHoldThreshold = defaultTombstoneHoldThreshold,
   }) : _transport = transport,
        _bookkeeping = bookkeeping,
        _applier = applier,
        _clock = clock ?? (() => DateTime.now().toUtc()),
        _pageSize = pageSize,
-       _syncClipboard = syncClipboard;
+       _syncClipboard = syncClipboard,
+       _tombstoneHoldThreshold = tombstoneHoldThreshold;
 
   final SyncTransport _transport;
   final SyncBookkeeping _bookkeeping;
   final SyncApplier _applier;
   final DateTime Function() _clock;
   final int _pageSize;
+  final int _tombstoneHoldThreshold;
+
+  /// Tombstones for locally present recordings seen so far in the current
+  /// [run], across every batch and page. The hold budget is per run: a
+  /// push-conflict batch and the pull that follows it draw on the same ten.
+  int _presentTombstonesThisRun = 0;
 
   /// Off: `clipboard_items` is neither pushed, swept nor pulled this run —
   /// bookkeeping and cursor for it are left exactly as they were, so switching
@@ -77,6 +97,8 @@ class SyncEngine {
     int skipped = 0;
     int pulled = 0;
     int tombstones = 0;
+    int tombstonesHeld = 0;
+    _presentTombstonesThisRun = 0;
     // Shared with the pull loop below: a tombstone resolved while applying a
     // push conflict removes its id here so the same run's pull pass — which
     // may re-see the row inside the lag window — does not delete it twice.
@@ -112,6 +134,7 @@ class SyncEngine {
           );
           pulled += resolved.pulled;
           tombstones += resolved.tombstones;
+          tombstonesHeld += resolved.tombstonesHeld;
           skipped += resolved.skipped;
           redirtied.addAll(resolved.redirtied);
         }
@@ -121,6 +144,7 @@ class SyncEngine {
       pulled += pull.pulled;
       conflicts += pull.conflicts;
       tombstones += pull.tombstones;
+      tombstonesHeld += pull.tombstonesHeld;
       skipped += pull.skipped;
       redirtied.addAll(pull.redirtied);
 
@@ -147,6 +171,7 @@ class SyncEngine {
         pulled: pulled,
         conflicts: conflicts,
         tombstonesApplied: tombstones,
+        tombstonesHeld: tombstonesHeld,
         skipped: skipped,
         failureReason: '$error',
       );
@@ -156,6 +181,7 @@ class SyncEngine {
       pulled: pulled,
       conflicts: conflicts,
       tombstonesApplied: tombstones,
+      tombstonesHeld: tombstonesHeld,
       skipped: skipped,
       failureReason: refusals.isEmpty ? null : refusals.join('; '),
     );
@@ -565,6 +591,16 @@ class SyncEngine {
     final Map<String, SyncRowState> known = _bookkeeping.loadTable(
       SyncTable.recordings.serverName,
     );
+    // Tombstones that will actually remove a local file; one for a row this
+    // device never had is a no-op and says nothing about the blast radius.
+    final int present = rows
+        .where((Map<String, Object?> r) => r['deleted_at'] != null && local.containsKey(r['id']))
+        .length;
+    // Cumulative within the run, so splitting a bulk delete across a conflict
+    // batch and pulled pages cannot slip under the threshold. An earlier batch
+    // that was within budget is not retroactively held.
+    _presentTombstonesThisRun += present;
+    final bool hold = _presentTombstonesThisRun > _tombstoneHoldThreshold;
     final List<Recording> upserts = [];
     final List<RecordingRevision> revisions = [];
     // (id, version, hash) — the actual `_bookkeeping.put` calls are deferred
@@ -597,13 +633,14 @@ class SyncEngine {
           final List<RecordingRevision> lost = _overwritten(mine, null);
           if (lost.isNotEmpty) await _applier.appendRevisions(lost);
         }
-        await _applier.deleteRecording(id);
+        await _applier.deleteRecording(id, hold: hold);
         _bookkeeping.remove(SyncTable.recordings.serverName, id);
         known.remove(id);
         // Prevent a later apply pass in this same run (the lag-window
         // re-read, or a second push-conflict batch) from deleting again.
         local.remove(id);
         out.tombstones++;
+        if (hold) out.tombstonesHeld++;
         continue;
       }
       if (state != null && serverVersion <= state.serverVersion) continue; // already have it
@@ -834,6 +871,7 @@ class _PullOutcome {
   int pulled = 0;
   int conflicts = 0;
   int tombstones = 0;
+  int tombstonesHeld = 0;
   int skipped = 0;
   final List<Recording> redirtied = <Recording>[];
 

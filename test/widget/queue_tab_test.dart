@@ -62,6 +62,26 @@ final Uint8List _pixel = base64Decode(
   'BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==',
 );
 
+/// A repository whose trash holds [held] `held-*` files until released.
+class _HeldTrashRepository extends FakeRecordingsRepository {
+  _HeldTrashRepository(super.directory, {required this.held});
+
+  int held;
+
+  @override
+  Future<int> pruneTrash({DateTime? now}) async => 0;
+
+  @override
+  Future<int> heldTrashCount() async => held;
+
+  @override
+  Future<int> releaseHeldTrash({DateTime? now}) async {
+    final int released = held;
+    held = 0;
+    return released;
+  }
+}
+
 /// Guards the queue list: which items a filter shows, what a card renders per
 /// capture type, what the search matches on, and — since the design put counts
 /// on the chips — that those counts partition the queue instead of
@@ -98,6 +118,37 @@ void main() {
     );
     await tester.pump();
   }
+
+  testWidgets('held synced deletes show a notice that CONFIRM clears (#304)', (
+    WidgetTester tester,
+  ) async {
+    final _HeldTrashRepository repository = _HeldTrashRepository(
+      appDir,
+      held: 3,
+    );
+    final RecordingsController controller = await buildRecordingsController(
+      appDir,
+      repository: repository,
+    );
+    await tester.runAsync(controller.recoverOrphans);
+
+    await pumpQueue(tester, controller);
+
+    expect(
+      find.text(
+        "Another device deleted recordings · 3 files kept in the recordings "
+        "folder's .trash · CONFIRM removes them after 30 days",
+      ),
+      findsOneWidget,
+    );
+
+    await tester.tap(find.text('CONFIRM'));
+    await tester.runAsync(() => Future<void>.delayed(Duration.zero));
+    await tester.pump();
+
+    expect(find.textContaining('.trash'), findsNothing);
+    expect(controller.heldSyncTrashFiles, 0);
+  });
 
   testWidgets('the send control shows on a projectless capture with text', (
     WidgetTester tester,

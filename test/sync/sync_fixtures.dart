@@ -128,7 +128,7 @@ class NoopApplier implements SyncApplier {
   Future<void> appendRevisions(List<RecordingRevision> rows) async {}
 
   @override
-  Future<void> deleteRecording(String id) async {}
+  Future<void> deleteRecording(String id, {bool hold = false}) async {}
 
   @override
   Future<void> deleteProject(String id) async {}
@@ -148,6 +148,9 @@ class RecordingApplier implements SyncApplier {
   final Map<String, ClipboardItem> clipboardItems = <String, ClipboardItem>{};
   final List<RecordingRevision> revisions = <RecordingRevision>[];
   final List<String> deleted = <String>[];
+
+  /// `(id, hold)` for every `deleteRecording` call, in order.
+  final List<(String, bool)> deletedWithHold = <(String, bool)>[];
   final List<String> deletedProjects = <String>[];
   final List<String> deletedClipboardItems = <String>[];
   final List<List<Recording>> upserts = <List<Recording>>[];
@@ -185,8 +188,9 @@ class RecordingApplier implements SyncApplier {
   }
 
   @override
-  Future<void> deleteRecording(String id) async {
+  Future<void> deleteRecording(String id, {bool hold = false}) async {
     deleted.add(id);
+    deletedWithHold.add((id, hold));
     recordings.remove(id);
   }
 
