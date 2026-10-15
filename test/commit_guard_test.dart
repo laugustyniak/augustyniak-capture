@@ -28,6 +28,8 @@ void main() {
     '.env/foo',
     'dir/.agent-tasks/x',
     'notatki/Café/Inbox.md',
+    '.agent-tasks/.env.example',
+    '.env/.env.example',
   ];
   const List<String> allowed = <String>[
     '.env.example',
@@ -39,6 +41,7 @@ void main() {
     'a/.env.example',
     'key.properties.bak',
     '.envrc',
+    '.env.example',
   ];
 
   Future<ProcessResult> filter(String stdin) async {
@@ -75,6 +78,29 @@ void main() {
         expect(r.stdout, isEmpty);
       });
     }
+
+    test('a path with invalid UTF-8 is still judged, not skipped', () async {
+      final Process p = await Process.start('bash', <String>[
+        'tool/blocked-paths.sh',
+      ]);
+      // `caf\xe9/inbox.md` in Latin-1: raw bytes, which a Dart string cannot hold.
+      p.stdin.add(<int>[...'caf'.codeUnits, 0xe9, ...'/inbox.md\n'.codeUnits]);
+      await p.stdin.close();
+      final Future<List<int>> out = p.stdout
+          .expand((List<int> c) => c)
+          .toList();
+      final String err = await p.stderr
+          .transform(const SystemEncoding().decoder)
+          .join();
+      final int code = await p.exitCode;
+      expect(code, 1, reason: err);
+      expect(await out, <int>[
+        ...'caf'.codeUnits,
+        0xe9,
+        ...'/inbox.md\n'.codeUnits,
+      ]);
+      expect(err, isNot(contains('binary file')));
+    });
 
     test('a mixed list prints only the blocked paths', () async {
       final ProcessResult r = await filter(

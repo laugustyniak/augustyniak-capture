@@ -29,7 +29,17 @@
 # `.env.template` are too, by design. `key.properties.example` passes on its
 # own, because the pattern requires `key.properties` to end the path. A name
 # may carry trailing whitespace (`inbox.md `) and a directory may be called
-# `.env`; both are blocked.
+# `.env`; both are blocked. `foo.env` and `prod.env` are not matched: the rule
+# needs `.env` to start a path component, which is intended.
+#
+# The `.env.example` exemption holds only when no directory above it is blocked:
+# `.agent-tasks/.env.example` is still a file inside `.agent-tasks/`.
+#
+# Each path is judged on its own line, with `grep -a`. Without it GNU grep under
+# a UTF-8 locale treats a path with invalid bytes as binary, prints "binary file
+# matches" and reports no match, so `caf\xe9/inbox.md` would read as clean. If
+# grep itself fails (exit 2) this script exits 2, never 0: the hook turns any
+# status above 1 into "refusing to commit blind".
 #
 # Input is split on newlines, so a path that itself contains a newline is cut
 # in two and is not defended. That is accepted as out of scope.
@@ -40,9 +50,27 @@ GREP=/usr/bin/grep
 
 blocked_re='(^|/)(\.agent-tasks/|inbox\.md[[:space:]]*$|key\.properties[[:space:]]*$|[^/]*\.(jks|p12|keystore|pem|mobileprovision)[[:space:]]*$|googleservice-info\.plist[[:space:]]*$|google-services\.json[[:space:]]*$|\.env(\.[^/]*)?(/|[[:space:]]*$))'
 
-hits=$("$GREP" -iE "$blocked_re" | "$GREP" -ivE '(^|/)\.env\.example[[:space:]]*$' || true)
+exempt_re='(^|/)\.env\.example[[:space:]]*$'
+match() { printf '%s\n' "$1" | "$GREP" -qiaE "$2"; }   # 0 match, 1 none, 2 grep error
+
+hits=''
+while IFS= read -r line; do
+  [ -n "$line" ] || continue
+  rc=0; match "$line" "$blocked_re" || rc=$?
+  [ "$rc" -le 1 ] || exit 2
+  [ "$rc" -eq 0 ] || continue
+  rc=0; match "$line" "$exempt_re" || rc=$?
+  [ "$rc" -le 1 ] || exit 2
+  if [ "$rc" -eq 0 ]; then
+    dir=${line%/*}; [ "$dir" = "$line" ] && dir=''
+    rc=0; match "$dir/" "$blocked_re" || rc=$?
+    [ "$rc" -le 1 ] || exit 2
+    [ "$rc" -eq 0 ] || continue
+  fi
+  hits="${hits}${line}"$'\n'
+done
 
 if [ -n "$hits" ]; then
-  printf '%s\n' "$hits"
+  printf '%s' "$hits"
   exit 1
 fi
