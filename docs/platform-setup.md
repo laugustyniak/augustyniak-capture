@@ -177,11 +177,10 @@ sudo apt-get install libsecret-1-dev
 ```
 
 **CI runs on GitHub Actions** (`.github/workflows/ci.yml`), on every push to
-`main` and on every pull request. A *Blocked paths + secret scan* (`guard`) job
-runs first: `tool/blocked-paths.sh` over every tracked path, the same rule the
-`pre-commit` hook applies, plus gitleaks over the commits being pushed — the
-fallback for merge, rebase and cherry-pick commits, which no hook sees. Then two
-jobs: *Analyze + test* on Ubuntu
+`main` and on every pull request. Alongside the build jobs, a *Blocked paths +
+secret scan* (`guard`) job fails the run on a blocked path in the tree or the
+commit range (the `pre-commit` hook's rule, `tool/blocked-paths.sh`), or on a
+gitleaks hit in the pushed commits. Two jobs: *Analyze + test* on Ubuntu
 (`flutter analyze`, `flutter test`, then a debug APK) and *Build macOS + iOS*
 plus a Windows build on their own runners. It was parked for a long time
 because Actions minutes were metered, which is true of a private repository —
