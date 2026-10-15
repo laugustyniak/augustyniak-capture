@@ -24,6 +24,10 @@ void main() {
     '.env',
     '.env.local',
     'tool/.env.production',
+    'inbox.md ',
+    '.env/foo',
+    'dir/.agent-tasks/x',
+    'notatki/Café/Inbox.md',
   ];
   const List<String> allowed = <String>[
     '.env.example',
@@ -32,6 +36,9 @@ void main() {
     'lib/main.dart',
     'docs/inbox-design.md',
     '.environment/x',
+    'a/.env.example',
+    'key.properties.bak',
+    '.envrc',
   ];
 
   Future<ProcessResult> filter(String stdin) async {
@@ -57,7 +64,7 @@ void main() {
       test('blocks $path', () async {
         final ProcessResult r = await filter('$path\n');
         expect(r.exitCode, 1, reason: '${r.stdout}${r.stderr}');
-        expect((r.stdout as String).trim(), path);
+        expect(r.stdout, '$path\n');
       });
     }
 
@@ -96,13 +103,27 @@ void main() {
   group('pre-commit hook', () {
     late Directory repo;
 
-    ProcessResult git(List<String> args) => Process.runSync('git', <String>[
-      '-c',
-      'user.email=t@example.com',
-      '-c',
-      'user.name=t',
-      ...args,
-    ], workingDirectory: repo.path);
+    // The suite runs from the `pre-push` hook, where git exports `GIT_DIR` and
+    // friends. Left in the environment they would point these commands at the
+    // real repository, and the `git add -f Inbox.md` below would stage it there.
+    final Map<String, String> cleanEnv =
+        <String, String>{...Platform.environment}..removeWhere(
+          (String k, _) => const <String>[
+            'GIT_DIR',
+            'GIT_WORK_TREE',
+            'GIT_INDEX_FILE',
+            'GIT_OBJECT_DIRECTORY',
+            'GIT_PREFIX',
+          ].contains(k),
+        );
+
+    ProcessResult git(List<String> args) => Process.runSync(
+      'git',
+      <String>['-c', 'user.email=t@example.com', '-c', 'user.name=t', ...args],
+      workingDirectory: repo.path,
+      environment: cleanEnv,
+      includeParentEnvironment: false,
+    );
 
     setUp(() {
       repo = Directory.systemTemp.createTempSync('commit_guard_');
@@ -126,20 +147,50 @@ void main() {
 
     tearDown(() => repo.deleteSync(recursive: true));
 
+    ProcessResult commitFile(String path) {
+      final File f = File('${repo.path}/$path')..createSync(recursive: true);
+      f.writeAsStringSync('x\n');
+      git(<String>['add', '-f', path]);
+      return git(<String>['commit', '-m', 'x']);
+    }
+
     test('refuses a case-variant of a captured file', () {
-      File('${repo.path}/Inbox.md').writeAsStringSync('notes');
-      git(<String>['add', '-f', 'Inbox.md']);
-      final ProcessResult r = git(<String>['commit', '-m', 'x']);
+      final ProcessResult r = commitFile('Inbox.md');
       expect(r.exitCode, isNot(0));
-      expect(r.stderr, contains('refusing to commit captured content'));
+      expect(
+        r.stderr,
+        contains('refusing to commit captured content or a credential file'),
+      );
+    });
+
+    test('refuses a keystore properties file in any letter case', () {
+      final ProcessResult r = commitFile('android/Key.properties');
+      expect(r.exitCode, isNot(0));
+      expect(r.stderr, contains('refusing to commit'));
     });
 
     test('lets an ordinary file through', () {
-      Directory('${repo.path}/lib').createSync();
-      File('${repo.path}/lib/ok.dart').writeAsStringSync('void main() {}\n');
-      git(<String>['add', 'lib/ok.dart']);
-      final ProcessResult r = git(<String>['commit', '-m', 'x']);
+      final ProcessResult r = commitFile('lib/ok.dart');
       expect(r.exitCode, 0, reason: '${r.stdout}${r.stderr}');
+    });
+
+    test('lets the committed env template through', () {
+      final ProcessResult r = commitFile('.env.example');
+      expect(r.exitCode, 0, reason: '${r.stdout}${r.stderr}');
+    });
+
+    test('refuses to commit blind when the path rule itself fails', () {
+      File('${repo.path}/tool/blocked-paths.sh').writeAsStringSync('exit 3\n');
+      final ProcessResult r = commitFile('lib/ok.dart');
+      expect(r.exitCode, isNot(0));
+      expect(r.stderr, contains('refusing to commit blind'));
+    });
+
+    test('refuses to commit blind when the path rule is missing', () {
+      File('${repo.path}/tool/blocked-paths.sh').deleteSync();
+      final ProcessResult r = commitFile('lib/ok.dart');
+      expect(r.exitCode, isNot(0));
+      expect(r.stderr, contains('refusing to commit blind'));
     });
   }, skip: skip);
 }

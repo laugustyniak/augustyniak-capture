@@ -25,16 +25,22 @@
 #   .env, .env.*                  environment files that hold live credentials
 #
 # `.env.example` is the exception: `.gitignore` deliberately allows it as the
-# committed template. `key.properties.example` passes on its own, because the
-# pattern requires `key.properties` to end the path.
+# committed template. Every other `.env.*` is blocked, so `.env.sample` and
+# `.env.template` are too, by design. `key.properties.example` passes on its
+# own, because the pattern requires `key.properties` to end the path. A name
+# may carry trailing whitespace (`inbox.md `) and a directory may be called
+# `.env`; both are blocked.
+#
+# Input is split on newlines, so a path that itself contains a newline is cut
+# in two and is not defended. That is accepted as out of scope.
 set -euo pipefail
 
 GREP=/usr/bin/grep
 [ -x "$GREP" ] || GREP=grep
 
-blocked_re='(^|/)(\.agent-tasks/|inbox\.md$|key\.properties$|[^/]*\.(jks|p12|keystore|pem|mobileprovision)$|googleservice-info\.plist$|google-services\.json$|\.env(\.[^/]*)?$)'
+blocked_re='(^|/)(\.agent-tasks/|inbox\.md[[:space:]]*$|key\.properties[[:space:]]*$|[^/]*\.(jks|p12|keystore|pem|mobileprovision)[[:space:]]*$|googleservice-info\.plist[[:space:]]*$|google-services\.json[[:space:]]*$|\.env(\.[^/]*)?(/|[[:space:]]*$))'
 
-hits=$("$GREP" -iE "$blocked_re" | "$GREP" -ivE '(^|/)\.env\.example$' || true)
+hits=$("$GREP" -iE "$blocked_re" | "$GREP" -ivE '(^|/)\.env\.example[[:space:]]*$' || true)
 
 if [ -n "$hits" ]; then
   printf '%s\n' "$hits"
