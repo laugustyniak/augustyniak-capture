@@ -35,11 +35,13 @@
 # The `.env.example` exemption holds only when no directory above it is blocked:
 # `.agent-tasks/.env.example` is still a file inside `.agent-tasks/`.
 #
-# Each path is judged on its own line, with `grep -a`. Without it GNU grep under
-# a UTF-8 locale treats a path with invalid bytes as binary, prints "binary file
-# matches" and reports no match, so `caf\xe9/inbox.md` would read as clean. If
-# grep itself fails (exit 2) this script exits 2, never 0: the hook turns any
-# status above 1 into "refusing to commit blind".
+# Each path is judged on its own line by grep's exit status (`-q`), never by
+# its output. The earlier pipeline read the output, and GNU grep under a UTF-8
+# locale treats a path with invalid bytes as binary: it printed "binary file
+# matches" instead of the path, so `caf\xe9/inbox.md` read as clean. `-a` is
+# kept so the bytes are always treated as text, belt and braces. If grep itself
+# fails (exit 2) this script exits 2, never 0: the hook turns any status above
+# 1 into "refusing to commit blind".
 #
 # Input is split on newlines, so a path that itself contains a newline is cut
 # in two and is not defended. That is accepted as out of scope.
