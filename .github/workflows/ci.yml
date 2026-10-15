@@ -51,6 +51,7 @@ jobs:
       # next step does. The rule is `tool/blocked-paths.sh`, the very script the
       # hook runs.
       - name: Blocked paths
+        shell: bash
         run: git ls-files -z | tr '\0' '\n' | bash tool/blocked-paths.sh
 
       # Every path touched by any commit in the range. A pull request that adds
@@ -60,12 +61,21 @@ jobs:
       # cherry-pick commits the hook never runs for. The all-zero `before` SHA is
       # the first push of a branch: there is no earlier tip to diff from, so there
       # is no range to scan and the step ends cleanly.
+      # `shell: bash` is load-bearing: GitHub then runs `bash -eo pipefail`.
+      # Without a `shell:` key it runs `bash -e`, no `pipefail`, and a failing
+      # `git log` (a force-push leaves `before` out of the clone: "bad revision")
+      # would feed the script empty input, which it answers with exit 0.
       - name: Blocked paths in the commit range
+        shell: bash
+        env:
+          EVENT: ${{ github.event_name }}
+          BASE: ${{ github.base_ref }}
+          BEFORE: ${{ github.event.before }}
         run: |
-          if [ "${{ github.event_name }}" = pull_request ]; then
-            range="origin/${{ github.base_ref }}..HEAD"
-          elif [ "${{ github.event.before }}" != 0000000000000000000000000000000000000000 ]; then
-            range="${{ github.event.before }}..HEAD"
+          if [ "$EVENT" = pull_request ]; then
+            range="origin/$BASE..HEAD"
+          elif [ "$BEFORE" != 0000000000000000000000000000000000000000 ]; then
+            range="$BEFORE..HEAD"
           else
             echo "no range to scan"; exit 0
           fi
