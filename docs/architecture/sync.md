@@ -242,11 +242,15 @@ dozens of captures without a prompt. `SupabaseSyncResult.tombstonesHeld` counts
 the held ones (they are still in `tombstonesApplied`) and the report says
 "N removed (M held in trash)".
 
-`trashArtifacts` is all or nothing. A `rename` that fails falls back to
-copy-then-delete (a source on another filesystem raises `EXDEV`); if an
-artifact still cannot move, the ones already moved are put back and the error
-is rethrown, so the kept row never points at files already in `.trash/` and a
-tombstone that cannot be applied does not leave half a capture behind.
+`trashArtifacts` is all or nothing, and every move — forward and the rollback
+— goes through one primitive: `rename`, or copy-then-delete when `rename`
+refuses (a source on another filesystem raises `EXDEV`). A copy that fails, or
+whose source then refuses to delete, is removed again, so the bytes are in one
+place whichever way it ends and a retried tombstone cannot stack a second copy.
+If an artifact still cannot move, the ones already moved are put back through
+the same primitive and the error is rethrown, so the kept row never points at
+files already in `.trash/`. The primitive is injectable (`renameFile`) because
+a single filesystem never refuses a `rename`; the tests force the refusal.
 
 **Every `delete*` on `SyncApplier` tolerates an id it has never heard of** — a
 tombstone for a row this device never had is a no-op, never a throw.

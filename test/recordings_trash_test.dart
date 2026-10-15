@@ -129,6 +129,74 @@ void main() {
       );
     });
 
+    test('a copy-moved file is copied back when a later artifact fails', () async {
+      // `rename` refuses, as it does across filesystems, so segment 0 travels
+      // by copy-then-delete; segment 1 then finds a directory in its way. The
+      // rollback must not try `rename` again — that is what failed.
+      final RecordingsRepository copying = RecordingsRepository(
+        directoryProvider: () async => dir,
+        renameFile: (File source, String target) =>
+            throw const FileSystemException('EXDEV', 'cross-device'),
+      );
+      write('abc.m4a');
+      write('abc-1.m4a');
+      Directory(p.join(trash().path, '$nowMs-abc-1.m4a'))
+          .createSync(recursive: true);
+
+      await expectLater(
+        copying.trashArtifacts(twoSegments(), held: false, now: now),
+        throwsA(isA<FileSystemException>()),
+      );
+
+      expect(File(p.join(dir.path, 'abc.m4a')).existsSync(), isTrue);
+      expect(File(p.join(dir.path, 'abc-1.m4a')).existsSync(), isTrue);
+      expect(trash().listSync().whereType<File>(), isEmpty);
+    });
+
+    test('a copy whose source will not delete leaves no second copy', () async {
+      // Copy succeeds into `.trash`, then the source refuses to go: the row is
+      // kept, so the copy must go instead of piling up one per retry.
+      final Directory locked = Directory(p.join(dir.path, 'locked'))
+        ..createSync();
+      final File source = File(p.join(locked.path, 'abc.m4a'))
+        ..writeAsBytesSync(<int>[1, 2, 3]);
+      final RecordingsRepository copying = RecordingsRepository(
+        directoryProvider: () async => dir,
+        renameFile: (File source, String target) =>
+            throw const FileSystemException('EXDEV', 'cross-device'),
+      );
+      final DateTime at = DateTime.utc(2026, 8, 28);
+      final Recording item = Recording(
+        id: 'abc',
+        filePath: source.path,
+        createdAt: at,
+        durationMs: 1000,
+        sizeBytes: 3,
+        status: RecordingStatus.completed,
+        type: CaptureType.audioRecording,
+        segments: <CaptureSegment>[
+          CaptureSegment(
+            index: 0,
+            filePath: source.path,
+            type: CaptureType.audioRecording,
+            createdAt: at,
+            sizeBytes: 3,
+          ),
+        ],
+      );
+      await Process.run('chmod', <String>['0555', locked.path]);
+      try {
+        await expectLater(
+          copying.trashArtifacts(item, held: false, now: now),
+          throwsA(isA<FileSystemException>()),
+        );
+        expect(source.existsSync(), isTrue);
+        expect(trash().listSync().whereType<File>(), isEmpty);
+      } finally {
+        await Process.run('chmod', <String>['0755', locked.path]);
+      }
+    }, skip: Platform.isWindows ? 'needs chmod' : false);
+
     test('trashes an artifact that lives outside the recordings dir', () async {
       final Directory other = await Directory.systemTemp.createTemp(
         'recordings-trash-other',

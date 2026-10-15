@@ -35,11 +35,24 @@ class IndexUnreadableException implements Exception {
 /// only move where it happens.
 typedef RecordingsDirectoryProvider = Future<Directory> Function();
 
+/// The one primitive [RecordingsRepository.trashArtifacts] cannot exercise on
+/// a single filesystem: `rename` only refuses across mount points (`EXDEV`),
+/// so a test hands in one that refuses, and the copy-then-delete fallback and
+/// its rollback become reachable.
+typedef RenameFile = Future<void> Function(File source, String target);
+
 class RecordingsRepository {
-  RecordingsRepository({RecordingsDirectoryProvider? directoryProvider})
-    : _directoryProvider = directoryProvider ?? _defaultDirectory;
+  RecordingsRepository({
+    RecordingsDirectoryProvider? directoryProvider,
+    RenameFile? renameFile,
+  }) : _directoryProvider = directoryProvider ?? _defaultDirectory,
+       _renameFile = renameFile ?? _rename;
 
   final RecordingsDirectoryProvider _directoryProvider;
+  final RenameFile _renameFile;
+
+  static Future<void> _rename(File source, String target) =>
+      source.rename(target);
 
   static Future<Directory> _defaultDirectory() async {
     final Directory appDirectory = await getApplicationDocumentsDirectory();
@@ -96,12 +109,13 @@ class RecordingsRepository {
   /// that is already gone is skipped, as in [deleteArtifacts]. Returns how many
   /// files moved.
   ///
-  /// All or nothing: a `rename` that fails (a source on another filesystem
-  /// raises `EXDEV`) falls back to copy-then-delete, and if an artifact still
-  /// cannot move, those already moved are put back and the error is rethrown.
-  /// The row is kept on a throw, so it must never point at files that are
-  /// already in `.trash`; and a tombstone that cannot be applied would otherwise
-  /// be retried by every sync run for ever.
+  /// All or nothing: every move goes through [_moveFile], which falls back to
+  /// copy-then-delete when `rename` refuses (a source on another filesystem
+  /// raises `EXDEV`), and if an artifact still cannot move, those already moved
+  /// are put back through the same primitive and the error is rethrown. The
+  /// row is kept on a throw, so it must never point at files that are already
+  /// in `.trash`; and a tombstone that cannot be applied would otherwise be
+  /// retried by every sync run for ever.
   ///
   /// Two captures trashed in the same millisecond with the same basename would
   /// collide; the name is a file id, so that needs the same file twice in one
@@ -122,18 +136,13 @@ class RecordingsRepository {
         if (!await file.exists()) continue;
         trash ??= await trashDirectory();
         final String target = p.join(trash.path, '$prefix${p.basename(path)}');
-        try {
-          await file.rename(target);
-        } on FileSystemException {
-          await file.copy(target);
-          await file.delete();
-        }
+        await _moveFile(path, target);
         moved.add((path, target));
       }
     } catch (_) {
       for (final (String from, String to) in moved.reversed) {
         try {
-          await File(to).rename(from);
+          await _moveFile(to, from);
         } catch (_) {
           // Best effort: a file that will not go back is still in `.trash`.
         }
@@ -141,6 +150,29 @@ class RecordingsRepository {
       rethrow;
     }
     return moved.length;
+  }
+
+  /// `rename`, or copy-then-delete when the two paths are on different
+  /// filesystems. The bytes end up in exactly one place whichever way it
+  /// ends: a copy that fails, or whose source then refuses to delete, is
+  /// removed from [to] before the error leaves, so neither a torn file nor a
+  /// second copy survives for the next attempt to stack another one on.
+  Future<void> _moveFile(String from, String to) async {
+    final File source = File(from);
+    try {
+      await _renameFile(source, to);
+      return;
+    } on FileSystemException {
+      // Fall through to the copy.
+    }
+    try {
+      await source.copy(to);
+      await source.delete();
+    } catch (_) {
+      final File target = File(to);
+      if (await target.exists()) await target.delete();
+      rethrow;
+    }
   }
 
   Future<List<File>> _trashFiles() async {
