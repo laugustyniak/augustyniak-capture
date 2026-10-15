@@ -48,11 +48,10 @@ that. One brief with notes about a prospective client reached a public commit
 that way, and clearing it took a history rewrite — after which `refs/pull/*`
 still held the blob. Before the commit exists is the only reliable place to stop
 it. `git commit --no-verify` overrides, if a file there ever genuinely belongs
-in the repo. The hook also
-refuses keystore, provisioning, Firebase config and `.env` files, at any depth
-and in any letter case, and the CI `guard` job runs the same path rule
-(`tool/blocked-paths.sh`) plus gitleaks as the server-side fallback for the
-commits a hook never sees.
+in the repo. The hook also refuses keystore, provisioning, Firebase config and
+`.env` files, at any depth and in any letter case, and the CI `guard` job runs
+the same path rule (`tool/blocked-paths.sh`) plus gitleaks as the server-side
+fallback for the commits a hook never sees.
 
 - Run: `flutter run`
 - Run with transcription token: `flutter run --dart-define=TRANSCRIPTION_TOKEN=secret`
