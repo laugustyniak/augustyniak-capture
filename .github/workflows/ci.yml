@@ -25,6 +25,41 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  # The `pre-commit` hook is opt-in per clone (`git config core.hooksPath
+  # .githooks`) and git never runs it for a merge, rebase or cherry-pick commit,
+  # so on its own it is a courtesy, not a gate. This job is the server-side
+  # fallback, for a public repository where a pushed blob stays reachable
+  # through `refs/pull/*` even after a history rewrite. The hook stays the first
+  # stop: it fails before the commit exists, this fails after the push.
+  #
+  # `fetch-depth: 0` because gitleaks-action walks the commit range of the pull
+  # request or push, which a shallow clone cannot supply.
+  guard:
+    name: Blocked paths + secret scan
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      # Every tracked path in the tree, not a diff: it is cheap, and it needs no
+      # base-ref arithmetic, which goes wrong on a push to `main`. The rule is
+      # `tool/blocked-paths.sh`, the very script the hook runs.
+      - name: Blocked paths
+        run: git ls-files -z | tr '\0' '\n' | bash tool/blocked-paths.sh
+
+      # Scans only the commits of the pull request, or the pushed range on a
+      # push. No GITLEAKS_LICENSE: the action's README requires one for
+      # organization accounts only, and this repository belongs to a personal
+      # account. Pinned by SHA like every third-party action in this file (see
+      # the subosito pin below).
+      - name: Secret scan
+        uses: gitleaks/gitleaks-action@e0c47f4f8be36e29cdc102c57e68cb5cbf0e8d1e # v3.0.0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
   # Fast gate: the whole test suite is pure Dart (bar a handful of testWidgets
   # files), so it needs no platform toolchain and runs on Linux.
   analyze-and-test:
