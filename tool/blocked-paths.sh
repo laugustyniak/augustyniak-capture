@@ -56,18 +56,29 @@ exempt_re='(^|/)\.env\.example[[:space:]]*$'
 match() { printf '%s\n' "$1" | "$GREP" -qiaE "$2"; }   # 0 match, 1 none, 2 grep error
 
 hits=''
-while IFS= read -r line; do
+# `|| [ -n "$line" ]` keeps a final line that has no trailing newline.
+while IFS= read -r line || [ -n "$line" ]; do
   [ -n "$line" ] || continue
   rc=0; match "$line" "$blocked_re" || rc=$?
   [ "$rc" -le 1 ] || exit 2
   [ "$rc" -eq 0 ] || continue
   rc=0; match "$line" "$exempt_re" || rc=$?
   [ "$rc" -le 1 ] || exit 2
-  if [ "$rc" -eq 0 ]; then
-    dir=${line%/*}; [ "$dir" = "$line" ] && dir=''
+  if [ "$rc" -eq 0 ] && [ "$line" != "${line%/*}" ]; then
+    # The parent is judged twice: with a trailing slash for the directory
+    # patterns (`.agent-tasks/`, `.env/`) and without it for the ones that
+    # must end the path (`x.jks`, `inbox.md`) — a directory may carry those
+    # names too.
+    dir=${line%/*}
     rc=0; match "$dir/" "$blocked_re" || rc=$?
     [ "$rc" -le 1 ] || exit 2
-    [ "$rc" -eq 0 ] || continue
+    if [ "$rc" -ne 0 ]; then
+      rc=0; match "$dir" "$blocked_re" || rc=$?
+      [ "$rc" -le 1 ] || exit 2
+      [ "$rc" -eq 0 ] || continue
+    fi
+  elif [ "$rc" -eq 0 ]; then
+    continue
   fi
   hits="${hits}${line}"$'\n'
 done

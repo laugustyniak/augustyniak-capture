@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
@@ -30,6 +31,9 @@ void main() {
     'notatki/Café/Inbox.md',
     '.agent-tasks/.env.example',
     '.env/.env.example',
+    'x.jks/.env.example',
+    'inbox.md/.env.example',
+    'key.properties/.env.example',
   ];
   const List<String> allowed = <String>[
     '.env.example',
@@ -41,7 +45,6 @@ void main() {
     'a/.env.example',
     'key.properties.bak',
     '.envrc',
-    '.env.example',
   ];
 
   Future<ProcessResult> filter(String stdin) async {
@@ -78,6 +81,17 @@ void main() {
         expect(r.stdout, isEmpty);
       });
     }
+
+    test('a final path without a trailing newline is still judged', () async {
+      final Process p = await Process.start('bash', <String>[
+        'tool/blocked-paths.sh',
+      ]);
+      p.stdin.write('lib/main.dart\ninbox.md');
+      await p.stdin.close();
+      final String out = await p.stdout.transform(utf8.decoder).join();
+      expect(await p.exitCode, 1);
+      expect(out, 'inbox.md\n');
+    });
 
     test('a path with invalid UTF-8 is still judged, not skipped', () async {
       final Process p = await Process.start('bash', <String>[
