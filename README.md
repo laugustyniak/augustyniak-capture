@@ -1211,7 +1211,10 @@ git config core.hooksPath .githooks
 `git push --no-verify` skips it when that is genuinely what you want.
 
 The same setting enables a `pre-commit` hook that refuses to commit captured
-content — `.agent-tasks/` and `inbox.md`. The app writes the user's own
+content — `.agent-tasks/` and `inbox.md`. It also refuses keystore, provisioning, Firebase config and `.env` files, at
+any depth and in any letter case, and the CI `guard` job runs the same path rule
+(`tool/blocked-paths.sh`) plus gitleaks as the server-side fallback for the
+commits a hook never sees. The app writes the user's own
 dictated notes into the repository it is developed in, **and this repository is
 public**. Both paths are gitignored, but `git add -f`, a tool staging on your
 behalf, or an ignore rule added after a file was already tracked all get past
