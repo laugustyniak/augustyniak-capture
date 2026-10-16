@@ -178,7 +178,9 @@ class ProjectAgentHandoff implements AgentHandoff {
           // is the opening line for a session started *from the project card*,
           // with no particular task in hand; here there is a task, and two
           // prompts would leave the agent to guess which one it was started for.
-          ...launcherAgent.promptArguments(request.instruction),
+          ...launcherAgent.promptArguments(
+            frameCapturePrompt(request.instruction, capture: request.capture),
+          ),
         ],
       ),
     );

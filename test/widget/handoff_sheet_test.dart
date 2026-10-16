@@ -238,9 +238,12 @@ void main() {
     await tester.tap(find.text('LAUNCH SESSION'));
     await settleIo(tester);
 
-    expect(launcher.requests.single.arguments, <String>[
-      'Read the brief and only write tests.',
-    ]);
+    // Framed at launch (#306): the edited text is inside the fence.
+    expect(launcher.requests.single.arguments.single, startsWith('The user handed you a capture'));
+    expect(
+      launcher.requests.single.arguments.single,
+      contains('\nRead the brief and only write tests.\n--- END CAPTURE TEXT ---'),
+    );
   });
 
   Future<RecordingsController> projectless(CaptureSender sender) =>
