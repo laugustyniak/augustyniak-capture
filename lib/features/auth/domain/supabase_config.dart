@@ -99,6 +99,14 @@ class SupabaseConfig {
       );
     }
     if (cleanKey.startsWith('eyJ')) {
+      if (cleanKey.split('.').length != 3) {
+        return (
+          config: null,
+          issue:
+              'SUPABASE_PUBLISHABLE_KEY looks like a JWT but is not one (a '
+              'JWT has three dot-separated segments).',
+        );
+      }
       final ({bool readable, String? role}) jwt = _jwtRole(cleanKey);
       if (!jwt.readable) {
         return (
@@ -118,14 +126,16 @@ class SupabaseConfig {
         );
       }
       if (role != 'anon') {
+        // The role is echoed only when it is a plain word: the claim is
+        // attacker-shaped input like the rest of the token.
         final String shown = RegExp(r'^[A-Za-z0-9_-]{1,32}$').hasMatch(role)
             ? role
-            : 'non-anon';
+            : 'not anon';
         return (
           config: null,
           issue:
-              'SUPABASE_PUBLISHABLE_KEY is a $shown JWT; use the anon or '
-              'publishable key.',
+              'SUPABASE_PUBLISHABLE_KEY is a JWT whose role is $shown; use '
+              'the anon or publishable key.',
         );
       }
     }
@@ -168,17 +178,20 @@ class SupabaseConfig {
     );
   }
 
-  /// Reads the `role` claim of a JWT. The signature is not verified: the check
-  /// is on the claim this build is about to ship, not on authenticity.
+  /// Reads the `role` claim of a three-segment JWT. The signature is not
+  /// verified: the check is on the claim this build is about to ship, not on
+  /// authenticity. A payload that is not a JSON object, or whose `role` is not
+  /// a string, counts as unreadable rather than as some role.
   static ({bool readable, String? role}) _jwtRole(String token) {
     try {
       final List<String> parts = token.split('.');
-      if (parts.length != 3) return (readable: false, role: null);
       final Object? payload = jsonDecode(
         utf8.decode(base64Url.decode(base64Url.normalize(parts[1]))),
       );
       if (payload is! Map) return (readable: false, role: null);
-      return (readable: true, role: payload['role']?.toString());
+      final Object? role = payload['role'];
+      if (role != null && role is! String) return (readable: false, role: null);
+      return (readable: true, role: role as String?);
     } catch (_) {
       return (readable: false, role: null);
     }

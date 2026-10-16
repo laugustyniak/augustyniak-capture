@@ -153,15 +153,15 @@ void main() {
       expect(parseKey(key), isNull);
       expect(
         issueOf(key),
-        'SUPABASE_PUBLISHABLE_KEY is a authenticated JWT; use the anon or '
-        'publishable key.',
+        'SUPABASE_PUBLISHABLE_KEY is a JWT whose role is authenticated; use '
+        'the anon or publishable key.',
       );
     });
 
     test('does not render an odd role claim', () {
       final String key = jwt(<String, Object?>{'role': 'bad role!'});
       expect(parseKey(key), isNull);
-      expect(issueOf(key), contains('a non-anon JWT'));
+      expect(issueOf(key), contains('whose role is not anon'));
       expect(issueOf(key), isNot(contains('bad role')));
     });
 
@@ -179,14 +179,28 @@ void main() {
     });
 
     test('refuses malformed eyJ strings with the matching line', () {
+      const String malformed =
+          'SUPABASE_PUBLISHABLE_KEY looks like a JWT but is not one (a JWT '
+          'has three dot-separated segments).';
       const String unreadable =
           'SUPABASE_PUBLISHABLE_KEY looks like a JWT but its payload could '
           'not be read.';
-      final String twoParts = 'eyJhbGciOiJIUzI1NiJ9.${b64(<String>['a'])}';
-      final String badPayload = 'eyJhbGciOiJIUzI1NiJ9.!!!notbase64!!!.sig';
-      final String listPayload =
-          '${b64(<String, Object?>{'alg': 'x'})}.${b64(<String>['a'])}.sig';
-      for (final String key in <String>[twoParts, badPayload, listPayload]) {
+      // Two and four segments with a perfectly good anon payload: the shape
+      // is what is wrong, so the role must never be read out of it.
+      final String anon = b64(<String, Object?>{'role': 'anon'});
+      final String header = b64(<String, Object?>{'alg': 'HS256'});
+      for (final String key in <String>[
+        '$header.$anon',
+        '$header.$anon.sig.extra',
+      ]) {
+        expect(parseKey(key), isNull, reason: key);
+        expect(issueOf(key), malformed, reason: key);
+      }
+      final String badPayload = '$header.!!!notbase64!!!.sig';
+      final String listPayload = '$header.${b64(<String>['a'])}.sig';
+      final String numberRole =
+          '$header.${b64(<String, Object?>{'role': 5})}.sig';
+      for (final String key in <String>[badPayload, listPayload, numberRole]) {
         expect(parseKey(key), isNull, reason: key);
         expect(issueOf(key), unreadable, reason: key);
       }
