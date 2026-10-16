@@ -1,0 +1,13 @@
+# Extends gitleaks' default rules; this file only names what is deliberately
+# not a secret. The CI `guard` job scans every commit in a pull request or
+# push, so a test fixture that merely looks like a credential fails the run
+# for as long as the commit that introduced it is in the range — a later
+# edit cannot clear it. Fixtures are therefore built at runtime where they
+# can be, and the one literal that reached a commit before that rule existed
+# is listed here by its exact value.
+[extend]
+useDefault = true
+
+[allowlist]
+description = "A fake Supabase secret-key fixture (test/supabase_config_test.dart, #307): the sb_secret_ prefix followed by a dozen hex characters, which no real key is."
+regexes = ['''sb_secret_abcdef123456''']

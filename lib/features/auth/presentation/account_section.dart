@@ -4,10 +4,16 @@ import '../../../app/ui_kit.dart';
 import '../../sync/data/e2ee_service.dart';
 import '../../sync/presentation/e2ee_passphrase_dialog.dart';
 import '../domain/auth_identity.dart';
+import '../domain/supabase_config.dart';
 import 'auth_controller.dart';
 
 class AccountSection extends StatelessWidget {
-  const AccountSection({super.key, this.controller, this.e2ee});
+  const AccountSection({
+    super.key,
+    this.controller,
+    this.e2ee,
+    this.configIssue,
+  });
 
   final AuthController? controller;
 
@@ -15,6 +21,10 @@ class AccountSection extends StatelessWidget {
   /// configured: the card shows whether this device holds it and offers
   /// the passphrase flow, LOCK and FORGET KEY. Null hides the whole block.
   final E2eeService? e2ee;
+
+  /// Why the build's Supabase values were refused, for tests. Null reads
+  /// `SupabaseConfig.environmentIssue()`, which is a compile-time constant.
+  final String? configIssue;
 
   @override
   Widget build(BuildContext context) {
@@ -30,7 +40,9 @@ class AccountSection extends StatelessWidget {
                 _AccountCard(auth, e2ee: e2ee),
           )
         else
-          _UnavailableCard(),
+          _UnavailableCard(
+            issue: configIssue ?? SupabaseConfig.environmentIssue(),
+          ),
       ],
     );
   }
@@ -196,6 +208,10 @@ class _EncryptionRows extends StatelessWidget {
 }
 
 class _UnavailableCard extends StatelessWidget {
+  _UnavailableCard({this.issue});
+
+  final String? issue;
+
   @override
   Widget build(BuildContext context) {
     return ConsoleCard(
@@ -213,6 +229,13 @@ class _UnavailableCard extends StatelessWidget {
             'Local capture remains available.',
             style: ConsoleText.body.copyWith(color: Console.mutedSoft),
           ),
+          if (issue case final String reason) ...<Widget>[
+            const SizedBox(height: 8),
+            Text(
+              'Refused: $reason',
+              style: ConsoleText.body.copyWith(color: Console.amber),
+            ),
+          ],
         ],
       ),
     );

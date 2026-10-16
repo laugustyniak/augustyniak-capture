@@ -67,9 +67,12 @@ fallback for the commits a hook never sees.
   app and a web client. Flutter-specific names win when both pairs exist.
   These two values are public client configuration, not secrets. Never pass a
   database password, `service_role`, Supabase secret key or provider-wide API
-  key to the app. Without both values Supabase is not initialized and local
-  capture behaves exactly as before. Persisted sessions and PKCE verifiers use
-  the OS keyring rather than Supabase's Shared Preferences defaults.
+  key to the app. `SupabaseConfig` refuses an `sb_secret_` key and any JWT
+  whose `role` is not `anon`, and the Config tab's account section says why
+  the build has no cloud account. Without both values Supabase is not
+  initialized and local capture behaves exactly as before. Persisted sessions
+  and PKCE verifiers use the OS keyring rather than Supabase's Shared
+  Preferences defaults.
   Google OAuth returns to `ai.augustyniak.capture://login-callback/`; that exact
   URI must be present in the Supabase Auth redirect allow list. Native platform
   registration is checked in, and `tool/deploy.sh` registers the Linux handler.

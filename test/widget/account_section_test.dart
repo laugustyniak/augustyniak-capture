@@ -180,6 +180,22 @@ void main() {
       findsOneWidget,
     );
   });
+
+  testWidgets('an unconfigured card says why the config was refused', (
+    WidgetTester tester,
+  ) async {
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(body: AccountSection(configIssue: 'x')),
+      ),
+    );
+    expect(find.text('Refused: x'), findsOneWidget);
+
+    await tester.pumpWidget(
+      const MaterialApp(home: Scaffold(body: AccountSection())),
+    );
+    expect(find.textContaining('Refused'), findsNothing);
+  });
 }
 
 Future<void> changesClose(StreamController<AuthIdentity?> controller) =>
