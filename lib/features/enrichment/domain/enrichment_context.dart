@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'package:crypto/crypto.dart';
 
 import '../../recordings/domain/suggested_route.dart';
+import '../../recordings/domain/untrusted_markdown.dart' as markdown;
 
 /// One project the model may file a capture under: its id (the only thing the
 /// answer is checked against), its name, and an optional one-line description.
@@ -205,31 +206,12 @@ class EnrichmentContext {
     return sha256.convert(utf8.encode(sent)).toString().substring(0, 8);
   }
 
-  /// A line shaped like one of the prompt's own fence markers, rewritten so it
-  /// cannot close the block it sits inside.
-  ///
-  /// The fence in `_appendContext` is what separates *reference material* from
-  /// *instructions*, and a fence made of a literal string is only as strong as
-  /// the guarantee that the fenced text does not contain it. It does not: a
-  /// `CLAUDE.md` is a file written to brief a model, and one line reading
-  /// `--- END PROJECT CONTEXT ---` puts everything after it back at the top
-  /// level of the system prompt, where the standing order not to follow
-  /// instructions no longer applies to it.
-  ///
-  /// Narrow on purpose. Only a line that *is* a marker is rewritten — a
-  /// horizontal rule, a YAML front-matter fence and a `--- BEGINNING ---`
-  /// heading all survive, because the pattern requires `BEGIN` or `END` as a
-  /// whole word between the dashes.
-  static final RegExp _fenceMarker = RegExp(
-    r'^[ \t]*-{3,}[ \t]*(BEGIN|END)\b.*$',
-    multiLine: true,
-    caseSensitive: false,
-  );
-
-  static const String fenceMarkerReplacement = '[removed: fence marker]';
+  /// See the top-level `defuseFenceMarkers` in `untrusted_markdown.dart`, where
+  /// the rule and the reasoning live; the capture brief shares it.
+  static const String fenceMarkerReplacement = markdown.fenceMarkerReplacement;
 
   static String? defuseFenceMarkers(String? value) =>
-      value?.replaceAll(_fenceMarker, fenceMarkerReplacement);
+      value == null ? null : markdown.defuseFenceMarkers(value);
 
   static String? _clamp(String? value, int limit) {
     final String? trimmed = _blankToNull(value);

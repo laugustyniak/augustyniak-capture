@@ -279,6 +279,19 @@ class _ProjectCard extends StatelessWidget {
                               const SizedBox(width: 8),
                               StatusPill(label: 'ACTIVE', color: Console.accent),
                             ],
+                            if (project.agentSettings.values.any(
+                              (AgentSettings settings) =>
+                                  settings.skipPermissions,
+                            )) ...<Widget>[
+                              const SizedBox(width: 8),
+                              StatusPill(
+                                key: ValueKey<String>(
+                                  'project-approvals-off-${project.id}',
+                                ),
+                                label: 'APPROVALS OFF',
+                                color: Console.red,
+                              ),
+                            ],
                           ],
                         ),
                         const SizedBox(height: 4),
@@ -650,6 +663,12 @@ class _ProjectEditorSheetState extends State<_ProjectEditorSheet> {
                       title: Text(
                         'Skip permission prompts',
                         style: ConsoleText.body,
+                      ),
+                      subtitle: Text(
+                        'The agent runs tools without asking. A capture\'s '
+                        'text can steer it, so leave this off for imported, '
+                        'OCR and clipboard captures.',
+                        style: ConsoleText.micro,
                       ),
                       value: _skipPermissions[agent]!,
                       onChanged: (bool value) =>

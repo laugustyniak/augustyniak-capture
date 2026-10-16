@@ -60,3 +60,32 @@ String sanitizeUntrustedMarkdownBody(String value) => value
       RegExp(r'<(img\b)', caseSensitive: false),
       (Match match) => '&lt;${match[1]}',
     );
+
+/// The replacement text for a line that was shaped like a prompt fence.
+const String fenceMarkerReplacement = '[removed: fence marker]';
+
+/// A line shaped like one of the prompt's own fence markers, rewritten so it
+/// cannot close the block it sits inside.
+///
+/// The fence in `_appendContext` is what separates *reference material* from
+/// *instructions*, and a fence made of a literal string is only as strong as
+/// the guarantee that the fenced text does not contain it. It does not: a
+/// `CLAUDE.md` is a file written to brief a model, and one line reading
+/// `--- END PROJECT CONTEXT ---` puts everything after it back at the top
+/// level of the system prompt, where the standing order not to follow
+/// instructions no longer applies to it. A capture's text is the same case
+/// with a worse author: it is someone else's audio, an imported file, or OCR
+/// of a screenshot, and it sits inside `--- BEGIN CAPTURE TEXT ---`.
+///
+/// Narrow on purpose. Only a line that *is* a marker is rewritten — a
+/// horizontal rule, a YAML front-matter fence and a `--- BEGINNING ---`
+/// heading all survive, because the pattern requires `BEGIN` or `END` as a
+/// whole word between the dashes.
+String defuseFenceMarkers(String value) =>
+    value.replaceAll(_fenceMarker, fenceMarkerReplacement);
+
+final RegExp _fenceMarker = RegExp(
+  r'^[ \t]*-{3,}[ \t]*(BEGIN|END)\b.*$',
+  multiLine: true,
+  caseSensitive: false,
+);

@@ -248,9 +248,10 @@ void main() {
         ),
       );
 
+      // Framed at launch (#306): the instruction is inside the fence.
       expect(
-        launcher.request!.arguments,
-        contains('Split the tokenizer out of the parser.'),
+        launcher.request!.arguments.single,
+        contains('\nSplit the tokenizer out of the parser.\n'),
       );
     });
   });
