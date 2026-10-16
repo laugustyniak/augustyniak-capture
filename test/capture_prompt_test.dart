@@ -79,6 +79,18 @@ void main() {
       );
     });
 
+    test('a body that happens to equal the title is still framed', () {
+      // The bare case is the `displayNameFor` fallback — a capture with no
+      // text at all. A short note whose enriched title repeats its body is
+      // still text somebody else may have written.
+      final String framed = frameCapturePrompt(
+        'Call the bank',
+        capture: capture(body: 'Call the bank', title: 'Call the bank'),
+      );
+      expect(framed, contains('--- BEGIN CAPTURE TEXT (audioRecording) ---'));
+      expect(framed, endsWith('--- END CAPTURE TEXT ---'));
+    });
+
     test('an empty instruction stays empty', () {
       expect(frameCapturePrompt('  ', capture: capture(title: 't')), isEmpty);
     });
