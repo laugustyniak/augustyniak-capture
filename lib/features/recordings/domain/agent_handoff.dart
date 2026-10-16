@@ -14,6 +14,7 @@ class HandoffAgent {
     required this.id,
     required this.label,
     required this.isDefault,
+    this.skipPermissions = false,
   });
 
   final String id;
@@ -22,6 +23,11 @@ class HandoffAgent {
   /// The project's configured default. Preselected by the sheet, so launching
   /// the usual agent stays a single tap.
   final bool isDefault;
+
+  /// The project runs this agent with its tool approvals off. Carried so the
+  /// sheet can say so before the launch: a capture's text is untrusted, and
+  /// with approvals off nothing stands between that text and the agent's tools.
+  final bool skipPermissions;
 }
 
 class AgentHandoffRequest {

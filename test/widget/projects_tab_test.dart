@@ -279,6 +279,69 @@ void main() {
     await tester.pump();
   }
 
+  Future<void> pumpTab(WidgetTester tester) => tester.pumpWidget(
+    MaterialApp(
+      theme: ThemeData.dark(useMaterial3: true),
+      home: Scaffold(
+        body: ListenableBuilder(
+          listenable: controller,
+          builder: (BuildContext context, Widget? child) =>
+              ProjectsTab(controller: controller),
+        ),
+      ),
+    ),
+  );
+
+  testWidgets('a card flags approvals off only for a project that has it', (
+    WidgetTester tester,
+  ) async {
+    final String plainId = controller.projects.single.id;
+    final Project armed = await tester.runAsync(
+      () => controller.create(
+        name: 'Armed',
+        repoPath: '/work/armed',
+        agentSettings: const <AgentKind, AgentSettings>{
+          AgentKind.codex: AgentSettings(skipPermissions: true),
+        },
+      ),
+    ) as Project;
+
+    await pumpTab(tester);
+
+    expect(
+      find.byKey(ValueKey<String>('project-approvals-off-${armed.id}')),
+      findsOneWidget,
+    );
+    expect(
+      find.byKey(ValueKey<String>('project-approvals-off-$plainId')),
+      findsNothing,
+    );
+    expect(find.text('APPROVALS OFF'), findsOneWidget);
+  });
+
+  testWidgets('the skip-permissions switch warns about steerable text', (
+    WidgetTester tester,
+  ) async {
+    await openEditor(tester);
+
+    await tester.scrollUntilVisible(
+      find.text('CODEX').last,
+      120,
+      scrollable: find.byType(Scrollable).last,
+    );
+    await tester.tap(find.text('CODEX').last);
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 300));
+
+    expect(
+      find.text(
+        'The agent runs tools without asking. A capture\'s text can steer it, '
+        'so leave this off for imported, OCR and clipboard captures.',
+      ),
+      findsOneWidget,
+    );
+  });
+
   testWidgets('skip permissions is a per-agent switch that saves', (
     WidgetTester tester,
   ) async {

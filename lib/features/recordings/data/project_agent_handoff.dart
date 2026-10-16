@@ -97,6 +97,8 @@ class ProjectAgentHandoff implements AgentHandoff {
           id: agent.name,
           label: agentLabel(agent),
           isDefault: target.project?.defaultAgent == agent,
+          skipPermissions:
+              target.project?.settingsFor(agent).skipPermissions ?? false,
         ),
     ];
   }

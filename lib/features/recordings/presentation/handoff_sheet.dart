@@ -267,6 +267,11 @@ class _HandoffSheetState extends State<_HandoffSheet> {
     );
   }
 
+  /// The selected agent runs with its tool approvals off.
+  bool get _approvalsOff => widget.agents.any(
+    (HandoffAgent agent) => agent.id == _agentId && agent.skipPermissions,
+  );
+
   /// Existing agents, unchanged in behaviour: launch, attach notice, close on a
   /// new session.
   List<Widget> _terminalGroup(String taskPath) => <Widget>[
@@ -304,6 +309,12 @@ class _HandoffSheetState extends State<_HandoffSheet> {
                 ? () {}
                 : () => setState(() => _agentId = agent.id),
           ),
+        if (_approvalsOff)
+          StatusPill(
+            key: const ValueKey<String>('handoff-approvals-off'),
+            label: 'APPROVALS OFF',
+            color: Console.red,
+          ),
       ],
     ),
     const SizedBox(height: 9),
@@ -317,8 +328,9 @@ class _HandoffSheetState extends State<_HandoffSheet> {
         Expanded(
           child: Text(
             'Sent to the agent as its opening prompt. A copy is also '
-            'written to $taskPath',
-            maxLines: 3,
+            'written to $taskPath'
+            '${_approvalsOff ? ' Runs with tool approvals off: the agent acts on this text without asking.' : ''}',
+            maxLines: _approvalsOff ? 5 : 3,
             style: ConsoleText.micro,
           ),
         ),

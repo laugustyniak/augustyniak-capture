@@ -95,6 +95,7 @@ void main() {
   Future<RecordingsController> controllerWith(
     AgentSessionLauncher launcher, {
     AgentKind? defaultAgent,
+    Set<AgentKind> skipPermissions = const <AgentKind>{},
   }) => buildRecordingsController(
     appDir,
     seed: <Recording>[
@@ -112,6 +113,10 @@ void main() {
               name: 'Acme',
               repoPath: repo.path,
               defaultAgent: defaultAgent,
+              agentSettings: <AgentKind, AgentSettings>{
+                for (final AgentKind agent in skipPermissions)
+                  agent: const AgentSettings(skipPermissions: true),
+              },
             )
           : null,
       launcher: launcher,
@@ -185,6 +190,59 @@ void main() {
     // A new session received the prompt, so there is nothing left to say.
     expect(find.text('LAUNCH SESSION'), findsNothing);
     expect(controller.recordings.single.isProcessedByUser, isTrue);
+  });
+
+  const Key approvalsOff = ValueKey<String>('handoff-approvals-off');
+  const String approvalsCopy =
+      'Runs with tool approvals off: the agent acts on this text without asking.';
+
+  testWidgets('a default agent with approvals off is flagged in the sheet', (
+    WidgetTester tester,
+  ) async {
+    final RecordingsController controller = await controllerWith(
+      _FakeLauncher(),
+      defaultAgent: AgentKind.codex,
+      skipPermissions: <AgentKind>{AgentKind.codex},
+    );
+
+    await openSheet(tester, controller);
+
+    expect(find.byKey(approvalsOff), findsOneWidget);
+    expect(find.text('APPROVALS OFF'), findsOneWidget);
+    expect(find.textContaining(approvalsCopy), findsOneWidget);
+  });
+
+  testWidgets('no flag, no approvals-off marker', (WidgetTester tester) async {
+    final RecordingsController controller = await controllerWith(
+      _FakeLauncher(),
+      defaultAgent: AgentKind.codex,
+    );
+
+    await openSheet(tester, controller);
+
+    expect(find.byKey(approvalsOff), findsNothing);
+    expect(find.textContaining('tool approvals off'), findsNothing);
+  });
+
+  testWidgets('switching to an agent with the flag shows the marker', (
+    WidgetTester tester,
+  ) async {
+    final RecordingsController controller = await controllerWith(
+      _FakeLauncher(),
+      defaultAgent: AgentKind.codex,
+      skipPermissions: <AgentKind>{AgentKind.claudeCode},
+    );
+
+    await openSheet(tester, controller);
+    expect(find.byKey(approvalsOff), findsNothing);
+
+    await tester.tap(find.text('CLAUDE CODE'));
+    await tester.pump();
+    expect(find.byKey(approvalsOff), findsOneWidget);
+
+    await tester.tap(find.text('CODEX'));
+    await tester.pump();
+    expect(find.byKey(approvalsOff), findsNothing);
   });
 
   testWidgets('choosing another agent overrides the project default', (
