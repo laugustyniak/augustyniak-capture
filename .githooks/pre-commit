@@ -22,7 +22,8 @@
 # *quoted* value, so an unquoted assignment (`.env` lines, `TURSO_AUTH_TOKEN=…`,
 # a bare Dart field) passes by design — widening it costs 40 false positives in
 # ordinary Dart. And the hook only runs for `git commit` proper; rebase,
-# cherry-pick and merge commits never invoke it (`git commit --amend` does).
+# cherry-pick and merge commits never invoke it (`git commit --amend` does); the
+# CI `guard` job is the server-side fallback for those.
 #
 # Enable once per clone (same setting the pre-push hook uses):
 #   git config core.hooksPath .githooks
@@ -30,26 +31,34 @@
 #   git commit --no-verify
 set -euo pipefail
 
-# Paths that hold captured content rather than source, plus the one credential
-# file that lives outside git's own tracking of secrets: `android/key.properties`
-# is gitignored, holds the passwords for the release keystore (CLAUDE.md calls
-# it the one artifact here that cannot be regenerated), and its Java-properties
-# format (`storePassword=…`) is exactly the unquoted shape the `named` rule
-# below does not catch. Anchored at the repo root, matched against the staged
-# path list.
-blocked_re='^(\.agent-tasks/|inbox\.md$|android/key\.properties$)'
-
+# The path rule lives in `tool/blocked-paths.sh`, not here, so the CI `guard`
+# job runs the identical check. It covers the captured content that started this
+# (`.agent-tasks/`, `inbox.md`) and the credential files that sit outside git's
+# own tracking of secrets: the release keystore and its `key.properties` (whose
+# Java-properties format, `storePassword=…`, is exactly the unquoted shape the
+# `named` rule below does not catch), `.p12`/`.pem` keys, iOS provisioning
+# profiles, Firebase config files and `.env` files. It matches case-insensitively
+# and at any depth; the script's header says why.
+#
 # `-z` avoids the same non-ASCII quoting hazard fixed below for the content
 # scan: without it, a path git renders as `"kawiarnia-caf\303\251.md"` would
-# never match `blocked_re` against the literal bytes.
-staged=$(git -c core.quotePath=false diff --cached --name-only -z --diff-filter=ACMRT | tr '\0' '\n' | grep -E "$blocked_re" || true)
+# never match the rule against the literal bytes.
+list=$(git -c core.quotePath=false diff --cached --name-only -z --diff-filter=ACMRT | tr '\0' '\n')
+# Only exit 0 (clean) and 1 (blocked) mean the rule ran. Anything else — a
+# missing script, a shell error — must not read as "nothing blocked": that would
+# let every commit through the moment the rule breaks. Run through `bash` so the
+# exec bit is not a dependency.
+rc=0
+staged=$(printf '%s\n' "$list" | bash "$(git rev-parse --show-toplevel)/tool/blocked-paths.sh") || rc=$?
+[ "$rc" -le 1 ] || { echo "pre-commit: tool/blocked-paths.sh failed ($rc); refusing to commit blind." >&2; exit 1; }
 
 if [ -n "$staged" ]; then
-  echo "pre-commit: refusing to commit captured content." >&2
+  echo "pre-commit: refusing to commit captured content or a credential file." >&2
   echo >&2
   echo "These files are the user's own captures — dictated notes, meeting" >&2
   echo "records, client work — written here by the app itself. They are input" >&2
-  echo "to an agent, never source, and this repository is public:" >&2
+  echo "to an agent, never source, and this repository is public. Keystores," >&2
+  echo "provisioning profiles and .env files are refused by the same rule:" >&2
   echo >&2
   printf '  %s\n' $staged >&2
   echo >&2
