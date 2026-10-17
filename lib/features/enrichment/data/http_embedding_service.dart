@@ -19,14 +19,19 @@ class HttpEmbeddingService implements EmbeddingService {
     this.bearerToken,
     http.Client? client,
     this.usageSink = const NoopUsageSink(),
-  }) : _client = BoundedClient(client ?? http.Client(), maxBytes: maxResponseBytes);
+  }) : _client = BoundedClient(
+      client ?? http.Client(),
+      maxBytes: maxResponseBytes,
+    );
 
   final Uri endpoint;
   @override
   final String model;
   final String? bearerToken;
-  /// Ceiling on any response body: a embedding vector is far smaller, so a body past
-  /// it is a misbehaving endpoint and fails instead of filling memory.
+
+  /// Ceiling on any response body: an embedding vector is far smaller, so a
+  /// body past it is a misbehaving endpoint and fails instead of filling
+  /// memory.
   static const int maxResponseBytes = 8 << 20;
 
   final http.Client _client;

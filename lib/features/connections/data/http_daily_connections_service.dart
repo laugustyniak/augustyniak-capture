@@ -32,7 +32,10 @@ class HttpDailyConnectionsService implements DailyConnectionsService {
     this.recordUsage,
     http.Client? client,
   }) : _activeProfile = activeProfile,
-       _client = BoundedClient(client ?? http.Client(), maxBytes: maxResponseBytes);
+       _client = BoundedClient(
+         client ?? http.Client(),
+         maxBytes: maxResponseBytes,
+       );
 
   final ProviderProfile? Function() _activeProfile;
   final void Function({
@@ -42,8 +45,9 @@ class HttpDailyConnectionsService implements DailyConnectionsService {
     required MeasuredUsage usage,
   })?
   recordUsage;
-  /// Ceiling on any response body: a review reply is far smaller, so a body past
-  /// it is a misbehaving endpoint and fails instead of filling memory.
+
+  /// Ceiling on any response body: a review reply is far smaller, so a body
+  /// past it is a misbehaving endpoint and fails instead of filling memory.
   static const int maxResponseBytes = 4 << 20;
 
   final http.Client _client;

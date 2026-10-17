@@ -23,13 +23,17 @@ class HttpVisionOcrService implements OcrService {
     this.model,
     http.Client? client,
     this.usageSink = const NoopUsageSink(),
-  }) : _client = BoundedClient(client ?? http.Client(), maxBytes: maxResponseBytes);
+  }) : _client = BoundedClient(
+      client ?? http.Client(),
+      maxBytes: maxResponseBytes,
+    );
 
   final Uri endpoint;
   final String? bearerToken;
   final String? model;
-  /// Ceiling on any response body: a vision reply is far smaller, so a body past
-  /// it is a misbehaving endpoint and fails instead of filling memory.
+
+  /// Ceiling on any response body: a vision reply is far smaller, so a body
+  /// past it is a misbehaving endpoint and fails instead of filling memory.
   static const int maxResponseBytes = 8 << 20;
 
   final http.Client _client;

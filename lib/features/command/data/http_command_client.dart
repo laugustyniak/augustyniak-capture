@@ -20,12 +20,17 @@ class HttpCommandClient implements CommandClient {
     required this.baseUrl,
     this.bearerToken,
     http.Client? client,
-  }) : _client = BoundedClient(client ?? http.Client(), maxBytes: maxResponseBytes);
+  }) : _client = BoundedClient(
+      client ?? http.Client(),
+      maxBytes: maxResponseBytes,
+    );
 
   final Uri baseUrl;
   final String? bearerToken;
-  /// Ceiling on any response body: a control plane reply is far smaller, so a body past
-  /// it is a misbehaving endpoint and fails instead of filling memory.
+
+  /// Ceiling on any response body: a control plane reply is far smaller, so a
+  /// body past it is a misbehaving endpoint and fails instead of filling
+  /// memory.
   static const int maxResponseBytes = 4 << 20;
 
   final http.Client _client;
