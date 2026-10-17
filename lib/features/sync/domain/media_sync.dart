@@ -67,8 +67,9 @@ class DisabledMediaObjectStore implements MediaObjectStore {
   }) async => _unavailable();
 
   @override
-  Stream<List<int>> download(String key, {required int maxBytes}) =>
-      Stream<List<int>>.error(StateError('Media sync is not configured'));
+  Stream<List<int>> download(String key, {required int maxBytes}) async* {
+    _unavailable();
+  }
 }
 
 class MediaObjectExistsException implements Exception {

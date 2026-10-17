@@ -467,7 +467,10 @@ not transcribed until something enqueues the row again.
 writes each chunk to the `.part` and into an incremental sha-256 as it
 arrives, and refuses the object (`rejected`, nothing landed) as soon as it
 crosses the row's `sizeBytes` — 2 GiB for a row an older build synced without
-one. Under E2EE the inner ceiling is `maxBytes` plus the 28-byte envelope.
+one. Under E2EE the inner ceiling is `maxBytes` plus the 28-byte envelope. That
+path still holds one ciphertext copy and one clear copy in memory, because
+AES-GCM authenticates the whole envelope: the row's `sizeBytes` (fallback
+2 GiB) is the memory bound there, not a streaming one.
 
 **Known gaps.** There is no resumable (TUS) transfer — #187's
 resumable-transfer item stays open. Objects of a deleted capture are not
