@@ -462,10 +462,16 @@ guard refuses the enqueue (every segment must be here) and the row keeps
 `completed`, which the resume sweep does not pick up, so the new fragment is
 not transcribed until something enqueues the row again.
 
-**Known gaps.** `storage_client` 2.8.0's `download()` answers the whole object
-as bytes, so a download holds the file in memory once, and there is no
-resumable (TUS) transfer — #187's resumable-transfer item stays open. Objects
-of a deleted capture are not removed from the bucket yet.
+**Downloads stream.** `MediaObjectStore.download` yields chunks and takes a
+`maxBytes`; `SupabaseMediaStore` reads through `downloadStream`. The service
+writes each chunk to the `.part` and into an incremental sha-256 as it
+arrives, and refuses the object (`rejected`, nothing landed) as soon as it
+crosses the row's `sizeBytes` — 2 GiB for a row an older build synced without
+one. Under E2EE the inner ceiling is `maxBytes` plus the 28-byte envelope.
+
+**Known gaps.** There is no resumable (TUS) transfer — #187's
+resumable-transfer item stays open. Objects of a deleted capture are not
+removed from the bucket yet.
 
 ## End-to-end encryption: the envelope
 
