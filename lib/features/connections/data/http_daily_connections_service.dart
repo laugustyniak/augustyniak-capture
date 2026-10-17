@@ -3,6 +3,7 @@ import 'dart:io';
 
 import 'package:http/http.dart' as http;
 
+import '../../../core/http/bounded_client.dart';
 import '../../../core/http/provider_failure.dart';
 import '../../costs/domain/usage_parsing.dart';
 import '../../recordings/domain/recording.dart';
@@ -31,7 +32,7 @@ class HttpDailyConnectionsService implements DailyConnectionsService {
     this.recordUsage,
     http.Client? client,
   }) : _activeProfile = activeProfile,
-       _client = client ?? http.Client();
+       _client = BoundedClient(client ?? http.Client(), maxBytes: maxResponseBytes);
 
   final ProviderProfile? Function() _activeProfile;
   final void Function({
@@ -41,6 +42,10 @@ class HttpDailyConnectionsService implements DailyConnectionsService {
     required MeasuredUsage usage,
   })?
   recordUsage;
+  /// Ceiling on any response body: a review reply is far smaller, so a body past
+  /// it is a misbehaving endpoint and fails instead of filling memory.
+  static const int maxResponseBytes = 4 << 20;
+
   final http.Client _client;
 
   void close() => _client.close();
