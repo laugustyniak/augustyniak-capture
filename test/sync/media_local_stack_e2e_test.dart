@@ -72,12 +72,20 @@ void main() {
         storeA.upload(key, source, sha256: hash),
         throwsA(isA<MediaObjectExistsException>()),
       );
-      expect(await storeA.download(key), audio);
+      expect(
+        <int>[
+          for (final List<int> c in await storeA
+              .download(key, maxBytes: audio.length)
+              .toList())
+            ...c,
+        ],
+        audio,
+      );
 
       expect(await storeB.exists(key), isFalse);
       expect(await storeBAsA.exists(key), isFalse);
       await expectLater(
-        storeBAsA.download(key),
+        storeBAsA.download(key, maxBytes: audio.length).toList(),
         throwsA(isA<StorageException>()),
       );
       await expectLater(

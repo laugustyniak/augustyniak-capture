@@ -140,8 +140,22 @@ void main() {
         endpoint: endpoint, bucket: bucket, accessKeyId: accessKeyId, secretAccessKey: secretAccessKey, region: region, client: mockClient,
       );
 
-      final bytes = await store.download('test.txt');
-      expect(String.fromCharCodes(bytes), 'data');
+      final chunks = await store.download('test.txt', maxBytes: 4).toList();
+      expect(String.fromCharCodes(chunks.expand((c) => c).toList()), 'data');
+    });
+
+    test('download past maxBytes throws MediaObjectTooLargeException', () async {
+      final mockClient = MockClient((request) async {
+        return http.Response('data', 200);
+      });
+      final store = S3MediaStore(
+        endpoint: endpoint, bucket: bucket, accessKeyId: accessKeyId, secretAccessKey: secretAccessKey, region: region, client: mockClient,
+      );
+
+      await expectLater(
+        store.download('test.txt', maxBytes: 3).toList(),
+        throwsA(isA<MediaObjectTooLargeException>()),
+      );
     });
 
     test('download throws MediaStoreUnreachableException on timeout', () async {
@@ -152,7 +166,10 @@ void main() {
         endpoint: endpoint, bucket: bucket, accessKeyId: accessKeyId, secretAccessKey: secretAccessKey, region: region, client: mockClient,
       );
 
-      expect(() => store.download('test.txt'), throwsA(isA<MediaStoreUnreachableException>()));
+      await expectLater(
+        store.download('test.txt', maxBytes: 4).toList(),
+        throwsA(isA<MediaStoreUnreachableException>()),
+      );
     });
   });
 }

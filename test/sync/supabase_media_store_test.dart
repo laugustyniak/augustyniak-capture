@@ -34,7 +34,7 @@ void main() {
         throwsA(isA<MediaStoreUnreachableException>()),
       );
       await expectLater(
-        store.download('captures/r1/r1.m4a'),
+        store.download('captures/r1/r1.m4a', maxBytes: 1 << 20).toList(),
         throwsA(isA<MediaStoreUnreachableException>()),
       );
     },

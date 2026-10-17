@@ -138,6 +138,10 @@ class E2eeCipher {
   static const String _legacyPrefix = 'enc:v1:';
   static const String _envelopeMarker = 'enc:';
   static const int _macLengthBytes = 16;
+
+  /// What sealing adds to the clear bytes: the nonce and the MAC.
+  static const int envelopeOverheadBytes =
+      AesGcm.defaultNonceLength + _macLengthBytes;
   static const String _dataKeyInfo = 'ai.augustyniak.capture/e2ee/data/v1';
   static const String _keyCheckInfo =
       'ai.augustyniak.capture/e2ee/key-check/v1';

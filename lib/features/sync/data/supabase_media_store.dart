@@ -35,9 +35,7 @@ class SupabaseMediaStore implements MediaObjectStore {
     try {
       return await call();
     } on StorageException catch (error) {
-      if (_transportFailures.contains(error.statusCode)) {
-        throw const MediaStoreUnreachableException();
-      }
+      if (_isTransport(error)) throw const MediaStoreUnreachableException();
       rethrow;
     } on http.ClientException {
       throw const MediaStoreUnreachableException();
@@ -45,6 +43,9 @@ class SupabaseMediaStore implements MediaObjectStore {
       throw const MediaStoreUnreachableException();
     }
   }
+
+  static bool _isTransport(StorageException error) =>
+      _transportFailures.contains(error.statusCode);
 
   @override
   Future<bool> exists(String key) => _reach(() => _bucket.exists(_path(key)));
@@ -71,6 +72,23 @@ class SupabaseMediaStore implements MediaObjectStore {
       });
 
   @override
-  Future<List<int>> download(String key) =>
-      _reach(() => _bucket.download(_path(key)));
+  Stream<List<int>> download(String key, {required int maxBytes}) async* {
+    // A loop rather than `yield*`, so an error raised by the stream itself
+    // passes through the same mapping as one raised by the request.
+    try {
+      await for (final List<int> chunk in boundedObjectBytes(
+        _bucket.downloadStream(_path(key)),
+        maxBytes: maxBytes,
+      )) {
+        yield chunk;
+      }
+    } on StorageException catch (error) {
+      if (_isTransport(error)) throw const MediaStoreUnreachableException();
+      rethrow;
+    } on http.ClientException {
+      throw const MediaStoreUnreachableException();
+    } on SocketException {
+      throw const MediaStoreUnreachableException();
+    }
+  }
 }

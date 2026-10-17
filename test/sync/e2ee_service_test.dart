@@ -24,7 +24,7 @@ class _FakeMediaStore implements MediaObjectStore {
   Future<void> upload(String key, File source, {required String sha256}) async {}
 
   @override
-  Future<List<int>> download(String key) async => const <int>[];
+  Stream<List<int>> download(String key, {required int maxBytes}) => const Stream<List<int>>.empty();
 }
 
 /// Answers `read` only once [gate] completes, to order a slow keyring read
@@ -258,7 +258,7 @@ void main() {
       expect(inner.pushes.single.$2.single['title'], 'Plain');
       final MediaObjectStore plainStore = service.wrapMediaStore(store, ownerId: 'u');
       expect(plainStore, isNot(isA<EncryptedMediaStore>()));
-      expect(await plainStore.download('k'), isEmpty);
+      expect(await plainStore.download('k', maxBytes: 1).toList(), isEmpty);
     });
 
     test('a run for a user other than the followed one is refused, not sealed or sent plain', () async {
