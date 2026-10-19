@@ -288,7 +288,11 @@ void main() {
         ),
       );
 
-      final File layout = layouts.listSync().whereType<File>().single;
+      // The layout sits in a per-launch directory under the seam (#310).
+      final File layout = layouts
+          .listSync(recursive: true)
+          .whereType<File>()
+          .single;
       final String kdl = layout.readAsStringSync();
       // Exactly two unescaped quotes per value: the ones this writer opened
       // and closed. Anything else means the argument broke out of its string.
