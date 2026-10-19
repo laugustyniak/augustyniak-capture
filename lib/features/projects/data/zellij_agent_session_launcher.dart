@@ -3,6 +3,7 @@ import 'dart:io';
 import 'package:path/path.dart' as p;
 
 import '../../../core/security/owner_only_file.dart';
+import '../../../core/security/symlink_guard.dart';
 import '../domain/agent_session_launcher.dart';
 import 'executable_resolver.dart';
 import 'process_runner.dart';
@@ -129,17 +130,15 @@ class ZellijAgentSessionLauncher implements AgentSessionLauncher {
     return resolved;
   }
 
-  /// One fresh `mkdtemp` directory per launch, tightened to 0700, under the
-  /// system temp directory (or the `layoutDirectory` seam). Dart's `createTemp`
-  /// creates it at the umask's mode, so [restrictDirectoryToOwner] follows at
-  /// once; the name is unguessable, so nobody can be inside in between. A
-  /// shared, predictably named
-  /// `<tmp>/augustyniak-capture/` was a path another account could own or
-  /// pre-link, and the layout is what the agent starts from (#310). The
-  /// directory is never deleted: Zellij reads the file at start-up, and
-  /// deleting it after the fact would race `open`, which returns long before
-  /// Ghostty has execed anything. The file is a derived artifact measured in
-  /// bytes.
+  /// One fresh directory per launch under the system temp directory (or the
+  /// `layoutDirectory` seam), restricted to the owner before the file is
+  /// written. A shared, predictably named `<tmp>/augustyniak-capture/` was a
+  /// path another account could own or pre-link, and the layout is what the
+  /// agent starts from (#310). Dart's `createTemp` creates at the umask's mode,
+  /// so [restrictDirectoryToOwner] follows at once and the file is refused if
+  /// something got in as a link meanwhile. The directory is never deleted:
+  /// Zellij reads the file at start-up, and deleting it after the fact would
+  /// race `open`, which returns long before Ghostty has execed anything.
   Future<String> _writeLayout(String sessionName, String layout) async {
     try {
       final Directory directory = await (_layoutDirectory ??
@@ -147,6 +146,7 @@ class ZellijAgentSessionLauncher implements AgentSessionLauncher {
           .createTemp('augustyniak-capture-');
       await restrictDirectoryToOwner(directory.path);
       final File file = File(p.join(directory.path, '$sessionName.kdl'));
+      await refuseSymlink(file.path);
       await file.writeAsString(layout);
       return file.path;
     } on FileSystemException catch (error) {
