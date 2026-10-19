@@ -1,5 +1,6 @@
 import 'dart:io';
 
+import '../../../core/security/symlink_guard.dart';
 import '../../projects/domain/project.dart';
 import '../domain/capture_router.dart';
 import '../domain/route_record.dart';
@@ -59,6 +60,7 @@ class ProjectInboxRouter implements CaptureRouter {
     }
 
     final File file = File('${project.repoPath}${Platform.pathSeparator}$fileName');
+    await refuseSymlink(file.path);
     await file.writeAsString(_render(capture), mode: FileMode.writeOnlyAppend);
     return RouteRecord(
       // Stamped here rather than by the caller so the record cannot claim a

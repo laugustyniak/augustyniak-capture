@@ -2,6 +2,7 @@ import 'dart:io';
 
 import 'package:path/path.dart' as p;
 
+import '../../../core/security/symlink_guard.dart';
 import '../../projects/domain/agent_session_launcher.dart';
 import '../../projects/domain/project.dart';
 import '../domain/agent_handoff.dart';
@@ -150,6 +151,8 @@ class ProjectAgentHandoff implements AgentHandoff {
     // there yet reads nothing and reports nothing — the one failure the user
     // could not diagnose from either end.
     final File file = _taskFile(repoPath, request.captureId);
+    await refuseSymlink(file.parent.path);
+    await refuseSymlink(file.path);
     final bool existed = await file.exists();
     if (!existed) await file.parent.create(recursive: true);
     await file.writeAsString(
