@@ -171,6 +171,68 @@ void main() {
     expect(controller.recordings.single.routes, hasLength(2));
   });
 
+  test(
+    'a symlinked .agent-tasks refuses the handoff and writes nothing',
+    () async {
+      final Directory outside = Directory.systemTemp.createTempSync('outside-');
+      addTearDown(() => outside.deleteSync(recursive: true));
+      Link('${repo.path}${Platform.pathSeparator}.agent-tasks')
+          .createSync(outside.path);
+      final _FakeLauncher launcher = _FakeLauncher();
+      final RecordingsController controller = await buildRecordingsController(
+        appDir,
+        seed: <Recording>[
+          makeRecording(id: 'r1', projectId: 'p1', transcript: 'Body.'),
+        ],
+        agentHandoff: handoffFor(projectFor(repo), launcher),
+      );
+
+      final AgentHandoffResult? result = await controller.handoff(
+        'r1',
+        agentId: AgentKind.codex.name,
+      );
+
+      expect(result, isNull);
+      expect(controller.error, contains('symbolic link'));
+      expect(outside.listSync(), isEmpty);
+      expect(launcher.requests, isEmpty);
+      expect(controller.recordings.single.isProcessedByUser, isFalse);
+    },
+    skip: Platform.isWindows,
+  );
+
+  test(
+    'a symlinked task file refuses the handoff and leaves its target alone',
+    () async {
+      final Directory outside = Directory.systemTemp.createTempSync('outside-');
+      addTearDown(() => outside.deleteSync(recursive: true));
+      final File victim = File('${outside.path}${Platform.pathSeparator}v.md')
+        ..writeAsStringSync('untouched');
+      Directory('${repo.path}${Platform.pathSeparator}.agent-tasks')
+          .createSync();
+      Link(taskFile('r1').path).createSync(victim.path);
+      final _FakeLauncher launcher = _FakeLauncher();
+      final RecordingsController controller = await buildRecordingsController(
+        appDir,
+        seed: <Recording>[
+          makeRecording(id: 'r1', projectId: 'p1', transcript: 'Body.'),
+        ],
+        agentHandoff: handoffFor(projectFor(repo), launcher),
+      );
+
+      final AgentHandoffResult? result = await controller.handoff(
+        'r1',
+        agentId: AgentKind.codex.name,
+      );
+
+      expect(result, isNull);
+      expect(controller.error, contains('symbolic link'));
+      expect(victim.readAsStringSync(), 'untouched');
+      expect(launcher.requests, isEmpty);
+    },
+    skip: Platform.isWindows,
+  );
+
   test('a launch that fails leaves the capture open and retryable', () async {
     final _FakeLauncher launcher = _FakeLauncher(failure: 'Ghostty is missing');
     final RecordingsController controller = await buildRecordingsController(

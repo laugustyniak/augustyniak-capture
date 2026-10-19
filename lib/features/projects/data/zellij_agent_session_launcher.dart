@@ -2,6 +2,8 @@ import 'dart:io';
 
 import 'package:path/path.dart' as p;
 
+import '../../../core/security/owner_only_file.dart';
+import '../../../core/security/symlink_guard.dart';
 import '../domain/agent_session_launcher.dart';
 import 'executable_resolver.dart';
 import 'process_runner.dart';
@@ -128,17 +130,23 @@ class ZellijAgentSessionLauncher implements AgentSessionLauncher {
     return resolved;
   }
 
-  /// One file per session name, overwritten on each launch, in the system temp
-  /// directory. It is read by Zellij at start-up and is a derived artifact —
-  /// deleting it after the fact would race `open`, which returns long before
-  /// Ghostty has execed anything.
+  /// One fresh directory per launch under the system temp directory (or the
+  /// `layoutDirectory` seam), restricted to the owner before the file is
+  /// written. A shared, predictably named `<tmp>/augustyniak-capture/` was a
+  /// path another account could own or pre-link, and the layout is what the
+  /// agent starts from (#310). Dart's `createTemp` creates at the umask's mode,
+  /// so [restrictDirectoryToOwner] follows at once and the file is refused if
+  /// something got in as a link meanwhile. The directory is never deleted:
+  /// Zellij reads the file at start-up, and deleting it after the fact would
+  /// race `open`, which returns long before Ghostty has execed anything.
   Future<String> _writeLayout(String sessionName, String layout) async {
-    final Directory directory =
-        _layoutDirectory ??
-        Directory(p.join(Directory.systemTemp.path, 'augustyniak-capture'));
     try {
-      await directory.create(recursive: true);
+      final Directory directory = await (_layoutDirectory ??
+              Directory.systemTemp)
+          .createTemp('augustyniak-capture-');
+      await restrictDirectoryToOwner(directory.path);
       final File file = File(p.join(directory.path, '$sessionName.kdl'));
+      await refuseSymlink(file.path);
       await file.writeAsString(layout);
       return file.path;
     } on FileSystemException catch (error) {

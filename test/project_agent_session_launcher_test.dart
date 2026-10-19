@@ -6,6 +6,7 @@ import 'package:augustyniak_capture/features/projects/data/process_runner.dart';
 import 'package:augustyniak_capture/features/projects/data/terminal_launcher.dart';
 import 'package:augustyniak_capture/features/projects/domain/agent_session_launcher.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:path/path.dart' as p;
 
 /// Stands in for the machine's installed tools. Every name resolves under
 /// `/opt/fake/bin` unless [missing] names it — which is how the "not installed"
@@ -97,6 +98,30 @@ void main() {
     repoPath: repo.path,
     agent: agent,
     arguments: arguments,
+  );
+
+  test(
+    'writes the layout into a fresh owner-only directory under the seam',
+    () async {
+      // mkdtemp already made `layouts` 0700; widen it so a launcher that
+      // writes straight into the parent cannot pass by inheriting that mode.
+      await Process.run('chmod', <String>['755', layouts.path]);
+      final _FakeProcessRunner runner = _FakeProcessRunner(<CommandResult>[
+        _success,
+        _success,
+      ]);
+
+      await build(runner).launch(request());
+
+      final List<String> arguments = runner.invocations.last.arguments;
+      final String path =
+          arguments[arguments.indexOf('--new-session-with-layout') + 1];
+      final Directory parent = File(path).parent;
+      expect(p.isWithin(layouts.path, path), isTrue);
+      expect(parent.path, isNot(layouts.path));
+      expect(parent.statSync().mode & 0x1ff, 0x1c0, reason: 'not 0700');
+    },
+    skip: Platform.isWindows,
   );
 
   test(
