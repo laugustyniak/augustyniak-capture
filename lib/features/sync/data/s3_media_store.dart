@@ -67,15 +67,28 @@ class S3MediaStore implements MediaObjectStore {
   }
 
   @override
-  Future<List<int>> download(String key) async {
-    return _mapErrors(() async {
+  Stream<List<int>> download(String key, {required int maxBytes}) async* {
+    // A loop rather than `yield*`, so an error raised by the body stream is
+    // mapped like one raised by the request.
+    try {
       final request = _buildRequest('GET', key, _emptyHash);
       final response = await _client.send(request);
       if (response.statusCode < 200 || response.statusCode >= 300) {
         throw Exception('Unexpected status code: ${response.statusCode}');
       }
-      return await response.stream.toBytes();
-    });
+      await for (final List<int> chunk in boundedObjectBytes(
+        response.stream,
+        maxBytes: maxBytes,
+      )) {
+        yield chunk;
+      }
+    } on SocketException {
+      throw const MediaStoreUnreachableException();
+    } on http.ClientException {
+      throw const MediaStoreUnreachableException();
+    } on TimeoutException {
+      throw const MediaStoreUnreachableException();
+    }
   }
 
   Future<T> _mapErrors<T>(Future<T> Function() action) async {

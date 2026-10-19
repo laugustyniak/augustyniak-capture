@@ -1,5 +1,6 @@
 import 'dart:convert';
 import 'dart:io';
+import 'dart:typed_data';
 
 import 'package:crypto/crypto.dart' as crypto;
 
@@ -63,8 +64,17 @@ class EncryptedMediaStore implements MediaObjectStore {
   }
 
   @override
-  Future<List<int>> download(String key) async {
-    final List<int> cipherBytes = await _inner.download(key);
-    return await _cipher.unsealBytes(cipherBytes, aad: _aad(key));
+  Stream<List<int>> download(String key, {required int maxBytes}) async* {
+    // The envelope is exactly the clear length plus a fixed overhead, so a
+    // ceiling on the clear bytes is one on the ciphertext. The inner store
+    // enforces it while the bytes arrive.
+    final BytesBuilder cipherBytes = BytesBuilder(copy: false);
+    await for (final List<int> chunk in _inner.download(
+      key,
+      maxBytes: maxBytes + E2eeCipher.envelopeOverheadBytes,
+    )) {
+      cipherBytes.add(chunk);
+    }
+    yield await _cipher.unsealBytes(cipherBytes.takeBytes(), aad: _aad(key));
   }
 }

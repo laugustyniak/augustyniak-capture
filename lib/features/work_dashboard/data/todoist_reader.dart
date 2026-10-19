@@ -3,6 +3,8 @@ import 'dart:convert';
 
 import 'package:http/http.dart' as http;
 
+import '../../../core/http/bounded_client.dart';
+
 class TodoistProject {
   const TodoistProject({required this.id, required this.name});
 
@@ -61,9 +63,16 @@ class TodoistSnapshot {
 /// Reads Todoist API v1. It has no write methods or background polling.
 class TodoistReader {
   TodoistReader({http.Client? client, Uri? baseUrl})
-    : _client = client ?? http.Client(),
+    : _client = BoundedClient(
+      client ?? http.Client(),
+      maxBytes: maxResponseBytes,
+    ),
       _ownsClient = client == null,
       _baseUrl = baseUrl ?? Uri.parse('https://api.todoist.com/api/v1/');
+
+  /// Ceiling on any response body: a Todoist page is far smaller, so a body
+  /// past it is a misbehaving endpoint and fails instead of filling memory.
+  static const int maxResponseBytes = 8 << 20;
 
   final http.Client _client;
   final bool _ownsClient;

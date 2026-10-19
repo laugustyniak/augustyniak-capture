@@ -626,8 +626,13 @@ class _PlaintextGuardMediaStore implements MediaObjectStore {
   }
 
   @override
-  Future<List<int>> download(String key) async {
+  Stream<List<int>> download(String key, {required int maxBytes}) async* {
     await _checked;
-    return _inner.download(key);
+    await for (final List<int> chunk in _inner.download(
+      key,
+      maxBytes: maxBytes,
+    )) {
+      yield chunk;
+    }
   }
 }

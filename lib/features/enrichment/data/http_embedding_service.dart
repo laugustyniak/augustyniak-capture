@@ -3,6 +3,7 @@ import 'dart:io';
 
 import 'package:http/http.dart' as http;
 
+import '../../../core/http/bounded_client.dart';
 import '../../../core/http/provider_failure.dart';
 import '../../costs/domain/usage_parsing.dart';
 import '../../costs/domain/usage_sink.dart';
@@ -18,12 +19,21 @@ class HttpEmbeddingService implements EmbeddingService {
     this.bearerToken,
     http.Client? client,
     this.usageSink = const NoopUsageSink(),
-  }) : _client = client ?? http.Client();
+  }) : _client = BoundedClient(
+      client ?? http.Client(),
+      maxBytes: maxResponseBytes,
+    );
 
   final Uri endpoint;
   @override
   final String model;
   final String? bearerToken;
+
+  /// Ceiling on any response body: an embedding vector is far smaller, so a
+  /// body past it is a misbehaving endpoint and fails instead of filling
+  /// memory.
+  static const int maxResponseBytes = 8 << 20;
+
   final http.Client _client;
   final UsageSink usageSink;
 

@@ -3,6 +3,7 @@ import 'dart:io';
 
 import 'package:http/http.dart' as http;
 
+import '../../../core/http/bounded_client.dart';
 import '../../../core/http/provider_failure.dart';
 
 import '../../costs/domain/usage_parsing.dart';
@@ -36,13 +37,21 @@ class HttpChatEnrichmentService
     this.model,
     http.Client? client,
     this.usageSink = const NoopUsageSink(),
-  }) : _client = client ?? http.Client();
+  }) : _client = BoundedClient(
+      client ?? http.Client(),
+      maxBytes: maxResponseBytes,
+    );
 
   final Uri endpoint;
   final String? bearerToken;
 
   /// Required by OpenAI and Groq, ignored by servers that don't read it.
   final String? model;
+
+  /// Ceiling on any response body: a chat completion is far smaller, so a body
+  /// past it is a misbehaving endpoint and fails instead of filling memory.
+  static const int maxResponseBytes = 4 << 20;
+
   final http.Client _client;
 
   /// Receives what this call consumed. Defaults to a no-op, so nothing in the

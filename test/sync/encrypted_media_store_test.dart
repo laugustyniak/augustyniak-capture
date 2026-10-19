@@ -22,13 +22,19 @@ class FakeMediaStore implements MediaObjectStore {
   }
 
   @override
-  Future<List<int>> download(String key) async {
+  Stream<List<int>> download(String key, {required int maxBytes}) {
     if (!storage.containsKey(key)) {
-      throw StateError('Not found: $key');
+      return Stream<List<int>>.error(StateError('Not found: $key'));
     }
-    return storage[key]!;
+    return boundedObjectBytes(
+      Stream<List<int>>.value(storage[key]!),
+      maxBytes: maxBytes,
+    );
   }
 }
+
+Future<List<int>> _read(MediaObjectStore store, String key, {int maxBytes = 1 << 20}) async =>
+    <int>[for (final List<int> chunk in await store.download(key, maxBytes: maxBytes).toList()) ...chunk];
 
 Future<E2eeCipher> _cipher(String passphrase) async {
   final E2eeKeyDerivation kdf = E2eeKeyDerivation(iterations: 1000);
@@ -83,11 +89,26 @@ void main() {
     await encryptedStore.upload(storageKey, audioFile, sha256: contentHash);
 
     // Download through EncryptedMediaStore
-    final List<int> decryptedBytes = await encryptedStore.download(storageKey);
+    final List<int> decryptedBytes = await _read(encryptedStore, storageKey);
 
     expect(decryptedBytes, equals(originalBytes));
     // The hash of decrypted bytes matches the local recording contentHash!
     expect(crypto.sha256.convert(decryptedBytes).toString(), contentHash);
+  });
+
+  test('the ceiling on the clear bytes maps to one on the envelope', () async {
+    final File audioFile = File('${tempDir.path}/bound.m4a');
+    final List<int> clear = utf8.encode('Exactly this many bytes');
+    await audioFile.writeAsBytes(clear);
+    const String storageKey = 'user123/captures/rec4/bound.m4a';
+    await encryptedStore.upload(storageKey, audioFile, sha256: 'h');
+    expect(innerStore.storage[storageKey]!.length, clear.length + E2eeCipher.envelopeOverheadBytes);
+
+    expect(await _read(encryptedStore, storageKey, maxBytes: clear.length), clear);
+    await expectLater(
+      _read(encryptedStore, storageKey, maxBytes: clear.length - 1),
+      throwsA(isA<MediaObjectTooLargeException>()),
+    );
   });
 
   test('a blob moved under another key does not open', () async {
@@ -99,9 +120,9 @@ void main() {
     await encryptedStore.upload('user123/rec-1/a.m4a', audioFile, sha256: 'h');
     innerStore.storage['user123/rec-2/a.m4a'] = innerStore.storage['user123/rec-1/a.m4a']!;
 
-    expect(await encryptedStore.download('user123/rec-1/a.m4a'), utf8.encode('Audio of recording one'));
+    expect(await _read(encryptedStore, 'user123/rec-1/a.m4a'), utf8.encode('Audio of recording one'));
     expect(
-      () => encryptedStore.download('user123/rec-2/a.m4a'),
+      () => _read(encryptedStore, 'user123/rec-2/a.m4a'),
       throwsA(isA<E2eeDecryptionException>()),
     );
   });
@@ -117,7 +138,7 @@ void main() {
         EncryptedMediaStore(inner: innerStore, cipher: cipher, ownerId: 'user456');
 
     expect(
-      () => otherOwner.download('rec-1/a.m4a'),
+      () => _read(otherOwner, 'rec-1/a.m4a'),
       throwsA(isA<E2eeDecryptionException>()),
     );
   });
@@ -132,6 +153,6 @@ void main() {
     final E2eeCipher badCipher = await _cipher('wrong-password');
     final EncryptedMediaStore badStore = EncryptedMediaStore(inner: innerStore, cipher: badCipher, ownerId: 'user123');
 
-    expect(() => badStore.download(storageKey), throwsA(isA<E2eeDecryptionException>()));
+    expect(() => _read(badStore, storageKey), throwsA(isA<E2eeDecryptionException>()));
   });
 }

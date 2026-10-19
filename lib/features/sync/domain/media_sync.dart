@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:convert';
 import 'dart:io';
 
 import 'package:crypto/crypto.dart';
@@ -19,7 +20,34 @@ abstract interface class MediaObjectStore {
   /// [MediaObjectExistsException].
   Future<void> upload(String key, File source, {required String sha256});
 
-  Future<List<int>> download(String key);
+  /// Yields the object's bytes as they arrive and never more than [maxBytes]
+  /// in total: an object past the ceiling errors with
+  /// [MediaObjectTooLargeException] and is not read further.
+  Stream<List<int>> download(String key, {required int maxBytes});
+}
+
+/// A download crossed the ceiling it was given.
+class MediaObjectTooLargeException implements Exception {
+  const MediaObjectTooLargeException(this.maxBytes);
+
+  final int maxBytes;
+
+  @override
+  String toString() => 'Media object exceeded the $maxBytes byte ceiling.';
+}
+
+/// Forwards [source] until the running total would cross [maxBytes], then
+/// errors with [MediaObjectTooLargeException] and stops pulling.
+Stream<List<int>> boundedObjectBytes(
+  Stream<List<int>> source, {
+  required int maxBytes,
+}) async* {
+  int received = 0;
+  await for (final List<int> chunk in source) {
+    received += chunk.length;
+    if (received > maxBytes) throw MediaObjectTooLargeException(maxBytes);
+    yield chunk;
+  }
 }
 
 /// The seam's default: wiring never fails, use does.
@@ -39,7 +67,9 @@ class DisabledMediaObjectStore implements MediaObjectStore {
   }) async => _unavailable();
 
   @override
-  Future<List<int>> download(String key) async => _unavailable();
+  Stream<List<int>> download(String key, {required int maxBytes}) async* {
+    _unavailable();
+  }
 }
 
 class MediaObjectExistsException implements Exception {
@@ -99,11 +129,16 @@ class MediaSyncJob {
     required this.key,
     required this.localPath,
     required this.contentHash,
+    this.sizeBytes = 0,
   });
 
   final String key;
   final String localPath;
   final String? contentHash;
+
+  /// What the row says the object weighs; 0 when an older build synced it
+  /// without. A download is refused once it crosses this.
+  final int sizeBytes;
 
   /// Every segment of every recording whose id and file name are safe to put
   /// in an object key. Paths must already be absolute — see
@@ -120,6 +155,7 @@ class MediaSyncJob {
           key: key,
           localPath: segment.filePath,
           contentHash: segment.contentHash,
+          sizeBytes: segment.sizeBytes,
         );
       }
     }
@@ -130,14 +166,19 @@ class MediaSyncJob {
 }
 
 /// Uploads local sources the store lacks and downloads pulled sources this
-/// device lacks. A download lands only after its bytes are non-empty and
-/// hash to the synced `contentHash` — written to a `.part` beside the
-/// target, then renamed, so a torn or wrong transfer never becomes a source.
+/// device lacks. A download is streamed to a `.part` beside the target and
+/// hashed as it arrives, refused as soon as it crosses the row's `sizeBytes`;
+/// it lands only after its bytes are non-empty and hash to the synced
+/// `contentHash`, then renamed, so a torn or wrong transfer never becomes a
+/// source.
 /// It never touches a recording's row or status.
 class MediaSyncService {
   const MediaSyncService({required this.store, this.stillWanted});
 
   final MediaObjectStore store;
+
+  /// The ceiling for a row an older build synced without `size_bytes`.
+  static const int fallbackDownloadCeilingBytes = 2 << 30;
 
   /// Asked right before a verified download is renamed into place. A capture
   /// deleted while its download was in flight must not come back as an
@@ -236,14 +277,37 @@ class MediaSyncService {
       return _Outcome.unverifiable;
     }
     if (!await store.exists(job.key)) return _Outcome.waiting;
-    final List<int> bytes = await store.download(job.key);
-    if (bytes.isEmpty || sha256.convert(bytes).toString() != expected) {
-      return _Outcome.rejected;
-    }
+    final int ceiling = job.sizeBytes > 0
+        ? job.sizeBytes
+        : fallbackDownloadCeilingBytes;
     await local.parent.create(recursive: true);
     final File partial = File('${local.path}.${const Uuid().v4()}.part');
     try {
-      await partial.writeAsBytes(bytes, flush: true);
+      final _DigestCollector collector = _DigestCollector();
+      final ByteConversionSink hashInput = sha256.startChunkedConversion(
+        collector,
+      );
+      final IOSink out = partial.openWrite();
+      int received = 0;
+      try {
+        await for (final List<int> chunk in store.download(
+          job.key,
+          maxBytes: ceiling,
+        )) {
+          received += chunk.length;
+          hashInput.add(chunk);
+          out.add(chunk);
+        }
+      } on MediaObjectTooLargeException {
+        return _Outcome.rejected;
+      } finally {
+        // Flushed and closed on the error path too, so the .part can be removed.
+        await out.close();
+      }
+      hashInput.close();
+      if (received == 0 || collector.value.toString() != expected) {
+        return _Outcome.rejected;
+      }
       if (stillWanted?.call(job) == false) return _Outcome.unchanged;
       await partial.rename(local.path);
       // Asked again: a delete that started while the rename was in flight
@@ -261,6 +325,18 @@ class MediaSyncService {
 
   static Future<String> _hash(File file) async =>
       (await sha256.bind(file.openRead()).first).toString();
+}
+
+class _DigestCollector implements Sink<Digest> {
+  Digest? _value;
+
+  Digest get value => _value!;
+
+  @override
+  void add(Digest data) => _value = data;
+
+  @override
+  void close() {}
 }
 
 enum _Outcome {
