@@ -16,7 +16,9 @@ plugins {
 // distribution needs the real key; see key.properties.example.
 val keystorePropertiesFile = rootProject.file("key.properties")
 val hasReleaseKeystore = keystorePropertiesFile.exists()
-val allowDebugSigning = providers.gradleProperty("allowDebugSigning").isPresent
+// Bare `-PallowDebugSigning` is enough; only an explicit `false` says no.
+val allowDebugSigning =
+    providers.gradleProperty("allowDebugSigning").map { it != "false" }.getOrElse(false)
 val keystoreProperties =
     Properties().apply {
         if (hasReleaseKeystore) {
@@ -135,6 +137,9 @@ android {
 // `ORG_GRADLE_PROJECT_allowDebugSigning=true` in the environment for
 // `flutter build`, which cannot pass -P. Debug builds are untouched.
 tasks.matching { it.name == "validateSigningRelease" }.configureEach {
+    // Never up-to-date: the check reads a property, not a task input, and an
+    // opted-in build must not leave the next one passing on a cached result.
+    outputs.upToDateWhen { false }
     doFirst {
         if (!hasReleaseKeystore && !allowDebugSigning) {
             throw GradleException(
