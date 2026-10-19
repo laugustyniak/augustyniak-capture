@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:augustyniak_capture/features/costs/domain/model_price.dart';
 import 'package:augustyniak_capture/features/costs/domain/price_book.dart';
 import 'package:augustyniak_capture/features/costs/domain/usage_event.dart';
@@ -15,6 +17,7 @@ PricingSection _section({
   UsageTotal thisMonth = const UsageTotal(amountUsd: 1.24, unpricedCount: 0),
   UsageTotal allTime = const UsageTotal(amountUsd: 8.90, unpricedCount: 0),
   void Function(String, ModelPrice?)? onRateChanged,
+  Future<ModelPrice> Function(String, bool)? onRefreshRate,
 }) {
   return PricingSection(
     thisMonth: thisMonth,
@@ -27,10 +30,106 @@ PricingSection _section({
     unknownQuantityCount: unknownQuantityCount,
     verifiedOn: DateTime.utc(2026, 8, 9),
     onRateChanged: onRateChanged ?? (String _, ModelPrice? _) {},
+    onRefreshRate: onRefreshRate,
   );
 }
 
 void main() {
+  testWidgets('refresh disables the row and applies the returned rate', (
+    WidgetTester tester,
+  ) async {
+    final Completer<ModelPrice> result = Completer<ModelPrice>();
+    await tester.pumpWidget(_host(_section(
+      models: const <String>['gpt-5.6-luna'],
+      onRefreshRate: (String _, bool _) => result.future,
+    )));
+
+    await tester.tap(find.text('REFRESH PRICE'));
+    await tester.pump();
+    expect(find.byType(CircularProgressIndicator), findsOneWidget);
+    expect(tester.widget<TextField>(find.byType(TextField).first).enabled, false);
+
+    result.complete(const ModelPrice(inputPerMTok: 0.42, outputPerMTok: 2.4));
+    await tester.pump();
+    expect(find.text('0.42'), findsOneWidget);
+    expect(find.text('2.4'), findsOneWidget);
+    expect(find.text('Updated from LiteLLM'), findsOneWidget);
+  });
+
+  testWidgets('refresh failure keeps old values and reports inline', (
+    WidgetTester tester,
+  ) async {
+    int calls = 0;
+    final Completer<ModelPrice> result = Completer<ModelPrice>();
+    await tester.pumpWidget(_host(_section(
+      models: const <String>['gpt-5.6-luna'],
+      onRefreshRate: (String _, bool _) {
+        calls += 1;
+        return result.future;
+      },
+    )));
+    final List<String> before = tester
+        .widgetList<TextField>(find.byType(TextField))
+        .map((TextField field) => field.controller!.text)
+        .toList();
+
+    await tester.tap(find.text('REFRESH PRICE'));
+    await tester.tap(find.byType(TextButton).last);
+    expect(calls, 1);
+    result.completeError(Exception('No standard catalog price found.'));
+    await tester.pump();
+
+    final List<String> after = tester
+        .widgetList<TextField>(find.byType(TextField))
+        .map((TextField field) => field.controller!.text)
+        .toList();
+    expect(after, before);
+    expect(find.textContaining('No standard catalog price found.'), findsOneWidget);
+  });
+
+  testWidgets('a pending refresh may complete after disposal', (
+    WidgetTester tester,
+  ) async {
+    final Completer<ModelPrice> result = Completer<ModelPrice>();
+    await tester.pumpWidget(_host(_section(
+      models: const <String>['gpt-5.6-luna'],
+      onRefreshRate: (String _, bool _) => result.future,
+    )));
+    await tester.tap(find.text('REFRESH PRICE'));
+    await tester.pumpWidget(const SizedBox());
+
+    result.complete(const ModelPrice(inputPerMTok: 0.2, outputPerMTok: 1.2));
+    await tester.pump();
+  });
+
+  testWidgets('a replaced row ignores an older refresh completion', (
+    WidgetTester tester,
+  ) async {
+    final Completer<ModelPrice> oldResult = Completer<ModelPrice>();
+    await tester.pumpWidget(_host(_section(
+      models: const <String>['gpt-5.6-luna'],
+      onRefreshRate: (String _, bool _) => oldResult.future,
+    )));
+    await tester.tap(find.text('REFRESH PRICE'));
+
+    await tester.pumpWidget(_host(_section(models: const <String>[])));
+    await tester.pumpWidget(_host(_section(
+      models: const <String>['gpt-5.6-luna'],
+      onRefreshRate: (String _, bool _) async =>
+          const ModelPrice(inputPerMTok: 8, outputPerMTok: 9),
+    )));
+    oldResult.complete(
+      const ModelPrice(inputPerMTok: 0.42, outputPerMTok: 2.4),
+    );
+    await tester.pump();
+
+    final List<String> values = tester
+        .widgetList<TextField>(find.byType(TextField))
+        .map((TextField field) => field.controller!.text)
+        .toList();
+    expect(values, <String>['0.2', '1.2']);
+  });
+
   testWidgets('reports the month, the all-time total and the storage rate', (
     WidgetTester tester,
   ) async {

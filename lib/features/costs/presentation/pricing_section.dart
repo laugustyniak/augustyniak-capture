@@ -69,6 +69,7 @@ class PricingSection extends StatefulWidget {
     required this.unknownQuantityCount,
     required this.verifiedOn,
     required this.onRateChanged,
+    this.onRefreshRate,
   });
 
   /// See [UsageTotal]: a floor rather than a total whenever it carries any
@@ -98,6 +99,8 @@ class PricingSection extends StatefulWidget {
   /// `price == null` (or a [ModelPrice] with every field cleared) removes the
   /// override and lets the shipped default take back over.
   final void Function(String key, ModelPrice? price) onRateChanged;
+  final Future<ModelPrice> Function(String key, bool isTranscription)?
+  onRefreshRate;
 
   @override
   State<PricingSection> createState() => _PricingSectionState();
@@ -106,6 +109,8 @@ class PricingSection extends StatefulWidget {
 class _PricingSectionState extends State<PricingSection> {
   final Map<String, _RateRowControllers> _controllers =
       <String, _RateRowControllers>{};
+  final Set<String> _refreshing = <String>{};
+  final Map<String, String> _refreshStatus = <String, String>{};
 
   @override
   void didUpdateWidget(covariant PricingSection oldWidget) {
@@ -212,10 +217,42 @@ class _PricingSectionState extends State<PricingSection> {
     });
   }
 
+  Future<void> _refresh(String key, _RateRowControllers ctrls) async {
+    final callback = widget.onRefreshRate;
+    if (callback == null || _refreshing.contains(key)) return;
+    setState(() {
+      _refreshing.add(key);
+      _refreshStatus.remove(key);
+    });
+    try {
+      final ModelPrice price = await callback(key, ctrls.isTranscription);
+      if (!mounted || !identical(_controllers[key], ctrls)) return;
+      setState(() {
+        if (ctrls.isTranscription) {
+          ctrls.audio.text = price.perAudioMinute!.toString();
+          ctrls.lastCommittedAudio = ctrls.audio.text;
+        } else {
+          ctrls.input.text = price.inputPerMTok!.toString();
+          ctrls.output.text = price.outputPerMTok!.toString();
+          ctrls.lastCommittedInput = ctrls.input.text;
+          ctrls.lastCommittedOutput = ctrls.output.text;
+        }
+        _refreshStatus[key] = 'Updated from LiteLLM';
+      });
+    } catch (exception) {
+      if (mounted && identical(_controllers[key], ctrls)) {
+        setState(() => _refreshStatus[key] = exception.toString());
+      }
+    } finally {
+      if (mounted) setState(() => _refreshing.remove(key));
+    }
+  }
+
   /// Just the input control(s) for [key] — one audio-minute field for a
   /// transcription model, or an input/output pair for a chat model.
   Widget _fields(String key) {
     final _RateRowControllers ctrls = _controllersFor(key);
+    final bool enabled = !_refreshing.contains(key);
     if (ctrls.isTranscription) {
       return SizedBox(
         width: 180,
@@ -225,6 +262,7 @@ class _PricingSectionState extends State<PricingSection> {
           hintText: 'USD / audio min',
           fontSize: 11,
           monospace: true,
+          enabled: enabled,
           onSubmitted: (String _) => _commit(key, ctrls),
         ),
       );
@@ -238,6 +276,7 @@ class _PricingSectionState extends State<PricingSection> {
             hintText: 'input USD / MTok',
             fontSize: 11,
             monospace: true,
+            enabled: enabled,
             onSubmitted: (String _) => _commit(key, ctrls),
           ),
         ),
@@ -249,6 +288,7 @@ class _PricingSectionState extends State<PricingSection> {
             hintText: 'output USD / MTok',
             fontSize: 11,
             monospace: true,
+            enabled: enabled,
             onSubmitted: (String _) => _commit(key, ctrls),
           ),
         ),
@@ -280,14 +320,32 @@ class _PricingSectionState extends State<PricingSection> {
                   style: ConsoleText.micro.copyWith(color: Console.accent),
                 ),
                 TextButton(
-                  onPressed: () => _reset(key, ctrls),
+                  onPressed: _refreshing.contains(key)
+                      ? null
+                      : () => _reset(key, ctrls),
                   child: const Text('RESET'),
                 ),
               ],
+              TextButton(
+                onPressed:
+                    widget.onRefreshRate == null || _refreshing.contains(key)
+                    ? null
+                    : () => _refresh(key, ctrls),
+                child: _refreshing.contains(key)
+                    ? const SizedBox.square(
+                        dimension: 14,
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      )
+                    : const Text('REFRESH PRICE'),
+              ),
             ],
           ),
           const SizedBox(height: 6),
           _fields(key),
+          if (_refreshStatus[key] case final String status) ...<Widget>[
+            const SizedBox(height: 4),
+            Text(status, style: ConsoleText.micro),
+          ],
         ],
       ),
     );
@@ -297,6 +355,7 @@ class _PricingSectionState extends State<PricingSection> {
   /// only place that text renders, so it does not also duplicate the label
   /// `_row` prints for the primary list — then the same rate field(s).
   Widget _missingRow(String key, MissingRateInfo info) {
+    final _RateRowControllers ctrls = _controllersFor(key);
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 6),
       child: Column(
@@ -306,8 +365,21 @@ class _PricingSectionState extends State<PricingSection> {
             '$key  ·  ${info.count} call(s)',
             style: ConsoleText.micro.copyWith(color: Console.textSoft),
           ),
+          TextButton(
+            onPressed: widget.onRefreshRate == null || _refreshing.contains(key)
+                ? null
+                : () => _refresh(key, ctrls),
+            child: _refreshing.contains(key)
+                ? const SizedBox.square(
+                    dimension: 14,
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  )
+                : const Text('REFRESH PRICE'),
+          ),
           const SizedBox(height: 6),
           _fields(key),
+          if (_refreshStatus[key] case final String status)
+            Text(status, style: ConsoleText.micro),
         ],
       ),
     );
@@ -341,7 +413,8 @@ class _PricingSectionState extends State<PricingSection> {
 
   @override
   Widget build(BuildContext context) {
-    final double storageMonthlyUsd = widget.storageBytes /
+    final double storageMonthlyUsd =
+        widget.storageBytes /
         1073741824 *
         widget.storagePrice.storagePerGbMonth;
 
@@ -356,12 +429,12 @@ class _PricingSectionState extends State<PricingSection> {
         .toList();
 
     final List<MapEntry<String, MissingRateInfo>> sortedMissing =
-        widget.missingRateCounts.entries.toList()
-          ..sort((
+        widget.missingRateCounts.entries.toList()..sort(
+          (
             MapEntry<String, MissingRateInfo> a,
             MapEntry<String, MissingRateInfo> b,
-          ) =>
-              a.key.compareTo(b.key));
+          ) => a.key.compareTo(b.key),
+        );
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -379,7 +452,8 @@ class _PricingSectionState extends State<PricingSection> {
               InfoRow(label: 'ALL TIME', value: _totalLabel(widget.allTime)),
               InfoRow(
                 label: 'STORAGE',
-                value: '${formatBytes(widget.storageBytes) ?? '0 B'} ≈ '
+                value:
+                    '${formatBytes(widget.storageBytes) ?? '0 B'} ≈ '
                     '${formatUsd(storageMonthlyUsd)}/mo',
               ),
               if (pricedModels.isNotEmpty) ...<Widget>[
@@ -390,6 +464,11 @@ class _PricingSectionState extends State<PricingSection> {
               Text(
                 'defaults verified '
                 '${widget.verifiedOn.toIso8601String().substring(0, 10)}',
+                style: ConsoleText.micro,
+              ),
+              const SizedBox(height: 4),
+              Text(
+                'Refresh uses public LiteLLM standard catalog rates.',
                 style: ConsoleText.micro,
               ),
             ],

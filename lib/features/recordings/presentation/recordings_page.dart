@@ -26,6 +26,7 @@ import '../../clipboard/domain/auto_paste.dart';
 import '../../clipboard/domain/clipboard_watcher_service.dart';
 import '../../clipboard/presentation/clipboard_history_sheet.dart';
 import '../../clipboard/presentation/clipboard_tab.dart';
+import '../../costs/data/litellm_price_service.dart';
 import '../../costs/data/recording_usage_sink.dart';
 import '../../costs/data/usage_repository.dart';
 import '../../costs/domain/model_price.dart';
@@ -219,6 +220,7 @@ class _RecordingsPageState extends State<RecordingsPage>
   late final RecordingUsageSink usageSink;
   late final SettingsController settings;
   late final HttpDailyConnectionsService dailyConnectionsService;
+  final LiteLlmPriceService priceService = LiteLlmPriceService();
   late final LogStore logs;
   late final GamificationController gamification;
   late final RecordingsController controller;
@@ -884,6 +886,37 @@ class _RecordingsPageState extends State<RecordingsPage>
     }());
   }
 
+  Future<ModelPrice> _onRefreshPriceRate(
+    String key,
+    bool isTranscription,
+  ) async {
+    final ModelPrice price = await priceService.fetch(
+      key,
+      isTranscription: isTranscription,
+    );
+    if (!mounted) throw StateError('Pricing screen is no longer available.');
+    await settings.setPriceOverride(key, price);
+    final String? saveError = settings.error;
+    if (saveError != null) throw Exception('Could not save price: $saveError');
+    if (!mounted) return price;
+    final UsageRepository? usageRepository = _usageRepository;
+    if (usageRepository != null) {
+      try {
+        final int filled = usageRepository.backfill(
+          key,
+          PriceBook(overrides: settings.settings.priceOverrides),
+        );
+        if (filled > 0 && mounted) setState(() {});
+      } catch (error) {
+        logs.log(
+          'Price saved, but usage backfill failed: $error',
+          level: LogLevel.warn,
+        );
+      }
+    }
+    return price;
+  }
+
   /// Push provider + audio changes into the recordings controller. Only affects
   /// work started after the swap.
   void _applySettings() {
@@ -1125,6 +1158,7 @@ class _RecordingsPageState extends State<RecordingsPage>
     timer.dispose();
     momentum.dispose();
     dailyConnectionsService.close();
+    priceService.close();
     settings.dispose();
     logs.dispose();
     super.dispose();
@@ -1396,6 +1430,7 @@ class _RecordingsPageState extends State<RecordingsPage>
                                             ?.unknownQuantityCount() ??
                                         0,
                                     onRateChanged: _onPriceRateChanged,
+                                    onRefreshRate: _onRefreshPriceRate,
                                     onBackfillClosures:
                                         controller.backfillClosures,
                                     onExportArchive: backup.export,

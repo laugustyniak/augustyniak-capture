@@ -2,6 +2,15 @@
 
 What each capture cost to process, priced per API call and totalled in the editor's `COST` panel and the Config tab's `PRICING` section.
 
+The Config tab can refresh a model's standard rate from LiteLLM's public
+`model_prices_and_context_window.json` catalog. Lookup is exact. The known
+unqualified names shipped in the Groq presets map explicitly to their
+`groq/…` catalog keys; there is no fuzzy or cross-provider fallback. Token
+prices convert from per token to per million tokens, and transcription uses
+input cost per second converted to per audio minute. Missing, incomplete,
+negative, or non-finite rates are rejected and never replace the saved
+override.
+
 **`UsageSink` (`costs/domain/usage_sink.dart`) is a write-only seam, deliberately not a return type.** The three HTTP classes sit under one or two decorators that all declare `Future<String>`; widening those would rewrite `Processor`, both audio processors, the chunking decorator and every hand-written fake in the suite — and would force `ChunkedTranscriptionService` to sum usage itself. A sink changes no contract, and chunking emits N events for free because every part goes through the same HTTP class. `NoopUsageSink` is the default, exactly as `NoopLogSink` and `NoopClipboardSink` are, so the pure-Dart suites need no database.
 
 **The HTTP classes do not know which capture they are working on, so `beginJob`/`endJob` supply it.** That is ambient state, and it is safe only because exactly one job is ever open at a time. Two paths in `RecordingsController` open one — `_processOne` (the drain) and `retryEnrichment` (the ENRICH button) — and both take the *same* mutex, `_acquireUsageScope`, for the whole of their job and release it from a `finally`. The exclusion is therefore symmetric: a retry cannot start underneath a running job, and a job cannot start on top of a running retry. Whoever asks second waits and then runs, so neither side is silently dropped. **`_isDraining` is not enough on its own** — it covers only the drain against itself, and the retry is not in the drain.
