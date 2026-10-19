@@ -221,7 +221,7 @@ PY
 Type=Application
 Name=$display_name
 Comment=$(sed -n 's/^description: //p' pubspec.yaml | head -1)
-Exec=$opt_dir/$binary_name %u
+Exec="$opt_dir/$binary_name" %u
 Icon=$application_id
 Terminal=false
 Categories=AudioVideo;Audio;Recorder;
@@ -339,7 +339,14 @@ install_android() {
   }
 
   if [ "$skip_build" = 0 ]; then
-    flutter build apk "${build_args[@]}"
+    # No release keystore here means the phone's installs are bound to the
+    # debug keystore on purpose (there is no store upload), so the build is told
+    # the debug signature is intended; the signer is still reported below.
+    if [ ! -f android/key.properties ]; then
+      ORG_GRADLE_PROJECT_allowDebugSigning=true flutter build apk "${build_args[@]}"
+    else
+      flutter build apk "${build_args[@]}"
+    fi
   fi
   [ -f "$apk" ] || { echo "deploy: no built APK at $apk — drop --skip-build" >&2; exit 1; }
 
