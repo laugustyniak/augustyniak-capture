@@ -12,6 +12,7 @@ import '../../recordings/data/source_content_hasher.dart';
 import '../../recordings/domain/capture_segment.dart';
 import '../../recordings/domain/recording.dart';
 import '../domain/capture_archive.dart';
+import 'verifying_output_stream.dart';
 
 typedef ArchiveDirectoryProvider = Future<Directory> Function();
 
@@ -28,8 +29,10 @@ class ZipCaptureArchive implements CaptureArchive {
     RecordingsRepository? recordings,
     ProjectsRepository? projects,
     SourceContentHasher hasher = const SourceContentHasher(),
+    Future<int?> Function(Directory directory)? freeBytes,
   }) : _directoryProvider = directoryProvider,
        _hasher = hasher,
+       _freeBytes = freeBytes ?? probeFreeBytes,
        _recordings = recordings ?? RecordingsRepository(),
        _projects =
            projects ?? ProjectsRepository(directoryProvider: directoryProvider);
@@ -46,11 +49,41 @@ class ZipCaptureArchive implements CaptureArchive {
 
   final ArchiveDirectoryProvider _directoryProvider;
   final SourceContentHasher _hasher;
+  final Future<int?> Function(Directory directory) _freeBytes;
   final RecordingsRepository _recordings;
   final ProjectsRepository _projects;
 
   static const String manifestName = 'capture-archive.json';
   static const int formatVersion = 1;
+
+  /// Room left for the OS and the app after the sources land: the index, the
+  /// journals and the SQLite mirror are all written once extraction is done.
+  static const int importFreeSpaceMarginBytes = 256 << 20;
+
+  /// Bytes available to [directory], or null when this platform cannot say.
+  ///
+  /// `dart:io` has no free-space API, so this asks `df`. Null means unknown,
+  /// and unknown must not refuse an import — the per-member bound in
+  /// [VerifyingOutputStream] still holds.
+  static Future<int?> probeFreeBytes(Directory directory) async {
+    if (Platform.isWindows) return null;
+    try {
+      final ProcessResult result = await Process.run('df', <String>[
+        '-Pk',
+        directory.path,
+      ]);
+      if (result.exitCode != 0) return null;
+      final List<String> lines = (result.stdout as String)
+          .trim()
+          .split('\n');
+      if (lines.length < 2) return null;
+      final List<String> fields = lines.last.trim().split(RegExp(r'\s+'));
+      if (fields.length < 4) return null;
+      return int.parse(fields[3]) * 1024;
+    } catch (_) {
+      return null;
+    }
+  }
 
   /// Merged row by row on import, because both are keyed collections whose
   /// local copy has moved on since the archive was taken.
@@ -452,6 +485,24 @@ class ZipCaptureArchive implements CaptureArchive {
     Directory directory,
     _RecordingImportPlan plan,
   ) async {
+    // **Room is checked before anything is staged.** A file already on disk
+    // does not count: a retry must not be charged for what it extracted last
+    // time, and an archive that is entirely present needs no space at all.
+    int needed = 0;
+    for (final Recording item in plan.additions) {
+      for (final CaptureSegment segment in item.segments) {
+        final String name = p.basename(segment.filePath);
+        if (await File(p.join(directory.path, name)).exists()) continue;
+        needed += archive.findFile(name)!.size;
+      }
+    }
+    if (needed > 0) {
+      final int? free = await _freeBytes(directory);
+      if (free != null && needed > free - importFreeSpaceMarginBytes) {
+        throw ArchiveWontFitException(needed, free);
+      }
+    }
+
     final List<Recording> restored = <Recording>[];
     for (final Recording item in plan.additions) {
       // A row counts as restored only when every one of its members landed.
@@ -482,17 +533,41 @@ class ZipCaptureArchive implements CaptureArchive {
         }
         final File temporary = File('${target.path}.importing');
         try {
-          final OutputFileStream output = OutputFileStream(temporary.path);
+          final VerifyingOutputStream output = VerifyingOutputStream(
+            OutputFileStream(temporary.path),
+            name: name,
+            declaredBytes: entry.size,
+          );
           try {
             entry.writeContent(output);
           } finally {
             output.closeSync();
+          }
+          // The inflater swallows exceptions thrown from its output, so the
+          // refusal arrives as a flag as well as a throw.
+          if (output.overflowed) {
+            throw ArchiveUnreadableException(
+              name,
+              'more bytes than the declared ${entry.size}',
+            );
           }
           if (!await temporary.exists() ||
               await temporary.length() != entry.size) {
             throw ArchiveUnreadableException(
               name,
               'extracted size did not match ${entry.size} bytes',
+            );
+          }
+          // The bytes were hashed on their way to disk, so this costs no
+          // second read. A row without a hash (an archive from before content
+          // hashing) can only be held to its size, and that is reported.
+          final String? expectedHash = segment.contentHash;
+          if (expectedHash == null) {
+            plan.unverifiedFiles++;
+          } else if (output.digest != expectedHash) {
+            throw ArchiveUnreadableException(
+              name,
+              'content does not hash to the row\'s contentHash',
             );
           }
         } catch (_) {
@@ -575,6 +650,7 @@ class ZipCaptureArchive implements CaptureArchive {
       matchedByIdAlone: plan.matchedByIdAlone,
       unreadable: plan.unreadable,
       filesRestored: plan.filesRestored,
+      unverifiedFiles: plan.unverifiedFiles,
     );
   }
 
@@ -768,4 +844,5 @@ class _RecordingImportPlan {
   int matchedByIdAlone = 0;
   int unreadable = 0;
   int filesRestored = 0;
+  int unverifiedFiles = 0;
 }

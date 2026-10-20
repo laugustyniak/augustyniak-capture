@@ -37,6 +37,7 @@ class RestoreSummary {
     required this.unreadable,
     required this.filesRestored,
     this.matchedByIdAlone = 0,
+    this.unverifiedFiles = 0,
   });
 
   /// Rows that were not in the local index and now are.
@@ -65,6 +66,11 @@ class RestoreSummary {
   /// while having compared nothing, and silently degrading to the weaker rule
   /// is exactly what the feature was asked not to do.
   final int matchedByIdAlone;
+
+  /// Fresh files restored on their size alone, because their row carried no
+  /// `contentHash` — an archive from before content hashing. A hash mismatch
+  /// is refused outright and never counted here.
+  final int unverifiedFiles;
 }
 
 /// A portable copy of everything the queue is made of.
@@ -167,6 +173,20 @@ class ArchiveTooLargeException implements Exception {
       'The archive is ${(bytes / (1024 * 1024)).round()} MB and this platform '
       'can save at most ${(limitBytes / (1024 * 1024)).round()} MB in one go. '
       'Export to a computer instead.';
+}
+
+/// An import whose new files would not fit on this device.
+class ArchiveWontFitException implements Exception {
+  const ArchiveWontFitException(this.neededBytes, this.freeBytes);
+
+  final int neededBytes;
+  final int freeBytes;
+
+  @override
+  String toString() =>
+      'This archive brings ${(neededBytes / (1024 * 1024)).round()} MB of new '
+      'files and this device has ${(freeBytes / (1024 * 1024)).round()} MB '
+      'free. Free up space and import again.';
 }
 
 /// Where an exported archive goes, and where an imported one comes from.

@@ -1,7 +1,9 @@
 import 'dart:convert';
 import 'dart:io';
+import 'dart:typed_data';
 
 import 'package:archive/archive_io.dart';
+import 'package:crypto/crypto.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:path/path.dart' as p;
 import 'package:augustyniak_capture/features/backup/data/file_picker_archive_location.dart';
@@ -31,10 +33,14 @@ void main() {
   ProjectsRepository projectsFor(Directory directory) =>
       ProjectsRepository(directoryProvider: () async => directory);
 
-  ZipCaptureArchive archiveFor(Directory directory) => ZipCaptureArchive(
+  ZipCaptureArchive archiveFor(
+    Directory directory, {
+    Future<int?> Function(Directory directory)? freeBytes,
+  }) => ZipCaptureArchive(
     directoryProvider: () async => directory,
     recordings: repositoryFor(directory),
     projects: projectsFor(directory),
+    freeBytes: freeBytes,
   );
 
   Recording capture(
@@ -135,6 +141,61 @@ void main() {
     await zip.writeAsBytes(ZipEncoder().encode(stripped));
   }
 
+  /// Rewrite a zip so one member *declares* [declared] bytes, in the central
+  /// directory, the local header and the manifest, while still carrying its
+  /// real payload. The archive then agrees with itself everywhere a size is
+  /// checked up front, and only the bytes the member inflates to give it away.
+  Future<void> understateMember(File zip, String name, int declared) async {
+    final Archive original = ZipDecoder().decodeBytes(await zip.readAsBytes());
+    final Archive rebuilt = Archive();
+    int real = 0;
+    for (final ArchiveFile member in original) {
+      if (member.name == name) real = member.size;
+      if (member.name == 'capture-archive.json') {
+        final Map<String, dynamic> manifest =
+            jsonDecode(utf8.decode(member.readBytes()!))
+                as Map<String, dynamic>;
+        for (final dynamic each in manifest['files'] as List<dynamic>) {
+          final Map<String, dynamic> row = each as Map<String, dynamic>;
+          if (row['name'] == name) row['size'] = declared;
+        }
+        final List<int> bytes = utf8.encode(jsonEncode(manifest));
+        rebuilt.addFile(ArchiveFile('capture-archive.json', bytes.length, bytes));
+        continue;
+      }
+      rebuilt.addFile(member);
+    }
+    final List<int> encoded = ZipEncoder().encode(rebuilt);
+    final Uint8List bytes = Uint8List.fromList(encoded);
+    final ByteData view = ByteData.sublistView(bytes);
+    final List<int> needle = utf8.encode(name);
+    int patched = 0;
+    for (int i = 0; i + 4 < bytes.length; i++) {
+      final bool local = bytes[i] == 0x50 &&
+          bytes[i + 1] == 0x4b &&
+          bytes[i + 2] == 3 &&
+          bytes[i + 3] == 4;
+      final bool central = bytes[i] == 0x50 &&
+          bytes[i + 1] == 0x4b &&
+          bytes[i + 2] == 1 &&
+          bytes[i + 3] == 2;
+      if (!local && !central) continue;
+      final int sizeAt = i + (local ? 22 : 24);
+      final int nameAt = i + (local ? 30 : 46);
+      final int nameLength = view.getUint16(i + (local ? 26 : 28), Endian.little);
+      if (nameLength != needle.length) continue;
+      bool same = true;
+      for (int k = 0; k < nameLength; k++) {
+        if (bytes[nameAt + k] != needle[k]) same = false;
+      }
+      if (!same || view.getUint32(sizeAt, Endian.little) != real) continue;
+      view.setUint32(sizeAt, declared, Endian.little);
+      patched++;
+    }
+    expect(patched, 2, reason: 'one local header and one directory entry');
+    await zip.writeAsBytes(bytes);
+  }
+
   setUp(() {
     source = Directory.systemTemp.createTempSync('capture_archive_src_');
     target = Directory.systemTemp.createTempSync('capture_archive_dst_');
@@ -169,6 +230,149 @@ void main() {
     // only ever lived in the index.
     expect(rows.first.transcript, isNotNull);
     expect(rows.first.title, startsWith('Title '));
+  });
+
+  test('a member that inflates past its declared size is refused', () async {
+    await seed(source, <Recording>[capture('a')]);
+    await archiveFor(source).exportTo(zipPath());
+    await understateMember(zipPath(), 'a.m4a', 6);
+
+    await expectLater(
+      archiveFor(target).importFrom(zipPath()),
+      throwsA(
+        isA<ArchiveUnreadableException>().having(
+          (ArchiveUnreadableException e) => e.reason,
+          'reason',
+          contains('declared'),
+        ),
+      ),
+    );
+
+    expect(File(p.join(target.path, 'a.m4a')).existsSync(), isFalse);
+    expect(File(p.join(target.path, 'a.m4a.importing')).existsSync(), isFalse);
+    expect(await repositoryFor(target).loadAll(), isEmpty);
+  });
+
+  test('an archive that would not fit is refused before any file is staged', () async {
+    await seed(source, <Recording>[capture('a')]);
+    await archiveFor(source).exportTo(zipPath());
+
+    await expectLater(
+      archiveFor(
+        target,
+        freeBytes: (_) async => ZipCaptureArchive.importFreeSpaceMarginBytes + 5,
+      ).importFrom(zipPath()),
+      throwsA(isA<ArchiveWontFitException>()),
+    );
+
+    expect(
+      target.listSync().map((FileSystemEntity e) => p.basename(e.path)),
+      isNot(contains(startsWith('a.m4a'))),
+    );
+    expect(await repositoryFor(target).loadAll(), isEmpty);
+  });
+
+  test('files already here do not count against the free space', () async {
+    await seed(source, <Recording>[capture('a')]);
+    await archiveFor(source).exportTo(zipPath());
+    await archiveFor(target).importFrom(zipPath());
+    // The state a failed import leaves: the file landed, the row did not.
+    await repositoryFor(target).saveAll(<Recording>[]);
+
+    final RestoreSummary again = await archiveFor(
+      target,
+      freeBytes: (_) async => 0,
+    ).importFrom(zipPath());
+    expect(again.added, 1);
+    expect(again.filesRestored, 0);
+  });
+
+  test('unknown free space does not refuse an import', () async {
+    await seed(source, <Recording>[capture('a')]);
+    await archiveFor(source).exportTo(zipPath());
+
+    final RestoreSummary restored = await archiveFor(
+      target,
+      freeBytes: (_) async => null,
+    ).importFrom(zipPath());
+    expect(restored.added, 1);
+  });
+
+  test(
+    'the default probe answers on this platform',
+    () async {
+      expect(
+        await ZipCaptureArchive.probeFreeBytes(Directory.systemTemp),
+        greaterThan(0),
+      );
+    },
+    skip: Platform.isWindows,
+  );
+
+  /// Replace the bytes of one member with others of the same length, so every
+  /// size check passes and only the content gives it away.
+  Future<void> swapMemberBytes(File zip, String name, List<int> bytes) async {
+    final Archive original = ZipDecoder().decodeBytes(await zip.readAsBytes());
+    final Archive rebuilt = Archive();
+    for (final ArchiveFile member in original) {
+      rebuilt.addFile(
+        member.name == name ? ArchiveFile(name, bytes.length, bytes) : member,
+      );
+    }
+    await zip.writeAsBytes(ZipEncoder().encode(rebuilt));
+  }
+
+  test('a member that does not hash to its row is refused and leaves no file', () async {
+    await seed(source, <Recording>[
+      capture(
+        'a',
+        contentHash: sha256.convert(utf8.encode('audio-a')).toString(),
+      ),
+    ]);
+    await archiveFor(source).exportTo(zipPath());
+    await swapMemberBytes(zipPath(), 'a.m4a', utf8.encode('audio-X'));
+
+    await expectLater(
+      archiveFor(target).importFrom(zipPath()),
+      throwsA(
+        isA<ArchiveUnreadableException>().having(
+          (ArchiveUnreadableException e) => e.reason,
+          'reason',
+          contains('hash'),
+        ),
+      ),
+    );
+
+    expect(File(p.join(target.path, 'a.m4a')).existsSync(), isFalse);
+    expect(File(p.join(target.path, 'a.m4a.importing')).existsSync(), isFalse);
+    expect(await repositoryFor(target).loadAll(), isEmpty);
+  });
+
+  test('a member that hashes to its row is restored and not counted unverified', () async {
+    await seed(source, <Recording>[
+      capture(
+        'a',
+        contentHash: sha256.convert(utf8.encode('audio-a')).toString(),
+      ),
+    ]);
+    await archiveFor(source).exportTo(zipPath());
+
+    final RestoreSummary restored = await archiveFor(
+      target,
+    ).importFrom(zipPath());
+    expect(restored.added, 1);
+    expect(restored.unverifiedFiles, 0);
+  });
+
+  test('a legacy row with no hash is restored and reported as unverified', () async {
+    await seed(source, <Recording>[capture('a')]);
+    await archiveFor(source).exportTo(zipPath());
+
+    final RestoreSummary restored = await archiveFor(
+      target,
+    ).importFrom(zipPath());
+    expect(restored.added, 1);
+    expect(restored.unverifiedFiles, 1);
   });
 
   test(
@@ -264,12 +468,15 @@ void main() {
   });
 
   test('matching hashes inside one archive remain two captures', () async {
-    const String hash =
-        'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb';
+    // The same bytes under two ids, so the hash is the real one for both.
+    final String hash = sha256.convert(utf8.encode('same bytes')).toString();
     await seed(source, <Recording>[
       capture('first', contentHash: hash),
       capture('second', contentHash: hash),
     ]);
+    for (final String id in <String>['first', 'second']) {
+      await File(p.join(source.path, '$id.m4a')).writeAsString('same bytes');
+    }
     await archiveFor(source).exportTo(zipPath());
 
     final RestoreSummary restored = await archiveFor(
@@ -975,7 +1182,10 @@ void main() {
 
   test('re-importing the same archive counts it alreadyPresent', () async {
     await seed(source, <Recording>[
-      twoSegmentCapture('abc', contentHash: 'd' * 64),
+      twoSegmentCapture(
+        'abc',
+        contentHash: sha256.convert(utf8.encode('audio-abc')).toString(),
+      ),
     ]);
     await File(p.join(source.path, 'abc-1.txt')).writeAsString('fragment-abc');
 
