@@ -1,3 +1,4 @@
+import '../../../core/security/record_id.dart';
 import 'capture_router.dart';
 import 'route_record.dart';
 
@@ -164,15 +165,9 @@ class DisabledAgentHandoff implements AgentHandoff {
   }
 }
 
-/// Whether [id] can be used as a single path segment.
-///
-/// Capture ids arrive from sync and from backup import, which check only that
-/// they are strings, and a handoff turns one into a directory name and a file
-/// name. `..`, a separator or an absolute path would make that a write outside
-/// the folder it was meant for.
-bool isSafeCaptureId(String id) => _safeCaptureId.hasMatch(id);
-
-final RegExp _safeCaptureId = RegExp(r'^[A-Za-z0-9_-]{1,64}$');
+/// Whether [id] can be used as a single path segment: the shared rule in
+/// `core/security/record_id.dart`, which sync and backup import also apply.
+bool isSafeCaptureId(String id) => isSafeRecordId(id);
 
 /// A handoff was refused because the capture's id is not a safe path segment.
 class UnsafeCaptureIdException implements Exception {
