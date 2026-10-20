@@ -349,6 +349,40 @@ void main() {
     expect(bookkeeping.cursor('revisions'), t0);
   });
 
+  test(
+    'a row whose id is not a safe path segment is dropped, counted, never '
+    'applied, and does not hold the cursor (#292)',
+    () async {
+      // Oldest on the page, so a cursor held at it would sit at t0.
+      transport.tables.putIfAbsent(SyncTable.recordings, () => {})['..'] = {
+        ...SyncRowCodec.recording(recording(id: '..')),
+        'updated_at': t0.toIso8601String(),
+        'version': 1,
+      };
+      // A tombstone with an unsafe id must not reach the applier's delete.
+      transport.tables[SyncTable.recordings]!['../x'] = {
+        'id': '../x',
+        'updated_at': t0.toIso8601String(),
+        'version': 2,
+        'deleted_at': t0.toIso8601String(),
+      };
+      advance(const Duration(seconds: 10));
+      await seedServer(recording(id: 'good'));
+
+      advance(const Duration(minutes: 1));
+      final r = await engine.run(const SyncSnapshot());
+      expect(r.skipped, 2);
+      expect(r.pulled, 1);
+      expect(applier.recordings.keys, ['good']);
+      expect(applier.deleted, isEmpty);
+      expect(
+        bookkeeping.cursor('recordings'),
+        t0.add(const Duration(seconds: 10)),
+        reason: 'no build can ever decode the row, so it must not pin the cursor',
+      );
+    },
+  );
+
   test('the cursor advances to the newest updated_at seen', () async {
     await seedServer(recording(id: 'a'));
     advance(const Duration(minutes: 1));

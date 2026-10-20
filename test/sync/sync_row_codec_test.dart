@@ -170,6 +170,39 @@ void main() {
     expect(SyncRowCodec.recordingFromRow(<String, Object?>{'title': 'x'}), isNull);
   });
 
+  group('a row whose id is not a safe path segment decodes to null (#292)', () {
+    final List<String> unsafe = <String>['..', 'a/b', '/abs', '', 'a' * 65];
+    final Map<String, Object?> recordingRow = SyncRowCodec.recording(_recording())
+      ..['version'] = 1
+      ..['updated_at'] = '2026-09-21T09:00:00Z';
+    final Map<String, Object?> projectRow = SyncRowCodec.project(
+      Project(id: 'proj-1', name: 'Capture', repoPath: '/home/me/capture'),
+    )..['version'] = 1;
+    final Map<String, Object?> clipRow = SyncRowCodec.clipboardItem(
+      ClipboardItem(
+        id: 'clip-1',
+        type: ClipboardItemType.text,
+        copiedAt: DateTime.utc(2026, 3, 1, 12),
+        text: 'hello',
+        preview: 'hello',
+      ),
+    )..['version'] = 1;
+
+    test('the unmodified rows decode, so only the id differs below', () {
+      expect(SyncRowCodec.recordingFromRow(recordingRow), isNotNull);
+      expect(SyncRowCodec.projectFromRow(projectRow), isNotNull);
+      expect(SyncRowCodec.clipboardItemFromRow(clipRow), isNotNull);
+    });
+
+    for (final String id in unsafe) {
+      test('id "${id.length > 8 ? '${id.length} chars' : id}"', () {
+        expect(SyncRowCodec.recordingFromRow({...recordingRow, 'id': id}), isNull);
+        expect(SyncRowCodec.projectFromRow({...projectRow, 'id': id}), isNull);
+        expect(SyncRowCodec.clipboardItemFromRow({...clipRow, 'id': id}), isNull);
+      });
+    }
+  });
+
   test('composite row ids join key columns with /', () {
     final RecordingRevision revision = RecordingRevision(
       recordingId: 'rec-1', at: DateTime.utc(2026, 1, 1), field: 'title',

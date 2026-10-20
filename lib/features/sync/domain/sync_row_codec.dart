@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'package:crypto/crypto.dart';
 import 'package:path/path.dart' as p;
 
+import '../../../core/security/record_id.dart';
 import '../../../core/sync/sync_path_policy.dart';
 import '../../clipboard/domain/clipboard_item.dart';
 import '../../projects/domain/project.dart';
@@ -162,6 +163,8 @@ class SyncRowCodec {
     final Object? id = row['id'];
     final DateTime? createdAt = _date(row['created_at']);
     if (id is! String || createdAt == null) return null;
+    // An unsafe id is dropped here so nothing downstream builds a path from it (#292).
+    if (!isSafeRecordId(id)) return null;
     final Object? payloadRaw = row['payload'];
     final Map<String, dynamic> payload = payloadRaw is Map
         ? Map<String, dynamic>.from(payloadRaw)
@@ -280,6 +283,8 @@ class SyncRowCodec {
 
   static Project? projectFromRow(Map<String, Object?> row) {
     if (_stillSealed(row) || row['id'] is! String) return null;
+    // An unsafe id is dropped here so nothing downstream builds a path from it (#292).
+    if (!isSafeRecordId(row['id'] as String)) return null;
     final Object? payloadRaw = row['payload'];
     final Map<String, dynamic> json = <String, dynamic>{
       if (payloadRaw is Map) ...Map<String, dynamic>.from(payloadRaw),
@@ -311,6 +316,8 @@ class SyncRowCodec {
     if (_stillSealed(row)) return null;
     final DateTime? copiedAt = _date(row['copied_at']);
     if (row['id'] is! String || copiedAt == null) return null;
+    // An unsafe id is dropped here so nothing downstream builds a path from it (#292).
+    if (!isSafeRecordId(row['id'] as String)) return null;
     try {
       return ClipboardItem.fromJson(<String, dynamic>{
         'id': row['id'],

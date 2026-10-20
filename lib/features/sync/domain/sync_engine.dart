@@ -1,3 +1,4 @@
+import '../../../core/security/record_id.dart';
 import '../../clipboard/domain/clipboard_item.dart';
 import '../../projects/domain/project.dart';
 import '../../recordings/domain/recording.dart';
@@ -612,6 +613,13 @@ class SyncEngine {
       final String? id = row['id'] as String?;
       if (id == null) {
         _recordSkip(row, out);
+        continue;
+      }
+      if (!isSafeRecordId(id)) {
+        // Dropped, not skipped: no build will ever decode this id, so holding
+        // the cursor on it (what `_recordSkip` does for a row a newer build may
+        // read) would stall the table behind one bad row (#292).
+        out.skipped++;
         continue;
       }
       final int serverVersion = row['version'] is int ? row['version'] as int : 0;
