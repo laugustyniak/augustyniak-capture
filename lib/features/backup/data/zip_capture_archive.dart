@@ -5,6 +5,7 @@ import 'package:archive/archive_io.dart';
 import 'package:flutter/foundation.dart';
 import 'package:path/path.dart' as p;
 
+import '../../../core/security/record_id.dart';
 import '../../projects/data/projects_repository.dart';
 import '../../projects/domain/project.dart';
 import '../../recordings/data/recordings_repository.dart';
@@ -425,6 +426,12 @@ class ZipCaptureArchive implements CaptureArchive {
         plan.unreadable++;
         continue;
       }
+      // An id later names a file and a directory; refuse one that is not a
+      // single plain segment before anything is built from it (#292).
+      if (!isSafeRecordId(incoming.id)) {
+        plan.unreadable++;
+        continue;
+      }
       final bool sameLocalBytes =
           incoming.contentHash != null &&
           localHashes.contains(incoming.contentHash);
@@ -757,6 +764,7 @@ class ZipCaptureArchive implements CaptureArchive {
     for (final dynamic row in rows) {
       try {
         final Project incoming = Project.fromJson(row as Map<String, dynamic>);
+        if (!isSafeRecordId(incoming.id)) continue;
         if (known.contains(incoming.id)) continue;
         merged.add(incoming);
         known.add(incoming.id);
