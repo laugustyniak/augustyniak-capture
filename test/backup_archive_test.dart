@@ -1,5 +1,6 @@
 import 'dart:convert';
 import 'dart:io';
+import 'dart:typed_data';
 
 import 'package:archive/archive_io.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -135,6 +136,61 @@ void main() {
     await zip.writeAsBytes(ZipEncoder().encode(stripped));
   }
 
+  /// Rewrite a zip so one member *declares* [declared] bytes, in the central
+  /// directory, the local header and the manifest, while still carrying its
+  /// real payload. The archive then agrees with itself everywhere a size is
+  /// checked up front, and only the bytes the member inflates to give it away.
+  Future<void> understateMember(File zip, String name, int declared) async {
+    final Archive original = ZipDecoder().decodeBytes(await zip.readAsBytes());
+    final Archive rebuilt = Archive();
+    int real = 0;
+    for (final ArchiveFile member in original) {
+      if (member.name == name) real = member.size;
+      if (member.name == 'capture-archive.json') {
+        final Map<String, dynamic> manifest =
+            jsonDecode(utf8.decode(member.readBytes()!))
+                as Map<String, dynamic>;
+        for (final dynamic each in manifest['files'] as List<dynamic>) {
+          final Map<String, dynamic> row = each as Map<String, dynamic>;
+          if (row['name'] == name) row['size'] = declared;
+        }
+        final List<int> bytes = utf8.encode(jsonEncode(manifest));
+        rebuilt.addFile(ArchiveFile('capture-archive.json', bytes.length, bytes));
+        continue;
+      }
+      rebuilt.addFile(member);
+    }
+    final List<int> encoded = ZipEncoder().encode(rebuilt);
+    final Uint8List bytes = Uint8List.fromList(encoded);
+    final ByteData view = ByteData.sublistView(bytes);
+    final List<int> needle = utf8.encode(name);
+    int patched = 0;
+    for (int i = 0; i + 4 < bytes.length; i++) {
+      final bool local = bytes[i] == 0x50 &&
+          bytes[i + 1] == 0x4b &&
+          bytes[i + 2] == 3 &&
+          bytes[i + 3] == 4;
+      final bool central = bytes[i] == 0x50 &&
+          bytes[i + 1] == 0x4b &&
+          bytes[i + 2] == 1 &&
+          bytes[i + 3] == 2;
+      if (!local && !central) continue;
+      final int sizeAt = i + (local ? 22 : 24);
+      final int nameAt = i + (local ? 30 : 46);
+      final int nameLength = view.getUint16(i + (local ? 26 : 28), Endian.little);
+      if (nameLength != needle.length) continue;
+      bool same = true;
+      for (int k = 0; k < nameLength; k++) {
+        if (bytes[nameAt + k] != needle[k]) same = false;
+      }
+      if (!same || view.getUint32(sizeAt, Endian.little) != real) continue;
+      view.setUint32(sizeAt, declared, Endian.little);
+      patched++;
+    }
+    expect(patched, 2, reason: 'one local header and one directory entry');
+    await zip.writeAsBytes(bytes);
+  }
+
   setUp(() {
     source = Directory.systemTemp.createTempSync('capture_archive_src_');
     target = Directory.systemTemp.createTempSync('capture_archive_dst_');
@@ -169,6 +225,27 @@ void main() {
     // only ever lived in the index.
     expect(rows.first.transcript, isNotNull);
     expect(rows.first.title, startsWith('Title '));
+  });
+
+  test('a member that inflates past its declared size is refused', () async {
+    await seed(source, <Recording>[capture('a')]);
+    await archiveFor(source).exportTo(zipPath());
+    await understateMember(zipPath(), 'a.m4a', 6);
+
+    await expectLater(
+      archiveFor(target).importFrom(zipPath()),
+      throwsA(
+        isA<ArchiveUnreadableException>().having(
+          (ArchiveUnreadableException e) => e.reason,
+          'reason',
+          contains('declared'),
+        ),
+      ),
+    );
+
+    expect(File(p.join(target.path, 'a.m4a')).existsSync(), isFalse);
+    expect(File(p.join(target.path, 'a.m4a.importing')).existsSync(), isFalse);
+    expect(await repositoryFor(target).loadAll(), isEmpty);
   });
 
   test(
