@@ -196,6 +196,40 @@ void main() {
     await zip.writeAsBytes(bytes);
   }
 
+  /// Replace (or add) whole members of a zip and keep the manifest inventory
+  /// in step, so `_validateManifest` accepts the result and only the content
+  /// under test is odd.
+  Future<void> replaceMembers(File zip, Map<String, List<int>> members) async {
+    final Archive original = ZipDecoder().decodeBytes(await zip.readAsBytes());
+    final Archive rebuilt = Archive();
+    for (final ArchiveFile member in original) {
+      if (member.name == 'capture-archive.json') {
+        final Map<String, dynamic> manifest =
+            jsonDecode(utf8.decode(member.readBytes()!))
+                as Map<String, dynamic>;
+        final List<dynamic> files = manifest['files'] as List<dynamic>;
+        for (final MapEntry<String, List<int>> entry in members.entries) {
+          files.removeWhere(
+            (dynamic each) => (each as Map<String, dynamic>)['name'] == entry.key,
+          );
+          files.add(<String, dynamic>{
+            'name': entry.key,
+            'size': entry.value.length,
+          });
+        }
+        final List<int> bytes = utf8.encode(jsonEncode(manifest));
+        rebuilt.addFile(ArchiveFile('capture-archive.json', bytes.length, bytes));
+        continue;
+      }
+      if (members.containsKey(member.name)) continue;
+      rebuilt.addFile(member);
+    }
+    for (final MapEntry<String, List<int>> entry in members.entries) {
+      rebuilt.addFile(ArchiveFile(entry.key, entry.value.length, entry.value));
+    }
+    await zip.writeAsBytes(ZipEncoder().encode(rebuilt));
+  }
+
   setUp(() {
     source = Directory.systemTemp.createTempSync('capture_archive_src_');
     target = Directory.systemTemp.createTempSync('capture_archive_dst_');
@@ -230,6 +264,81 @@ void main() {
     // only ever lived in the index.
     expect(rows.first.transcript, isNotNull);
     expect(rows.first.title, startsWith('Title '));
+  });
+
+  test('rows whose id is not a safe path segment are dropped, the rest restored (#292)', () async {
+    await seed(source, <Recording>[capture('good')]);
+    await archiveFor(source).exportTo(zipPath());
+
+    Map<String, dynamic> row(String id, String fileName) =>
+        capture('good').toJson()
+          ..['id'] = id
+          ..['filePath'] = p.join(source.path, fileName)
+          ..remove('contentHash');
+    // `..` and the oversize id are the two that can still name a flat member
+    // (`...m4a` has the stem `..`), so they get past the conventional-name
+    // check and only the id guard stops them. `a/b`, `/abs` and the empty id
+    // are refused by that check already, which makes them a vacuous probe.
+    final String oversize = 'a' * 65;
+    final Archive exported = ZipDecoder().decodeBytes(await zipPath().readAsBytes());
+    final List<dynamic> rows = jsonDecode(
+      utf8.decode(exported.findFile('recordings.json')!.readBytes()!),
+    ) as List<dynamic>;
+    rows.addAll(<Map<String, dynamic>>[
+      row('..', '...m4a'),
+      row('a/b', 'a-b.m4a'),
+      row('/abs', 'abs.m4a'),
+      row('', '.m4a'),
+      row(oversize, '$oversize.m4a'),
+    ]);
+    await replaceMembers(zipPath(), <String, List<int>>{
+      'recordings.json': utf8.encode(jsonEncode(rows)),
+      '...m4a': utf8.encode('audio-dots!'),
+      '$oversize.m4a': utf8.encode('audio-long!'),
+    });
+
+    final RestoreSummary restored = await archiveFor(target).importFrom(zipPath());
+
+    expect(restored.added, 1);
+    expect(restored.unreadable, 5);
+    expect(
+      target.listSync().map((FileSystemEntity e) => p.basename(e.path)).where(
+        (String name) => name.endsWith('.m4a') || name.endsWith('.importing'),
+      ),
+      <String>['good.m4a'],
+    );
+    expect((await repositoryFor(target).loadAll()).map((Recording r) => r.id), <String>['good']);
+  });
+
+  test('a project whose id is not a safe path segment is not merged (#292)', () async {
+    await seed(source, <Recording>[capture('a')]);
+    await projectsFor(source).saveAll(<Project>[
+      const Project(id: 'good-project', name: 'Acme', repoPath: '/tmp/acme'),
+    ], activeProjectId: null);
+    await archiveFor(source).exportTo(zipPath());
+
+    final Archive exported = ZipDecoder().decodeBytes(await zipPath().readAsBytes());
+    final dynamic decoded = jsonDecode(
+      utf8.decode(exported.findFile('projects.json')!.readBytes()!),
+    );
+    final List<dynamic> projects = decoded is Map<String, dynamic>
+        ? decoded['projects'] as List<dynamic>
+        : decoded as List<dynamic>;
+    projects.add(<String, dynamic>{
+      ...(projects.first as Map<String, dynamic>),
+      'id': '../etc',
+      'name': 'Evil',
+    });
+    await replaceMembers(zipPath(), <String, List<int>>{
+      'projects.json': utf8.encode(jsonEncode(decoded)),
+    });
+
+    await archiveFor(target).importFrom(zipPath());
+
+    expect(
+      (await projectsFor(target).loadAll()).map((Project item) => item.id),
+      <String>['good-project'],
+    );
   });
 
   test('a member that inflates past its declared size is refused', () async {
