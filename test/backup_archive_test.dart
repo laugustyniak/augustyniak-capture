@@ -32,10 +32,14 @@ void main() {
   ProjectsRepository projectsFor(Directory directory) =>
       ProjectsRepository(directoryProvider: () async => directory);
 
-  ZipCaptureArchive archiveFor(Directory directory) => ZipCaptureArchive(
+  ZipCaptureArchive archiveFor(
+    Directory directory, {
+    Future<int?> Function(Directory directory)? freeBytes,
+  }) => ZipCaptureArchive(
     directoryProvider: () async => directory,
     recordings: repositoryFor(directory),
     projects: projectsFor(directory),
+    freeBytes: freeBytes,
   );
 
   Recording capture(
@@ -247,6 +251,62 @@ void main() {
     expect(File(p.join(target.path, 'a.m4a.importing')).existsSync(), isFalse);
     expect(await repositoryFor(target).loadAll(), isEmpty);
   });
+
+  test('an archive that would not fit is refused before any file is staged', () async {
+    await seed(source, <Recording>[capture('a')]);
+    await archiveFor(source).exportTo(zipPath());
+
+    await expectLater(
+      archiveFor(
+        target,
+        freeBytes: (_) async => ZipCaptureArchive.importFreeSpaceMarginBytes + 5,
+      ).importFrom(zipPath()),
+      throwsA(isA<ArchiveWontFitException>()),
+    );
+
+    expect(
+      target.listSync().map((FileSystemEntity e) => p.basename(e.path)),
+      isNot(contains(startsWith('a.m4a'))),
+    );
+    expect(await repositoryFor(target).loadAll(), isEmpty);
+  });
+
+  test('files already here do not count against the free space', () async {
+    await seed(source, <Recording>[capture('a')]);
+    await archiveFor(source).exportTo(zipPath());
+    await archiveFor(target).importFrom(zipPath());
+    // The state a failed import leaves: the file landed, the row did not.
+    await repositoryFor(target).saveAll(<Recording>[]);
+
+    final RestoreSummary again = await archiveFor(
+      target,
+      freeBytes: (_) async => 0,
+    ).importFrom(zipPath());
+    expect(again.added, 1);
+    expect(again.filesRestored, 0);
+  });
+
+  test('unknown free space does not refuse an import', () async {
+    await seed(source, <Recording>[capture('a')]);
+    await archiveFor(source).exportTo(zipPath());
+
+    final RestoreSummary restored = await archiveFor(
+      target,
+      freeBytes: (_) async => null,
+    ).importFrom(zipPath());
+    expect(restored.added, 1);
+  });
+
+  test(
+    'the default probe answers on this platform',
+    () async {
+      expect(
+        await ZipCaptureArchive.probeFreeBytes(Directory.systemTemp),
+        greaterThan(0),
+      );
+    },
+    skip: Platform.isWindows,
+  );
 
   test(
     'restored paths point into the importing install, not the exporting one',

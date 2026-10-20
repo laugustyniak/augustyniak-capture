@@ -169,6 +169,20 @@ class ArchiveTooLargeException implements Exception {
       'Export to a computer instead.';
 }
 
+/// An import whose new files would not fit on this device.
+class ArchiveWontFitException implements Exception {
+  const ArchiveWontFitException(this.neededBytes, this.freeBytes);
+
+  final int neededBytes;
+  final int freeBytes;
+
+  @override
+  String toString() =>
+      'This archive brings ${(neededBytes / (1024 * 1024)).round()} MB of new '
+      'files and this device has ${(freeBytes / (1024 * 1024)).round()} MB '
+      'free. Free up space and import again.';
+}
+
 /// Where an exported archive goes, and where an imported one comes from.
 ///
 /// A seam for the same reason `DirectoryPicker` and `MediaPicker` are: the real
