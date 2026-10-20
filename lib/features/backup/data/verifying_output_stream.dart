@@ -15,9 +15,12 @@ import '../domain/capture_archive.dart';
 /// declared size is what stops such a member filling the disk; hashing in that
 /// same pass avoids re-reading a multi-gigabyte video afterwards.
 ///
-/// The inflater swallows exceptions thrown from inside its output calls, so a
-/// refusal is also recorded in [overflowed] for the caller to check once
-/// `writeContent` returns.
+/// What it bounds is the disk. On `dart:io` the package's zlib decoder
+/// inflates the whole member in memory and only then writes it chunk by chunk,
+/// so the first refusal comes after the full body already exists in RAM
+/// (#342). The pure-Dart inflater swallows exceptions thrown from inside its
+/// output calls, so a refusal is also recorded in [overflowed] for the caller
+/// to check once `writeContent` returns.
 class VerifyingOutputStream extends OutputStream {
   VerifyingOutputStream(
     this._inner, {
