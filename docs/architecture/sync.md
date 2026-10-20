@@ -124,10 +124,11 @@ repeat pull safe). Stored locally under `settings['sync.cursor.<table>']`
 and mirrored to the server's `sync_state` row for this device, so a
 reinstall can see where its predecessor stopped.
 
-A row whose id is not a safe path segment (`isSafeRecordId`,
-`core/security/record_id.dart`) is dropped and counted as skipped **without**
-holding the cursor: no build will ever decode it, so holding the cursor on it
-would stall every later row of the table (#292).
+In every pulled table (recordings, projects, clipboard items), a row whose id
+is not a safe path segment (`isSafeRecordId`, `core/security/record_id.dart`),
+live or tombstone, is dropped and counted as skipped **without** holding the
+cursor: no build will ever decode it, so holding the cursor on it would stall
+every later row of the table (#292).
 
 **Paging is keyset, not offset (#195).** Each page continues strictly
 after the previous page's last `(updated_at, key…)` tuple

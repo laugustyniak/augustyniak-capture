@@ -775,6 +775,11 @@ class SyncEngine {
     final List<(String, int, String)> pendingBookkeeping = [];
     for (final Map<String, Object?> row in rows) {
       final String id = SyncRowCodec.rowId(table, row);
+      if (!isSafeRecordId(id)) {
+        // Dropped without holding the cursor; see `_applyRecordings` (#292).
+        out.skipped++;
+        continue;
+      }
       final String tombstoneKey = '${table.serverName}/$id';
       if (tombstonedIds.contains(tombstoneKey)) continue;
       final int serverVersion = row['version'] is int ? row['version'] as int : 0;
