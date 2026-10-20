@@ -3,13 +3,15 @@ import 'dart:io';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:augustyniak_capture/features/backup/domain/capture_archive.dart';
 import 'package:augustyniak_capture/features/backup/presentation/backup_coordinator.dart';
+import 'package:augustyniak_capture/features/logs/domain/log_event.dart';
 
 /// Records what it was asked to archive and writes a plausible file, so the
 /// coordinator's staging and clean-up can be observed without a real zip.
 class _RecordingArchive implements CaptureArchive {
-  _RecordingArchive({this.failWith});
+  _RecordingArchive({this.failWith, this.unverifiedFiles = 0});
 
   final Object? failWith;
+  final int unverifiedFiles;
   File? staged;
 
   @override
@@ -28,12 +30,26 @@ class _RecordingArchive implements CaptureArchive {
   @override
   Future<RestoreSummary> importFrom(File source) async {
     if (failWith != null) throw failWith!;
-    return const RestoreSummary(
+    return RestoreSummary(
       added: 2,
       alreadyPresent: 1,
       unreadable: 0,
       filesRestored: 2,
+      unverifiedFiles: unverifiedFiles,
     );
+  }
+}
+
+class _CollectingLogSink implements LogSink {
+  final List<String> messages = <String>[];
+
+  @override
+  void log(
+    String message, {
+    LogLevel level = LogLevel.info,
+    String? recordingId,
+  }) {
+    messages.add(message);
   }
 }
 
@@ -140,4 +156,22 @@ void main() {
     expect(summary.alreadyPresent, 1);
     expect(summary.filesRestored, 2);
   });
+  for (final int unverified in <int>[0, 1]) {
+    test('the import log line mentions $unverified unverified files', () async {
+      final File chosen = File('${scratch.path}/incoming.zip')
+        ..writeAsStringSync('x');
+      final _CollectingLogSink logs = _CollectingLogSink();
+      await BackupCoordinator(
+        archive: _RecordingArchive(unverifiedFiles: unverified),
+        picker: _FakePicker(archive: chosen),
+        logSink: logs,
+        now: () => DateTime(2026, 8, 6),
+      ).import();
+
+      expect(
+        logs.messages.single.contains('checked by size alone'),
+        unverified > 0,
+      );
+    });
+  }
 }

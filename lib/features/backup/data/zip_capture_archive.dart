@@ -558,6 +558,18 @@ class ZipCaptureArchive implements CaptureArchive {
               'extracted size did not match ${entry.size} bytes',
             );
           }
+          // The bytes were hashed on their way to disk, so this costs no
+          // second read. A row without a hash (an archive from before content
+          // hashing) can only be held to its size, and that is reported.
+          final String? expectedHash = segment.contentHash;
+          if (expectedHash == null) {
+            plan.unverifiedFiles++;
+          } else if (output.digest != expectedHash) {
+            throw ArchiveUnreadableException(
+              name,
+              'content does not hash to the row\'s contentHash',
+            );
+          }
         } catch (_) {
           // Every failure path clears the staging file, not just the size
           // mismatch. A leftover `.importing` is a payload member `_isPayload`
@@ -638,6 +650,7 @@ class ZipCaptureArchive implements CaptureArchive {
       matchedByIdAlone: plan.matchedByIdAlone,
       unreadable: plan.unreadable,
       filesRestored: plan.filesRestored,
+      unverifiedFiles: plan.unverifiedFiles,
     );
   }
 
@@ -831,4 +844,5 @@ class _RecordingImportPlan {
   int matchedByIdAlone = 0;
   int unreadable = 0;
   int filesRestored = 0;
+  int unverifiedFiles = 0;
 }

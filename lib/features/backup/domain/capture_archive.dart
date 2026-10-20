@@ -37,6 +37,7 @@ class RestoreSummary {
     required this.unreadable,
     required this.filesRestored,
     this.matchedByIdAlone = 0,
+    this.unverifiedFiles = 0,
   });
 
   /// Rows that were not in the local index and now are.
@@ -65,6 +66,11 @@ class RestoreSummary {
   /// while having compared nothing, and silently degrading to the weaker rule
   /// is exactly what the feature was asked not to do.
   final int matchedByIdAlone;
+
+  /// Fresh files restored on their size alone, because their row carried no
+  /// `contentHash` — an archive from before content hashing. A hash mismatch
+  /// is refused outright and never counted here.
+  final int unverifiedFiles;
 }
 
 /// A portable copy of everything the queue is made of.

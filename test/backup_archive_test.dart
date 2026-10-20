@@ -3,6 +3,7 @@ import 'dart:io';
 import 'dart:typed_data';
 
 import 'package:archive/archive_io.dart';
+import 'package:crypto/crypto.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:path/path.dart' as p;
 import 'package:augustyniak_capture/features/backup/data/file_picker_archive_location.dart';
@@ -308,6 +309,72 @@ void main() {
     skip: Platform.isWindows,
   );
 
+  /// Replace the bytes of one member with others of the same length, so every
+  /// size check passes and only the content gives it away.
+  Future<void> swapMemberBytes(File zip, String name, List<int> bytes) async {
+    final Archive original = ZipDecoder().decodeBytes(await zip.readAsBytes());
+    final Archive rebuilt = Archive();
+    for (final ArchiveFile member in original) {
+      rebuilt.addFile(
+        member.name == name ? ArchiveFile(name, bytes.length, bytes) : member,
+      );
+    }
+    await zip.writeAsBytes(ZipEncoder().encode(rebuilt));
+  }
+
+  test('a member that does not hash to its row is refused and leaves no file', () async {
+    await seed(source, <Recording>[
+      capture(
+        'a',
+        contentHash: sha256.convert(utf8.encode('audio-a')).toString(),
+      ),
+    ]);
+    await archiveFor(source).exportTo(zipPath());
+    await swapMemberBytes(zipPath(), 'a.m4a', utf8.encode('audio-X'));
+
+    await expectLater(
+      archiveFor(target).importFrom(zipPath()),
+      throwsA(
+        isA<ArchiveUnreadableException>().having(
+          (ArchiveUnreadableException e) => e.reason,
+          'reason',
+          contains('hash'),
+        ),
+      ),
+    );
+
+    expect(File(p.join(target.path, 'a.m4a')).existsSync(), isFalse);
+    expect(File(p.join(target.path, 'a.m4a.importing')).existsSync(), isFalse);
+    expect(await repositoryFor(target).loadAll(), isEmpty);
+  });
+
+  test('a member that hashes to its row is restored and not counted unverified', () async {
+    await seed(source, <Recording>[
+      capture(
+        'a',
+        contentHash: sha256.convert(utf8.encode('audio-a')).toString(),
+      ),
+    ]);
+    await archiveFor(source).exportTo(zipPath());
+
+    final RestoreSummary restored = await archiveFor(
+      target,
+    ).importFrom(zipPath());
+    expect(restored.added, 1);
+    expect(restored.unverifiedFiles, 0);
+  });
+
+  test('a legacy row with no hash is restored and reported as unverified', () async {
+    await seed(source, <Recording>[capture('a')]);
+    await archiveFor(source).exportTo(zipPath());
+
+    final RestoreSummary restored = await archiveFor(
+      target,
+    ).importFrom(zipPath());
+    expect(restored.added, 1);
+    expect(restored.unverifiedFiles, 1);
+  });
+
   test(
     'restored paths point into the importing install, not the exporting one',
     () async {
@@ -401,12 +468,15 @@ void main() {
   });
 
   test('matching hashes inside one archive remain two captures', () async {
-    const String hash =
-        'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb';
+    // The same bytes under two ids, so the hash is the real one for both.
+    final String hash = sha256.convert(utf8.encode('same bytes')).toString();
     await seed(source, <Recording>[
       capture('first', contentHash: hash),
       capture('second', contentHash: hash),
     ]);
+    for (final String id in <String>['first', 'second']) {
+      await File(p.join(source.path, '$id.m4a')).writeAsString('same bytes');
+    }
     await archiveFor(source).exportTo(zipPath());
 
     final RestoreSummary restored = await archiveFor(
@@ -1112,7 +1182,10 @@ void main() {
 
   test('re-importing the same archive counts it alreadyPresent', () async {
     await seed(source, <Recording>[
-      twoSegmentCapture('abc', contentHash: 'd' * 64),
+      twoSegmentCapture(
+        'abc',
+        contentHash: sha256.convert(utf8.encode('audio-abc')).toString(),
+      ),
     ]);
     await File(p.join(source.path, 'abc-1.txt')).writeAsString('fragment-abc');
 
