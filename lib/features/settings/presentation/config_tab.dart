@@ -71,6 +71,7 @@ class ConfigTab extends StatefulWidget {
     this.unknownQuantityCount = 0,
     this.verifiedOn,
     this.onRateChanged = _noRateChange,
+    this.onRefreshRate,
     this.onBackfillClosures,
     this.onExportArchive,
     this.onImportArchive,
@@ -138,6 +139,8 @@ class ConfigTab extends StatefulWidget {
   /// Persists an edited or reset rate, then backfills the rows it unblocks.
   /// The no-op default is what every pre-existing Config test still gets.
   final void Function(String key, ModelPrice? price) onRateChanged;
+  final Future<ModelPrice> Function(String key, bool isTranscription)?
+      onRefreshRate;
 
   /// Reads already-closed captures back into the closure history. Null under
   /// the same rule as [onMirrorAll] — the button renders disabled, not absent.
@@ -660,6 +663,7 @@ class _ConfigTabState extends State<ConfigTab> {
         unknownQuantityCount: widget.unknownQuantityCount,
         verifiedOn: widget.verifiedOn ?? PriceBookDefaults.verifiedOn,
         onRateChanged: widget.onRateChanged,
+        onRefreshRate: widget.onRefreshRate,
       ),
       const SizedBox(height: 22),
       MomentumSection(onBackfill: widget.onBackfillClosures),
