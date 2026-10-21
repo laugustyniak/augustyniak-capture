@@ -743,7 +743,7 @@ class _DetachedNotice extends StatelessWidget {
               const SizedBox(width: 6),
               Expanded(
                 child: Text(
-                  'Running in the background',
+                  'Session started in the background',
                   style: ConsoleText.micro.copyWith(color: Console.green),
                 ),
               ),
@@ -751,8 +751,8 @@ class _DetachedNotice extends StatelessWidget {
           ),
           const SizedBox(height: 7),
           Text(
-            'The agent received the prompt and is working. Attach to watch '
-            'it, or join from any terminal:',
+            'The session was started with the prompt and no window. Attach '
+            'to watch it, or join from any terminal:',
             style: ConsoleText.micro,
           ),
           const SizedBox(height: 9),

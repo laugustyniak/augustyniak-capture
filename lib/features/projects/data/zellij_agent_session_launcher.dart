@@ -201,7 +201,7 @@ class ZellijAgentSessionLauncher implements AgentSessionLauncher {
     if (!await _sessionExists(zellij, sessionName)) {
       throw AgentSessionLaunchException(
         'Zellij reported success but `$sessionName` is not running. '
-        'Run `zellij --new-session-with-layout $layoutPath attach '
+        "Run `zellij --new-session-with-layout '$layoutPath' attach "
         '--create-background $sessionName` in a terminal to see why.',
       );
     }

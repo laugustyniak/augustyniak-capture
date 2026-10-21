@@ -179,6 +179,17 @@ class RouteOutcome {
   }
 }
 
+/// Whether [name] is a session name this app could have produced, and so one
+/// that may go into `zellij attach <name>` as an argument and onto a card.
+///
+/// The launcher builds names from slugs, so a stored name that is anything
+/// else — a leading dash that a parser would read as an option, whitespace,
+/// a path — came from a hand-edited index, a synced row or an archive, not
+/// from a launch. It is dropped on load, the same boundary rule record ids
+/// get (#292); the route itself survives.
+bool isSafeSessionName(String name) =>
+    RegExp(r'^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$').hasMatch(name);
+
 /// One delivery. Append-only in practice: routing the same capture twice adds a
 /// second record rather than replacing the first, because both deliveries
 /// really happened and the second does not undo the first.
@@ -251,8 +262,8 @@ class RouteRecord {
       kind: kind,
       target: target,
       outcome: RouteOutcome.fromJson(json['outcome']),
-      session: session is String && session.trim().isNotEmpty
-          ? session.trim()
+      session: session is String && isSafeSessionName(session)
+          ? session
           : null,
     );
   }

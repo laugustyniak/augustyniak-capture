@@ -56,14 +56,27 @@ void main() {
     expect(record.toJson()['session'], 'augustyniak-capture-1234abcd-claude');
     // Carried across an outcome update, like every other field.
     expect(back.withOutcome(null).session, record.session);
-    // Blank is absent: a hand-edited row cannot produce an empty handle.
-    expect(
-      RouteRecord.fromJson(<String, dynamic>{
+    // Only a name the launcher could have produced is kept: a hand-edited,
+    // synced or archived row cannot plant an option or a path into
+    // `zellij attach <name>`. The route itself survives.
+    for (final Object? bad in <Object?>[
+      '  ',
+      '--help',
+      '-x',
+      'a b',
+      '../x',
+      'x' * 65,
+      42,
+    ]) {
+      final RouteRecord? back = RouteRecord.fromJson(<String, dynamic>{
         ...record.toJson(),
-        'session': '  ',
-      })!.session,
-      isNull,
-    );
+        'session': bad,
+      });
+      expect(back, isNotNull, reason: '$bad');
+      expect(back!.session, isNull, reason: '$bad');
+    }
+    expect(isSafeSessionName('capture-abc123-codex'), isTrue);
+    expect(isSafeSessionName('my.project_1-claude'), isTrue);
   });
 
   test('a legacy row serialises byte for byte as it was read', () {

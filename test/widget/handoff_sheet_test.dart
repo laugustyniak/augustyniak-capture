@@ -307,11 +307,14 @@ void main() {
       expect(launcher.requests.single.detached, isTrue);
       // Stays open: with no window, the sheet is the only thing that says
       // where the session went and how to reach it.
-      expect(find.text('Running in the background'), findsOneWidget);
+      expect(find.text('Session started in the background'), findsOneWidget);
       expect(find.text('zellij attach $session'), findsOneWidget);
       // The capture is closed — the prompt was delivered.
       expect(controller.recordings.single.isProcessedByUser, isTrue);
 
+      await tester.ensureVisible(
+        find.byKey(const ValueKey<String>('handoff-attach')),
+      );
       await tester.tap(find.byKey(const ValueKey<String>('handoff-attach')));
       await settleIo(tester);
 
@@ -347,7 +350,10 @@ void main() {
     await openSheet(tester, controller);
     await tester.tap(find.text('LAUNCH SESSION'));
     await settleIo(tester);
-    await tester.tap(find.byKey(const ValueKey<String>('handoff-attach')));
+    await tester.ensureVisible(
+        find.byKey(const ValueKey<String>('handoff-attach')),
+      );
+      await tester.tap(find.byKey(const ValueKey<String>('handoff-attach')));
     await settleIo(tester);
 
     expect(launcher.attached, isEmpty);

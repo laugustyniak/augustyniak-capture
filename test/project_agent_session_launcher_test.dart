@@ -547,6 +547,29 @@ void main() {
       },
     );
 
+    test('a background start that exits non-zero is a failure', () async {
+      final _FakeProcessRunner runner = _FakeProcessRunner(<CommandResult>[
+        noSessions,
+        const CommandResult(
+          exitCode: 2,
+          stdout: '',
+          stderr: "error: Found argument '--create-background'",
+        ),
+      ]);
+
+      await expectLater(
+        build(runner).launch(request(detached: true)),
+        throwsA(
+          isA<AgentSessionLaunchException>().having(
+            (AgentSessionLaunchException error) => error.message,
+            'message',
+            contains('--create-background'),
+          ),
+        ),
+      );
+      expect(runner.invocations, hasLength(2), reason: 'no further probe');
+    });
+
     test('an already running session is reported, not restarted', () async {
       final _FakeProcessRunner runner = _FakeProcessRunner(<CommandResult>[
         listing('augustyniak-client-legal-pilot-550e8400-codex'),

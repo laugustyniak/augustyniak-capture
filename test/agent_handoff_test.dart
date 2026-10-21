@@ -331,6 +331,29 @@ void main() {
     expect(launcher.attached, <String>['augustyniak-acme-p1-claude']);
   });
 
+  test('a detached handoff onto a running session is a found, not a start',
+      () async {
+    final _FakeLauncher launcher = _FakeLauncher(running: true);
+    final RecordingsController controller = await buildRecordingsController(
+      appDir,
+      seed: <Recording>[
+        makeRecording(id: 'r1', projectId: 'p1', transcript: 'Body.'),
+      ],
+      agentHandoff: handoffFor(projectFor(repo), launcher),
+    );
+
+    final AgentHandoffResult? result = await controller.handoff(
+      'r1',
+      agentId: AgentKind.codex.name,
+      detached: true,
+    );
+
+    // Both flags: nothing started, nothing opened, the prompt did not land.
+    expect(result!.detached, isTrue);
+    expect(result.attachedToExistingSession, isTrue);
+    expect(controller.recordings.single.routes.single.session, isNotNull);
+  });
+
   test('a failed attach reports why and changes nothing', () async {
     final _FakeLauncher launcher = _FakeLauncher();
     final RecordingsController controller = await buildRecordingsController(

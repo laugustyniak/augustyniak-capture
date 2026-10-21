@@ -3152,7 +3152,8 @@ class RecordingsController extends ChangeNotifier {
     );
     _logSink.log(
       result.attachedToExistingSession
-          ? 'Attached to ${result.record.target} · brief at ${result.taskPath}'
+          ? '${result.detached ? 'Found running' : 'Attached to'} '
+                '${result.record.target} · brief at ${result.taskPath}'
           : result.detached
           ? 'Started ${result.record.target} in the background · '
                 '${attachCommandFor(result.sessionName)} · '

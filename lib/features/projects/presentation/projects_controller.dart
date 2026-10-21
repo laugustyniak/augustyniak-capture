@@ -273,6 +273,9 @@ class ProjectsController extends ChangeNotifier {
     if (launcher == null) {
       throw StateError('No agent session launcher is configured.');
     }
+    // Same single-flight set as launch: a double tap must not open two windows.
+    final String key = 'attach:$sessionName';
+    if (!_launchesInProgress.add(key)) return;
     _error = null;
     try {
       await launcher.attach(sessionName);
@@ -280,6 +283,7 @@ class ProjectsController extends ChangeNotifier {
       _error = exception.toString();
       rethrow;
     } finally {
+      _launchesInProgress.remove(key);
       if (!_disposed) notifyListeners();
     }
   }

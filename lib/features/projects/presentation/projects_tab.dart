@@ -402,32 +402,35 @@ class _AgentButton extends StatelessWidget {
         return;
       }
       if (result == null || !context.mounted) return;
-      if (result.detached || result.attachedToExistingSession) {
-        _showSession(context, controller, result);
-      }
+      // A window launch is its own feedback — the window is there, attached
+      // or new. Only a launch that opened nothing has to say where it went.
+      if (result.detached) _showSession(context, controller, result);
     }
 
-    return OutlinedButton.icon(
-      key: ValueKey<String>('launch-${project.id}-${agent.name}'),
-      onPressed: !controller.canLaunch || launching
-          ? null
-          : () => start(detached: true),
-      onLongPress: !controller.canLaunch || launching
-          ? null
-          : () => start(detached: false),
-      style: OutlinedButton.styleFrom(
-        foregroundColor: preferred ? Console.accent : Console.textSoft,
-        side: BorderSide(
-          color: preferred ? Console.accent : Console.borderStrong,
+    return Tooltip(
+      message: 'Tap: start in the background · Long press: open in a window',
+      child: OutlinedButton.icon(
+        key: ValueKey<String>('launch-${project.id}-${agent.name}'),
+        onPressed: !controller.canLaunch || launching
+            ? null
+            : () => start(detached: true),
+        onLongPress: !controller.canLaunch || launching
+            ? null
+            : () => start(detached: false),
+        style: OutlinedButton.styleFrom(
+          foregroundColor: preferred ? Console.accent : Console.textSoft,
+          side: BorderSide(
+            color: preferred ? Console.accent : Console.borderStrong,
+          ),
         ),
+        icon: launching
+            ? const SizedBox.square(
+                dimension: 14,
+                child: CircularProgressIndicator(strokeWidth: 2),
+              )
+            : Icon(_agentIcon(agent), size: 16),
+        label: Text(_agentLabel(agent).toUpperCase()),
       ),
-      icon: launching
-          ? const SizedBox.square(
-              dimension: 14,
-              child: CircularProgressIndicator(strokeWidth: 2),
-            )
-          : Icon(_agentIcon(agent), size: 16),
-      label: Text(_agentLabel(agent).toUpperCase()),
     );
   }
 }
