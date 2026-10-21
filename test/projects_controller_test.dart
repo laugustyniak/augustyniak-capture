@@ -122,9 +122,14 @@ void main() {
       },
     );
 
-    await controller.launch(project, AgentKind.claudeCode);
+    final AgentSessionLaunchResult? result = await controller.launch(
+      project,
+      AgentKind.claudeCode,
+    );
 
+    expect(result!.sessionName, 'test-session');
     final AgentSessionLaunchRequest request = launcher.requests.single;
+    expect(request.detached, isFalse);
     expect(request.projectId, 'augustyniak-capture');
     expect(request.projectName, 'Augustyniak Capture');
     expect(request.repoPath, '/work/augustyniak-capture');
@@ -132,6 +137,30 @@ void main() {
     expect(request.agent, ProjectAgent.claude);
     expect(request.arguments, <String>['--model', 'sonnet', 'Read AGENTS.md.']);
     expect(controller.isLaunching(project.id, AgentKind.claudeCode), isFalse);
+  });
+
+  test('a detached launch is passed through, and attach goes by name', () async {
+    final _CapturingLauncher launcher = _CapturingLauncher();
+    final ProjectsController controller = ProjectsController(
+      repository: repository,
+      launcher: launcher,
+    );
+    const Project project = Project(
+      id: 'p',
+      name: 'P',
+      repoPath: '/work/p',
+    );
+
+    final AgentSessionLaunchResult? result = await controller.launch(
+      project,
+      AgentKind.codex,
+      detached: true,
+    );
+    await controller.attach(result!.sessionName);
+
+    expect(launcher.requests.single.detached, isTrue);
+    expect(result.detached, isTrue);
+    expect(launcher.attached, <String>['test-session']);
   });
 
   test('launch maps Antigravity to AGY interactive prompt arguments', () async {
@@ -307,10 +336,18 @@ class _CapturingLauncher implements AgentSessionLauncher {
     AgentSessionLaunchRequest request,
   ) async {
     requests.add(request);
-    return const AgentSessionLaunchResult(
+    return AgentSessionLaunchResult(
       sessionName: 'test-session',
       attachedToExistingSession: false,
+      detached: request.detached,
     );
+  }
+
+  final List<String> attached = <String>[];
+
+  @override
+  Future<void> attach(String sessionName) async {
+    attached.add(sessionName);
   }
 }
 

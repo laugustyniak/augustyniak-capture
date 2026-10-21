@@ -42,6 +42,30 @@ void main() {
     );
   });
 
+  test('an agent route keeps the session it opened', () {
+    final RouteRecord record = RouteRecord(
+      at: DateTime.utc(2026, 10, 21, 9),
+      kind: RouteKind.agent,
+      target: 'Claude Code · augustyniak-capture-1234abcd-claude',
+      session: 'augustyniak-capture-1234abcd-claude',
+    );
+
+    final RouteRecord? back = RouteRecord.fromJson(record.toJson());
+
+    expect(back!.session, 'augustyniak-capture-1234abcd-claude');
+    expect(record.toJson()['session'], 'augustyniak-capture-1234abcd-claude');
+    // Carried across an outcome update, like every other field.
+    expect(back.withOutcome(null).session, record.session);
+    // Blank is absent: a hand-edited row cannot produce an empty handle.
+    expect(
+      RouteRecord.fromJson(<String, dynamic>{
+        ...record.toJson(),
+        'session': '  ',
+      })!.session,
+      isNull,
+    );
+  });
+
   test('a legacy row serialises byte for byte as it was read', () {
     final Map<String, dynamic> legacy = <String, dynamic>{
       'at': '2026-10-06T12:00:00.000Z',

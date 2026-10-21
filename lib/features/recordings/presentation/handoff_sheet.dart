@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 
 import '../../../app/ui_kit.dart';
+import '../../projects/domain/agent_session_launcher.dart'
+    show attachCommandFor;
 import '../domain/agent_handoff.dart';
 import '../domain/assistant_target.dart';
 import '../domain/capture_sender.dart';
@@ -74,6 +76,15 @@ class _HandoffSheetState extends State<_HandoffSheet> {
   String _agentId = '';
   bool _busy = false;
   bool _launching = false;
+
+  /// Start the session in the background rather than in a terminal window.
+  /// On by default: a handoff should not take the screen, and the window is
+  /// one tap away afterwards through ATTACH.
+  bool _detached = true;
+
+  /// A launch that did not open a window — a session started in the
+  /// background, or one found already running — keeps the sheet open to say
+  /// where it is and offer the way in.
   AgentHandoffResult? _attached;
   SendOutcome? _sent;
   String? _error;
@@ -145,6 +156,7 @@ class _HandoffSheetState extends State<_HandoffSheet> {
       widget.recording.id,
       agentId: _agentId,
       instruction: _instruction.text,
+      detached: _detached,
     );
     if (!mounted) return;
 
@@ -156,7 +168,7 @@ class _HandoffSheetState extends State<_HandoffSheet> {
       });
       return;
     }
-    if (result.attachedToExistingSession) {
+    if (result.attachedToExistingSession || result.detached) {
       setState(() {
         _busy = false;
         _launching = false;
@@ -165,6 +177,21 @@ class _HandoffSheetState extends State<_HandoffSheet> {
       return;
     }
     Navigator.of(context).pop();
+  }
+
+  /// Open a terminal on the session the launch reported. The capture is
+  /// already closed and routed; this only shows the session.
+  Future<void> _attach(String sessionName) async {
+    setState(() {
+      _busy = true;
+      _error = null;
+    });
+    final bool opened = await widget.controller.attachSession(sessionName);
+    if (!mounted) return;
+    setState(() {
+      _busy = false;
+      if (!opened) _error = widget.controller.error ?? 'Could not attach.';
+    });
   }
 
   @override
@@ -318,6 +345,34 @@ class _HandoffSheetState extends State<_HandoffSheet> {
       ],
     ),
     const SizedBox(height: 9),
+    // Where the session shows up. Background is the default and the reason
+    // this group no longer needs a terminal that can open a window: the agent
+    // starts inside Zellij's server, and ATTACH (or the command the notice
+    // prints) opens it when wanted. The chips are disabled once a launch has
+    // happened — the mode is a property of the session that was started.
+    Wrap(
+      spacing: 8,
+      runSpacing: 8,
+      children: <Widget>[
+        ConsoleChip(
+          key: const ValueKey<String>('handoff-mode-background'),
+          label: 'IN BACKGROUND',
+          selected: _detached,
+          onSelected: _busy || _attached != null
+              ? () {}
+              : () => setState(() => _detached = true),
+        ),
+        ConsoleChip(
+          key: const ValueKey<String>('handoff-mode-window'),
+          label: 'IN A WINDOW',
+          selected: !_detached,
+          onSelected: _busy || _attached != null
+              ? () {}
+              : () => setState(() => _detached = false),
+        ),
+      ],
+    ),
+    const SizedBox(height: 9),
     // The agent is started with the prompt above. The file is the copy that
     // outlives the session — and the one an *attach* falls back on, since a
     // running agent never receives this prompt.
@@ -355,7 +410,17 @@ class _HandoffSheetState extends State<_HandoffSheet> {
     ],
     if (_attached case final AgentHandoffResult result) ...<Widget>[
       const SizedBox(height: 16),
-      _AttachedNotice(result: result, instruction: _instruction.text),
+      if (result.attachedToExistingSession)
+        _AttachedNotice(
+          result: result,
+          instruction: _instruction.text,
+          onAttach: _busy ? null : () => _attach(result.sessionName),
+        )
+      else
+        _DetachedNotice(
+          result: result,
+          onAttach: _busy ? null : () => _attach(result.sessionName),
+        ),
     ],
     const SizedBox(height: 14),
     _LaunchButton(
@@ -572,10 +637,18 @@ class _TargetTile extends StatelessWidget {
 /// What an attach means, said plainly, because it is the one outcome that looks
 /// like success and is not finished.
 class _AttachedNotice extends StatelessWidget {
-  _AttachedNotice({required this.result, required this.instruction});
+  _AttachedNotice({
+    required this.result,
+    required this.instruction,
+    required this.onAttach,
+  });
 
   final AgentHandoffResult result;
   final String instruction;
+
+  /// Opens a terminal on the running session — the place the prompt has to
+  /// be pasted, so it sits next to the copy button.
+  final VoidCallback? onAttach;
 
   @override
   Widget build(BuildContext context) {
@@ -628,6 +701,89 @@ class _AttachedNotice extends StatelessWidget {
               ),
             ],
           ),
+          const SizedBox(height: 10),
+          _LaunchButton(
+            key: const ValueKey<String>('handoff-attach'),
+            busy: false,
+            label: 'ATTACH',
+            onTap: onAttach,
+            outlined: true,
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// A session started in the background: where it is, and the two ways in —
+/// a terminal opened from here, or the command for one already open.
+class _DetachedNotice extends StatelessWidget {
+  _DetachedNotice({required this.result, required this.onAttach});
+
+  final AgentHandoffResult result;
+  final VoidCallback? onAttach;
+
+  @override
+  Widget build(BuildContext context) {
+    final String command = attachCommandFor(result.sessionName);
+    return Container(
+      key: const ValueKey<String>('handoff-detached-notice'),
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: Console.green.withValues(alpha: .08),
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(color: Console.green.withValues(alpha: .35)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: <Widget>[
+          Row(
+            children: <Widget>[
+              Icon(Icons.check_circle_outline, size: 14, color: Console.green),
+              const SizedBox(width: 6),
+              Expanded(
+                child: Text(
+                  'Running in the background',
+                  style: ConsoleText.micro.copyWith(color: Console.green),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 7),
+          Text(
+            'The agent received the prompt and is working. Attach to watch '
+            'it, or join from any terminal:',
+            style: ConsoleText.micro,
+          ),
+          const SizedBox(height: 9),
+          Row(
+            children: <Widget>[
+              Expanded(
+                child: Text(
+                  command,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: ConsoleText.micro.copyWith(
+                    fontFamily: ConsoleFont.mono,
+                  ),
+                ),
+              ),
+              const SizedBox(width: 8),
+              CopyButton(
+                text: command,
+                tooltip: 'Copy attach command',
+                semanticLabel: 'Copy the attach command to clipboard',
+              ),
+            ],
+          ),
+          const SizedBox(height: 10),
+          _LaunchButton(
+            key: const ValueKey<String>('handoff-attach'),
+            busy: false,
+            label: 'ATTACH',
+            onTap: onAttach,
+            outlined: true,
+          ),
         ],
       ),
     );
@@ -636,6 +792,7 @@ class _AttachedNotice extends StatelessWidget {
 
 class _LaunchButton extends StatelessWidget {
   _LaunchButton({
+    super.key,
     required this.busy,
     required this.label,
     required this.onTap,

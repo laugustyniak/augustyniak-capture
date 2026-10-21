@@ -42,7 +42,8 @@ Launching locally requires **macOS or Linux**, plus:
   - macOS: [Ghostty](https://ghostty.org/), installed as `Ghostty.app`,
   - Linux: the first of `ghostty`, `wezterm`, `kitty`, `alacritty`, `konsole`,
     `gnome-terminal`, `xfce4-terminal` that is installed;
-- [Zellij](https://zellij.dev/) for named, reusable sessions,
+- [Zellij](https://zellij.dev/) **0.41 or newer** for named, reusable sessions
+  (`attach --create-background` is what starts one with no window),
 - at least one supported agent CLI on `PATH`:
   - `codex` for Codex,
   - `claude` for Claude Code,
@@ -90,9 +91,13 @@ manage its account, or provide its credentials.
    on load.
 6. Save, then use the agent action on the project card.
 
-The first launch opens Ghostty, creates a named Zellij session rooted in the
-repository, and starts exactly one selected agent. Later launches attach to that
-session instead of starting a duplicate agent.
+A tap starts the agent **in the background**: a named Zellij session rooted in
+the repository, with exactly one selected agent in it and no window. A snackbar
+names the session and offers **ATTACH**, which opens your terminal on it; the
+same `zellij attach <name>` works from any terminal you already have open. A
+long press starts the session in a terminal window directly. Either way, a
+later launch of the same project-agent pair finds the running session instead
+of starting a duplicate agent.
 
 ## Hand a capture to a local agent
 
@@ -105,13 +110,16 @@ The project card starts a session with no particular task in hand. To start one
 *on something you captured*, use the agent button on the capture itself — in the
 Queue, on a card or an expanded row, or with `A` on the focused row.
 
-The sheet that opens shows three things and launches on one tap:
+The sheet that opens shows four things and launches on one tap:
 
 1. **Agent** — the project's default is preselected; choosing another applies to
    this task only and does not change the project.
-2. **Opening prompt** — a single line pointing the agent at the brief. Editable,
-   so `only write tests` or `open a PR when green` costs one sentence.
-3. **The brief's path** — `.agent-tasks/<capture-id>.md` inside the repository.
+2. **Where it runs** — **IN BACKGROUND** (the default) starts the session with
+   no window and needs no terminal at all; **IN A WINDOW** opens your terminal
+   on it straight away.
+3. **Opening prompt** — the capture's own text. Editable, so `only write tests`
+   or `open a PR when green` costs one sentence.
+4. **The brief's path** — `.agent-tasks/<capture-id>.md` inside the repository.
 
 The full capture (title, summary, tags and the transcript or OCR text) is written
 to that file *before* the session opens; the prompt only points at it. That is
@@ -120,6 +128,20 @@ would have been truncated somewhere along the way without saying so.
 
 The capture then closes itself and records where it went, exactly as routing to
 the inbox does. A failed launch leaves it open and retryable.
+
+**After a background launch the sheet stays open** and says "Running in the
+background", with the session name, **ATTACH** — which opens your terminal on
+the session — and a copy button for `zellij attach <name>`, for a terminal you
+already have open. The capture's card keeps an **ATTACH** action on its route
+line for as long as the session runs, so you can come back to it tomorrow. A
+session that has ended is refused by name; hand the capture off again to start
+a new one.
+
+Starting in the background works on a machine whose terminal cannot open a
+window at all (WezTerm failing with `egl Initialize: BAD_ACCESS`, for one): only
+Zellij and the agent CLI are needed to start, and the terminal is asked for only
+when you attach. If that terminal cannot open either, the copied command in your
+own shell is the way in.
 
 **Handing off twice appends.** The brief file gains a second `## Handoff`
 section rather than being rewritten, so anything the agent wrote underneath —
@@ -164,9 +186,16 @@ version control instead of living in one provider's conversation history.
 - **The agent button is missing on a capture:** its project is bound to Command.
   That is the supervised path — route the capture instead, and watch the outcome
   line on its card.
-- **Nothing opens:** confirm the terminal is installed — `Ghostty.app` on macOS,
-  or one of the seven supported terminals on Linux — and that `zellij`
-  is on `PATH`.
+- **Nothing opens:** a background launch opens nothing by design — look for the
+  green notice or the snackbar, then ATTACH. For a window, confirm the terminal
+  is installed — `Ghostty.app` on macOS, or one of the seven supported
+  terminals on Linux — and that `zellij` is on `PATH`.
+- **ATTACH says the session is not running:** the agent exited, or the Zellij
+  server went down with the shell it was started from. `zellij ls` lists what
+  is alive; hand the capture off again to start a fresh session. On Linux the
+  server lives in the app's cgroup, so an app started from a terminal pane
+  takes its sessions down with that pane — start the app from the launcher
+  (`tool/deploy.sh` installs the desktop entry) and they outlive it.
 - **The terminal opens but the agent fails:** the Zellij pane shows the
   agent's exit and its error above it. An `unexpected argument` or
   `unknown option` means the project's additional arguments are wrong for that

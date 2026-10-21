@@ -187,6 +187,7 @@ class ProjectAgentHandoff implements AgentHandoff {
             frameCapturePrompt(request.instruction, capture: request.capture),
           ),
         ],
+        detached: request.detached,
       ),
     );
 
@@ -197,12 +198,17 @@ class ProjectAgentHandoff implements AgentHandoff {
         at: DateTime.now(),
         kind: RouteKind.agent,
         target: '${agentLabel(agent)} · ${session.sessionName}',
+        session: session.sessionName,
       ),
       taskPath: taskPathFor(request.captureId),
       sessionName: session.sessionName,
       attachedToExistingSession: session.attachedToExistingSession,
+      detached: session.detached,
     );
   }
+
+  @override
+  Future<void> attach(String sessionName) => _launcher.attach(sessionName);
 
   File _taskFile(String repoPath, String captureId) {
     final String path = p.join(repoPath, directoryName, '$captureId.md');

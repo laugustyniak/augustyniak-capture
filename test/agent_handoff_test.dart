@@ -15,11 +15,13 @@ import 'support/harness.dart';
 
 /// Records what it was asked to launch instead of opening a terminal.
 class _FakeLauncher implements AgentSessionLauncher {
-  _FakeLauncher({this.attach = false, this.failure});
+  _FakeLauncher({this.running = false, this.failure});
 
-  final bool attach;
+  /// The session already exists, so a launch attaches instead of starting.
+  final bool running;
   final String? failure;
   final List<AgentSessionLaunchRequest> requests = <AgentSessionLaunchRequest>[];
+  final List<String> attached = <String>[];
 
   @override
   Future<AgentSessionLaunchResult> launch(
@@ -29,8 +31,30 @@ class _FakeLauncher implements AgentSessionLauncher {
     if (failure != null) throw AgentSessionLaunchException(failure!);
     return AgentSessionLaunchResult(
       sessionName: 'augustyniak-acme-p1-${request.agent.executable}',
-      attachedToExistingSession: attach,
+      attachedToExistingSession: running,
+      detached: request.detached,
     );
+  }
+
+  @override
+  Future<void> attach(String sessionName) async {
+    attached.add(sessionName);
+  }
+}
+
+/// A launcher whose `attach` refuses every session, by name.
+class _ThrowingAttach implements AgentSessionLauncher {
+  _ThrowingAttach(this.inner);
+
+  final AgentSessionLauncher inner;
+
+  @override
+  Future<AgentSessionLaunchResult> launch(AgentSessionLaunchRequest request) =>
+      inner.launch(request);
+
+  @override
+  Future<void> attach(String sessionName) async {
+    throw AgentSessionLaunchException('Session `$sessionName` is not running.');
   }
 }
 
@@ -257,7 +281,7 @@ void main() {
   });
 
   test('attaching to a running session is reported, not hidden', () async {
-    final _FakeLauncher launcher = _FakeLauncher(attach: true);
+    final _FakeLauncher launcher = _FakeLauncher(running: true);
     final RecordingsController controller = await buildRecordingsController(
       appDir,
       seed: <Recording>[
@@ -275,6 +299,52 @@ void main() {
     // has to be able to say so. The brief is on disk either way.
     expect(result!.attachedToExistingSession, isTrue);
     expect(taskFile('r1').existsSync(), isTrue);
+  });
+
+  test('a detached handoff records the session it started', () async {
+    final _FakeLauncher launcher = _FakeLauncher();
+    final RecordingsController controller = await buildRecordingsController(
+      appDir,
+      seed: <Recording>[
+        makeRecording(id: 'r1', projectId: 'p1', transcript: 'Body.'),
+      ],
+      agentHandoff: handoffFor(projectFor(repo), launcher),
+    );
+
+    final AgentHandoffResult? result = await controller.handoff(
+      'r1',
+      agentId: AgentKind.claudeCode.name,
+      detached: true,
+    );
+
+    expect(launcher.requests.single.detached, isTrue);
+    expect(result!.detached, isTrue);
+    expect(result.attachedToExistingSession, isFalse);
+    // Closed and routed exactly like a windowed launch: the prompt was
+    // delivered, only the window is missing.
+    final Recording item = controller.recordings.single;
+    expect(item.isProcessedByUser, isTrue);
+    expect(item.routes.single.session, 'augustyniak-acme-p1-claude');
+
+    // The way back in, by the handle the route kept.
+    expect(await controller.attachSession(item.routes.single.session!), isTrue);
+    expect(launcher.attached, <String>['augustyniak-acme-p1-claude']);
+  });
+
+  test('a failed attach reports why and changes nothing', () async {
+    final _FakeLauncher launcher = _FakeLauncher();
+    final RecordingsController controller = await buildRecordingsController(
+      appDir,
+      seed: <Recording>[
+        makeRecording(id: 'r1', projectId: 'p1', transcript: 'Body.'),
+      ],
+      agentHandoff: handoffFor(projectFor(repo), _ThrowingAttach(launcher)),
+    );
+
+    expect(await controller.attachSession('gone'), isFalse);
+
+    expect(controller.error, contains('gone'));
+    expect(controller.recordings.single.routes, isEmpty);
   });
 
   test('Antigravity takes its prompt behind a flag', () async {

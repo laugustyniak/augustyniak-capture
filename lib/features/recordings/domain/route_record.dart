@@ -188,6 +188,7 @@ class RouteRecord {
     required this.kind,
     required this.target,
     this.outcome,
+    this.session,
   });
 
   final DateTime at;
@@ -207,14 +208,30 @@ class RouteRecord {
   /// being terminal. It has.
   final RouteOutcome? outcome;
 
-  RouteRecord withOutcome(RouteOutcome? next) =>
-      RouteRecord(at: at, kind: kind, target: target, outcome: next);
+  /// The multiplexer session an [RouteKind.agent] delivery opened, exactly as
+  /// the launcher named it — the handle the card attaches with later.
+  ///
+  /// Kept beside [target] rather than parsed out of it: the target is a label
+  /// built for a human (`Claude Code · augustyniak-…`), and a label is not a
+  /// contract. Null on every row written before it existed and on every kind
+  /// that opens no session; the key stays out of the JSON then, so an older
+  /// row serialises byte for byte as before.
+  final String? session;
+
+  RouteRecord withOutcome(RouteOutcome? next) => RouteRecord(
+    at: at,
+    kind: kind,
+    target: target,
+    outcome: next,
+    session: session,
+  );
 
   Map<String, dynamic> toJson() => <String, dynamic>{
     'at': at.toIso8601String(),
     'kind': kind.name,
     'target': target,
     if (outcome != null) 'outcome': outcome!.toJson(),
+    if (session != null) 'session': session,
   };
 
   /// Null when the row cannot be trusted, so the caller can drop exactly that
@@ -228,11 +245,15 @@ class RouteRecord {
     if (kind == null || at is! String || target is! String) return null;
     final DateTime? parsed = DateTime.tryParse(at);
     if (parsed == null) return null;
+    final Object? session = json['session'];
     return RouteRecord(
       at: parsed,
       kind: kind,
       target: target,
       outcome: RouteOutcome.fromJson(json['outcome']),
+      session: session is String && session.trim().isNotEmpty
+          ? session.trim()
+          : null,
     );
   }
 

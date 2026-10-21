@@ -22,6 +22,9 @@ class _FakeLauncher implements AgentSessionLauncher {
       attachedToExistingSession: false,
     );
   }
+
+  @override
+  Future<void> attach(String sessionName) async {}
 }
 
 AgentHandoffRequest _request(String id, {String? projectId}) =>
