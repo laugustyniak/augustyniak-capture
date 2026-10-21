@@ -13,6 +13,7 @@ import '../../recordings/data/source_content_hasher.dart';
 import '../../recordings/domain/capture_segment.dart';
 import '../../recordings/domain/recording.dart';
 import '../domain/capture_archive.dart';
+import 'member_inflater.dart';
 import 'verifying_output_stream.dart';
 
 typedef ArchiveDirectoryProvider = Future<Directory> Function();
@@ -546,12 +547,13 @@ class ZipCaptureArchive implements CaptureArchive {
             declaredBytes: entry.size,
           );
           try {
-            entry.writeContent(output);
+            inflateMember(entry, output);
           } finally {
             output.closeSync();
           }
-          // The inflater swallows exceptions thrown from its output, so the
-          // refusal arrives as a flag as well as a throw.
+          // The pure-Dart inflater (the bzip2 fallback) swallows exceptions
+          // thrown from its output, so the refusal arrives as a flag as well
+          // as a throw.
           if (output.overflowed) {
             throw ArchiveUnreadableException(
               name,
