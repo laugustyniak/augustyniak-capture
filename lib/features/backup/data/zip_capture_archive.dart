@@ -551,9 +551,9 @@ class ZipCaptureArchive implements CaptureArchive {
           } finally {
             output.closeSync();
           }
-          // The pure-Dart inflater (the bzip2 fallback) swallows exceptions
-          // thrown from its output, so the refusal arrives as a flag as well
-          // as a throw.
+          // The pure-Dart inflater, which a build without `dart:io` falls back
+          // to, swallows exceptions thrown from its output, so the refusal
+          // arrives as a flag as well as a throw.
           if (output.overflowed) {
             throw ArchiveUnreadableException(
               name,

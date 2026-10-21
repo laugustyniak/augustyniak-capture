@@ -103,7 +103,8 @@ void main() {
     expect(spy.offered, lessThan(1 << 20));
     expect(memory.length, 0);
     // The line that proves the body was never inflated: the package path reads
-    // the whole member before its first write.
+    // the whole member before its first write. The margin rests on the 16 KiB
+    // feed slice in `member_inflater.dart` against roughly 64 KiB compressed.
     expect(raw.position, lessThan(compressedLength ~/ 2));
   });
 

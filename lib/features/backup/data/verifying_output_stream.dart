@@ -18,9 +18,10 @@ import '../domain/capture_archive.dart';
 /// On `dart:io` the package's own zlib path inflates the whole member in
 /// memory before the first write, so a deflated member is fed through
 /// `inflateMember` instead and each chunk reaches this bound as it is produced
-/// (#342). The pure-Dart inflater used for anything else swallows exceptions
-/// thrown from inside its output calls, so a refusal is also recorded in
-/// [overflowed] for the caller to check once the write returns.
+/// (#342). The pure-Dart inflater, which a build without `dart:io` falls back
+/// to, swallows exceptions thrown from inside its output calls, so a refusal
+/// is also recorded in [overflowed] for the caller to check once the write
+/// returns.
 class VerifyingOutputStream extends OutputStream {
   VerifyingOutputStream(
     this._inner, {
