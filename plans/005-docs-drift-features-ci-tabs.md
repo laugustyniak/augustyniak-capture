@@ -2,7 +2,7 @@
 
 | Field | Value |
 | --- | --- |
-| Status | TODO |
+| Status | DONE — PR #361 merged 2026-10-22; branch `docs/360-drift` @ `0019baf`, issue #360, advisor-reviewed 2026-10-22 |
 | Written against | commit `294976b` (branch `main`), 2026-10-21 |
 | Finding | docs (several high-confidence staleness items), S effort, zero code risk |
 | Effort | S–M (2–5 h; the one new architecture doc is most of it) |
@@ -163,3 +163,12 @@ Everything in Step 5 passes, `git diff origin/main --stat` lists only the ten fi
 - `ls lib/features` shows a count other than 20, or a feature with no `presentation/` **and** no mention anywhere in `docs/` — list it instead of inventing a description.
 - The on-device plan's slice list cannot be matched to code in ~20 minutes of grepping — leave the status line as "proposed; parts shipped, see `lib/features/transcription/`" and say so.
 - `AGENTS.md` turns out to be tracked on `origin/main` by the time you run (it is untracked at `294976b`) — then diff against the tracked version and update rather than regenerate blindly.
+
+## Execution record (2026-10-22)
+
+- Executor: `coder` in `.worktrees/docs-360-drift` from `d74f350`; one commit `0019baf`, `Refs #360`, no attribution. PR #361.
+- Drift: `ui.md` had a fifth "seven" at line 85 (second navigation line) not in the plan; fixed. `clipboard.md:19` "all seven tabs" also fixed. Everything else matched.
+- On-device status derived by symbol grep: slices 0–3 shipped (`local_transcription_engine.dart`, `ProfileKind.localWhisper`, `local_transcription_service.dart`, `whisper_model.dart`, `whisper_model_store.dart`, `LocalModelsSection`, `decodeToPcm`); slice 4 engine built on Linux/Android/macOS/Windows; no iOS engine build found; network-off acceptance unverified.
+- `AGENTS.md` regenerated from `CLAUDE.md` (`identical`) and committed — maintainer may drop it from the merge.
+- Step 5 checks: `ighteen` count is 1 (the plan's own new "eighteen lines"), the rest as specified. Analyze clean, 2316 tests green.
+- Advisor review: new doc is 26 lines in the `clipboard.md` style, every bullet names a symbol, states the missing `domain/` layer as fact. `CLAUDE.md` hunks are the count, the two bullets and the table row.

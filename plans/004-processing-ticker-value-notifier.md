@@ -2,7 +2,7 @@
 
 | Field | Value |
 | --- | --- |
-| Status | IN REVIEW — PR #359, branch `fix/354-processing-ticker` @ `25e307e`, issue #354, advisor-reviewed 2026-10-22, manual screen check pending |
+| Status | DONE — PR #359 merged `89afe9c` 2026-10-22; branch `fix/354-processing-ticker` @ `25e307e`, issue #354, advisor-reviewed 2026-10-22, manual screen check pending |
 | Written against | commit `294976b` (branch `main`), 2026-10-21 |
 | Finding | performance, high confidence on mechanism (not profiled) |
 | Effort | M (half a day; the controller change is 10 lines, the consumers and tests are the work) |

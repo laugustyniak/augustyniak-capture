@@ -12,9 +12,9 @@ Verification baseline at `294976b`: `flutter analyze` → `No issues found!`; `f
 | --- | --- | --- | --- | --- | --- |
 | 1 | [001 — Guard capture entry points before the index has loaded](001-guard-capture-entry-points-before-load.md) | DONE (PR #350 merged `d55330c`) | — | S | Smallest diff, protects durability invariant 2 from an unrecoverable loss. Touches `recordings_controller.dart`; land before 004. |
 | 2 | [002 — Drop remote artifact paths at the sync and import boundary](002-drop-remote-artifact-paths-at-sync-and-import-boundary.md) | DONE (PR #352 merged) | — | S | File disclosure via pulled/imported rows. Edits `sync_row_codec.dart`; land before 003. |
-| 3 | [003 — Keep agent launch configuration device-local](003-keep-agent-launch-config-device-local.md) | IN REVIEW (PR #358, `fix/353-launch-config-local` @ `747e1c5`) | 002 (same codec file; sequential diffs) | M | Remote data must not set `--dangerously-skip-permissions`. Records a product decision; reversible. |
-| 4 | [004 — Processing ticker into a ValueNotifier](004-processing-ticker-value-notifier.md) | IN REVIEW (PR #359, `fix/354-processing-ticker` @ `25e307e`; screen check pending) | 001 (same controller file) | M | Whole-shell rebuild at 2 Hz for the length of every job. Pattern already exists in the class. |
-| 5 | [005 — Docs drift: features, CI, tabs, Turso, on-device status](005-docs-drift-features-ci-tabs.md) | IN PROGRESS (`docs/360-drift`, issue #360) | none; do last so counts do not re-drift | S–M | Agent-facing docs are the repo's control surface; eight verified stale claims. |
+| 3 | [003 — Keep agent launch configuration device-local](003-keep-agent-launch-config-device-local.md) | DONE (PR #358 merged `a38bc5c`) | 002 (same codec file; sequential diffs) | M | Remote data must not set `--dangerously-skip-permissions`. Records a product decision; reversible. |
+| 4 | [004 — Processing ticker into a ValueNotifier](004-processing-ticker-value-notifier.md) | DONE (PR #359 merged `89afe9c`; manual screen check still owed) | 001 (same controller file) | M | Whole-shell rebuild at 2 Hz for the length of every job. Pattern already exists in the class. |
+| 5 | [005 — Docs drift: features, CI, tabs, Turso, on-device status](005-docs-drift-features-ci-tabs.md) | DONE (PR #361 merged) | none; do last so counts do not re-drift | S–M | Agent-facing docs are the repo's control surface; eight verified stale claims. |
 
 Status values the executor should use: `TODO` → `IN PROGRESS (<branch>)` → `DONE (<PR>)` or `BLOCKED (<reason>)` or `STALE (<why>)`.
 

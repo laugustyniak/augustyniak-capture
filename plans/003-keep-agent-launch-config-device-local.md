@@ -2,7 +2,7 @@
 
 | Field | Value |
 | --- | --- |
-| Status | IN REVIEW — PR #358, branch `fix/353-launch-config-local` @ `747e1c5`, issue #353, advisor-reviewed 2026-10-22 |
+| Status | DONE — PR #358 merged `a38bc5c` 2026-10-22; branch `fix/353-launch-config-local` @ `747e1c5`, issue #353, advisor-reviewed 2026-10-22 |
 | Written against | commit `294976b` (branch `main`), 2026-10-21 |
 | Finding | security (remote data controls local process launch flags), high confidence on the path, medium on exploitability |
 | Effort | M (half a day) |
