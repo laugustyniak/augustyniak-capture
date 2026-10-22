@@ -24,6 +24,18 @@ void main() {
       expect(match!.group(1), 'false');
     });
 
+    // The keyboard has nothing to show until the host publishes its clipboard
+    // history into the App Group again, and a keyboard that is installed and
+    // shows nothing is worse than none (#343). The target stays in the project
+    // so restoring it is one revert; the Runner must not embed or build it.
+    test('is not embedded in the Runner app', () {
+      final String project = File(
+        'ios/Runner.xcodeproj/project.pbxproj',
+      ).readAsStringSync();
+      expect(project, isNot(contains('CaptureKeyboard.appex in Embed')));
+      expect(project, isNot(contains('remoteInfo = CaptureKeyboard;')));
+    });
+
     test('never touches the network or the system pasteboard', () {
       final String swift = File(
         'ios/CaptureKeyboard/CaptureKeyboardViewController.swift',

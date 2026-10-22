@@ -386,7 +386,7 @@ class _ConfigTabState extends State<ConfigTab> {
           children: <Widget>[
             InfoRow(
               label: 'KEYBOARD EXTENSION',
-              value: 'Ready for iOS & Android',
+              value: 'Ready for Android',
               valueColor: Console.accent,
             ),
             // Same padding and label column as `InfoRow`, with a switch
