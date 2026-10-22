@@ -117,6 +117,7 @@ void main() {
       WidgetTester tester,
     ) async {
       final RecordingsController controller = buildController();
+      await controller.initialize();
       await tester.pumpWidget(
         hostTab(
           () => CaptureDock(controller: controller, onOpenCaptureMenu: () {}),
@@ -191,6 +192,7 @@ void main() {
       WidgetTester tester,
     ) async {
       final RecordingsController controller = buildController();
+      await controller.initialize();
       controller.activeProjectId = 'first';
       await tester.runAsync(controller.startRecording);
 
@@ -225,6 +227,7 @@ void main() {
       final RecordingsController controller = buildController(
         recorder: recorder,
       );
+      await controller.initialize();
       await tester.runAsync(controller.startRecording);
 
       await tester.pumpWidget(
@@ -257,6 +260,7 @@ void main() {
       final RecordingsController controller = buildController(
         recorder: recorder,
       );
+      await controller.initialize();
       await tester.runAsync(controller.startRecording);
       final String path = recorder._path!;
 
@@ -282,6 +286,7 @@ void main() {
       WidgetTester tester,
     ) async {
       final RecordingsController controller = buildController();
+      await controller.initialize();
       await tester.runAsync(controller.startRecording);
 
       await tester.pumpWidget(
@@ -312,6 +317,7 @@ void main() {
       final RecordingsController controller = buildController(
         recorder: recorder,
       );
+      await controller.initialize();
       await tester.runAsync(controller.startRecording);
 
       await tester.pumpWidget(
@@ -350,6 +356,7 @@ void main() {
       WidgetTester tester,
     ) async {
       final RecordingsController controller = buildController();
+      await controller.initialize();
 
       // `_GrantingRecorder` has no amplitude stream; the meter must degrade to
       // a flat line rather than taking the capture down with it.

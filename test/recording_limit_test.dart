@@ -190,6 +190,7 @@ void main() {
           Duration(milliseconds: 400),
           'test ceiling',
         );
+      await controller.initialize();
 
       await controller.startRecording();
       expect(controller.isRecording, isTrue);
@@ -223,6 +224,7 @@ void main() {
               'test ceiling',
             );
 
+      await controller.initialize();
       await controller.startRecording();
       await _until(() => !controller.isRecording);
 
@@ -240,6 +242,7 @@ void main() {
       // The desktop answer. Splitting happens before the request there, so no
       // length is unsafe and nothing should interrupt a recording.
       final RecordingsController controller = build();
+      await controller.initialize();
       expect(controller.recordingLimit, isNull);
 
       await controller.startRecording();

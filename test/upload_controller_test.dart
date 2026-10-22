@@ -19,6 +19,11 @@ class _FakeRepository extends RecordingsRepository {
 
   final Directory directory;
   List<Recording> saved = <Recording>[];
+  int saveCalls = 0;
+
+  /// Status of the newest item at each `saveAll` — pins that the first write
+  /// is `saved`, not already queued for processing.
+  final List<RecordingStatus> statusAtSave = <RecordingStatus>[];
 
   /// One entry per `saveAll`: was the newest item's source file already on disk
   /// when the index was written? This is what pins the ordering invariant —
@@ -35,7 +40,9 @@ class _FakeRepository extends RecordingsRepository {
 
   @override
   Future<void> saveAll(List<Recording> recordings) async {
+    saveCalls++;
     if (recordings.isNotEmpty) {
+      statusAtSave.add(recordings.first.status);
       sourcePresentAtSave.add(File(recordings.first.filePath).existsSync());
     }
     saved = List<Recording>.from(recordings);
@@ -119,9 +126,50 @@ void main() {
     pickDir.deleteSync(recursive: true);
   });
 
+  test(
+    'addUpload before initialize writes nothing and sets the loading error',
+    () async {
+      final File source = File(p.join(pickDir.path, 'original.mp3'))
+        ..writeAsStringSync('SOUND');
+      final _FakeRepository repo = _FakeRepository(appDir);
+      final RecordingsController controller = buildController(
+        repo,
+        picked: PickedMedia(file: source, mimeType: 'audio/mpeg'),
+      );
+      int notified = 0;
+      controller.addListener(() => notified++);
+
+      await controller.addUpload(CaptureType.audioUpload);
+
+      expect(repo.saveCalls, 0);
+      expect(controller.recordings, isEmpty);
+      expect(controller.error, contains('still loading'));
+      expect(notified, 1);
+      controller.dispose();
+    },
+  );
+
+  test(
+    'addImportedFile before initialize writes nothing and sets the loading error',
+    () async {
+      final File source = File(p.join(pickDir.path, 'dropped.txt'))
+        ..writeAsStringSync('TEXT');
+      final _FakeRepository repo = _FakeRepository(appDir);
+      final RecordingsController controller = buildController(repo);
+
+      await controller.addImportedFile(source, CaptureType.text);
+
+      expect(repo.saveCalls, 0);
+      expect(controller.recordings, isEmpty);
+      expect(controller.error, contains('still loading'));
+      controller.dispose();
+    },
+  );
+
   test('cancelled pick indexes nothing and releases the busy lock', () async {
     final _FakeRepository repo = _FakeRepository(appDir);
     final RecordingsController controller = buildController(repo, picked: null);
+    await controller.initialize();
 
     await controller.addUpload(CaptureType.image);
     await controller.waitForProcessing();
@@ -139,6 +187,7 @@ void main() {
       repo,
       picked: PickedMedia(file: source, mimeType: 'image/png'),
     );
+    await controller.initialize();
 
     await controller.addUpload(CaptureType.image);
     await controller.waitForProcessing();
@@ -161,6 +210,7 @@ void main() {
       ..writeAsStringSync('PNGDATA');
     final _FakeRepository repo = _FakeRepository(appDir);
     final RecordingsController controller = buildController(repo);
+    await controller.initialize();
 
     await controller.addImportedFile(source, CaptureType.image,
         mimeType: 'image/png');
@@ -180,6 +230,7 @@ void main() {
       ..writeAsStringSync('%PDF-1.7');
     final _FakeRepository repo = _FakeRepository(appDir);
     final RecordingsController controller = buildController(repo);
+    await controller.initialize();
 
     await controller.addImportedFile(source, CaptureType.file);
     await controller.waitForProcessing();
@@ -219,6 +270,7 @@ void main() {
         repo,
         picked: PickedMedia(file: source, mimeType: 'audio/mpeg'),
       );
+      await controller.initialize();
 
       await controller.addUpload(CaptureType.audioUpload);
       await controller.waitForProcessing();
@@ -242,6 +294,7 @@ void main() {
         picked: PickedMedia(file: source, mimeType: 'audio/mpeg'),
         service: gated,
       );
+      await controller.initialize();
 
       // Processing is enqueued and drained unawaited, so the job is parked inside
       // the processor when the page tears the controller down.
@@ -267,6 +320,7 @@ void main() {
       picked: PickedMedia(file: source, mimeType: 'audio/mpeg'),
       service: const _StubTranscriptionService('UPLOADED TRANSCRIPT'),
     );
+    await controller.initialize();
 
     await controller.addUpload(CaptureType.audioUpload);
     // Processing is queued, so `addUpload` returns before the drain finishes;
@@ -277,6 +331,7 @@ void main() {
     // disk. Without this, copy-then-index and index-then-copy look identical.
     expect(repo.sourcePresentAtSave, isNotEmpty);
     expect(repo.sourcePresentAtSave.first, isTrue);
+    expect(repo.statusAtSave.first, RecordingStatus.saved);
     controller.dispose();
   });
 
@@ -289,6 +344,7 @@ void main() {
       picked: PickedMedia(file: source, mimeType: 'audio/mpeg'),
       service: const _StubTranscriptionService('UPLOADED TRANSCRIPT'),
     );
+    await controller.initialize();
 
     await controller.addUpload(CaptureType.audioUpload);
     await controller.waitForProcessing();

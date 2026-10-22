@@ -189,6 +189,7 @@ void main() {
             PickedMedia(file: src, mimeType: 'video/mp4'),
           ),
         );
+        await controller.initialize();
         addTearDown(controller.dispose);
 
         await controller.addUpload(CaptureType.video);
@@ -217,6 +218,7 @@ void main() {
             PickedMedia(file: src, mimeType: 'video/mp4'),
           ),
         );
+        await controller.initialize();
         addTearDown(controller.dispose);
 
         await controller.addUpload(CaptureType.video);

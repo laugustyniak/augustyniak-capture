@@ -1314,8 +1314,11 @@ class RecordingsController extends ChangeNotifier {
     // empty snapshot would read as "everything was deleted locally" to the
     // push-side sweep — see the engine's own refusal for an empty outbox,
     // which this gate backs up rather than relies on alone.
+    // A snapshot taken before initialize() is [] for the same reason an
+    // unreadable index is, and the engine's fuse covers `recordings` only.
     final String? ownerId = _authGateway?.currentIdentity?.id;
     final bool hasSupabase =
+        _initialized &&
         !_indexUnreadable &&
         ownerId != null &&
         _syncTransportResolver != null &&
@@ -1760,6 +1763,15 @@ class RecordingsController extends ChangeNotifier {
   }
 
   Future<void> startRecording({String? appendTo}) async {
+    // Before the first load the list is empty, not right: persisting now would
+    // overwrite recordings.json with just this capture (see addTextNote).
+    if (!_initialized) {
+      if (!_indexUnreadable) {
+        _error = 'Captures are still loading — try again.';
+        notifyListeners();
+      }
+      return;
+    }
     if (_isRecording || _isBusy) return;
     _error = null;
 
@@ -2569,6 +2581,15 @@ class RecordingsController extends ChangeNotifier {
   /// then process. A cancelled pick is a no-op; a copy or processing failure
   /// never deletes the source.
   Future<void> addUpload(CaptureType type, {String? appendTo}) async {
+    // Before the first load the list is empty, not right: persisting now would
+    // overwrite recordings.json with just this capture (see addTextNote).
+    if (!_initialized) {
+      if (!_indexUnreadable) {
+        _error = 'Captures are still loading — try again.';
+        notifyListeners();
+      }
+      return;
+    }
     if (_isRecording || _isBusy) return;
     _isBusy = true;
     _error = null;
@@ -2639,6 +2660,15 @@ class RecordingsController extends ChangeNotifier {
     String? appendTo,
     String? mimeType,
   }) async {
+    // Before the first load the list is empty, not right: persisting now would
+    // overwrite recordings.json with just this capture (see addTextNote).
+    if (!_initialized) {
+      if (!_indexUnreadable) {
+        _error = 'Captures are still loading — try again.';
+        notifyListeners();
+      }
+      return;
+    }
     if (_isRecording || _isBusy) return;
     _isBusy = true;
     _error = null;

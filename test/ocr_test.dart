@@ -100,6 +100,7 @@ void main() {
         ocrService: const _StubOcr('rozpoznany tekst'),
         mediaPicker: _FakePicker(PickedMedia(file: src, mimeType: 'image/png')),
       );
+      await controller.initialize();
       addTearDown(controller.dispose);
 
       await controller.addUpload(CaptureType.image);
@@ -127,6 +128,7 @@ void main() {
             PickedMedia(file: src, mimeType: 'image/png'),
           ),
         );
+        await controller.initialize();
         addTearDown(controller.dispose);
 
         await controller.addUpload(CaptureType.image);
@@ -150,6 +152,7 @@ void main() {
         ocrService: const _StubOcr('first engine'),
         mediaPicker: _FakePicker(PickedMedia(file: src, mimeType: 'image/png')),
       );
+      await controller.initialize();
       addTearDown(controller.dispose);
 
       await controller.addUpload(CaptureType.image);

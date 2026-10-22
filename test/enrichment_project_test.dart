@@ -449,6 +449,7 @@ void main() {
             _Repo(dir),
             enrichment: _Enrichment(const EnrichmentResult()),
           )..activeProjectId = 'a';
+          await c.initialize();
           await c.startRecording();
           c.setRecordingProject(pick);
           await c.stopRecording();
@@ -462,6 +463,7 @@ void main() {
         _Repo(dir),
         enrichment: _Enrichment(const EnrichmentResult()),
       )..activeProjectId = 'a';
+      await c.initialize();
       await c.startRecording();
       await c.stopRecording();
       expect(c.recordings.first.projectAuto, isTrue);
@@ -601,6 +603,7 @@ void main() {
         player: _FakePlayer(),
         mediaPicker: _Picker(PickedMedia(file: picked, mimeType: 'image/png')),
       )..activeProjectId = 'a';
+      await c.initialize();
       await c.addUpload(CaptureType.image);
       await c.addImportedFile(picked, CaptureType.image, mimeType: 'image/png');
       await c.waitForProcessing();
