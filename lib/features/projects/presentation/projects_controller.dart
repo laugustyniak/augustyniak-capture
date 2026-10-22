@@ -90,9 +90,7 @@ class ProjectsController extends ChangeNotifier {
         description: _optional(description),
         sessionName: _optional(sessionName),
         defaultAgent: defaultAgent,
-        agentSettings: Map<AgentKind, AgentSettings>.unmodifiable(
-          agentSettings,
-        ),
+        agentSettings: Map<AgentKind, AgentSettings>.unmodifiable(agentSettings),
       ),
       host: commandHost,
       workspace: commandWorkspace,
@@ -209,8 +207,7 @@ class ProjectsController extends ChangeNotifier {
       // Launch settings never travel (SyncRowCodec.project): an existing
       // project keeps this device's own and a new one starts with none.
       byId[p.id] = p.copyWith(
-        agentSettings:
-            mine?.agentSettings ?? const <AgentKind, AgentSettings>{},
+        agentSettings: mine?.agentSettings ?? const <AgentKind, AgentSettings>{},
       );
     }
     await _save(byId.values.toList(), activeProjectId: _activeProjectId);

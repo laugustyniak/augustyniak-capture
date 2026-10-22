@@ -121,19 +121,19 @@ void main() {
 
   test(
     'active falls back to the first project when the stored id is unknown',
-    () async {
-      const List<Project> projects = <Project>[
-        Project(id: 'first', name: 'First', repoPath: '/work/first'),
-        Project(id: 'second', name: 'Second', repoPath: '/work/second'),
-      ];
-      await repository.saveAll(projects, activeProjectId: 'gone');
+      () async {
+    const List<Project> projects = <Project>[
+      Project(id: 'first', name: 'First', repoPath: '/work/first'),
+      Project(id: 'second', name: 'Second', repoPath: '/work/second'),
+    ];
+    await repository.saveAll(projects, activeProjectId: 'gone');
 
-      final ProjectsController controller = ProjectsController(
-        repository: repository,
-      );
-      await controller.initialize();
+    final ProjectsController controller = ProjectsController(
+      repository: repository,
+    );
+    await controller.initialize();
 
-      expect(controller.activeProjectId, 'first');
+    expect(controller.activeProjectId, 'first');
     },
   );
 
@@ -192,23 +192,23 @@ void main() {
   test(
     'a detached launch is passed through, and attach goes by name',
     () async {
-      final _CapturingLauncher launcher = _CapturingLauncher();
-      final ProjectsController controller = ProjectsController(
-        repository: repository,
-        launcher: launcher,
-      );
+    final _CapturingLauncher launcher = _CapturingLauncher();
+    final ProjectsController controller = ProjectsController(
+      repository: repository,
+      launcher: launcher,
+    );
       const Project project = Project(id: 'p', name: 'P', repoPath: '/work/p');
 
-      final AgentSessionLaunchResult? result = await controller.launch(
-        project,
-        AgentKind.codex,
-        detached: true,
-      );
-      await controller.attach(result!.sessionName);
+    final AgentSessionLaunchResult? result = await controller.launch(
+      project,
+      AgentKind.codex,
+      detached: true,
+    );
+    await controller.attach(result!.sessionName);
 
-      expect(launcher.requests.single.detached, isTrue);
-      expect(result.detached, isTrue);
-      expect(launcher.attached, <String>['test-session']);
+    expect(launcher.requests.single.detached, isTrue);
+    expect(result.detached, isTrue);
+    expect(launcher.attached, <String>['test-session']);
     },
   );
 
@@ -354,36 +354,36 @@ void main() {
   test(
     'applySyncedProjectDelete does not resurrect on the next select — I3',
     () async {
-      final ProjectsController controller = ProjectsController(
-        repository: repository,
-      );
-      await controller.initialize();
-      final Project first = await controller.create(
-        name: 'First',
-        repoPath: '/work/first',
-      );
-      final Project second = await controller.create(
-        name: 'Second',
-        repoPath: '/work/second',
-      );
+    final ProjectsController controller = ProjectsController(
+      repository: repository,
+    );
+    await controller.initialize();
+    final Project first = await controller.create(
+      name: 'First',
+      repoPath: '/work/first',
+    );
+    final Project second = await controller.create(
+      name: 'Second',
+      repoPath: '/work/second',
+    );
 
-      // Unknown id: no-op, per the SyncApplier "tolerate an unknown id" rule.
-      await controller.applySyncedProjectDelete('does-not-exist');
-      expect(controller.projects, hasLength(2));
+    // Unknown id: no-op, per the SyncApplier "tolerate an unknown id" rule.
+    await controller.applySyncedProjectDelete('does-not-exist');
+    expect(controller.projects, hasLength(2));
 
-      await controller.applySyncedProjectDelete(second.id);
-      expect(controller.projects.map((Project p) => p.id), <String>[first.id]);
+    await controller.applySyncedProjectDelete(second.id);
+    expect(controller.projects.map((Project p) => p.id), <String>[first.id]);
 
-      // A later, unrelated select must not bring the deleted project back.
-      await controller.select(first.id);
-      final ProjectsController reloaded = ProjectsController(
+    // A later, unrelated select must not bring the deleted project back.
+    await controller.select(first.id);
+    final ProjectsController reloaded = ProjectsController(
         repository: ProjectsRepository(
           directoryProvider: () async => directory,
         ),
-      );
-      await reloaded.initialize();
-      expect(reloaded.projects.map((Project p) => p.id), <String>[first.id]);
-      expect(reloaded.activeProjectId, first.id);
+    );
+    await reloaded.initialize();
+    expect(reloaded.projects.map((Project p) => p.id), <String>[first.id]);
+    expect(reloaded.activeProjectId, first.id);
     },
   );
 

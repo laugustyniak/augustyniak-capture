@@ -338,13 +338,13 @@ void main() {
     final String plainId = controller.projects.single.id;
     final Project armed =
         await tester.runAsync(
-              () => controller.create(
-                name: 'Armed',
-                repoPath: '/work/armed',
-                agentSettings: const <AgentKind, AgentSettings>{
-                  AgentKind.codex: AgentSettings(skipPermissions: true),
-                },
-              ),
+      () => controller.create(
+        name: 'Armed',
+        repoPath: '/work/armed',
+        agentSettings: const <AgentKind, AgentSettings>{
+          AgentKind.codex: AgentSettings(skipPermissions: true),
+        },
+      ),
             )
             as Project;
 

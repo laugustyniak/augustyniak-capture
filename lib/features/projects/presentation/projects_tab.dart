@@ -85,28 +85,29 @@ class ProjectsTab extends StatelessWidget {
                   'or Antigravity with the right working directory and context.',
             )
           else
-            ...projects.map((Project project) {
-              final int count =
-                  recordingsController?.recordings
-                      .where((Recording r) => r.projectId == project.id)
-                      .length ??
-                  0;
-              return Padding(
-                padding: const EdgeInsets.only(bottom: 11),
-                child: _ProjectCard(
-                  key: ValueKey<String>('project-${project.id}'),
-                  project: project,
-                  controller: controller,
-                  active: controller.activeProjectId == project.id,
-                  onSelect: () => _select(context, project),
-                  onEdit: () => _openEditor(context, project),
-                  onDelete: () => _confirmDelete(context, project),
-                  onViewCaptures: () => _openCaptures(context, project),
-                  capturesCount: count,
-                  agentJobs: agentJobs,
-                ),
-              );
-            }),
+            ...projects.map(
+              (Project project) {
+                final int count = recordingsController?.recordings
+                        .where((Recording r) => r.projectId == project.id)
+                        .length ??
+                    0;
+                return Padding(
+                  padding: const EdgeInsets.only(bottom: 11),
+                  child: _ProjectCard(
+                    key: ValueKey<String>('project-${project.id}'),
+                    project: project,
+                    controller: controller,
+                    active: controller.activeProjectId == project.id,
+                    onSelect: () => _select(context, project),
+                    onEdit: () => _openEditor(context, project),
+                    onDelete: () => _confirmDelete(context, project),
+                    onViewCaptures: () => _openCaptures(context, project),
+                    capturesCount: count,
+                    agentJobs: agentJobs,
+                  ),
+                );
+              },
+            ),
           const SizedBox(height: 16),
           FilledButton.icon(
             key: const ValueKey<String>('add-project'),
@@ -294,10 +295,7 @@ class _ProjectCard extends StatelessWidget {
                             ),
                             if (active) ...<Widget>[
                               const SizedBox(width: 8),
-                              StatusPill(
-                                label: 'ACTIVE',
-                                color: Console.accent,
-                              ),
+                              StatusPill(label: 'ACTIVE', color: Console.accent),
                             ],
                             if (project.agentSettings.values.any(
                               (AgentSettings settings) =>
@@ -333,10 +331,7 @@ class _ProjectCard extends StatelessWidget {
                     },
                     itemBuilder: (BuildContext context) =>
                         const <PopupMenuEntry<String>>[
-                          PopupMenuItem<String>(
-                            value: 'edit',
-                            child: Text('Edit'),
-                          ),
+                          PopupMenuItem<String>(value: 'edit', child: Text('Edit')),
                           PopupMenuItem<String>(
                             value: 'delete',
                             child: Text('Delete'),

@@ -300,31 +300,31 @@ void main() {
   testWidgets('launches in the background by default and offers the way in', (
     WidgetTester tester,
   ) async {
-    final _FakeLauncher launcher = _FakeLauncher();
-    final RecordingsController controller = await controllerWith(launcher);
+      final _FakeLauncher launcher = _FakeLauncher();
+      final RecordingsController controller = await controllerWith(launcher);
 
-    await openSheet(tester, controller);
-    await tester.tap(find.text('LAUNCH SESSION'));
-    await settleIo(tester);
+      await openSheet(tester, controller);
+      await tester.tap(find.text('LAUNCH SESSION'));
+      await settleIo(tester);
 
-    final String session =
-        'augustyniak-acme-p1-${launcher.requests.single.agent.executable}';
-    expect(launcher.requests.single.detached, isTrue);
-    // Stays open: with no window, the sheet is the only thing that says
-    // where the session went and how to reach it.
-    expect(find.text('Session started in the background'), findsOneWidget);
-    expect(find.text('zellij attach $session'), findsOneWidget);
-    // The capture is closed — the prompt was delivered.
-    expect(controller.recordings.single.isProcessedByUser, isTrue);
+      final String session =
+          'augustyniak-acme-p1-${launcher.requests.single.agent.executable}';
+      expect(launcher.requests.single.detached, isTrue);
+      // Stays open: with no window, the sheet is the only thing that says
+      // where the session went and how to reach it.
+      expect(find.text('Session started in the background'), findsOneWidget);
+      expect(find.text('zellij attach $session'), findsOneWidget);
+      // The capture is closed — the prompt was delivered.
+      expect(controller.recordings.single.isProcessedByUser, isTrue);
 
-    await tester.ensureVisible(
-      find.byKey(const ValueKey<String>('handoff-attach')),
-    );
-    await tester.tap(find.byKey(const ValueKey<String>('handoff-attach')));
-    await settleIo(tester);
+      await tester.ensureVisible(
+        find.byKey(const ValueKey<String>('handoff-attach')),
+      );
+      await tester.tap(find.byKey(const ValueKey<String>('handoff-attach')));
+      await settleIo(tester);
 
-    expect(launcher.attached, <String>[session]);
-    expect(find.text('DONE'), findsOneWidget);
+      expect(launcher.attached, <String>[session]);
+      expect(find.text('DONE'), findsOneWidget);
   });
 
   testWidgets('a native background handoff shows the durable job notice', (
@@ -335,7 +335,7 @@ void main() {
         id: '00000000-0000-4000-8000-000000000001',
         backend: NativeAgentBackend.codex,
       ),
-    );
+  );
     final RecordingsController controller = await controllerWith(launcher);
 
     await openSheet(tester, controller);
@@ -395,9 +395,9 @@ void main() {
     await tester.tap(find.text('LAUNCH SESSION'));
     await settleIo(tester);
     await tester.ensureVisible(
-      find.byKey(const ValueKey<String>('handoff-attach')),
-    );
-    await tester.tap(find.byKey(const ValueKey<String>('handoff-attach')));
+        find.byKey(const ValueKey<String>('handoff-attach')),
+      );
+      await tester.tap(find.byKey(const ValueKey<String>('handoff-attach')));
     await settleIo(tester);
 
     expect(launcher.attached, isEmpty);

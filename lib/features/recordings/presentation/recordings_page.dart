@@ -157,7 +157,7 @@ class RecordingsPage extends StatefulWidget {
   /// dependency in this app follows. Null whenever Supabase was not
   /// initialised, which leaves Supabase sync off.
   final SyncTransport Function(String ownerId, LogSink log)?
-  syncTransportResolver;
+      syncTransportResolver;
 
   /// Supabase Storage for capture media; null under the same condition as
   /// [syncTransportResolver].
@@ -851,10 +851,7 @@ class _RecordingsPageState extends State<RecordingsPage>
         controller.syncCloud().then<void>(
           (_) {},
           onError: (Object error) {
-            logs.log(
-              'Launch Supabase sync failed: $error',
-              level: LogLevel.warn,
-            );
+            logs.log('Launch Supabase sync failed: $error', level: LogLevel.warn);
           },
         ),
       );
@@ -957,14 +954,12 @@ class _RecordingsPageState extends State<RecordingsPage>
             audio: settings.audio,
           );
     controller.enrichmentService = settings.enrichmentService;
-    controller.connectionReasoner =
-        settings.enrichmentService is ConnectionReasoner
+    controller.connectionReasoner = settings.enrichmentService is ConnectionReasoner
         ? settings.enrichmentService as ConnectionReasoner
         : const ReviewConnectionReasoner();
     // Clean-up rides the enrichment profile too: the same chat endpoint, asked
     // for plain text instead of JSON.
-    controller.transcriptCleaner =
-        settings.enrichmentService is TranscriptCleaner
+    controller.transcriptCleaner = settings.enrichmentService is TranscriptCleaner
         ? settings.enrichmentService as TranscriptCleaner
         : const DisabledTranscriptCleaner();
     controller.autoCleanup = settings.autoCleanup;
@@ -1115,16 +1110,14 @@ class _RecordingsPageState extends State<RecordingsPage>
   Future<void> _pasteCapture() async {
     final pasted = await const ClipboardCaptureReader().read();
     final Set<String> before = controller.recordings
-        .map((Recording item) => item.id)
-        .toSet();
+        .map((Recording item) => item.id).toSet();
     if (pasted.file != null && pasted.type != null) {
       final File file = pasted.file!;
       try {
         await controller.addImportedFile(
           file,
           pasted.type!,
-          mimeType:
-              pasted.mimeType ?? FilePickerMediaPicker.mimeForPath(file.path),
+          mimeType: pasted.mimeType ?? FilePickerMediaPicker.mimeForPath(file.path),
         );
       } finally {
         if (pasted.temporary) {
@@ -1213,10 +1206,8 @@ class _RecordingsPageState extends State<RecordingsPage>
               final Widget shell = CallbackShortcuts(
                 bindings: <ShortcutActivator, VoidCallback>{
                   // Zoom in: Ctrl/Cmd + = or +, plus keypad
-                  const SingleActivator(
-                    LogicalKeyboardKey.equal,
-                    control: true,
-                  ): settings.zoomIn,
+                  const SingleActivator(LogicalKeyboardKey.equal, control: true):
+                      settings.zoomIn,
                   const SingleActivator(LogicalKeyboardKey.equal, meta: true):
                       settings.zoomIn,
                   const SingleActivator(
@@ -1243,10 +1234,8 @@ class _RecordingsPageState extends State<RecordingsPage>
                   ): settings.zoomIn,
 
                   // Zoom out: Ctrl/Cmd + -
-                  const SingleActivator(
-                    LogicalKeyboardKey.minus,
-                    control: true,
-                  ): settings.zoomOut,
+                  const SingleActivator(LogicalKeyboardKey.minus, control: true):
+                      settings.zoomOut,
                   const SingleActivator(LogicalKeyboardKey.minus, meta: true):
                       settings.zoomOut,
                   const SingleActivator(
@@ -1263,282 +1252,284 @@ class _RecordingsPageState extends State<RecordingsPage>
                     LogicalKeyboardKey.digit0,
                     control: true,
                   ): settings.resetZoom,
-                  const SingleActivator(LogicalKeyboardKey.digit0, meta: true):
-                      settings.resetZoom,
+                  const SingleActivator(
+                    LogicalKeyboardKey.digit0,
+                    meta: true,
+                  ): settings.resetZoom,
                   const SingleActivator(
                     LogicalKeyboardKey.numpad0,
                     control: true,
                   ): settings.resetZoom,
-                  const SingleActivator(LogicalKeyboardKey.numpad0, meta: true):
-                      settings.resetZoom,
+                  const SingleActivator(
+                    LogicalKeyboardKey.numpad0,
+                    meta: true,
+                  ): settings.resetZoom,
                 },
                 child: CelebrationOverlay(
                   controller: gamification,
                   child: Scaffold(
-                    // No AppBar: each tab draws the design's own header (accent eyebrow +
-                    // large title) inside its scroll area, so the title scrolls with the
-                    // content instead of sitting in a separate bar above it.
-                    body: Row(
-                      children: <Widget>[
-                        // Outside the Stack, so the rail is a sibling of the page
-                        // rather than an overlay on it — a capture card must never
-                        // scroll under the navigation. It goes with the bottom bar
-                        // while recording for the same reason that one does: the
-                        // capture screen is single-purpose.
-                        if (wide && !recording) _buildRail(),
-                        Expanded(
-                          child: Stack(
-                            children: <Widget>[
-                              // IndexedStack so the Queue tab keeps its search text and filter
-                              // while the user visits Models/Logs/Config.
-                              //
-                              IndexedStack(
-                                index: navigationIndex,
-                                children: <Widget>[
-                                  QueueTab(
-                                    controller: controller,
-                                    dailyConnectionsService:
-                                        dailyConnectionsService,
-                                    projects: projects,
-                                    initialProjectId:
-                                        activeQueueProjectFilterId,
-                                    // The amber dot on the Models destination
-                                    // already says this, but it says it where
-                                    // nobody on a first run is looking. The
-                                    // queue is the screen the app opens on and
-                                    // the one an unconfigured install leaves
-                                    // empty, so the prompt belongs there too.
-                                    hasTranscriptionProfile:
-                                        settings.activeProfile != null,
-                                    onConfigureModels: () => setState(
-                                      () => navigationIndex = modelsIndex,
-                                    ),
+                  // No AppBar: each tab draws the design's own header (accent eyebrow +
+                  // large title) inside its scroll area, so the title scrolls with the
+                  // content instead of sitting in a separate bar above it.
+                  body: Row(
+                    children: <Widget>[
+                      // Outside the Stack, so the rail is a sibling of the page
+                      // rather than an overlay on it — a capture card must never
+                      // scroll under the navigation. It goes with the bottom bar
+                      // while recording for the same reason that one does: the
+                      // capture screen is single-purpose.
+                      if (wide && !recording) _buildRail(),
+                      Expanded(
+                        child: Stack(
+                          children: <Widget>[
+                            // IndexedStack so the Queue tab keeps its search text and filter
+                            // while the user visits Models/Logs/Config.
+                            //
+                            IndexedStack(
+                              index: navigationIndex,
+                              children: <Widget>[
+                                QueueTab(
+                                  controller: controller,
+                                  dailyConnectionsService: dailyConnectionsService,
+                                  projects: projects,
+                                  initialProjectId:
+                                      activeQueueProjectFilterId,
+                                  // The amber dot on the Models destination
+                                  // already says this, but it says it where
+                                  // nobody on a first run is looking. The
+                                  // queue is the screen the app opens on and
+                                  // the one an unconfigured install leaves
+                                  // empty, so the prompt belongs there too.
+                                  hasTranscriptionProfile:
+                                      settings.activeProfile != null,
+                                  onConfigureModels: () => setState(
+                                    () => navigationIndex = modelsIndex,
+                                  ),
                                     density: settings.queueDensity,
                                     onDensityChanged: settings.setQueueDensity,
-                                    onAppendRecording: (String id) =>
-                                        _startRecording(appendTo: id),
-                                    onAppendNote: (String id) =>
-                                        _composeTextNote(context, appendTo: id),
-                                    onAppendUpload:
-                                        (String id, CaptureType type) =>
-                                            controller.addUpload(
-                                              type,
-                                              appendTo: id,
-                                            ),
-                                    // Null until `_bootstrap()`'s database open
-                                    // resolves — same nullable resolver shape
-                                    // the PRICING section below already reads
-                                    // through.
-                                    usageRepository: _usageRepository,
-                                    storagePrice: settings.storagePrice,
-                                    e2ee: widget.e2eeService,
+                                  onAppendRecording: (String id) =>
+                                      _startRecording(appendTo: id),
+                                  onAppendNote: (String id) =>
+                                      _composeTextNote(context, appendTo: id),
+                                  onAppendUpload:
+                                      (String id, CaptureType type) =>
+                                          controller.addUpload(
+                                            type,
+                                            appendTo: id,
+                                          ),
+                                  // Null until `_bootstrap()`'s database open
+                                  // resolves — same nullable resolver shape
+                                  // the PRICING section below already reads
+                                  // through.
+                                  usageRepository: _usageRepository,
+                                  storagePrice: settings.storagePrice,
+                                  e2ee: widget.e2eeService,
+                                ),
+                                ConsolePageWidth(
+                                  child: TimerTab(
+                                    controller: timer,
+                                    settings: settings,
+                                    momentum: momentum,
                                   ),
-                                  ConsolePageWidth(
-                                    child: TimerTab(
-                                      controller: timer,
-                                      settings: settings,
-                                      momentum: momentum,
-                                    ),
+                                ),
+                                ConsolePageWidth(
+                                  child: WorkDashboardTab(
+                                    projects: projects,
+                                    recordings: controller,
+                                    timer: timer,
+                                    active: navigationIndex == workIndex,
+                                    onNavigateToQueue: (String projectId) {
+                                      setState(() {
+                                        activeQueueProjectFilterId = projectId;
+                                        navigationIndex = queueIndex;
+                                      });
+                                    },
                                   ),
-                                  ConsolePageWidth(
-                                    child: WorkDashboardTab(
-                                      projects: projects,
-                                      recordings: controller,
-                                      timer: timer,
-                                      active: navigationIndex == workIndex,
-                                      onNavigateToQueue: (String projectId) {
-                                        setState(() {
-                                          activeQueueProjectFilterId =
-                                              projectId;
-                                          navigationIndex = queueIndex;
-                                        });
-                                      },
-                                    ),
-                                  ),
-                                  ConsolePageWidth(
-                                    child: ProjectsTab(
-                                      controller: projects,
+                                ),
+                                ConsolePageWidth(
+                                  child: ProjectsTab(
+                                    controller: projects,
                                       agentJobs:
                                           TerminalLauncher.isSupportedPlatform
                                           ? agentJobs
                                           : null,
-                                      recordingsController: controller,
-                                      // Read off the settings controller rather
-                                      // than held, on the same rule as the
-                                      // transcription and enrichment services:
-                                      // an address edited in Config reaches the
-                                      // next binding without rebuilding the tab.
-                                      commandClient: settings.commandClient,
-                                      onNavigateToQueue: (String projectId) {
-                                        setState(() {
-                                          activeQueueProjectFilterId =
-                                              projectId;
-                                          navigationIndex = queueIndex;
-                                        });
-                                      },
+                                    recordingsController: controller,
+                                    // Read off the settings controller rather
+                                    // than held, on the same rule as the
+                                    // transcription and enrichment services:
+                                    // an address edited in Config reaches the
+                                    // next binding without rebuilding the tab.
+                                    commandClient: settings.commandClient,
+                                    onNavigateToQueue: (String projectId) {
+                                      setState(() {
+                                        activeQueueProjectFilterId = projectId;
+                                        navigationIndex = queueIndex;
+                                      });
+                                    },
+                                  ),
+                                ),
+                                ConsolePageWidth(
+                                  child: ClipboardTab(
+                                    watcherService: clipboardWatcher,
+                                    recordingsController: controller,
+                                  ),
+                                ),
+                                ConsolePageWidth(
+                                  child: ModelsTab(controller: settings),
+                                ),
+                                ConsolePageWidth(
+                                  child: LogsTab(store: logs),
+                                ),
+                                ConsolePageWidth(
+                                  child: ConfigTab(
+                                    controller: settings,
+                                    authController: widget.authController,
+                                    e2ee: widget.e2eeService,
+                                    recordingsController: controller,
+                                    storagePath: storagePath,
+                                    recordingsCount:
+                                        controller.recordings.length,
+                                    logCount: logs.events.length,
+                                    onOpenModels: () => setState(
+                                      () => navigationIndex = modelsIndex,
                                     ),
-                                  ),
-                                  ConsolePageWidth(
-                                    child: ClipboardTab(
-                                      watcherService: clipboardWatcher,
-                                      recordingsController: controller,
-                                    ),
-                                  ),
-                                  ConsolePageWidth(
-                                    child: ModelsTab(controller: settings),
-                                  ),
-                                  ConsolePageWidth(child: LogsTab(store: logs)),
-                                  ConsolePageWidth(
-                                    child: ConfigTab(
-                                      controller: settings,
-                                      authController: widget.authController,
-                                      e2ee: widget.e2eeService,
-                                      recordingsController: controller,
-                                      storagePath: storagePath,
-                                      recordingsCount:
-                                          controller.recordings.length,
-                                      logCount: logs.events.length,
-                                      onOpenModels: () => setState(
-                                        () => navigationIndex = modelsIndex,
-                                      ),
-                                      // Reported on in the enrichment-context section: which
-                                      // file each repository actually contributes, and which
-                                      // paths are wrong. The tab never edits them.
-                                      projects: projects.projects,
-                                      showShortcuts: _isDesktop,
-                                      rejectedShortcuts: rejectedShortcuts,
-                                      runWithHotkeysSuspended:
-                                          _runWithHotkeysSuspended,
-                                      // The backfill: every capture taken before a
-                                      // vault was configured, copied across on
-                                      // demand. The queue is the recordings
-                                      // controller's, so the sweep has to be its
-                                      // call rather than the settings tab's.
-                                      onMirrorAll: controller.mirrorAll,
-                                      // PRICING section. `_usageRepository` is
-                                      // null until `_bootstrap()`'s database
-                                      // open resolves, so every read here falls
-                                      // back to the same "nothing yet" value the
-                                      // section would show on a fresh install.
-                                      thisMonthUsd:
-                                          _usageRepository?.totalSince(
-                                            DateTime(
-                                              DateTime.now().year,
-                                              DateTime.now().month,
-                                            ),
-                                          ) ??
-                                          UsageTotal.none,
-                                      allTimeUsd:
-                                          _usageRepository?.totalAll() ??
-                                          UsageTotal.none,
-                                      // Only the source files reach the Storage
-                                      // bucket, so the measured media total is
-                                      // the whole input to the monthly-rate
-                                      // formula.
-                                      storageBytes: controller.recordings
-                                          .fold<int>(
-                                            0,
-                                            (int sum, Recording r) =>
-                                                sum + r.sizeBytes,
+                                    // Reported on in the enrichment-context section: which
+                                    // file each repository actually contributes, and which
+                                    // paths are wrong. The tab never edits them.
+                                    projects: projects.projects,
+                                    showShortcuts: _isDesktop,
+                                    rejectedShortcuts: rejectedShortcuts,
+                                    runWithHotkeysSuspended:
+                                        _runWithHotkeysSuspended,
+                                    // The backfill: every capture taken before a
+                                    // vault was configured, copied across on
+                                    // demand. The queue is the recordings
+                                    // controller's, so the sweep has to be its
+                                    // call rather than the settings tab's.
+                                    onMirrorAll: controller.mirrorAll,
+                                    // PRICING section. `_usageRepository` is
+                                    // null until `_bootstrap()`'s database
+                                    // open resolves, so every read here falls
+                                    // back to the same "nothing yet" value the
+                                    // section would show on a fresh install.
+                                    thisMonthUsd:
+                                        _usageRepository?.totalSince(
+                                          DateTime(
+                                            DateTime.now().year,
+                                            DateTime.now().month,
                                           ),
-                                      storagePrice: settings.storagePrice,
-                                      priceBook: PriceBook(
-                                        overrides:
-                                            settings.settings.priceOverrides,
-                                      ),
-                                      models: _usageModels(),
-                                      missingRateCounts:
-                                          _usageRepository
-                                              ?.missingRateCounts() ??
-                                          const <String, MissingRateInfo>{},
-                                      unknownQuantityCount:
-                                          _usageRepository
-                                              ?.unknownQuantityCount() ??
+                                        ) ??
+                                        UsageTotal.none,
+                                    allTimeUsd:
+                                        _usageRepository?.totalAll() ??
+                                        UsageTotal.none,
+                                    // Only the source files reach the Storage
+                                    // bucket, so the measured media total is
+                                    // the whole input to the monthly-rate
+                                    // formula.
+                                    storageBytes: controller.recordings
+                                        .fold<int>(
                                           0,
-                                      onRateChanged: _onPriceRateChanged,
-                                      onRefreshRate: _onRefreshPriceRate,
-                                      onBackfillClosures:
-                                          controller.backfillClosures,
-                                      onExportArchive: backup.export,
-                                      onImportArchive: _importArchive,
+                                          (int sum, Recording r) =>
+                                              sum + r.sizeBytes,
+                                        ),
+                                    storagePrice: settings.storagePrice,
+                                    priceBook: PriceBook(
+                                      overrides:
+                                          settings.settings.priceOverrides,
                                     ),
+                                    models: _usageModels(),
+                                    missingRateCounts:
+                                        _usageRepository?.missingRateCounts() ??
+                                        const <String, MissingRateInfo>{},
+                                    unknownQuantityCount:
+                                        _usageRepository
+                                            ?.unknownQuantityCount() ??
+                                        0,
+                                    onRateChanged: _onPriceRateChanged,
+                                    onRefreshRate: _onRefreshPriceRate,
+                                    onBackfillClosures:
+                                        controller.backfillClosures,
+                                    onExportArchive: backup.export,
+                                    onImportArchive: _importArchive,
                                   ),
-                                ],
+                                ),
+                              ],
+                            ),
+                            // The compact bar and the rail both carry the capture actions
+                            // themselves; only the tablet form in between still needs the
+                            // floating dock.
+                            if (!compact &&
+                                !wide &&
+                                navigationIndex == queueIndex &&
+                                !recording)
+                              Positioned(
+                                left: 0,
+                                right: 0,
+                                bottom: 0,
+                                child: CaptureDock(
+                                  controller: controller,
+                                  onOpenCaptureMenu: () =>
+                                      _openCaptureMenu(context),
+                                ),
                               ),
-                              // The compact bar and the rail both carry the capture actions
-                              // themselves; only the tablet form in between still needs the
-                              // floating dock.
-                              if (!compact &&
-                                  !wide &&
-                                  navigationIndex == queueIndex &&
-                                  !recording)
-                                Positioned(
-                                  left: 0,
-                                  right: 0,
-                                  bottom: 0,
-                                  child: CaptureDock(
+                            // Overlaid rather than swapped into the IndexedStack: the Queue
+                            // underneath keeps its search text and scroll position for when
+                            // the capture finishes.
+                            if (recording)
+                              Positioned.fill(
+                                child: ColoredBox(
+                                  color: Console.background,
+                                  child: RecordingView(
                                     controller: controller,
-                                    onOpenCaptureMenu: () =>
-                                        _openCaptureMenu(context),
+                                    projects: projects.projects,
                                   ),
                                 ),
-                              // Overlaid rather than swapped into the IndexedStack: the Queue
-                              // underneath keeps its search text and scroll position for when
-                              // the capture finishes.
-                              if (recording)
-                                Positioned.fill(
-                                  child: ColoredBox(
-                                    color: Console.background,
-                                    child: RecordingView(
-                                      controller: controller,
-                                      projects: projects.projects,
-                                    ),
-                                  ),
-                                ),
-                            ],
-                          ),
+                              ),
+                          ],
                         ),
-                      ],
-                    ),
-                    // Hidden while recording — the capture screen is a single-purpose
-                    // view, and switching tabs mid-take is not a thing to invite.
-                    // Also hidden once the rail is up: five destinations with two
-                    // homes on one screen is two navigations.
-                    bottomNavigationBar: recording || wide
-                        ? null
-                        : compact
-                        ? CaptureNavBar(
-                            destinations: <CaptureNavDestination>[
-                              for (
-                                int index = 0;
-                                index < destinations.length;
-                                index++
-                              )
-                                CaptureNavDestination(
-                                  icon: destinations[index].icon,
-                                  label: destinations[index].label,
-                                  shortLabel: destinations[index].shortLabel,
-                                  warn:
-                                      index == modelsIndex &&
-                                      settings.activeProfile == null,
-                                ),
-                            ],
-                            selectedIndex: navigationIndex,
-                            onSelected: (int value) =>
-                                setState(() => navigationIndex = value),
-                            busy: controller.isBusy,
-                            onRecord: _startRecording,
-                            onOpenCaptureMenu: () => _openCaptureMenu(context),
-                          )
-                        : _buildDesktopNavigationBar(),
+                      ),
+                    ],
                   ),
+                  // Hidden while recording — the capture screen is a single-purpose
+                  // view, and switching tabs mid-take is not a thing to invite.
+                  // Also hidden once the rail is up: five destinations with two
+                  // homes on one screen is two navigations.
+                  bottomNavigationBar: recording || wide
+                      ? null
+                      : compact
+                      ? CaptureNavBar(
+                          destinations: <CaptureNavDestination>[
+                            for (
+                              int index = 0;
+                              index < destinations.length;
+                              index++
+                            )
+                              CaptureNavDestination(
+                                icon: destinations[index].icon,
+                                label: destinations[index].label,
+                                shortLabel: destinations[index].shortLabel,
+                                warn:
+                                    index == modelsIndex &&
+                                    settings.activeProfile == null,
+                              ),
+                          ],
+                          selectedIndex: navigationIndex,
+                          onSelected: (int value) =>
+                              setState(() => navigationIndex = value),
+                          busy: controller.isBusy,
+                          onRecord: _startRecording,
+                          onOpenCaptureMenu: () => _openCaptureMenu(context),
+                        )
+                      : _buildDesktopNavigationBar(),
                 ),
-              );
+              ),
+            );
               return PasteCaptureShortcut(
                 onPaste: () => unawaited(_pasteCapture()),
                 child: shell,
               );
-            },
+          },
           );
         },
       ),

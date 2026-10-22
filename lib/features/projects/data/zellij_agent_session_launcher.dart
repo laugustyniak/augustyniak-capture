@@ -85,12 +85,7 @@ class ZellijAgentSessionLauncher implements AgentSessionLauncher {
       // caller surfaces the attach the same way it does for a terminal launch
       // — the agent inside never received this prompt.
       if (!exists) {
-        await _startInBackground(
-          request,
-          zellij,
-          sessionName,
-          canonicalRepoPath,
-        );
+        await _startInBackground(request, zellij, sessionName, canonicalRepoPath);
       }
       return AgentSessionLaunchResult(
         sessionName: sessionName,
@@ -239,10 +234,9 @@ class ZellijAgentSessionLauncher implements AgentSessionLauncher {
   /// race `open`, which returns long before Ghostty has execed anything.
   Future<String> _writeLayout(String sessionName, String layout) async {
     try {
-      final Directory directory =
-          await (_layoutDirectory ?? Directory.systemTemp).createTemp(
-            'augustyniak-capture-',
-          );
+      final Directory directory = await (_layoutDirectory ??
+              Directory.systemTemp)
+          .createTemp('augustyniak-capture-');
       await restrictDirectoryToOwner(directory.path);
       final File file = File(p.join(directory.path, '$sessionName.kdl'));
       await refuseSymlink(file.path);
