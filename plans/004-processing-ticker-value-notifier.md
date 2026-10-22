@@ -2,7 +2,7 @@
 
 | Field | Value |
 | --- | --- |
-| Status | TODO |
+| Status | IN REVIEW — PR #359, branch `fix/354-processing-ticker` @ `25e307e`, issue #354, advisor-reviewed 2026-10-22, manual screen check pending |
 | Written against | commit `294976b` (branch `main`), 2026-10-21 |
 | Finding | performance, high confidence on mechanism (not profiled) |
 | Effort | M (half a day; the controller change is 10 lines, the consumers and tests are the work) |
@@ -288,3 +288,11 @@ Any future "live" value shown during processing (progress %, chunk n/m) belongs 
 - `RecordingCard`'s `transcribingLabel` is used by more than the one status widget (e.g. for semantics labels or a tooltip) and the `ValueListenableBuilder` restructuring grows past ~30 lines — report the shape you found.
 - A `test/widget/` test depended on the periodic rebuild to make a frame appear (symptom: a card that used to show `TRANSCRIBING` now shows nothing until a status change). Report the test name; do not add `notifyListeners()` back.
 - `_processOne` is no longer the only place the periodic timer is created (`grep -n "_processingTickerTimer = " …` returns more than the one site at `:3942` plus null assignments).
+
+## Execution record (2026-10-22)
+
+- Executor: `coder` in `.worktrees/fix-354-processing-ticker` from `00dcc3e`; one commit `25e307e`, `Refs #354`, no attribution. PR #359.
+- Drift: line numbers shifted ~30 (plan 001 landed). **Not in the plan:** `recording_row.dart` (`RecordingRow`, `_CollapsedBadge`) also took `processingElapsed`; converted the same way. Only one test file needed the parameter change (`test/widget/cancel_processing_ui_test.dart`, two sites), not three.
+- Red evidence: new test failed to compile (`getter 'processingTicker' isn't defined`); sabotage with `notifyListeners()` restored failed `Expected: <0> Actual: <2>`, reverted. `notifyListeners` count in the controller 82 → 81.
+- Advisor review: controller mirrors `elapsedTicker`; every consumer hunk is the `ValueListenableBuilder` wrap; the card's switcher key stays on the base label (incidental improvement: no cross-fade per tick). Gates re-run: analyze clean, 2316 passed / 4 skipped, `processing_ticker_test` + `theme_test` 20 pass, `grep processingElapsed:` 0.
+- **Step 5 skipped** (run it and look): the desktop app on this host runs against the real library and a launch triggers sync and backfills, so the advisor did not start it. Maintainer to watch `TRANSCRIBING · mm:ss` advance on the next local run.

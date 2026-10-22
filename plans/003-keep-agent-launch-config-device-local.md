@@ -2,7 +2,7 @@
 
 | Field | Value |
 | --- | --- |
-| Status | TODO |
+| Status | IN REVIEW — PR #358, branch `fix/353-launch-config-local` @ `747e1c5`, issue #353, advisor-reviewed 2026-10-22 |
 | Written against | commit `294976b` (branch `main`), 2026-10-21 |
 | Finding | security (remote data controls local process launch flags), high confidence on the path, medium on exploitability |
 | Effort | M (half a day) |
@@ -279,3 +279,11 @@ Anything added to `AgentSettings` is automatically device-local now (the whole k
 - `applySyncedProjects` is also used by the backup restore path or by `_mergeProjects` (grep its callers) — then Step 5 may be redundant or conflict; report before editing both.
 - `Project.copyWith` does not expose `agentSettings` in your checkout.
 - You find a second code path that constructs a `Project` from remote data (grep `Project.fromJson(` in `lib/features/sync`, `lib/features/backup`, `lib/features/command`).
+
+## Execution record (2026-10-22)
+
+- Executor: `coder` in `.worktrees/fix-353-launch-config-local` from `00dcc3e`; one commit `747e1c5`, `Refs #353`, no attribution. PR #358.
+- Drift: none beyond plan 002 having landed in the same codec file.
+- **Plan bug found by the executor:** Step 4's suggested code `mine == null ? p : p.copyWith(...)` let a brand-new pulled project keep remote settings, contradicting the target state. Shipped as `p.copyWith(agentSettings: mine?.agentSettings ?? const {})`. The done-criteria grep for the literal `agentSettings: mine.agentSettings` therefore does not match; the behaviour is the one the plan asked for and the test pins it.
+- Tests: five new, each quoted red before the fix (payload key present; `skipPermissions` read; hash differs; remote settings replaced local; archive carried settings). Suite 2315 → 2319.
+- Advisor review: every `lib/` hunk traces to Steps 3–5; `repoPath` still syncs as decided; hash stability confirmed by the encoder strip. Gates re-run: analyze clean, 2319 passed / 4 skipped, `test/sync/` 222.
