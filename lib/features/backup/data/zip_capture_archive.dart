@@ -770,7 +770,11 @@ class ZipCaptureArchive implements CaptureArchive {
         final Project incoming = Project.fromJson(row as Map<String, dynamic>);
         if (!isSafeRecordId(incoming.id)) continue;
         if (known.contains(incoming.id)) continue;
-        merged.add(incoming);
+        // Launch settings are device-local (see SyncRowCodec.project); an
+        // archive made elsewhere must not decide how an agent is started here.
+        merged.add(
+          incoming.copyWith(agentSettings: const <AgentKind, AgentSettings>{}),
+        );
         known.add(incoming.id);
         changed = true;
       } catch (_) {

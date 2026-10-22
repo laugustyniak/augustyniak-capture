@@ -356,6 +356,9 @@ class RecordingsController extends ChangeNotifier {
   final ValueNotifier<Duration> _elapsedTicker = ValueNotifier<Duration>(
     Duration.zero,
   );
+  final ValueNotifier<Duration> _processingTicker = ValueNotifier<Duration>(
+    Duration.zero,
+  );
   final ValueNotifier<double> _levelTicker = ValueNotifier<double>(0);
   StreamSubscription<Amplitude>? _amplitudeSub;
   Timer? _timer;
@@ -539,6 +542,11 @@ class RecordingsController extends ChangeNotifier {
   /// controller when all you render is the running time — it repaints one label
   /// rather than the whole page.
   ValueListenable<Duration> get elapsedTicker => _elapsedTicker;
+
+  /// Ticks every 500 ms while a processing job is in flight. Listen to this
+  /// instead of the controller when all you render is the running time — it
+  /// repaints one label rather than the whole page.
+  ValueListenable<Duration> get processingTicker => _processingTicker;
 
   /// Input level, `0`–`1`, while recording. Same reasoning as [elapsedTicker]:
   /// the waveform is the only thing that repaints at this rate, so it listens
@@ -3998,12 +4006,21 @@ class RecordingsController extends ChangeNotifier {
     // otherwise queue it a second time and process it twice.
     _processingId = id; // marks this id in-flight so it can't be re-enqueued
     _processingStartTime = DateTime.now();
+    _processingTicker.value = Duration.zero;
     _processingTickerTimer?.cancel();
+    // Ticks into `processingTicker` rather than a controller-wide
+    // notification: the elapsed time repaints one label, while notifying the
+    // controller rebuilds the whole page. The status transitions above and
+    // below still notify.
     _processingTickerTimer = Timer.periodic(
       const Duration(milliseconds: 500),
       (_) {
-        if (!_disposed && _processingId != null) {
-          notifyListeners();
+        if (!_disposed &&
+            _processingId != null &&
+            _processingStartTime != null) {
+          _processingTicker.value = DateTime.now().difference(
+            _processingStartTime!,
+          );
         }
       },
     );
@@ -5096,6 +5113,7 @@ class RecordingsController extends ChangeNotifier {
     _processingTickerTimer = null;
     unawaited(_amplitudeSub?.cancel());
     _elapsedTicker.dispose();
+    _processingTicker.dispose();
     _levelTicker.dispose();
     _playerCompleteSub?.cancel();
     _playerPositionSub?.cancel();
