@@ -59,6 +59,8 @@ flutter pub get
 flutter run                       # pick a device when prompted
 ```
 
+Linux: install `keybinder-3.0 libsecret-1-dev` first (see Build & deploy).
+
 That is genuinely all — the app is fully usable with **no** API key. Recording,
 notes, uploads, storage, search, projects and hand-off all work offline. Only
 transcription, OCR and AI titling need an endpoint, and you add that in the UI.
@@ -1194,15 +1196,15 @@ enriched from the part that survived.
 
 ```bash
 flutter analyze                                  # flutter_lints + avoid_print
-flutter test                                     # 56 test files, pure Dart + widget
+flutter test                                     # pure Dart by default, a few widget tests
 flutter test test/index_durability_test.dart     # one file
 flutter test --plain-name "legacy JSON defaults" # one test
 ```
 
-**There is no server-side CI** — GitHub Actions is metered on this private repo,
-so the workflow is parked at `.github/workflows/ci.yml.disabled`. A `pre-push`
-hook runs `flutter analyze` + `flutter test` in its place. Enable it once per
-clone:
+CI (`.github/workflows/ci.yml`) runs analyze, test and the platform builds on
+every push to `main` and every PR. The `pre-push` hook runs the same
+`flutter analyze` + `flutter test` locally in seconds and is worth enabling,
+once per clone:
 
 ```bash
 git config core.hooksPath .githooks
