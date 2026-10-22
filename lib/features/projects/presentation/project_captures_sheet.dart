@@ -280,9 +280,16 @@ class _ProjectCapturesSheetState extends State<ProjectCapturesSheet> {
                                     onCancelProcessing: () => widget
                                         .recordingsController
                                         .cancelProcessing(recording.id),
-                                    processingElapsed: widget
-                                        .recordingsController
-                                        .processingElapsedFor(recording.id),
+                                    processingTicker:
+                                        widget.recordingsController
+                                                .processingElapsedFor(
+                                                  recording.id,
+                                                ) !=
+                                            null
+                                        ? widget
+                                              .recordingsController
+                                              .processingTicker
+                                        : null,
                                     onEdit: () => setState(
                                       () => _editingId = recording.id,
                                     ),

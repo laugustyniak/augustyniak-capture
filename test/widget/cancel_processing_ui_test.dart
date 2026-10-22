@@ -52,7 +52,7 @@ void main() {
         () => RecordingCard(
           recording: recording,
           isPlaying: false,
-          processingElapsed: const Duration(seconds: 12),
+          processingTicker: ValueNotifier<Duration>(const Duration(seconds: 12)),
           onCancelProcessing: () => cancelCalled = true,
           onTogglePlay: () {},
           onOpen: () {},
@@ -97,7 +97,7 @@ void main() {
           recording: recording,
           focused: false,
           isEnriching: false,
-          processingElapsed: const Duration(seconds: 7),
+          processingTicker: ValueNotifier<Duration>(const Duration(seconds: 7)),
           onCancelProcessing: () => cancelCalled = true,
           onTap: () {},
           onToggleProcessed: () {},
