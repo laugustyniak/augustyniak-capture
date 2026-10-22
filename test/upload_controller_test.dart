@@ -331,6 +331,7 @@ void main() {
     // disk. Without this, copy-then-index and index-then-copy look identical.
     expect(repo.sourcePresentAtSave, isNotEmpty);
     expect(repo.sourcePresentAtSave.first, isTrue);
+    expect(repo.statusAtSave.first, RecordingStatus.saved);
     controller.dispose();
   });
 
