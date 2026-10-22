@@ -1,5 +1,3 @@
-import 'package:path/path.dart' as p;
-
 /// What a row that arrived over the network is allowed to say about the local
 /// filesystem: **a file name, never a location.**
 ///
@@ -33,59 +31,5 @@ class SyncPathPolicy {
     final String name = raw.split(RegExp(r'[/\\]')).last;
     if (name.isEmpty || name == '.' || name == '..') return null;
     return name;
-  }
-
-  /// The `json_payload` of a pulled recording, with every path re-rooted, or
-  /// null when the row cannot be made safe.
-  ///
-  /// **The payload has to be sanitised as well as the columns**, and it is the
-  /// half that matters: `RecordingsRepository.loadAll` prefers `json_payload`
-  /// whenever it parses, so a clean `file_path` column next to a hostile
-  /// payload is a fix that changes nothing.
-  static Map<String, dynamic>? sanitizePayload(
-    Map<String, dynamic> payload, {
-    required String recordingsDirectory,
-  }) {
-    final String? source = localFileName(payload['filePath']);
-    // No usable name for the source: there is nothing to point the row at, and
-    // keeping the remote path is the whole defect. Drop the row instead.
-    if (source == null) return null;
-
-    final Map<String, dynamic> clean = Map<String, dynamic>.of(payload);
-    clean['filePath'] = p.join(recordingsDirectory, source);
-
-    final String? poster = localFileName(payload['thumbPath']);
-    // A poster is derived and safe to lose — see the `thumbPath` contract —
-    // so an unusable one is dropped rather than costing the row.
-    clean['thumbPath'] = poster == null
-        ? null
-        : p.join(recordingsDirectory, poster);
-
-    // The payload is the half `loadAll` prefers, and every segment path is
-    // acted on exactly as `filePath` is: deleted, opened, copied into the
-    // vault. A segment whose name cannot be trusted is dropped, like a poster;
-    // the row itself only falls when segment 0 is unusable, which the `source`
-    // check above already covers.
-    final Object? rawSegments = payload['segments'];
-    if (rawSegments is List) {
-      final List<Map<String, dynamic>> segments = <Map<String, dynamic>>[];
-      for (final Object? entry in rawSegments) {
-        if (entry is! Map<String, dynamic>) continue;
-        final String? name = localFileName(entry['filePath']);
-        if (name == null) continue;
-        segments.add(<String, dynamic>{
-          ...entry,
-          'filePath': p.join(recordingsDirectory, name),
-        });
-      }
-      clean['segments'] = segments;
-    }
-
-    // Artifacts name files in a project repository *on the machine that ran the
-    // agent*, and `AgentArtifactViewerModal` passes one to `open`. Nothing here
-    // can re-root them into something meaningful, so they do not travel.
-    clean['artifacts'] = const <Map<String, dynamic>>[];
-
-    return clean;
   }
 }

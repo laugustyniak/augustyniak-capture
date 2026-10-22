@@ -704,7 +704,9 @@ class ZipCaptureArchive implements CaptureArchive {
       isProcessedByUser: recording.isProcessedByUser,
       processedAt: recording.processedAt,
       routes: recording.routes,
-      artifacts: recording.artifacts,
+      // Artifact paths belong to the machine that produced the archive; the
+      // viewer reads whatever they name, so an archive never supplies them.
+      artifacts: const [],
       // Left null for a row that never gained a fragment, so it keeps
       // serialising without a `segments` key exactly as it arrived.
       segments: recording.hasStoredSegments
