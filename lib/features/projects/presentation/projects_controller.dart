@@ -203,7 +203,12 @@ class ProjectsController extends ChangeNotifier {
       for (final Project p in _projects) p.id: p,
     };
     for (final Project p in upserts) {
-      byId[p.id] = p;
+      final Project? mine = byId[p.id];
+      // Launch settings never travel (SyncRowCodec.project): an existing
+      // project keeps this device's own and a new one starts with none.
+      byId[p.id] = p.copyWith(
+        agentSettings: mine?.agentSettings ?? const <AgentKind, AgentSettings>{},
+      );
     }
     await _save(byId.values.toList(), activeProjectId: _activeProjectId);
   }

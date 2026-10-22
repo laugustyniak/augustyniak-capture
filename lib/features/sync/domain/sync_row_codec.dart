@@ -282,10 +282,16 @@ class SyncRowCodec {
     'id': pr.id,
     'name': pr.name,
     'repository_path': pr.repoPath,
+    // Launch settings (extra arguments, an initial prompt, the skip-permissions
+    // switch) are device-local by decision: a row another device or a hostile
+    // server wrote must not decide how an agent is started here. Leaving them
+    // out of the payload also keeps the row's hash stable when they are edited,
+    // so a local-only change never dirties the outbox.
     'payload': pr.toJson()
       ..remove('id')
       ..remove('name')
-      ..remove('repoPath'),
+      ..remove('repoPath')
+      ..remove('agentSettings'),
   };
 
   static Project? projectFromRow(Map<String, Object?> row) {
@@ -299,6 +305,8 @@ class SyncRowCodec {
       'name': row['name'],
       'repoPath': row['repository_path'] ?? '',
     };
+    // Rows pushed by older builds still carry launch settings; never read them.
+    json.remove('agentSettings');
     try {
       return Project.fromJson(json);
     } catch (_) {

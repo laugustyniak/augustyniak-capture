@@ -357,6 +357,19 @@ or one this device never had, leaves the active id untouched — the same
 tombstone for the active project cannot leave `_activeProjectId` pointing
 at a project that no longer exists.
 
+### Projects: launch settings are device-local
+
+A project row carries `name`, `repository_path`, the description, session
+name, default agent and Command binding. It does **not** carry
+`agentSettings` (extra arguments, initial prompt, skip-permissions).
+`SyncRowCodec.project` strips them, `projectFromRow` ignores them when an
+older build's row still has them, and `applySyncedProjects` keeps this
+device's own settings for an id it already has (a new id gets none). A
+backup archive is imported the same way. Two reasons: a row another device
+or a hostile server wrote must not decide how an agent is started here, and
+leaving them out keeps the row hash stable when they are edited, so a
+local-only change never dirties the outbox. `repository_path` still syncs.
+
 ### A known staleness gap
 
 `CaptureHistory.loadRevisions()` only runs from `RecordingsController.

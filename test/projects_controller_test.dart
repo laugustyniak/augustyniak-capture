@@ -21,6 +21,50 @@ void main() {
     if (await directory.exists()) await directory.delete(recursive: true);
   });
 
+  test(
+    'applySyncedProjects keeps this device\'s launch settings for a known id '
+    'and gives a new id none',
+    () async {
+      const Project mine = Project(
+        id: 'known',
+        name: 'Old name',
+        repoPath: '/work/known',
+        agentSettings: <AgentKind, AgentSettings>{
+          AgentKind.codex: AgentSettings(additionalArgs: <String>['--local']),
+        },
+      );
+      await repository.saveAll(<Project>[mine], activeProjectId: null);
+      final ProjectsController controller = ProjectsController(
+        repository: repository,
+      );
+      await controller.initialize();
+
+      const Map<AgentKind, AgentSettings> remote = <AgentKind, AgentSettings>{
+        AgentKind.claudeCode: AgentSettings(skipPermissions: true),
+      };
+      await controller.applySyncedProjects(<Project>[
+        mine.copyWith(name: 'New name', agentSettings: remote),
+        const Project(
+          id: 'fresh',
+          name: 'Fresh',
+          repoPath: '/work/fresh',
+          agentSettings: remote,
+        ),
+      ]);
+
+      final Project known = controller.projects.firstWhere(
+        (Project p) => p.id == 'known',
+      );
+      expect(known.name, 'New name');
+      expect(known.agentSettings.keys, <AgentKind>[AgentKind.codex]);
+      expect(known.settingsFor(AgentKind.codex).additionalArgs, <String>['--local']);
+      expect(
+        controller.projects.firstWhere((Project p) => p.id == 'fresh').agentSettings,
+        isEmpty,
+      );
+    },
+  );
+
   test('create, update, select and delete stay durable', () async {
     final ProjectsController controller = ProjectsController(
       repository: repository,

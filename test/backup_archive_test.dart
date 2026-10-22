@@ -720,6 +720,31 @@ void main() {
     );
   });
 
+  test('an archived project is imported without its launch settings', () async {
+    await seed(source, <Recording>[capture('a')]);
+    await projectsFor(source).saveAll(<Project>[
+      const Project(
+        id: 'p1',
+        name: 'Backed up',
+        repoPath: '/tmp/one',
+        agentSettings: <AgentKind, AgentSettings>{
+          AgentKind.claudeCode: AgentSettings(
+            additionalArgs: <String>['--x'],
+            skipPermissions: true,
+          ),
+        },
+      ),
+    ], activeProjectId: null);
+    await archiveFor(source).exportTo(zipPath());
+
+    await archiveFor(target).importFrom(zipPath());
+
+    final Project imported = (await projectsFor(target).loadAll()).single;
+    expect(imported.id, 'p1');
+    expect(imported.name, 'Backed up');
+    expect(imported.agentSettings, isEmpty);
+  });
+
   test('a file that is not a capture archive is refused by name', () async {
     final File notAnArchive = File(p.join(scratch.path, 'holiday.zip'))
       ..writeAsStringSync('this is not a zip at all');
