@@ -46,6 +46,7 @@ class RecordingCard extends StatelessWidget {
     this.onSelectArtifact,
     this.onOpenOutcome,
     this.canOpenOutcome,
+    this.onAttachSession,
     this.focused = false,
     this.costUsd,
     this.onOpenFocus,
@@ -162,6 +163,12 @@ class RecordingCard extends StatelessWidget {
   /// plane whose address is still configured. Asked per outcome rather than
   /// once for the card, because the answer differs row by row.
   final bool Function(RouteOutcome outcome)? canOpenOutcome;
+
+  /// Opens a terminal on the agent session the latest delivery started — the
+  /// way back into a session that ran in the background. Null where no
+  /// launcher exists, which hides the action; the session name on the route
+  /// line still says where it went.
+  final void Function(String sessionName)? onAttachSession;
 
   /// This row is the one the keyboard is on.
   ///
@@ -606,6 +613,32 @@ class RecordingCard extends StatelessWidget {
                     style: ConsoleText.micro.copyWith(color: Console.green),
                   ),
                 ),
+                // Only a session this app started by name can be attached to;
+                // a file or a Command brief has no terminal to open.
+                if (recording.routes.last.session case final String session
+                    when recording.routes.last.kind == RouteKind.agent &&
+                        onAttachSession != null) ...<Widget>[
+                  const SizedBox(width: 8),
+                  InkWell(
+                    key: ValueKey<String>('attach-${recording.id}'),
+                    onTap: () => onAttachSession!(session),
+                    borderRadius: BorderRadius.circular(6),
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 4,
+                        vertical: 2,
+                      ),
+                      child: Text(
+                        'ATTACH',
+                        style: ConsoleText.micro.copyWith(
+                          color: Console.accent,
+                          fontWeight: FontWeight.w700,
+                          letterSpacing: 1.1,
+                        ),
+                      ),
+                    ),
+                  ),
+                ],
               ],
             ),
             // **One line, and a link out — never a fleet view.** Command has a

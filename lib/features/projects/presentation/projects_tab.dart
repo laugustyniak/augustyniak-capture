@@ -5,6 +5,7 @@ import '../../recordings/domain/recording.dart';
 import '../../recordings/presentation/recordings_controller.dart';
 import '../../command/domain/command_client.dart';
 import '../data/directory_picker.dart';
+import '../domain/agent_session_launcher.dart';
 import '../domain/project.dart';
 import 'project_captures_sheet.dart';
 import 'projects_controller.dart';
@@ -390,30 +391,46 @@ class _AgentButton extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final bool launching = controller.isLaunching(project.id, agent);
-    return OutlinedButton.icon(
-      key: ValueKey<String>('launch-${project.id}-${agent.name}'),
-      onPressed: !controller.canLaunch || launching
-          ? null
-          : () async {
-              try {
-                await controller.launch(project, agent);
-              } catch (exception) {
-                if (context.mounted) _showFailure(context, exception);
-              }
-            },
-      style: OutlinedButton.styleFrom(
-        foregroundColor: preferred ? Console.accent : Console.textSoft,
-        side: BorderSide(
-          color: preferred ? Console.accent : Console.borderStrong,
+    // Background by default: the session starts with no window, and the
+    // snackbar's ATTACH opens one. A long press starts it in a window directly.
+    Future<void> start({required bool detached}) async {
+      final AgentSessionLaunchResult? result;
+      try {
+        result = await controller.launch(project, agent, detached: detached);
+      } catch (exception) {
+        if (context.mounted) _showFailure(context, exception);
+        return;
+      }
+      if (result == null || !context.mounted) return;
+      // A window launch is its own feedback — the window is there, attached
+      // or new. Only a launch that opened nothing has to say where it went.
+      if (result.detached) _showSession(context, controller, result);
+    }
+
+    return Tooltip(
+      message: 'Tap: start in the background · Long press: open in a window',
+      child: OutlinedButton.icon(
+        key: ValueKey<String>('launch-${project.id}-${agent.name}'),
+        onPressed: !controller.canLaunch || launching
+            ? null
+            : () => start(detached: true),
+        onLongPress: !controller.canLaunch || launching
+            ? null
+            : () => start(detached: false),
+        style: OutlinedButton.styleFrom(
+          foregroundColor: preferred ? Console.accent : Console.textSoft,
+          side: BorderSide(
+            color: preferred ? Console.accent : Console.borderStrong,
+          ),
         ),
+        icon: launching
+            ? const SizedBox.square(
+                dimension: 14,
+                child: CircularProgressIndicator(strokeWidth: 2),
+              )
+            : Icon(_agentIcon(agent), size: 16),
+        label: Text(_agentLabel(agent).toUpperCase()),
       ),
-      icon: launching
-          ? const SizedBox.square(
-              dimension: 14,
-              child: CircularProgressIndicator(strokeWidth: 2),
-            )
-          : Icon(_agentIcon(agent), size: 16),
-      label: Text(_agentLabel(agent).toUpperCase()),
     );
   }
 }
@@ -888,6 +905,39 @@ void _showFailure(BuildContext context, Object exception) {
   ScaffoldMessenger.of(
     context,
   ).showSnackBar(SnackBar(content: Text(exception.toString())));
+}
+
+/// Where a session that opened no window is, and the way in.
+///
+/// Both outcomes land here: a session started in the background, and one that
+/// was already running — the second is said plainly, because a project's
+/// configured prompt was not delivered to it.
+void _showSession(
+  BuildContext context,
+  ProjectsController controller,
+  AgentSessionLaunchResult result,
+) {
+  final String command = attachCommandFor(result.sessionName);
+  ScaffoldMessenger.of(context).showSnackBar(
+    SnackBar(
+      duration: const Duration(seconds: 12),
+      content: Text(
+        result.attachedToExistingSession
+            ? 'Already running · $command'
+            : 'Started in the background · $command',
+      ),
+      action: SnackBarAction(
+        label: 'ATTACH',
+        onPressed: () async {
+          try {
+            await controller.attach(result.sessionName);
+          } catch (exception) {
+            if (context.mounted) _showFailure(context, exception);
+          }
+        },
+      ),
+    ),
+  );
 }
 
 /// Binds a project to a `(host, workspace)` on the Command control plane.

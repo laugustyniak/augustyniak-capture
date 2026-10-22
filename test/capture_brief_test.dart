@@ -19,6 +19,9 @@ class _FakeLauncher implements AgentSessionLauncher {
     sessionName: 'augustyniak-acme-p1-claude',
     attachedToExistingSession: false,
   );
+
+  @override
+  Future<void> attach(String sessionName) async {}
 }
 
 RoutedCapture _capture({

@@ -43,6 +43,8 @@ import '../data/media_picker.dart';
 import '../data/recordings_repository.dart';
 import '../data/revisions_repository.dart';
 import '../../projects/data/projects_repository.dart';
+import '../../projects/domain/agent_session_launcher.dart'
+    show attachCommandFor;
 import '../../projects/domain/project.dart';
 import '../data/agent_artifact_scanner.dart';
 import '../data/vault_connection_analyzer.dart';
@@ -3104,6 +3106,7 @@ class RecordingsController extends ChangeNotifier {
     String id, {
     required String agentId,
     String? instruction,
+    bool detached = false,
   }) async {
     final int index = _recordings.indexWhere((Recording item) => item.id == id);
     if (index < 0) return null;
@@ -3121,6 +3124,7 @@ class RecordingsController extends ChangeNotifier {
           instruction: instruction?.trim().isNotEmpty == true
               ? instruction!.trim()
               : _agentHandoff.promptFor(capture),
+          detached: detached,
         ),
       );
     } catch (exception) {
@@ -3148,12 +3152,38 @@ class RecordingsController extends ChangeNotifier {
     );
     _logSink.log(
       result.attachedToExistingSession
-          ? 'Attached to ${result.record.target} · brief at ${result.taskPath}'
+          ? '${result.detached ? 'Found running' : 'Attached to'} '
+                '${result.record.target} · brief at ${result.taskPath}'
+          : result.detached
+          ? 'Started ${result.record.target} in the background · '
+                '${attachCommandFor(result.sessionName)} · '
+                'brief at ${result.taskPath}'
           : 'Handed off to ${result.record.target} · brief at ${result.taskPath}',
       recordingId: id,
     );
     unawaited(refreshArtifacts(id));
     return result;
+  }
+
+  /// Open a terminal on the agent session [sessionName] — the way back into a
+  /// session [handoff] started detached, or found already running.
+  ///
+  /// Nothing about the capture changes: the route was recorded when the
+  /// session started, and looking at it is not a second delivery. Returns
+  /// false with [error] set when the session is not running or no terminal
+  /// can open.
+  Future<bool> attachSession(String sessionName) async {
+    try {
+      await _agentHandoff.attach(sessionName);
+    } catch (exception) {
+      _error = exception.toString();
+      _logSink.log('Attach failed: $exception', level: LogLevel.error);
+      notifyListeners();
+      return false;
+    }
+    _error = null;
+    notifyListeners();
+    return true;
   }
 
   /// Send a capture's text to an assistant, the share sheet or the clipboard —

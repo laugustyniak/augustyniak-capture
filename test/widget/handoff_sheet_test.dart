@@ -16,11 +16,14 @@ import 'package:flutter_test/flutter_test.dart';
 import '../support/harness.dart';
 
 class _FakeLauncher implements AgentSessionLauncher {
-  _FakeLauncher({this.attach = false});
+  _FakeLauncher({this.running = false, this.attachFailure});
 
-  final bool attach;
+  /// The session already exists, so a launch attaches instead of starting.
+  final bool running;
+  final String? attachFailure;
   final List<AgentSessionLaunchRequest> requests =
       <AgentSessionLaunchRequest>[];
+  final List<String> attached = <String>[];
 
   @override
   Future<AgentSessionLaunchResult> launch(
@@ -29,8 +32,15 @@ class _FakeLauncher implements AgentSessionLauncher {
     requests.add(request);
     return AgentSessionLaunchResult(
       sessionName: 'augustyniak-acme-p1-${request.agent.executable}',
-      attachedToExistingSession: attach,
+      attachedToExistingSession: running,
+      detached: request.detached,
     );
+  }
+
+  @override
+  Future<void> attach(String sessionName) async {
+    if (attachFailure != null) throw AgentSessionLaunchException(attachFailure!);
+    attached.add(sessionName);
   }
 }
 
@@ -266,7 +276,7 @@ void main() {
   testWidgets(
     'an attach keeps the sheet open and says the prompt did not land',
     (WidgetTester tester) async {
-      final _FakeLauncher launcher = _FakeLauncher(attach: true);
+      final _FakeLauncher launcher = _FakeLauncher(running: true);
       final RecordingsController controller = await controllerWith(launcher);
 
       await openSheet(tester, controller);
@@ -281,6 +291,75 @@ void main() {
       expect(find.text('DONE'), findsOneWidget);
     },
   );
+
+  testWidgets(
+    'launches in the background by default and offers the way in',
+    (WidgetTester tester) async {
+      final _FakeLauncher launcher = _FakeLauncher();
+      final RecordingsController controller = await controllerWith(launcher);
+
+      await openSheet(tester, controller);
+      await tester.tap(find.text('LAUNCH SESSION'));
+      await settleIo(tester);
+
+      final String session =
+          'augustyniak-acme-p1-${launcher.requests.single.agent.executable}';
+      expect(launcher.requests.single.detached, isTrue);
+      // Stays open: with no window, the sheet is the only thing that says
+      // where the session went and how to reach it.
+      expect(find.text('Session started in the background'), findsOneWidget);
+      expect(find.text('zellij attach $session'), findsOneWidget);
+      // The capture is closed — the prompt was delivered.
+      expect(controller.recordings.single.isProcessedByUser, isTrue);
+
+      await tester.ensureVisible(
+        find.byKey(const ValueKey<String>('handoff-attach')),
+      );
+      await tester.tap(find.byKey(const ValueKey<String>('handoff-attach')));
+      await settleIo(tester);
+
+      expect(launcher.attached, <String>[session]);
+      expect(find.text('DONE'), findsOneWidget);
+    },
+  );
+
+  testWidgets('IN A WINDOW launches through the terminal and closes', (
+    WidgetTester tester,
+  ) async {
+    final _FakeLauncher launcher = _FakeLauncher();
+    final RecordingsController controller = await controllerWith(launcher);
+
+    await openSheet(tester, controller);
+    await tester.tap(find.text('IN A WINDOW'));
+    await tester.pump();
+    await tester.tap(find.text('LAUNCH SESSION'));
+    await settleIo(tester);
+
+    expect(launcher.requests.single.detached, isFalse);
+    expect(find.text('LAUNCH SESSION'), findsNothing);
+  });
+
+  testWidgets('a failed attach says why and keeps the sheet open', (
+    WidgetTester tester,
+  ) async {
+    final _FakeLauncher launcher = _FakeLauncher(
+      attachFailure: 'Session `augustyniak-acme-p1-codex` is not running.',
+    );
+    final RecordingsController controller = await controllerWith(launcher);
+
+    await openSheet(tester, controller);
+    await tester.tap(find.text('LAUNCH SESSION'));
+    await settleIo(tester);
+    await tester.ensureVisible(
+        find.byKey(const ValueKey<String>('handoff-attach')),
+      );
+      await tester.tap(find.byKey(const ValueKey<String>('handoff-attach')));
+    await settleIo(tester);
+
+    expect(launcher.attached, isEmpty);
+    expect(find.textContaining('is not running'), findsOneWidget);
+    expect(find.text('DONE'), findsOneWidget);
+  });
 
   testWidgets('an edited prompt is the one that launches', (
     WidgetTester tester,

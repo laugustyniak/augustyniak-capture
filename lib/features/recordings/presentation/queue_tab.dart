@@ -994,6 +994,11 @@ class _QueueTabState extends State<QueueTab> {
       onOpenOutcome: controller.openCommandOutcome,
       canOpenOutcome: (RouteOutcome outcome) =>
           controller.commandOutcomeUrl(outcome) != null,
+      // Offered wherever a session can be launched at all; a session that has
+      // since ended is refused by name, through the controller's error.
+      onAttachSession: controller.canHandoff(recording)
+          ? controller.attachSession
+          : null,
       onSelectArtifact: (AgentArtifact artifact) {
         showAgentArtifactViewer(
           context,

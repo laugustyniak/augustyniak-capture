@@ -78,6 +78,9 @@ class _RecordingLauncher implements AgentSessionLauncher {
       attachedToExistingSession: false,
     );
   }
+
+  @override
+  Future<void> attach(String sessionName) async {}
 }
 
 RoutedCapture _capture({

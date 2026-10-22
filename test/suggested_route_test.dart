@@ -140,6 +140,9 @@ class _Agents implements AgentHandoff {
 
   @override
   String? workspacePathFor(String captureId, String? projectId) => null;
+
+  @override
+  Future<void> attach(String sessionName) async {}
   @override
   String promptFor(RoutedCapture capture) => '';
   @override
