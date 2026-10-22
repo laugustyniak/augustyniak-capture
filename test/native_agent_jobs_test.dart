@@ -123,6 +123,15 @@ while :; do n=$((n + 1)); printf 'tick%s\n' "$n" >&2; sleep 0.05; done
         (NativeAgentJob value) => value.status == NativeAgentJobStatus.stopped,
       );
       expect(stopped.status, NativeAgentJobStatus.stopped);
+      await File(
+        p.join(jobsRoot.path, handle.id, 'status'),
+      ).writeAsString('stopping');
+      final NativeAgentJob recovered = await _pollJob(
+        jobs,
+        handle.id,
+        (NativeAgentJob value) => value.status == NativeAgentJobStatus.stopped,
+      );
+      expect(recovered.exitCode, isNotNull);
       for (final String name in <String>[
         'fixture-child.pid',
         'fixture-grandchild.pid',

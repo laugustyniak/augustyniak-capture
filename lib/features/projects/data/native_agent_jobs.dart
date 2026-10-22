@@ -287,7 +287,9 @@ class NativeAgentJobs {
     );
     NativeAgentJobStatus status = await _readStatus(directory);
     if (!_terminal(status) && !await _supervisorAlive(directory)) {
-      status = exitCode == null
+      status = exitCode != null && await _validStopRequested(directory)
+          ? NativeAgentJobStatus.stopped
+          : exitCode == null
           ? _now().difference(createdAt.toLocal()) > const Duration(seconds: 1)
                 ? NativeAgentJobStatus.lost
                 : status
@@ -356,8 +358,18 @@ class NativeAgentJobs {
     final String nonce = (await File(
       p.join(directory.path, 'nonce'),
     ).readAsString()).trim();
-    await _writePrivate(File(p.join(directory.path, 'stop')), nonce);
     await _writeStatus(directory, NativeAgentJobStatus.stopping);
+    await _writePrivate(File(p.join(directory.path, 'stop')), nonce);
+  }
+
+  Future<bool> _validStopRequested(Directory directory) async {
+    final String? nonce = await _readOptional(
+      File(p.join(directory.path, 'nonce')),
+    );
+    final String? stop = await _readOptional(
+      File(p.join(directory.path, 'stop')),
+    );
+    return nonce != null && stop?.trim() == nonce.trim();
   }
 
   Future<NativeAgentJobHandle> followUp(String id, String prompt) async {
