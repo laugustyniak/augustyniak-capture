@@ -3,6 +3,7 @@ import 'dart:io';
 import 'package:augustyniak_capture/features/command/domain/command_client.dart';
 import 'package:augustyniak_capture/features/projects/data/directory_picker.dart';
 import 'package:augustyniak_capture/features/projects/data/projects_repository.dart';
+import 'package:augustyniak_capture/features/projects/domain/agent_session_launcher.dart';
 import 'package:augustyniak_capture/features/projects/domain/project.dart';
 import 'package:augustyniak_capture/features/projects/presentation/projects_controller.dart';
 import 'package:augustyniak_capture/features/projects/presentation/projects_tab.dart';
@@ -93,6 +94,45 @@ void main() {
     tester.state<NavigatorState>(find.byType(Navigator).first).pop();
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 300));
+  });
+
+  testWidgets('a background launch asks for an editable prompt', (
+    WidgetTester tester,
+  ) async {
+    controller.dispose();
+    final _FakeLauncher launcher = _FakeLauncher();
+    controller = ProjectsController(
+      repository: ProjectsRepository(directoryProvider: () async => directory),
+      launcher: launcher,
+    );
+    await tester.runAsync(controller.initialize);
+    final Project project = controller.projects.single;
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: ThemeData.dark(useMaterial3: true),
+        home: Scaffold(body: ProjectsTab(controller: controller)),
+      ),
+    );
+
+    await tester.tap(
+      find.byKey(ValueKey<String>('launch-${project.id}-codex')),
+    );
+    await tester.pump();
+    expect(
+      find.byKey(const ValueKey<String>('project-background-prompt')),
+      findsOneWidget,
+    );
+    await tester.enterText(
+      find.byKey(const ValueKey<String>('project-background-prompt')),
+      'Inspect the failing test',
+    );
+    await tester.tap(
+      find.byKey(const ValueKey<String>('project-run-background')),
+    );
+    await tester.pump();
+
+    expect(launcher.requests.single.prompt, 'Inspect the failing test');
+    expect(launcher.requests.single.detached, isTrue);
   });
 
   testWidgets('the folder dialog fills the repository path field', (
@@ -296,15 +336,17 @@ void main() {
     WidgetTester tester,
   ) async {
     final String plainId = controller.projects.single.id;
-    final Project armed = await tester.runAsync(
-      () => controller.create(
-        name: 'Armed',
-        repoPath: '/work/armed',
-        agentSettings: const <AgentKind, AgentSettings>{
-          AgentKind.codex: AgentSettings(skipPermissions: true),
-        },
-      ),
-    ) as Project;
+    final Project armed =
+        await tester.runAsync(
+              () => controller.create(
+                name: 'Armed',
+                repoPath: '/work/armed',
+                agentSettings: const <AgentKind, AgentSettings>{
+                  AgentKind.codex: AgentSettings(skipPermissions: true),
+                },
+              ),
+            )
+            as Project;
 
     await pumpTab(tester);
 
@@ -453,7 +495,6 @@ void main() {
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 300));
   });
-
 }
 
 /// Answers from a table instead of a control plane, and records which host it
@@ -504,7 +545,6 @@ class _FakeCommandClient implements CommandClient {
       throw UnimplementedError();
 }
 
-
 /// Stands in for the native folder dialog, the way `_FakeRegistrar` stands in
 /// for the OS hotkey table — the widget suite must not reach `file_picker`.
 class _FakeDirectoryPicker implements DirectoryPicker {
@@ -522,4 +562,24 @@ class _FakeDirectoryPicker implements DirectoryPicker {
     initialDirectories.add(initialDirectory);
     return chosen;
   }
+}
+
+class _FakeLauncher implements AgentSessionLauncher {
+  final List<AgentSessionLaunchRequest> requests =
+      <AgentSessionLaunchRequest>[];
+
+  @override
+  Future<AgentSessionLaunchResult> launch(
+    AgentSessionLaunchRequest request,
+  ) async {
+    requests.add(request);
+    return AgentSessionLaunchResult(
+      sessionName: 'test-session',
+      attachedToExistingSession: false,
+      detached: false,
+    );
+  }
+
+  @override
+  Future<void> attach(String sessionName) async {}
 }

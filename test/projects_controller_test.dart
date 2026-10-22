@@ -57,9 +57,13 @@ void main() {
       );
       expect(known.name, 'New name');
       expect(known.agentSettings.keys, <AgentKind>[AgentKind.codex]);
-      expect(known.settingsFor(AgentKind.codex).additionalArgs, <String>['--local']);
+      expect(known.settingsFor(AgentKind.codex).additionalArgs, <String>[
+        '--local',
+      ]);
       expect(
-        controller.projects.firstWhere((Project p) => p.id == 'fresh').agentSettings,
+        controller.projects
+            .firstWhere((Project p) => p.id == 'fresh')
+            .agentSettings,
         isEmpty,
       );
     },
@@ -115,24 +119,25 @@ void main() {
     expect(controller.activeProjectId, isNull);
   });
 
-  test('active falls back to the first project when the stored id is unknown',
-      () async {
-    const List<Project> projects = <Project>[
-      Project(id: 'first', name: 'First', repoPath: '/work/first'),
-      Project(id: 'second', name: 'Second', repoPath: '/work/second'),
-    ];
-    await repository.saveAll(projects, activeProjectId: 'gone');
+  test(
+    'active falls back to the first project when the stored id is unknown',
+    () async {
+      const List<Project> projects = <Project>[
+        Project(id: 'first', name: 'First', repoPath: '/work/first'),
+        Project(id: 'second', name: 'Second', repoPath: '/work/second'),
+      ];
+      await repository.saveAll(projects, activeProjectId: 'gone');
 
-    final ProjectsController controller = ProjectsController(
-      repository: repository,
-    );
-    await controller.initialize();
+      final ProjectsController controller = ProjectsController(
+        repository: repository,
+      );
+      await controller.initialize();
 
-    expect(controller.activeProjectId, 'first');
-  });
+      expect(controller.activeProjectId, 'first');
+    },
+  );
 
-  test('active falls back to the first project when none was stored',
-      () async {
+  test('active falls back to the first project when none was stored', () async {
     const List<Project> projects = <Project>[
       Project(id: 'first', name: 'First', repoPath: '/work/first'),
       Project(id: 'second', name: 'Second', repoPath: '/work/second'),
@@ -179,33 +184,61 @@ void main() {
     expect(request.repoPath, '/work/augustyniak-capture');
     expect(request.sessionName, 'augustyniak-capture-work');
     expect(request.agent, ProjectAgent.claude);
-    expect(request.arguments, <String>['--model', 'sonnet', 'Read AGENTS.md.']);
+    expect(request.arguments, <String>['--model', 'sonnet']);
+    expect(request.prompt, 'Read AGENTS.md.');
     expect(controller.isLaunching(project.id, AgentKind.claudeCode), isFalse);
   });
 
-  test('a detached launch is passed through, and attach goes by name', () async {
-    final _CapturingLauncher launcher = _CapturingLauncher();
-    final ProjectsController controller = ProjectsController(
-      repository: repository,
-      launcher: launcher,
-    );
-    const Project project = Project(
-      id: 'p',
-      name: 'P',
-      repoPath: '/work/p',
-    );
+  test(
+    'a detached launch is passed through, and attach goes by name',
+    () async {
+      final _CapturingLauncher launcher = _CapturingLauncher();
+      final ProjectsController controller = ProjectsController(
+        repository: repository,
+        launcher: launcher,
+      );
+      const Project project = Project(id: 'p', name: 'P', repoPath: '/work/p');
 
-    final AgentSessionLaunchResult? result = await controller.launch(
-      project,
-      AgentKind.codex,
-      detached: true,
-    );
-    await controller.attach(result!.sessionName);
+      final AgentSessionLaunchResult? result = await controller.launch(
+        project,
+        AgentKind.codex,
+        detached: true,
+      );
+      await controller.attach(result!.sessionName);
 
-    expect(launcher.requests.single.detached, isTrue);
-    expect(result.detached, isTrue);
-    expect(launcher.attached, <String>['test-session']);
-  });
+      expect(launcher.requests.single.detached, isTrue);
+      expect(result.detached, isTrue);
+      expect(launcher.attached, <String>['test-session']);
+    },
+  );
+
+  test(
+    'an explicit launch prompt overrides the saved project prompt',
+    () async {
+      final _CapturingLauncher launcher = _CapturingLauncher();
+      final ProjectsController controller = ProjectsController(
+        repository: repository,
+        launcher: launcher,
+      );
+      const Project project = Project(
+        id: 'p',
+        name: 'P',
+        repoPath: '/work/p',
+        agentSettings: <AgentKind, AgentSettings>{
+          AgentKind.codex: AgentSettings(initialPrompt: 'saved prompt'),
+        },
+      );
+
+      await controller.launch(
+        project,
+        AgentKind.codex,
+        detached: true,
+        prompt: 'prompt from dialog',
+      );
+
+      expect(launcher.requests.single.prompt, 'prompt from dialog');
+    },
+  );
 
   test('launch maps Antigravity to AGY interactive prompt arguments', () async {
     final _CapturingLauncher launcher = _CapturingLauncher();
@@ -230,12 +263,8 @@ void main() {
     final AgentSessionLaunchRequest request = launcher.requests.single;
     expect(request.agent, ProjectAgent.antigravity);
     expect(request.agent.executable, 'agy');
-    expect(request.arguments, <String>[
-      '--model',
-      'gemini-2.5-pro',
-      '--prompt-interactive',
-      'Read AGENTS.md.',
-    ]);
+    expect(request.arguments, <String>['--model', 'gemini-2.5-pro']);
+    expect(request.prompt, 'Read AGENTS.md.');
   });
 
   test('skip permissions passes each agent its own flag', () async {
@@ -262,8 +291,8 @@ void main() {
 
     expect(launcher.requests.first.arguments, <String>[
       '--dangerously-bypass-approvals-and-sandbox',
-      'Go.',
     ]);
+    expect(launcher.requests.first.prompt, 'Go.');
     expect(launcher.requests.last.arguments, <String>[
       '--dangerously-skip-permissions',
     ]);
@@ -303,7 +332,10 @@ void main() {
     await controller.applySyncedProjects(<Project>[
       const Project(id: 'pulled', name: 'Pulled', repoPath: '/work/pulled'),
     ]);
-    expect(controller.projects.map((Project p) => p.id), containsAll(<String>[local.id, 'pulled']));
+    expect(
+      controller.projects.map((Project p) => p.id),
+      containsAll(<String>[local.id, 'pulled']),
+    );
 
     // The user's next action — unrelated to sync — must not rewrite
     // `projects.json` from a pre-sync `_projects` and drop the pulled row.
@@ -313,39 +345,47 @@ void main() {
       repository: ProjectsRepository(directoryProvider: () async => directory),
     );
     await reloaded.initialize();
-    expect(reloaded.projects.map((Project p) => p.id), containsAll(<String>[local.id, 'pulled']));
+    expect(
+      reloaded.projects.map((Project p) => p.id),
+      containsAll(<String>[local.id, 'pulled']),
+    );
   });
 
-  test('applySyncedProjectDelete does not resurrect on the next select — I3', () async {
-    final ProjectsController controller = ProjectsController(
-      repository: repository,
-    );
-    await controller.initialize();
-    final Project first = await controller.create(
-      name: 'First',
-      repoPath: '/work/first',
-    );
-    final Project second = await controller.create(
-      name: 'Second',
-      repoPath: '/work/second',
-    );
+  test(
+    'applySyncedProjectDelete does not resurrect on the next select — I3',
+    () async {
+      final ProjectsController controller = ProjectsController(
+        repository: repository,
+      );
+      await controller.initialize();
+      final Project first = await controller.create(
+        name: 'First',
+        repoPath: '/work/first',
+      );
+      final Project second = await controller.create(
+        name: 'Second',
+        repoPath: '/work/second',
+      );
 
-    // Unknown id: no-op, per the SyncApplier "tolerate an unknown id" rule.
-    await controller.applySyncedProjectDelete('does-not-exist');
-    expect(controller.projects, hasLength(2));
+      // Unknown id: no-op, per the SyncApplier "tolerate an unknown id" rule.
+      await controller.applySyncedProjectDelete('does-not-exist');
+      expect(controller.projects, hasLength(2));
 
-    await controller.applySyncedProjectDelete(second.id);
-    expect(controller.projects.map((Project p) => p.id), <String>[first.id]);
+      await controller.applySyncedProjectDelete(second.id);
+      expect(controller.projects.map((Project p) => p.id), <String>[first.id]);
 
-    // A later, unrelated select must not bring the deleted project back.
-    await controller.select(first.id);
-    final ProjectsController reloaded = ProjectsController(
-      repository: ProjectsRepository(directoryProvider: () async => directory),
-    );
-    await reloaded.initialize();
-    expect(reloaded.projects.map((Project p) => p.id), <String>[first.id]);
-    expect(reloaded.activeProjectId, first.id);
-  });
+      // A later, unrelated select must not bring the deleted project back.
+      await controller.select(first.id);
+      final ProjectsController reloaded = ProjectsController(
+        repository: ProjectsRepository(
+          directoryProvider: () async => directory,
+        ),
+      );
+      await reloaded.initialize();
+      expect(reloaded.projects.map((Project p) => p.id), <String>[first.id]);
+      expect(reloaded.activeProjectId, first.id);
+    },
+  );
 
   test(
     'applySyncedProjects after dispose does not throw and still writes — round 2 LOW 2',
@@ -363,7 +403,9 @@ void main() {
       ]);
 
       final ProjectsController reloaded = ProjectsController(
-        repository: ProjectsRepository(directoryProvider: () async => directory),
+        repository: ProjectsRepository(
+          directoryProvider: () async => directory,
+        ),
       );
       await reloaded.initialize();
       expect(reloaded.projects.map((Project p) => p.id), <String>['pulled']);

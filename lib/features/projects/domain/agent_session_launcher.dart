@@ -1,3 +1,5 @@
+import 'native_agent_types.dart';
+
 /// Agent CLIs that Augustyniak Capture may start inside a project session.
 enum ProjectAgent {
   codex('codex'),
@@ -70,6 +72,7 @@ class AgentSessionLaunchRequest {
     required this.agent,
     this.sessionName,
     this.arguments = const <String>[],
+    this.prompt,
     this.detached = false,
   });
 
@@ -81,6 +84,13 @@ class AgentSessionLaunchRequest {
   /// Optional stable base configured by the project. The agent is appended.
   final String? sessionName;
   final List<String> arguments;
+
+  /// Text sent through stdin by a native background adapter.
+  ///
+  /// Null keeps old callers source-compatible. The Zellij launcher adds this
+  /// to its own positional prompt arguments, while a native launcher keeps it
+  /// out of the process list entirely.
+  final String? prompt;
 
   /// Start the session in the background, with no terminal window.
   ///
@@ -98,6 +108,7 @@ class AgentSessionLaunchResult {
     required this.sessionName,
     required this.attachedToExistingSession,
     this.detached = false,
+    this.job,
   });
 
   final String sessionName;
@@ -106,6 +117,9 @@ class AgentSessionLaunchResult {
   /// No window was opened: the session is running in the background and the
   /// user has to attach to see it.
   final bool detached;
+
+  /// Native background job, absent for every legacy Zellij/window launch.
+  final NativeAgentJobHandle? job;
 }
 
 /// What to type in any terminal to join [sessionName].

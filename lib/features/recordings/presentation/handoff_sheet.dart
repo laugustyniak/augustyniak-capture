@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../../../app/ui_kit.dart';
 import '../../projects/domain/agent_session_launcher.dart'
     show attachCommandFor;
+import '../../projects/presentation/agent_jobs_sheet.dart';
 import '../domain/agent_handoff.dart';
 import '../domain/assistant_target.dart';
 import '../domain/capture_sender.dart';
@@ -316,8 +317,8 @@ class _HandoffSheetState extends State<_HandoffSheet> {
         const SizedBox(width: 6),
         Expanded(
           child: Text(
-            'Local session — not supervised. It runs on this machine '
-            'and reports nothing back.',
+            'Local run on this machine. Background jobs report status and '
+            'results; window sessions remain attached through Zellij.',
             style: ConsoleText.micro.copyWith(color: Console.amber),
           ),
         ),
@@ -372,6 +373,14 @@ class _HandoffSheetState extends State<_HandoffSheet> {
         ),
       ],
     ),
+    if (_detached && _agentId == 'geminiCli') ...<Widget>[
+      const SizedBox(height: 9),
+      Text(
+        'Gemini CLI background jobs are unavailable. Choose IN A WINDOW.',
+        key: const ValueKey<String>('gemini-native-unavailable'),
+        style: ConsoleText.micro.copyWith(color: Console.amber),
+      ),
+    ],
     const SizedBox(height: 9),
     // The agent is started with the prompt above. The file is the copy that
     // outlives the session — and the one an *attach* falls back on, since a
@@ -410,7 +419,18 @@ class _HandoffSheetState extends State<_HandoffSheet> {
     ],
     if (_attached case final AgentHandoffResult result) ...<Widget>[
       const SizedBox(height: 16),
-      if (result.attachedToExistingSession)
+      if (result.job != null)
+        _NativeJobNotice(
+          result: result,
+          onView: widget.controller.agentJobs == null
+              ? null
+              : () => showAgentJobsSheet(
+                  context,
+                  jobs: widget.controller.agentJobs!,
+                  focusJobId: result.job!.id,
+                ),
+        )
+      else if (result.attachedToExistingSession)
         _AttachedNotice(
           result: result,
           instruction: _instruction.text,
@@ -429,7 +449,8 @@ class _HandoffSheetState extends State<_HandoffSheet> {
       // closed; the remaining action is to paste the prompt, not to launch
       // again.
       label: _attached == null ? 'LAUNCH SESSION' : 'DONE',
-      onTap: _busy
+      onTap: _busy ||
+              (_attached == null && _detached && _agentId == 'geminiCli')
           ? null
           : _attached == null
           ? _launch
@@ -713,6 +734,54 @@ class _AttachedNotice extends StatelessWidget {
       ),
     );
   }
+}
+
+class _NativeJobNotice extends StatelessWidget {
+  _NativeJobNotice({required this.result, required this.onView});
+
+  final AgentHandoffResult result;
+  final VoidCallback? onView;
+
+  @override
+  Widget build(BuildContext context) => Container(
+    key: const ValueKey<String>('handoff-native-job-notice'),
+    padding: const EdgeInsets.all(12),
+    decoration: BoxDecoration(
+      color: Console.green.withValues(alpha: .08),
+      borderRadius: BorderRadius.circular(10),
+      border: Border.all(color: Console.green.withValues(alpha: .35)),
+    ),
+    child: Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: <Widget>[
+        Row(
+          children: <Widget>[
+            Icon(Icons.check_circle_outline, size: 14, color: Console.green),
+            const SizedBox(width: 6),
+            Expanded(
+              child: Text(
+                'Background job accepted the prompt',
+                style: ConsoleText.micro.copyWith(color: Console.green),
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 7),
+        Text(
+          'It keeps running after Capture closes. Jobs stores its status, '
+          'logs, result and follow-ups.',
+          style: ConsoleText.micro,
+        ),
+        const SizedBox(height: 10),
+        OutlinedButton.icon(
+          key: const ValueKey<String>('handoff-view-job'),
+          onPressed: onView,
+          icon: const Icon(Icons.terminal_rounded),
+          label: const Text('VIEW TASK'),
+        ),
+      ],
+    ),
+  );
 }
 
 /// A session started in the background: where it is, and the two ways in —

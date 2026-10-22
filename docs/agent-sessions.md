@@ -7,10 +7,10 @@ by the capture, and not by a choice made at hand-off time.
 | | Bound project | Unbound project |
 |---|---|---|
 | Where it runs | any host in the fleet | this machine |
-| Started by | the Command control plane | a terminal + Zellij, here |
-| Second hand-off | updates the same brief | attaches to a live session, delivering nothing |
-| Reports back | state, issues, a PR link | nothing, ever |
-| Needs | an aggregator address and a fleet token | a terminal, Zellij, an agent CLI |
+| Started by | the Command control plane | a native background job or a terminal + Zellij |
+| Another hand-off | updates the same brief | starts a fresh job; Jobs can explicitly follow up |
+| Reports back | state, issues, a PR link | local status, output, result and exit code |
+| Needs | an aggregator address and a fleet token | an agent CLI; Zellij only for windowed sessions |
 
 A project is *bound* when it names a Command host and workspace (Projects → edit
 → **Command binding**, two pickers over a live read of the fleet). Everything
@@ -23,20 +23,14 @@ session in a fleet snapshot, refuses a second start of one already running, and
 returns an outcome the capture then shows on its own card. Set it up in Config →
 **Command control plane**, then bind the project.
 
-**Unbound is the offline case, and it is a real one**: one machine, no collector
-running, and you want an agent in a terminal now. It costs one file to keep and
-it is kept deliberately. What it cannot do is equally deliberate — it will not
-gain more hosts, status tracking, or a way to deliver a second prompt, because
-every one of those exists on the other side and building them twice is the cost
-this integration was designed to avoid.
-
-The hand-off sheet says **local session — not supervised** whenever it is about
-to take this path. Without that label the two look identical, and they differ in
-whether anything will ever tell you what happened.
+**Unbound is the offline case**: one machine and no collector. A background run
+is supervised locally and stays visible under **Projects → Jobs** after Capture
+closes and reopens. A windowed run keeps the older Zellij path.
 
 ## Prerequisites (unbound path)
 
-Launching locally requires **macOS or Linux**, plus:
+Launching locally requires **macOS or Linux** and the selected agent CLI. A
+windowed run additionally requires:
 
 - a terminal the app can drive,
   - macOS: [Ghostty](https://ghostty.org/), installed as `Ghostty.app`,
@@ -49,11 +43,10 @@ Launching locally requires **macOS or Linux**, plus:
   - `claude` for Claude Code,
   - `agy` for Antigravity. **AGY is the Antigravity CLI abbreviation.**
 
-**Windows is not supported and is not a gap waiting to be filled.** Zellij has no
-native Windows build, and the named-session model — attach an existing session,
-or start a new one from a layout — is Zellij's rather than the terminal's. A
-Windows path would be a different design with no `attachedToExistingSession`, so
-the app shows no agent button there rather than a control that cannot work.
+Native background supervision currently uses POSIX process groups and supports
+macOS and Linux. The windowed path also uses Zellij, which has no native Windows
+build. The app therefore hides local agent controls on Windows rather than
+offering a launch mode it cannot supervise or attach to.
 
 Verify the environment before creating a project:
 
@@ -91,13 +84,12 @@ manage its account, or provide its credentials.
    on load.
 6. Save, then use the agent action on the project card.
 
-A tap starts the agent **in the background**: a named Zellij session rooted in
-the repository, with exactly one selected agent in it and no window. A snackbar
-names the session and offers **ATTACH**, which opens your terminal on it; the
-same `zellij attach <name>` works from any terminal you already have open. A
-long press starts the session in a terminal window directly. Either way, a
-later launch of the same project-agent pair finds the running session instead
-of starting a duplicate agent.
+A tap asks for the opening prompt and starts a native agent job in the
+background. **Jobs** shows its status, bounded output, result and exit code, and
+can stop a running job. After it reaches a terminal state, **Follow up** starts
+a new local job against the exact provider conversation id. A long press keeps
+the previous Zellij path and opens the session in a terminal window. Gemini CLI
+is window-only; native background runs support Codex, Claude Code and AGY.
 
 ## Hand a capture to a local agent
 

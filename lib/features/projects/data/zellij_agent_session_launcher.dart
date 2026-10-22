@@ -85,7 +85,12 @@ class ZellijAgentSessionLauncher implements AgentSessionLauncher {
       // caller surfaces the attach the same way it does for a terminal launch
       // — the agent inside never received this prompt.
       if (!exists) {
-        await _startInBackground(request, zellij, sessionName, canonicalRepoPath);
+        await _startInBackground(
+          request,
+          zellij,
+          sessionName,
+          canonicalRepoPath,
+        );
       }
       return AgentSessionLaunchResult(
         sessionName: sessionName,
@@ -234,9 +239,10 @@ class ZellijAgentSessionLauncher implements AgentSessionLauncher {
   /// race `open`, which returns long before Ghostty has execed anything.
   Future<String> _writeLayout(String sessionName, String layout) async {
     try {
-      final Directory directory = await (_layoutDirectory ??
-              Directory.systemTemp)
-          .createTemp('augustyniak-capture-');
+      final Directory directory =
+          await (_layoutDirectory ?? Directory.systemTemp).createTemp(
+            'augustyniak-capture-',
+          );
       await restrictDirectoryToOwner(directory.path);
       final File file = File(p.join(directory.path, '$sessionName.kdl'));
       await refuseSymlink(file.path);
@@ -340,6 +346,11 @@ class ZellijAgentSessionLauncher implements AgentSessionLauncher {
         );
       }
     }
+    if (request.prompt?.contains('\u0000') ?? false) {
+      throw const AgentSessionLaunchException(
+        'Agent prompt cannot contain NUL characters.',
+      );
+    }
   }
 
   static String _buildLayout(
@@ -353,9 +364,14 @@ class ZellijAgentSessionLauncher implements AgentSessionLauncher {
         '  pane cwd="${_escapeKdl(repoPath)}" '
         'command="${_escapeKdl(agentExecutable)}" {',
       );
-    if (request.arguments.isNotEmpty) {
+    final List<String> arguments = <String>[
+      ...request.arguments,
+      if (request.prompt != null)
+        ...request.agent.promptArguments(request.prompt!),
+    ];
+    if (arguments.isNotEmpty) {
       layout.write('    args');
-      for (final String argument in request.arguments) {
+      for (final String argument in arguments) {
         layout.write(' "${_escapeKdl(argument)}"');
       }
       layout.writeln();

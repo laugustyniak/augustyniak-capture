@@ -90,7 +90,9 @@ class ProjectsController extends ChangeNotifier {
         description: _optional(description),
         sessionName: _optional(sessionName),
         defaultAgent: defaultAgent,
-        agentSettings: Map<AgentKind, AgentSettings>.unmodifiable(agentSettings),
+        agentSettings: Map<AgentKind, AgentSettings>.unmodifiable(
+          agentSettings,
+        ),
       ),
       host: commandHost,
       workspace: commandWorkspace,
@@ -207,7 +209,8 @@ class ProjectsController extends ChangeNotifier {
       // Launch settings never travel (SyncRowCodec.project): an existing
       // project keeps this device's own and a new one starts with none.
       byId[p.id] = p.copyWith(
-        agentSettings: mine?.agentSettings ?? const <AgentKind, AgentSettings>{},
+        agentSettings:
+            mine?.agentSettings ?? const <AgentKind, AgentSettings>{},
       );
     }
     await _save(byId.values.toList(), activeProjectId: _activeProjectId);
@@ -240,6 +243,7 @@ class ProjectsController extends ChangeNotifier {
     Project project,
     AgentKind agent, {
     bool detached = false,
+    String? prompt,
   }) async {
     final AgentSessionLauncher? launcher = _launcher;
     if (launcher == null) {
@@ -259,6 +263,7 @@ class ProjectsController extends ChangeNotifier {
           agent: _launcherAgent(agent),
           sessionName: project.sessionName,
           arguments: _launchArguments(agent, settings),
+          prompt: prompt ?? settings.initialPrompt,
           detached: detached,
         ),
       );
@@ -338,7 +343,5 @@ class ProjectsController extends ChangeNotifier {
     ...settings.additionalArgs,
     if (settings.skipPermissions)
       ..._launcherAgent(agent).skipPermissionsArguments,
-    if (settings.initialPrompt case final String prompt)
-      ..._launcherAgent(agent).promptArguments(prompt),
   ];
 }

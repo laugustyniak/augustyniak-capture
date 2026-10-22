@@ -5,10 +5,13 @@ import '../../recordings/domain/recording.dart';
 import '../../recordings/presentation/recordings_controller.dart';
 import '../../command/domain/command_client.dart';
 import '../data/directory_picker.dart';
+import '../data/native_agent_jobs.dart';
 import '../domain/agent_session_launcher.dart';
+import '../domain/native_agent_types.dart';
 import '../domain/project.dart';
 import 'project_captures_sheet.dart';
 import 'projects_controller.dart';
+import 'agent_jobs_sheet.dart';
 
 /// Project registry and the explicit entry point for opening coding-agent
 /// sessions in a repository context.
@@ -20,6 +23,7 @@ class ProjectsTab extends StatelessWidget {
     this.directoryPicker = const FilePickerDirectoryPicker(),
     this.commandClient = const DisabledCommandClient(),
     this.onNavigateToQueue,
+    this.agentJobs,
   });
 
   final ProjectsController controller;
@@ -35,6 +39,7 @@ class ProjectsTab extends StatelessWidget {
   final CommandClient commandClient;
 
   final ValueChanged<String>? onNavigateToQueue;
+  final NativeAgentJobs? agentJobs;
 
   @override
   Widget build(BuildContext context) {
@@ -45,6 +50,15 @@ class ProjectsTab extends StatelessWidget {
         children: <Widget>[
           ConsoleHeader(
             title: 'Projects',
+            action: agentJobs == null
+                ? null
+                : OutlinedButton.icon(
+                    key: const ValueKey<String>('agent-jobs-button'),
+                    onPressed: () =>
+                        showAgentJobsSheet(context, jobs: agentJobs!),
+                    icon: const Icon(Icons.terminal_rounded, size: 17),
+                    label: const Text('JOBS'),
+                  ),
             trailing:
                 '${projects.length} ${projects.length == 1 ? 'project' : 'projects'}',
           ),
@@ -71,28 +85,28 @@ class ProjectsTab extends StatelessWidget {
                   'or Antigravity with the right working directory and context.',
             )
           else
-            ...projects.map(
-              (Project project) {
-                final int count = recordingsController?.recordings
-                        .where((Recording r) => r.projectId == project.id)
-                        .length ??
-                    0;
-                return Padding(
-                  padding: const EdgeInsets.only(bottom: 11),
-                  child: _ProjectCard(
-                    key: ValueKey<String>('project-${project.id}'),
-                    project: project,
-                    controller: controller,
-                    active: controller.activeProjectId == project.id,
-                    onSelect: () => _select(context, project),
-                    onEdit: () => _openEditor(context, project),
-                    onDelete: () => _confirmDelete(context, project),
-                    onViewCaptures: () => _openCaptures(context, project),
-                    capturesCount: count,
-                  ),
-                );
-              },
-            ),
+            ...projects.map((Project project) {
+              final int count =
+                  recordingsController?.recordings
+                      .where((Recording r) => r.projectId == project.id)
+                      .length ??
+                  0;
+              return Padding(
+                padding: const EdgeInsets.only(bottom: 11),
+                child: _ProjectCard(
+                  key: ValueKey<String>('project-${project.id}'),
+                  project: project,
+                  controller: controller,
+                  active: controller.activeProjectId == project.id,
+                  onSelect: () => _select(context, project),
+                  onEdit: () => _openEditor(context, project),
+                  onDelete: () => _confirmDelete(context, project),
+                  onViewCaptures: () => _openCaptures(context, project),
+                  capturesCount: count,
+                  agentJobs: agentJobs,
+                ),
+              );
+            }),
           const SizedBox(height: 16),
           FilledButton.icon(
             key: const ValueKey<String>('add-project'),
@@ -222,6 +236,7 @@ class _ProjectCard extends StatelessWidget {
     required this.onDelete,
     this.onViewCaptures,
     this.capturesCount = 0,
+    this.agentJobs,
   });
 
   final Project project;
@@ -232,6 +247,7 @@ class _ProjectCard extends StatelessWidget {
   final VoidCallback onDelete;
   final VoidCallback? onViewCaptures;
   final int capturesCount;
+  final NativeAgentJobs? agentJobs;
 
   @override
   Widget build(BuildContext context) {
@@ -278,7 +294,10 @@ class _ProjectCard extends StatelessWidget {
                             ),
                             if (active) ...<Widget>[
                               const SizedBox(width: 8),
-                              StatusPill(label: 'ACTIVE', color: Console.accent),
+                              StatusPill(
+                                label: 'ACTIVE',
+                                color: Console.accent,
+                              ),
                             ],
                             if (project.agentSettings.values.any(
                               (AgentSettings settings) =>
@@ -314,7 +333,10 @@ class _ProjectCard extends StatelessWidget {
                     },
                     itemBuilder: (BuildContext context) =>
                         const <PopupMenuEntry<String>>[
-                          PopupMenuItem<String>(value: 'edit', child: Text('Edit')),
+                          PopupMenuItem<String>(
+                            value: 'edit',
+                            child: Text('Edit'),
+                          ),
                           PopupMenuItem<String>(
                             value: 'delete',
                             child: Text('Delete'),
@@ -360,6 +382,7 @@ class _ProjectCard extends StatelessWidget {
                   agent: agent,
                   controller: controller,
                   preferred: project.defaultAgent == agent,
+                  agentJobs: agentJobs,
                 ),
               ),
             ],
@@ -381,12 +404,14 @@ class _AgentButton extends StatelessWidget {
     required this.agent,
     required this.controller,
     required this.preferred,
+    required this.agentJobs,
   });
 
   final Project project;
   final AgentKind agent;
   final ProjectsController controller;
   final bool preferred;
+  final NativeAgentJobs? agentJobs;
 
   @override
   Widget build(BuildContext context) {
@@ -394,9 +419,22 @@ class _AgentButton extends StatelessWidget {
     // Background by default: the session starts with no window, and the
     // snackbar's ATTACH opens one. A long press starts it in a window directly.
     Future<void> start({required bool detached}) async {
+      String? prompt;
+      if (detached) {
+        prompt = await _promptForBackgroundRun(
+          context,
+          initialValue: project.settingsFor(agent).initialPrompt,
+        );
+        if (prompt == null || !context.mounted) return;
+      }
       final AgentSessionLaunchResult? result;
       try {
-        result = await controller.launch(project, agent, detached: detached);
+        result = await controller.launch(
+          project,
+          agent,
+          detached: detached,
+          prompt: prompt,
+        );
       } catch (exception) {
         if (context.mounted) _showFailure(context, exception);
         return;
@@ -404,14 +442,19 @@ class _AgentButton extends StatelessWidget {
       if (result == null || !context.mounted) return;
       // A window launch is its own feedback — the window is there, attached
       // or new. Only a launch that opened nothing has to say where it went.
-      if (result.detached) _showSession(context, controller, result);
+      if (result.detached) {
+        _showSession(context, controller, result, agentJobs: agentJobs);
+      }
     }
 
+    final bool backgroundAvailable = agent != AgentKind.geminiCli;
     return Tooltip(
-      message: 'Tap: start in the background · Long press: open in a window',
+      message: backgroundAvailable
+          ? 'Tap: start in the background · Long press: open in a window'
+          : 'Gemini CLI: long press to open in a window',
       child: OutlinedButton.icon(
         key: ValueKey<String>('launch-${project.id}-${agent.name}'),
-        onPressed: !controller.canLaunch || launching
+        onPressed: !controller.canLaunch || launching || !backgroundAvailable
             ? null
             : () => start(detached: true),
         onLongPress: !controller.canLaunch || launching
@@ -915,8 +958,24 @@ void _showFailure(BuildContext context, Object exception) {
 void _showSession(
   BuildContext context,
   ProjectsController controller,
-  AgentSessionLaunchResult result,
-) {
+  AgentSessionLaunchResult result, {
+  NativeAgentJobs? agentJobs,
+}) {
+  final NativeAgentJobHandle? job = result.job;
+  if (job != null && agentJobs != null) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        duration: const Duration(seconds: 12),
+        content: const Text('Agent job started in the background'),
+        action: SnackBarAction(
+          label: 'VIEW TASK',
+          onPressed: () =>
+              showAgentJobsSheet(context, jobs: agentJobs, focusJobId: job.id),
+        ),
+      ),
+    );
+    return;
+  }
   final String command = attachCommandFor(result.sessionName);
   ScaffoldMessenger.of(context).showSnackBar(
     SnackBar(
@@ -937,6 +996,64 @@ void _showSession(
         },
       ),
     ),
+  );
+}
+
+Future<String?> _promptForBackgroundRun(
+  BuildContext context, {
+  String? initialValue,
+}) => showDialog<String>(
+  context: context,
+  builder: (BuildContext context) =>
+      _BackgroundPromptDialog(initialValue: initialValue),
+);
+
+class _BackgroundPromptDialog extends StatefulWidget {
+  const _BackgroundPromptDialog({this.initialValue});
+
+  final String? initialValue;
+
+  @override
+  State<_BackgroundPromptDialog> createState() =>
+      _BackgroundPromptDialogState();
+}
+
+class _BackgroundPromptDialogState extends State<_BackgroundPromptDialog> {
+  late final TextEditingController prompt = TextEditingController(
+    text: widget.initialValue,
+  );
+
+  @override
+  void dispose() {
+    prompt.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) => AlertDialog(
+    title: const Text('Run agent in background'),
+    content: TextField(
+      key: const ValueKey<String>('project-background-prompt'),
+      controller: prompt,
+      autofocus: true,
+      minLines: 4,
+      maxLines: 10,
+      decoration: const InputDecoration(hintText: 'What should the agent do?'),
+    ),
+    actions: <Widget>[
+      TextButton(
+        onPressed: () => Navigator.of(context).pop(),
+        child: const Text('CANCEL'),
+      ),
+      FilledButton(
+        key: const ValueKey<String>('project-run-background'),
+        onPressed: () {
+          final String value = prompt.text.trim();
+          if (value.isNotEmpty) Navigator.of(context).pop(value);
+        },
+        child: const Text('RUN IN BACKGROUND'),
+      ),
+    ],
   );
 }
 

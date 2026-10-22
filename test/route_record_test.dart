@@ -1,6 +1,7 @@
 import 'dart:convert';
 
 import 'package:augustyniak_capture/features/recordings/domain/route_record.dart';
+import 'package:augustyniak_capture/features/projects/domain/native_agent_types.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {
@@ -89,5 +90,25 @@ void main() {
     final RouteRecord? record = RouteRecord.fromJson(legacy);
 
     expect(jsonEncode(record!.toJson()), jsonEncode(legacy));
+  });
+
+  test('a native job is typed and never becomes a legacy session', () {
+    const NativeAgentJobHandle job = NativeAgentJobHandle(
+      id: '019a019e-9590-45f5-b4d7-60a391ada56f',
+      backend: NativeAgentBackend.codex,
+    );
+    final RouteRecord record = RouteRecord(
+      at: DateTime.utc(2026, 10, 23),
+      kind: RouteKind.agent,
+      target: 'Codex · background job',
+      agentJob: job,
+    );
+
+    final RouteRecord back = RouteRecord.fromJson(record.toJson())!;
+
+    expect(back.agentJob?.id, job.id);
+    expect(back.agentJob?.backend, NativeAgentBackend.codex);
+    expect(back.session, isNull);
+    expect(back.withOutcome(null).agentJob?.id, job.id);
   });
 }

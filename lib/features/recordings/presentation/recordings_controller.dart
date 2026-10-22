@@ -43,6 +43,7 @@ import '../data/media_picker.dart';
 import '../data/recordings_repository.dart';
 import '../data/revisions_repository.dart';
 import '../../projects/data/projects_repository.dart';
+import '../../projects/data/native_agent_jobs.dart';
 import '../../projects/domain/agent_session_launcher.dart'
     show attachCommandFor;
 import '../../projects/domain/project.dart';
@@ -99,6 +100,7 @@ class RecordingsController extends ChangeNotifier {
     MediaOpener mediaOpener = const NoopMediaOpener(),
     CaptureRouter captureRouter = const DisabledCaptureRouter(),
     AgentHandoff agentHandoff = const DisabledAgentHandoff(),
+    this.agentJobs,
     CaptureSender captureSender = const DisabledCaptureSender(),
     NoteVault noteVault = const DisabledNoteVault(),
     ConnectionReasoner connectionReasoner = const ReviewConnectionReasoner(),
@@ -225,6 +227,9 @@ class RecordingsController extends ChangeNotifier {
       });
     } catch (_) {}
   }
+
+  /// Shared native job store used by the handoff result and Projects tab.
+  final NativeAgentJobs? agentJobs;
 
   final RecordingsRepository _repository;
 

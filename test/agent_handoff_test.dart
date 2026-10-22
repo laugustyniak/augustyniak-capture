@@ -20,7 +20,8 @@ class _FakeLauncher implements AgentSessionLauncher {
   /// The session already exists, so a launch attaches instead of starting.
   final bool running;
   final String? failure;
-  final List<AgentSessionLaunchRequest> requests = <AgentSessionLaunchRequest>[];
+  final List<AgentSessionLaunchRequest> requests =
+      <AgentSessionLaunchRequest>[];
   final List<String> attached = <String>[];
 
   @override
@@ -100,108 +101,116 @@ void main() {
     launcher: launcher,
   );
 
-  File taskFile(String id) =>
-      File('${repo.path}${Platform.pathSeparator}.agent-tasks'
-          '${Platform.pathSeparator}$id.md');
+  File taskFile(String id) => File(
+    '${repo.path}${Platform.pathSeparator}.agent-tasks'
+    '${Platform.pathSeparator}$id.md',
+  );
 
-  test('a handoff writes the brief, starts the agent, and closes the capture',
-      () async {
-    final _FakeLauncher launcher = _FakeLauncher();
-    final RecordingsController controller = await buildRecordingsController(
-      appDir,
-      seed: <Recording>[
-        makeRecording(
-          id: 'r1',
-          projectId: 'p1',
-          title: 'Add the delegate button',
-          transcript: 'Dictate a note, then hand it to an agent.',
-          summary: 'One button from capture to session.',
-          tags: <String>['ui'],
-        ),
-      ],
-      agentHandoff: handoffFor(projectFor(repo), launcher),
-    );
+  test(
+    'a handoff writes the brief, starts the agent, and closes the capture',
+    () async {
+      final _FakeLauncher launcher = _FakeLauncher();
+      final RecordingsController controller = await buildRecordingsController(
+        appDir,
+        seed: <Recording>[
+          makeRecording(
+            id: 'r1',
+            projectId: 'p1',
+            title: 'Add the delegate button',
+            transcript: 'Dictate a note, then hand it to an agent.',
+            summary: 'One button from capture to session.',
+            tags: <String>['ui'],
+          ),
+        ],
+        agentHandoff: handoffFor(projectFor(repo), launcher),
+      );
 
-    final AgentHandoffResult? result = await controller.handoff(
-      'r1',
-      agentId: AgentKind.claudeCode.name,
-    );
+      final AgentHandoffResult? result = await controller.handoff(
+        'r1',
+        agentId: AgentKind.claudeCode.name,
+      );
 
-    expect(result, isNotNull);
-    expect(result!.attachedToExistingSession, isFalse);
-    expect(result.taskPath, '.agent-tasks/r1.md');
+      expect(result, isNotNull);
+      expect(result!.attachedToExistingSession, isFalse);
+      expect(result.taskPath, '.agent-tasks/r1.md');
 
-    // The brief is on disk, and carries the capture rather than a reference to
-    // it — an agent reading this file needs no access to the queue.
-    final String brief = taskFile('r1').readAsStringSync();
-    expect(brief, contains('# Add the delegate button'));
-    expect(brief, contains('Dictate a note, then hand it to an agent.'));
-    expect(brief, contains('> One button from capture to session.'));
-    // Tags moved off the italic facts line into the front matter, where a
-    // reader can parse them rather than scrape them — see capture_brief.dart
-    // and `test/capture_brief_test.dart` for the format itself.
-    expect(brief, startsWith('---\n'));
-    expect(brief, contains('tags: ["ui"]'));
-    expect(brief, contains('capture-id: r1'));
+      // The brief is on disk, and carries the capture rather than a reference to
+      // it — an agent reading this file needs no access to the queue.
+      final String brief = taskFile('r1').readAsStringSync();
+      expect(brief, contains('# Add the delegate button'));
+      expect(brief, contains('Dictate a note, then hand it to an agent.'));
+      expect(brief, contains('> One button from capture to session.'));
+      // Tags moved off the italic facts line into the front matter, where a
+      // reader can parse them rather than scrape them — see capture_brief.dart
+      // and `test/capture_brief_test.dart` for the format itself.
+      expect(brief, startsWith('---\n'));
+      expect(brief, contains('tags: ["ui"]'));
+      expect(brief, contains('capture-id: r1'));
 
-    // The prompt is the capture's own text. A session opened on an errand to go
-    // and read a file is a session waiting for a second turn, which is the one
-    // thing the handoff exists to skip.
-    expect(launcher.requests, hasLength(1));
-    final AgentSessionLaunchRequest request = launcher.requests.single;
-    expect(request.repoPath, repo.path);
-    expect(request.agent, ProjectAgent.claude);
-    expect(request.arguments, <String>[
-      framed('Dictate a note, then hand it to an agent.'),
-    ]);
-    expect(request.arguments.single, startsWith('The user handed you a capture'));
-    expect(request.arguments.single, contains('--- BEGIN CAPTURE TEXT ('));
-    expect(request.arguments.single, contains('--- END CAPTURE TEXT ---'));
+      // The prompt is the capture's own text. A session opened on an errand to go
+      // and read a file is a session waiting for a second turn, which is the one
+      // thing the handoff exists to skip.
+      expect(launcher.requests, hasLength(1));
+      final AgentSessionLaunchRequest request = launcher.requests.single;
+      expect(request.repoPath, repo.path);
+      expect(request.agent, ProjectAgent.claude);
+      expect(request.arguments, isEmpty);
+      expect(
+        request.prompt,
+        framed('Dictate a note, then hand it to an agent.'),
+      );
+      expect(request.prompt, startsWith('The user handed you a capture'));
+      expect(request.prompt, contains('--- BEGIN CAPTURE TEXT ('));
+      expect(request.prompt, contains('--- END CAPTURE TEXT ---'));
 
-    // Delivery happened, so the capture closes and records where it went.
-    final Recording item = controller.recordings.single;
-    expect(item.isProcessedByUser, isTrue);
-    expect(item.routes, hasLength(1));
-    expect(item.routes.single.kind, RouteKind.agent);
-    expect(item.routes.single.target, contains('Claude Code'));
-  });
+      // Delivery happened, so the capture closes and records where it went.
+      final Recording item = controller.recordings.single;
+      expect(item.isProcessedByUser, isTrue);
+      expect(item.routes, hasLength(1));
+      expect(item.routes.single.kind, RouteKind.agent);
+      expect(item.routes.single.target, contains('Claude Code'));
+    },
+  );
 
-  test('a second handoff appends and cannot overwrite the agent\'s own notes',
-      () async {
-    final _FakeLauncher launcher = _FakeLauncher();
-    final RecordingsController controller = await buildRecordingsController(
-      appDir,
-      seed: <Recording>[
-        makeRecording(id: 'r1', projectId: 'p1', transcript: 'First pass.'),
-      ],
-      agentHandoff: handoffFor(projectFor(repo), launcher),
-    );
+  test(
+    'a second handoff appends and cannot overwrite the agent\'s own notes',
+    () async {
+      final _FakeLauncher launcher = _FakeLauncher();
+      final RecordingsController controller = await buildRecordingsController(
+        appDir,
+        seed: <Recording>[
+          makeRecording(id: 'r1', projectId: 'p1', transcript: 'First pass.'),
+        ],
+        agentHandoff: handoffFor(projectFor(repo), launcher),
+      );
 
-    await controller.handoff('r1', agentId: AgentKind.codex.name);
-    // Whatever the agent wrote underneath must survive the next handoff.
-    taskFile('r1').writeAsStringSync(
-      '\n## Result\nDone, see PR #12.\n',
-      mode: FileMode.writeOnlyAppend,
-    );
-    await controller.handoff('r1', agentId: AgentKind.codex.name);
+      await controller.handoff('r1', agentId: AgentKind.codex.name);
+      // Whatever the agent wrote underneath must survive the next handoff.
+      taskFile('r1').writeAsStringSync(
+        '\n## Result\nDone, see PR #12.\n',
+        mode: FileMode.writeOnlyAppend,
+      );
+      await controller.handoff('r1', agentId: AgentKind.codex.name);
 
-    final String brief = taskFile('r1').readAsStringSync();
-    expect(brief, contains('Done, see PR #12.'));
-    expect('## Handoff '.allMatches(brief), hasLength(2));
-    // One heading only: the file is the capture's, and it is named once.
-    expect('# '.allMatches(brief).length, greaterThan(0));
+      final String brief = taskFile('r1').readAsStringSync();
+      expect(brief, contains('Done, see PR #12.'));
+      expect('## Handoff '.allMatches(brief), hasLength(2));
+      // One heading only: the file is the capture's, and it is named once.
+      expect('# '.allMatches(brief).length, greaterThan(0));
 
-    // Both deliveries really happened, so both are recorded.
-    expect(controller.recordings.single.routes, hasLength(2));
-  });
+      // Both deliveries really happened, so both are recorded.
+      expect(controller.recordings.single.routes, hasLength(2));
+    },
+  );
 
   test(
     'a symlinked .agent-tasks refuses the handoff and writes nothing',
     () async {
       final Directory outside = Directory.systemTemp.createTempSync('outside-');
       addTearDown(() => outside.deleteSync(recursive: true));
-      Link('${repo.path}${Platform.pathSeparator}.agent-tasks')
-          .createSync(outside.path);
+      Link(
+        '${repo.path}${Platform.pathSeparator}.agent-tasks',
+      ).createSync(outside.path);
       final _FakeLauncher launcher = _FakeLauncher();
       final RecordingsController controller = await buildRecordingsController(
         appDir,
@@ -232,8 +241,9 @@ void main() {
       addTearDown(() => outside.deleteSync(recursive: true));
       final File victim = File('${outside.path}${Platform.pathSeparator}v.md')
         ..writeAsStringSync('untouched');
-      Directory('${repo.path}${Platform.pathSeparator}.agent-tasks')
-          .createSync();
+      Directory(
+        '${repo.path}${Platform.pathSeparator}.agent-tasks',
+      ).createSync();
       Link(taskFile('r1').path).createSync(victim.path);
       final _FakeLauncher launcher = _FakeLauncher();
       final RecordingsController controller = await buildRecordingsController(
@@ -331,28 +341,30 @@ void main() {
     expect(launcher.attached, <String>['augustyniak-acme-p1-claude']);
   });
 
-  test('a detached handoff onto a running session is a found, not a start',
-      () async {
-    final _FakeLauncher launcher = _FakeLauncher(running: true);
-    final RecordingsController controller = await buildRecordingsController(
-      appDir,
-      seed: <Recording>[
-        makeRecording(id: 'r1', projectId: 'p1', transcript: 'Body.'),
-      ],
-      agentHandoff: handoffFor(projectFor(repo), launcher),
-    );
+  test(
+    'a detached handoff onto a running session is a found, not a start',
+    () async {
+      final _FakeLauncher launcher = _FakeLauncher(running: true);
+      final RecordingsController controller = await buildRecordingsController(
+        appDir,
+        seed: <Recording>[
+          makeRecording(id: 'r1', projectId: 'p1', transcript: 'Body.'),
+        ],
+        agentHandoff: handoffFor(projectFor(repo), launcher),
+      );
 
-    final AgentHandoffResult? result = await controller.handoff(
-      'r1',
-      agentId: AgentKind.codex.name,
-      detached: true,
-    );
+      final AgentHandoffResult? result = await controller.handoff(
+        'r1',
+        agentId: AgentKind.codex.name,
+        detached: true,
+      );
 
-    // Both flags: nothing started, nothing opened, the prompt did not land.
-    expect(result!.detached, isTrue);
-    expect(result.attachedToExistingSession, isTrue);
-    expect(controller.recordings.single.routes.single.session, isNotNull);
-  });
+      // Both flags: nothing started, nothing opened, the prompt did not land.
+      expect(result!.detached, isTrue);
+      expect(result.attachedToExistingSession, isTrue);
+      expect(controller.recordings.single.routes.single.session, isNotNull);
+    },
+  );
 
   test('a failed attach reports why and changes nothing', () async {
     final _FakeLauncher launcher = _FakeLauncher();
@@ -382,10 +394,8 @@ void main() {
 
     await controller.handoff('r1', agentId: AgentKind.antigravity.name);
 
-    expect(launcher.requests.single.arguments, <String>[
-      '--prompt-interactive',
-      framed('Body.'),
-    ]);
+    expect(launcher.requests.single.arguments, isEmpty);
+    expect(launcher.requests.single.prompt, framed('Body.'));
   });
 
   test('skip permissions reaches a handoff with the agent own flag', () async {
@@ -412,8 +422,8 @@ void main() {
 
     expect(launcher.requests.single.arguments, <String>[
       '--dangerously-bypass-approvals-and-sandbox',
-      framed('Body.'),
     ]);
+    expect(launcher.requests.single.prompt, framed('Body.'));
   });
 
   test('a multi-line capture reaches the agent whole', () async {
@@ -434,7 +444,8 @@ void main() {
 
     await controller.handoff('r1', agentId: AgentKind.claudeCode.name);
 
-    expect(launcher.requests.single.arguments, <String>[framed(dictated)]);
+    expect(launcher.requests.single.arguments, isEmpty);
+    expect(launcher.requests.single.prompt, framed(dictated));
   });
 
   test('a capture with no text falls back to its title', () async {
@@ -449,7 +460,8 @@ void main() {
 
     await controller.handoff('r1', agentId: AgentKind.claudeCode.name);
 
-    expect(launcher.requests.single.arguments, const <String>['Rename the tab']);
+    expect(launcher.requests.single.arguments, isEmpty);
+    expect(launcher.requests.single.prompt, 'Rename the tab');
   });
 
   test('an edited instruction replaces the default', () async {
@@ -468,9 +480,11 @@ void main() {
       instruction: '  Read the brief and only write tests.  ',
     );
 
-    expect(launcher.requests.single.arguments, <String>[
+    expect(launcher.requests.single.arguments, isEmpty);
+    expect(
+      launcher.requests.single.prompt,
       framed('Read the brief and only write tests.'),
-    ]);
+    );
   });
 
   test('a capture with no reachable project is offered no agents', () async {
@@ -577,5 +591,4 @@ void main() {
       );
     });
   });
-
 }
