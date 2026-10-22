@@ -346,4 +346,7 @@ class _NoopLauncher implements AgentSessionLauncher {
     sessionName: 'x',
     attachedToExistingSession: false,
   );
+
+  @override
+  Future<void> attach(String sessionName) async {}
 }

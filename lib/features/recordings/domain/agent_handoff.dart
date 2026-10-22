@@ -36,6 +36,7 @@ class AgentHandoffRequest {
     required this.capture,
     required this.agentId,
     required this.instruction,
+    this.detached = false,
   });
 
   /// Names the brief this capture owns, so a second handoff appends to the same
@@ -57,6 +58,10 @@ class AgentHandoffRequest {
   /// The opening prompt, carrying the capture's own text — see
   /// [AgentHandoff.promptFor].
   final String instruction;
+
+  /// Start the session in the background rather than in a terminal window.
+  /// See `AgentSessionLaunchRequest.detached`.
+  final bool detached;
 }
 
 class AgentHandoffResult {
@@ -65,6 +70,7 @@ class AgentHandoffResult {
     required this.taskPath,
     required this.sessionName,
     required this.attachedToExistingSession,
+    this.detached = false,
   });
 
   final RouteRecord record;
@@ -83,6 +89,11 @@ class AgentHandoffResult {
   /// user has to be told to point the running agent at it, or they will wait
   /// for work that was never requested.
   final bool attachedToExistingSession;
+
+  /// The session runs in the background and no window was opened. The caller
+  /// has to say where it is and offer a way in — [AgentHandoff.attach], or the
+  /// command to type — or the launch looks like nothing happened.
+  final bool detached;
 }
 
 /// Starts a coding agent on a capture, in its project's repository.
@@ -141,6 +152,13 @@ abstract interface class AgentHandoff {
   /// Throws on failure, under the same contract as [CaptureRouter.route]: the
   /// caller must record nothing when it does.
   Future<AgentHandoffResult> handoff(AgentHandoffRequest request);
+
+  /// Opens a terminal on the running session [sessionName].
+  ///
+  /// The way back into a session started detached, and into one that was
+  /// already running when a second handoff found it. Throws when the session
+  /// is not running or no terminal can open; nothing is written either way.
+  Future<void> attach(String sessionName);
 }
 
 /// The default: no agent can be started, so the queue offers no such control.
@@ -161,6 +179,11 @@ class DisabledAgentHandoff implements AgentHandoff {
 
   @override
   Future<AgentHandoffResult> handoff(AgentHandoffRequest request) async {
+    throw const AgentHandoffUnavailableException();
+  }
+
+  @override
+  Future<void> attach(String sessionName) async {
     throw const AgentHandoffUnavailableException();
   }
 }
