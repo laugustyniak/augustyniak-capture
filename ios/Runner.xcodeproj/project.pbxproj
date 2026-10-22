@@ -21,7 +21,6 @@
 		A14D1A012F10000100AC0001 /* NativeMediaProcessor.swift in Sources */ = {isa = PBXBuildFile; fileRef = A14D1A002F10000100AC0001 /* NativeMediaProcessor.swift */; };
 		A14D1A032F10000100AC0001 /* CaptureNoteIntent.swift in Sources */ = {isa = PBXBuildFile; fileRef = A14D1A022F10000100AC0001 /* CaptureNoteIntent.swift */; };
 		A15D1A012F20000100AC0001 /* CaptureKeyboardViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = A15D1A032F20000100AC0001 /* CaptureKeyboardViewController.swift */; };
-		A15D1A022F20000100AC0001 /* CaptureKeyboard.appex in Embed App Extensions */ = {isa = PBXBuildFile; fileRef = A15D1A062F20000100AC0001 /* CaptureKeyboard.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -31,13 +30,6 @@
 			proxyType = 1;
 			remoteGlobalIDString = 97C146ED1CF9000F007C117D;
 			remoteInfo = Runner;
-		};
-		A15D1A0D2F20000100AC0001 /* PBXContainerItemProxy */ = {
-			isa = PBXContainerItemProxy;
-			containerPortal = 97C146E61CF9000F007C117D /* Project object */;
-			proxyType = 1;
-			remoteGlobalIDString = A15D1A082F20000100AC0001;
-			remoteInfo = CaptureKeyboard;
 		};
 /* End PBXContainerItemProxy section */
 
@@ -50,17 +42,6 @@
 			files = (
 			);
 			name = "Embed Frameworks";
-			runOnlyForDeploymentPostprocessing = 0;
-		};
-		A15D1A0C2F20000100AC0001 /* Embed App Extensions */ = {
-			isa = PBXCopyFilesBuildPhase;
-			buildActionMask = 2147483647;
-			dstPath = "";
-			dstSubfolderSpec = 13;
-			files = (
-				A15D1A022F20000100AC0001 /* CaptureKeyboard.appex in Embed App Extensions */,
-			);
-			name = "Embed App Extensions";
 			runOnlyForDeploymentPostprocessing = 0;
 		};
 /* End PBXCopyFilesBuildPhase section */
@@ -255,14 +236,12 @@
 				97C146EB1CF9000F007C117D /* Frameworks */,
 				97C146EC1CF9000F007C117D /* Resources */,
 				9705A1C41CF9048500538489 /* Embed Frameworks */,
-				A15D1A0C2F20000100AC0001 /* Embed App Extensions */,
 				3B06AD1E1E4923F5004D2608 /* Thin Binary */,
 				D2B3085B9C5448EB4C1E6B29 /* [CP] Embed Pods Frameworks */,
 			);
 			buildRules = (
 			);
 			dependencies = (
-				A15D1A0E2F20000100AC0001 /* PBXTargetDependency */,
 			);
 			name = Runner;
 			packageProductDependencies = (
@@ -494,11 +473,6 @@
 			isa = PBXTargetDependency;
 			target = 97C146ED1CF9000F007C117D /* Runner */;
 			targetProxy = 331C8085294A63A400263BE5 /* PBXContainerItemProxy */;
-		};
-		A15D1A0E2F20000100AC0001 /* PBXTargetDependency */ = {
-			isa = PBXTargetDependency;
-			target = A15D1A082F20000100AC0001 /* CaptureKeyboard */;
-			targetProxy = A15D1A0D2F20000100AC0001 /* PBXContainerItemProxy */;
 		};
 /* End PBXTargetDependency section */
 
