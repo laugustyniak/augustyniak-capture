@@ -1,5 +1,6 @@
 import 'dart:io';
 
+import 'package:flutter/foundation.dart' show ValueListenable;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
@@ -52,7 +53,7 @@ class RecordingCard extends StatelessWidget {
     this.onOpenFocus,
     this.onConfigureModels,
     this.onCancelProcessing,
-    this.processingElapsed,
+    this.processingTicker,
     this.relatedCount = 0,
     this.repeatCount = 0,
   });
@@ -198,7 +199,7 @@ class RecordingCard extends StatelessWidget {
   final VoidCallback? onOpenFocus;
   final VoidCallback? onConfigureModels;
   final VoidCallback? onCancelProcessing;
-  final Duration? processingElapsed;
+  final ValueListenable<Duration>? processingTicker;
 
   /// Captures close in meaning to this one (#272). Zero draws nothing, which
   /// is also what an install without an embedding model always passes.
@@ -230,11 +231,7 @@ class RecordingCard extends StatelessWidget {
     final String baseTranscribing = recording.type == CaptureType.image
         ? 'EXTRACTING'
         : 'TRANSCRIBING';
-    final String? transcribingLabel = isTranscribing
-        ? (processingElapsed != null
-            ? '$baseTranscribing · ${formatDuration(processingElapsed!)}'
-            : baseTranscribing)
-        : null;
+    final String? transcribingLabel = isTranscribing ? baseTranscribing : null;
     final _StatusVisual? visual = isEnriching
         ? _StatusVisual('ANALYZING', Console.accent, pulse: true)
         : isTranscribing
@@ -307,6 +304,20 @@ class RecordingCard extends StatelessWidget {
         duration: const Duration(milliseconds: 260),
         child: visual == null
             ? const SizedBox.shrink()
+            : (isTranscribing && !isEnriching && processingTicker != null)
+            // Only the `· mm:ss` suffix moves, so only this pill repaints; the
+            // key stays on the base label so the switcher does not cross-fade
+            // on every tick.
+            ? ValueListenableBuilder<Duration>(
+                key: ValueKey<String>(visual.label),
+                valueListenable: processingTicker!,
+                builder: (BuildContext _, Duration elapsed, Widget? _) =>
+                    StatusPill(
+                      label: '${visual.label} · ${formatDuration(elapsed)}',
+                      color: visual.color,
+                      pulse: visual.pulse,
+                    ),
+              )
             : StatusPill(
                 key: ValueKey<String>(visual.label),
                 label: visual.label,
