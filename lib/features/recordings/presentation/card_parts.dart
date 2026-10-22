@@ -1,5 +1,6 @@
 import 'dart:io';
 
+import 'package:flutter/foundation.dart' show ValueListenable;
 import 'package:flutter/material.dart';
 
 import '../../../app/ui_kit.dart';
@@ -263,7 +264,7 @@ class ProcessingStrip extends StatelessWidget {
     super.key,
     required this.enriching,
     this.type = CaptureType.audioRecording,
-    this.elapsed,
+    this.processingTicker,
   });
 
   /// True while the model reads the text; false while the audio is being
@@ -272,8 +273,10 @@ class ProcessingStrip extends StatelessWidget {
   final bool enriching;
   final CaptureType type;
 
-  /// Elapsed duration for currently running transcription or OCR processing.
-  final Duration? elapsed;
+  /// Running time of the current transcription or OCR job, or null when there
+  /// is none to show. Only the label listens to it, so a tick repaints one
+  /// `Text` rather than the page.
+  final ValueListenable<Duration>? processingTicker;
 
   /// Public so a widget test asserts the string that is actually rendered
   /// rather than a copy of it, the same rule `RecordingCard.analyzingLabel`
@@ -286,9 +289,6 @@ class ProcessingStrip extends StatelessWidget {
   Widget build(BuildContext context) {
     final bool isImage = type == CaptureType.image;
     final String baseLabel = isImage ? ocrLabel : transcribingLabel;
-    final String activeLabel = elapsed != null
-        ? '$baseLabel · ${formatDuration(elapsed!)}'
-        : baseLabel;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: <Widget>[
@@ -309,10 +309,19 @@ class ProcessingStrip extends StatelessWidget {
               ),
             ),
             const SizedBox(width: 8),
-            Text(
-              enriching ? analyzingLabel : activeLabel,
-              style: ConsoleText.micro.copyWith(color: Console.accent),
-            ),
+            if (enriching || processingTicker == null)
+              Text(
+                enriching ? analyzingLabel : baseLabel,
+                style: ConsoleText.micro.copyWith(color: Console.accent),
+              )
+            else
+              ValueListenableBuilder<Duration>(
+                valueListenable: processingTicker!,
+                builder: (BuildContext _, Duration elapsed, Widget? _) => Text(
+                  '$baseLabel · ${formatDuration(elapsed)}',
+                  style: ConsoleText.micro.copyWith(color: Console.accent),
+                ),
+              ),
             const SizedBox(width: 8),
             Expanded(
               child: Text(

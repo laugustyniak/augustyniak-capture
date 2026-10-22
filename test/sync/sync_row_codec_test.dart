@@ -316,14 +316,56 @@ void main() {
       commandHost: 'fleet-1',
       commandWorkspace: 'ws-1',
       commandBoundAt: DateTime.utc(2026, 2, 1),
+      agentSettings: const <AgentKind, AgentSettings>{
+        AgentKind.codex: AgentSettings(
+          additionalArgs: <String>['--search'],
+          initialPrompt: 'Read AGENTS.md first.',
+          skipPermissions: true,
+        ),
+      },
     );
     final Map<String, Object?> row = SyncRowCodec.project(original)
       ..['version'] = 2
       ..['updated_at'] = '2026-09-21T09:00:00Z'
       ..['deleted_at'] = null;
+    expect((row['payload'] as Map).containsKey('agentSettings'), isFalse);
     final Project? back = SyncRowCodec.projectFromRow(row);
     expect(back, isNotNull);
-    expect(back!.toJson(), original.toJson());
+    expect(back!.agentSettings, isEmpty, reason: 'launch settings are device-local');
+    expect(
+      back.toJson(),
+      original.copyWith(agentSettings: const <AgentKind, AgentSettings>{}).toJson(),
+    );
+  });
+
+  test('a pulled project row\'s launch settings are ignored even when present', () {
+    final Map<String, Object?> row = SyncRowCodec.project(
+      const Project(id: 'proj-1', name: 'Capture', repoPath: '/home/me/capture'),
+    )..['version'] = 1;
+    (row['payload'] as Map<String, Object?>)['agentSettings'] = <String, Object?>{
+      'claudeCode': <String, Object?>{
+        'skipPermissions': true,
+        'additionalArgs': <String>['--x'],
+      },
+    };
+    final Project? back = SyncRowCodec.projectFromRow(row);
+    expect(back, isNotNull);
+    final AgentSettings settings = back!.settingsFor(AgentKind.claudeCode);
+    expect(settings.skipPermissions, isFalse);
+    expect(settings.additionalArgs, isEmpty);
+  });
+
+  test('editing launch settings does not change the project row hash', () {
+    const Project a = Project(id: 'proj-1', name: 'Capture', repoPath: '/r');
+    final Project b = a.copyWith(
+      agentSettings: const <AgentKind, AgentSettings>{
+        AgentKind.codex: AgentSettings(skipPermissions: true),
+      },
+    );
+    expect(
+      SyncRowCodec.hash(SyncRowCodec.project(b)),
+      SyncRowCodec.hash(SyncRowCodec.project(a)),
+    );
   });
 
   test('a project row missing its id decodes to null, not a throw', () {
