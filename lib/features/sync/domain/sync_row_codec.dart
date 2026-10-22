@@ -88,6 +88,9 @@ class SyncRowCodec {
     // sends `repoPath` as a real column by schema design. None of it is a
     // secret; a path is not device-specific in the sense a bearer token is,
     // it is just local filesystem layout another device cannot use.
+    // On arrival the rule differs: `recordingFromRow` drops `artifacts` (the
+    // viewer reads whatever path one names), and `routes[].target` is only
+    // displayed, never opened.
     final Map<String, Object?> payload = <String, Object?>{
       'thumbPath': json['thumbPath'] is String
           ? p.basename(json['thumbPath'] as String)
@@ -209,7 +212,11 @@ class SyncRowCodec {
       'cleanup': payload['cleanup'],
       'instruction': payload['instruction'],
       'routes': payload['routes'] ?? <Object?>[],
-      'artifacts': payload['artifacts'] ?? <Object?>[],
+      // Artifacts name files on the machine that ran the agent, and the viewer
+      // reads and opens whatever path one carries. A remote row therefore never
+      // contributes any: this device's own list is kept, a fresh row gets none,
+      // and `AgentArtifactScanner` rediscovers them from `.agent-tasks/` here.
+      'artifacts': local?.toJson()['artifacts'] ?? <Object?>[],
       if (payload.containsKey('segments'))
         'segments': _restoreSegmentPaths(payload['segments'], localSegmentPaths)
       else if (local != null && local.hasStoredSegments)
@@ -237,7 +244,7 @@ class SyncRowCodec {
               ? localPathsByIndex[segment['index'] as int]
               : null) ??
           SyncPathPolicy.localFileName(segment['filePath']);
-      // No usable name: dropped, as `SyncPathPolicy.sanitizePayload` does.
+      // No usable name: dropped, like an artifact or a poster with no usable name.
       if (path == null) continue;
       restored.add(<String, dynamic>{...segment, 'filePath': path});
     }

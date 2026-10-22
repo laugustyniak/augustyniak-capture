@@ -402,6 +402,10 @@ segment's `filePath`) unless a local row already supplies this device's own
 path. So an absolute path in `_recordings` was always written by this
 device, and a row can never make it download to — or upload from — a
 location of the row's choosing.
+`artifacts` never arrive from a remote row at all: the codec keeps the local
+row's list (empty for a new row), because the viewer reads whatever path an
+artifact names and `AgentArtifactScanner` rediscovers them on the device that
+ran the agent.
 
 **Step 1 — re-root.** `RecordingsController._rerootSyncedPaths` points every
 bare-name path a pull left behind (`SyncRowCodec.recordingFromRow` with no

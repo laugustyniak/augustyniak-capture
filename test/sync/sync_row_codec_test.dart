@@ -1,5 +1,6 @@
 import 'package:augustyniak_capture/features/clipboard/domain/clipboard_item.dart';
 import 'package:augustyniak_capture/features/projects/domain/project.dart';
+import 'package:augustyniak_capture/features/recordings/domain/agent_artifact.dart';
 import 'package:augustyniak_capture/features/recordings/domain/capture_category.dart';
 import 'package:augustyniak_capture/features/recordings/domain/capture_segment.dart';
 import 'package:augustyniak_capture/features/recordings/domain/capture_type.dart';
@@ -14,6 +15,7 @@ Recording _recording({
   String? transcript,
   String? thumbPath,
   List<CaptureSegment>? segments,
+  List<AgentArtifact> artifacts = const <AgentArtifact>[],
 }) => Recording(
   id: 'rec-1',
   filePath: '/tmp/rec-1.m4a',
@@ -27,6 +29,7 @@ Recording _recording({
   category: CaptureCategory.idea,
   tags: const <String>['a', 'b'],
   segments: segments,
+  artifacts: artifacts,
 );
 
 /// Walks a decoded JSON-shaped value (maps, lists, scalars — the same shape
@@ -109,6 +112,65 @@ void main() {
       <String>['rec-1.m4a', 'rec-1-1.jpg'],
       reason: 'without local, the bare segment names stay',
     );
+  });
+
+  test('a pulled row never contributes artifact paths — local ones are kept', () {
+    final Recording mine = _recording(
+      artifacts: <AgentArtifact>[
+        AgentArtifact(
+          id: 'mine',
+          captureId: 'rec-1',
+          title: 'result',
+          path: '/home/me/repo/.agent-tasks/x-result.md',
+          updatedAt: DateTime.utc(2026, 10, 20),
+        ),
+      ],
+    );
+    final Map<String, Object?> row = SyncRowCodec.recording(mine);
+    final Map<String, Object?> payload = Map<String, Object?>.from(
+      row['payload'] as Map,
+    );
+    payload['artifacts'] = <Object?>[
+      <String, Object?>{
+        'id': 'evil',
+        'captureId': mine.id,
+        'title': 'id_ed25519',
+        'path': '/home/me/.ssh/id_ed25519',
+        'updatedAt': '2026-10-21T00:00:00Z',
+        'kind': 'resultNote',
+      },
+    ];
+    final Map<String, Object?> hostile = <String, Object?>{
+      ...row,
+      'payload': payload,
+    };
+
+    final Recording? withLocal = SyncRowCodec.recordingFromRow(
+      hostile,
+      local: mine,
+    );
+    expect(
+      withLocal!.artifacts.map((AgentArtifact a) => a.path).toList(),
+      <String>['/home/me/repo/.agent-tasks/x-result.md'],
+    );
+
+    final Recording? fresh = SyncRowCodec.recordingFromRow(hostile);
+    expect(fresh!.artifacts, isEmpty);
+  });
+
+  test('a payload with malformed artifacts still decodes', () {
+    for (final Object? bad in <Object?>['not a list', null, 7]) {
+      final Map<String, Object?> row = SyncRowCodec.recording(_recording());
+      final Map<String, Object?> payload = Map<String, Object?>.from(
+        row['payload'] as Map,
+      )..['artifacts'] = bad;
+      final Recording? back = SyncRowCodec.recordingFromRow(<String, Object?>{
+        ...row,
+        'payload': payload,
+      });
+      expect(back, isNotNull);
+      expect(back!.artifacts, isEmpty);
+    }
   });
 
   test('a pulled row never chooses a location on this device', () {

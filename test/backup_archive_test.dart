@@ -802,7 +802,7 @@ void main() {
     expect(merged.readAsStringSync(), contains('"recordingId":"a"'));
   });
 
-  test('an agent artifact survives a round trip', () async {
+  test('an agent artifact path is not carried across an import', () async {
     final Recording withArtifact = capture('a').copyWith(
       artifacts: <AgentArtifact>[
         AgentArtifact(
@@ -819,11 +819,11 @@ void main() {
     await archiveFor(source).exportTo(zipPath());
     await archiveFor(target).importFrom(zipPath());
 
-    // `_relocate` rebuilds the row field by field, which is exactly the shape
-    // that loses a field added later — this asserts the one it already lost.
+    // An artifact path names a file on the machine that made the archive, and
+    // the viewer reads whatever it names — so an archive never supplies one.
     final Recording restored = (await repositoryFor(target).loadAll()).single;
-    expect(restored.artifacts, hasLength(1));
-    expect(restored.artifacts.single.id, 'artifact-1');
+    expect(restored.id, 'a');
+    expect(restored.artifacts, isEmpty);
   });
 
   test('projectAuto survives a round trip, and a legacy row reads false', () async {
@@ -909,7 +909,7 @@ void main() {
     expect(merged.readAsStringSync(), contains('"recordingId":"a"'));
   });
 
-  test('an agent artifact survives a round trip', () async {
+  test('an agent artifact path is not carried across an import', () async {
     final Recording withArtifact = capture('a').copyWith(
       artifacts: <AgentArtifact>[
         AgentArtifact(
@@ -926,11 +926,11 @@ void main() {
     await archiveFor(source).exportTo(zipPath());
     await archiveFor(target).importFrom(zipPath());
 
-    // `_relocate` rebuilds the row field by field, which is exactly the shape
-    // that loses a field added later — this asserts the one it already lost.
+    // An artifact path names a file on the machine that made the archive, and
+    // the viewer reads whatever it names — so an archive never supplies one.
     final Recording restored = (await repositoryFor(target).loadAll()).single;
-    expect(restored.artifacts, hasLength(1));
-    expect(restored.artifacts.single.id, 'artifact-1');
+    expect(restored.id, 'a');
+    expect(restored.artifacts, isEmpty);
   });
 
   // **This does not reproduce the race it was written for**, and saying so is
