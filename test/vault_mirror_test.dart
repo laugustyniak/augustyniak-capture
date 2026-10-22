@@ -180,6 +180,7 @@ void main() {
       transcription: _StubTranscription('Treść nagrania.'),
       picked: audioSource(),
     );
+    await controller.initialize();
 
     await controller.addUpload(CaptureType.audioUpload);
     await controller.waitForProcessing();
@@ -204,6 +205,7 @@ void main() {
       picked: audioSource(),
       analyzeConnections: true,
     );
+    await controller.initialize();
 
     await controller.addUpload(CaptureType.audioUpload);
     await controller.waitForProcessing();
@@ -224,6 +226,7 @@ void main() {
       analyzeConnections: true,
       connectionReasoner: _FailingReasoner(),
     );
+    await controller.initialize();
 
     await controller.addUpload(CaptureType.audioUpload);
     await controller.waitForProcessing();
@@ -246,6 +249,7 @@ void main() {
       vault: realVault(),
       picked: audioSource(),
     );
+    await controller.initialize();
 
     await controller.addUpload(CaptureType.audioUpload);
     await controller.waitForProcessing();
@@ -260,6 +264,7 @@ void main() {
       transcription: _StubTranscription('Pierwsza wersja.'),
       picked: audioSource(),
     );
+    await controller.initialize();
 
     await controller.addUpload(CaptureType.audioUpload);
     await controller.waitForProcessing();
@@ -280,6 +285,7 @@ void main() {
       transcription: _StubTranscription('Wersja z modelu.'),
       picked: audioSource(),
     );
+    await controller.initialize();
 
     await controller.addUpload(CaptureType.audioUpload);
     await controller.waitForProcessing();
@@ -301,6 +307,7 @@ void main() {
       transcription: _StubTranscription('Tekst.'),
       picked: audioSource(),
     );
+    await controller.initialize();
 
     await controller.addUpload(CaptureType.audioUpload);
     await controller.waitForProcessing();
@@ -320,6 +327,7 @@ void main() {
       transcription: _StubTranscription('Tekst mimo wszystko.'),
       picked: audioSource(),
     );
+    await controller.initialize();
 
     await controller.addUpload(CaptureType.audioUpload);
     await controller.waitForProcessing();
@@ -338,6 +346,7 @@ void main() {
       transcription: _StubTranscription('Tekst.'),
       picked: audioSource(),
     );
+    await controller.initialize();
 
     await controller.addUpload(CaptureType.audioUpload);
     await controller.waitForProcessing();

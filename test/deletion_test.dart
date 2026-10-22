@@ -181,6 +181,7 @@ void main() {
         _TempRepository(root),
         recorder: recorder,
       );
+      await controller.initialize();
 
       await controller.startRecording();
       final String path = recorder.path!;
