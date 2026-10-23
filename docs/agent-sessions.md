@@ -109,9 +109,9 @@ The sheet that opens shows four things and launches on one tap:
 
 1. **Agent** — the project's default is preselected; choosing another applies to
    this task only and does not change the project.
-2. **Where it runs** — **IN BACKGROUND** (the default) starts the session with
-   no window and needs no terminal at all; **IN A WINDOW** opens your terminal
-   on it straight away.
+2. **Where it runs** — **DETACHED · NO ZELLIJ** (the default) starts a native
+   background job with no window, no terminal and no Zellij; **WINDOW · ZELLIJ**
+   opens your terminal on a Zellij session straight away.
 3. **Opening prompt** — the capture's own text. Editable, so `only write tests`
    or `open a PR when green` costs one sentence.
 4. **The brief's path** — `.agent-tasks/<capture-id>.md` inside the repository.

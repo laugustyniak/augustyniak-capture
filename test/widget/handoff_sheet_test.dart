@@ -367,14 +367,14 @@ void main() {
     expect(find.text('LAUNCH SESSION'), findsOneWidget);
   });
 
-  testWidgets('IN A WINDOW launches through the terminal and closes', (
+  testWidgets('WINDOW · ZELLIJ launches through the terminal and closes', (
     WidgetTester tester,
   ) async {
     final _FakeLauncher launcher = _FakeLauncher();
     final RecordingsController controller = await controllerWith(launcher);
 
     await openSheet(tester, controller);
-    await tester.tap(find.text('IN A WINDOW'));
+    await tester.tap(find.text('WINDOW · ZELLIJ'));
     await tester.pump();
     await tester.tap(find.text('LAUNCH SESSION'));
     await settleIo(tester);
