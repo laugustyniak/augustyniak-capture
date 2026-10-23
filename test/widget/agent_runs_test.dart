@@ -199,17 +199,56 @@ void main() {
     expect(tester.takeException(), isNull);
   });
 
-  testWidgets('a failed read stops the polling', (tester) async {
+  testWidgets('a transient failure is retried and the pill recovers', (
+    tester,
+  ) async {
     final _FakeJobs jobs = _FakeJobs(_job(NativeAgentJobStatus.running));
     await mountSection(tester, _withJob(), jobs);
     jobs.failReads = true;
     await tester.pump(const Duration(milliseconds: 150));
     await tester.pump();
-    final int afterFailure = jobs.reads;
-
-    await tester.pump(const Duration(seconds: 1));
-    expect(jobs.reads, afterFailure);
     expect(find.text('RUNNING'), findsOneWidget);
+
+    jobs.failReads = false;
+    jobs.job = _job(NativeAgentJobStatus.completed, result: 'back');
+    await tester.pump(const Duration(milliseconds: 400));
+    await tester.pump();
+    expect(find.text('DONE'), findsOneWidget);
+  });
+
+  testWidgets('a persistent failure gives up after bounded retries', (
+    tester,
+  ) async {
+    final _FakeJobs jobs = _FakeJobs(_job(NativeAgentJobStatus.running));
+    await mountSection(tester, _withJob(), jobs);
+    jobs.failReads = true;
+    await tester.pump(const Duration(milliseconds: 150));
+    final int afterFirstFailure = jobs.reads;
+
+    await tester.pump(const Duration(seconds: 10));
+    final int settled = jobs.reads;
+    expect(settled - afterFirstFailure, lessThanOrEqualTo(5));
+    await tester.pump(const Duration(seconds: 10));
+    expect(jobs.reads, settled);
+    expect(find.text('RUNNING'), findsOneWidget);
+  });
+
+  testWidgets('a new watcher resumes a poller that gave up', (tester) async {
+    final _FakeJobs jobs = _FakeJobs(_job(NativeAgentJobStatus.running));
+    await mountSection(tester, _withJob(), jobs);
+    jobs.failReads = true;
+    await tester.pump(const Duration(seconds: 20));
+    final int settled = jobs.reads;
+
+    jobs.failReads = false;
+    jobs.job = _job(NativeAgentJobStatus.completed, result: 'x');
+    await tester.pumpWidget(
+      hostTab(() => AgentRunPill(jobs: jobs, handle: _handle)),
+    );
+    await tester.pump();
+    await tester.pump();
+    expect(jobs.reads, greaterThan(settled));
+    expect(find.text('AGENT · DONE'), findsOneWidget);
   });
 
   testWidgets('unmounting stops the polling', (tester) async {

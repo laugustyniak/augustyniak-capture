@@ -288,10 +288,10 @@ class NativeAgentJobs {
   /// listening. A failed read keeps the last answer and stops polling.
   /// [NativeAgentJobWatch.release] must be called when the listener leaves.
   NativeAgentJobWatch watch(String id, void Function() onChange) {
-    final _JobPoll poll = _polls.putIfAbsent(
-      id,
-      () => _JobPoll(this, id)..load(),
-    );
+    final _JobPoll? existing = _polls[id];
+    final _JobPoll poll = existing ?? (_polls[id] = _JobPoll(this, id)..load());
+    // A poller that gave up after failed reads starts again for a new viewer.
+    if (existing != null) existing.resume();
     return NativeAgentJobWatch._(poll, onChange);
   }
 
@@ -416,10 +416,15 @@ class NativeAgentJobs {
       // Only when the supervisor itself wrote this terminal status: a derived
       // `lost`, or a completed run downgraded to failed, has no such moment.
       finishedAt: _terminal(status) && status == onDiskStatus
-          ? await _statusModified(directory)
+          ? _clampedFinish(await _statusModified(directory), createdAt)
           : null,
     );
   }
+
+  /// `lastModified` can be truncated to the second, so a job created and
+  /// finished within one second would otherwise finish before it began.
+  DateTime? _clampedFinish(DateTime? modified, DateTime createdAt) =>
+      modified == null || modified.isBefore(createdAt) ? createdAt : modified;
 
   Future<DateTime?> _statusModified(Directory directory) async {
     try {
@@ -831,6 +836,9 @@ class NativeAgentJobWatch {
 class _JobPoll {
   _JobPoll(this._jobs, this.id);
 
+  /// Retries after failed reads, spaced 2x, 4x, 8x, 16x [watchInterval].
+  static const int _maxRetries = 4;
+
   final NativeAgentJobs _jobs;
   final String id;
   final List<void Function()> listeners = <void Function()>[];
@@ -838,11 +846,23 @@ class _JobPoll {
   bool loading = true;
   Timer? _timer;
   int _generation = 0;
+  int _failures = 0;
+  bool _inFlight = false;
   bool _disposed = false;
+
+  /// Starts reading again when nothing is scheduled or running and the job is
+  /// not known to be finished.
+  void resume() {
+    if (_disposed || _inFlight || (_timer?.isActive ?? false)) return;
+    if (job?.isTerminal ?? false) return;
+    _failures = 0;
+    load();
+  }
 
   Future<void> load() async {
     _timer?.cancel();
     final int generation = ++_generation;
+    _inFlight = true;
     NativeAgentJob? next = job;
     bool failed = false;
     try {
@@ -852,14 +872,20 @@ class _JobPoll {
     }
     // A newer load, or the last listener leaving, supersedes this answer.
     if (_disposed || generation != _generation) return;
+    _inFlight = false;
     job = next;
     loading = false;
+    _failures = failed ? _failures + 1 : 0;
     for (final void Function() listener in List.of(listeners)) {
       listener();
     }
-    if (!failed && next != null && !next.isTerminal) {
-      _timer?.cancel();
+    // A listener may have released the last watch while being notified.
+    if (_disposed) return;
+    if (next != null && next.isTerminal) return;
+    if (!failed) {
       _timer = Timer(_jobs.watchInterval, load);
+    } else if (_failures <= _maxRetries) {
+      _timer = Timer(_jobs.watchInterval * (1 << _failures), load);
     }
   }
 

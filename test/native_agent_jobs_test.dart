@@ -541,6 +541,94 @@ printf '%s\n' '{"type":"turn.completed"}'
     expect(done.finishedAt!.isBefore(done.createdAt), isFalse);
   });
 
+  test('finishedAt never precedes createdAt despite coarse mtimes', () async {
+    const String id = '00000000-0000-4000-8000-000000000005';
+    final Directory directory = Directory(p.join(jobsRoot.path, id));
+    await directory.create(recursive: true);
+    // Created "after" the status file's mtime, as happens when both fall in
+    // one second and the filesystem truncates the mtime.
+    final DateTime created = DateTime.now().add(const Duration(days: 1));
+    await File(p.join(directory.path, 'request.json')).writeAsString(
+      jsonEncode(<String, dynamic>{
+        'id': id,
+        'backend': 'codex',
+        'agent': 'codex',
+        'projectId': 'project',
+        'projectName': 'Project',
+        'workspacePath': workspace.path,
+        'createdAt': created.toIso8601String(),
+        'configuredArguments': <String>[],
+        'prompt': 'x',
+      }),
+    );
+    await File(p.join(directory.path, 'status')).writeAsString('failed');
+    final NativeAgentJobs jobs = NativeAgentJobs(
+      jobsRoot: () async => jobsRoot,
+      executables: _Resolver('/bin/true'),
+    );
+
+    final NativeAgentJob job = await jobs.read(id);
+
+    expect(job.status, NativeAgentJobStatus.failed);
+    expect(job.finishedAt, isNotNull);
+    expect(job.finishedAt!.isBefore(job.createdAt), isFalse);
+  });
+
+  test('a listener releasing the last watch leaves no timer', () async {
+    const String id = '00000000-0000-4000-8000-000000000006';
+    final Directory directory = Directory(p.join(jobsRoot.path, id));
+    await directory.create(recursive: true);
+    await File(p.join(directory.path, 'request.json')).writeAsString(
+      jsonEncode(<String, dynamic>{
+        'id': id,
+        'backend': 'codex',
+        'agent': 'codex',
+        'projectId': 'project',
+        'projectName': 'Project',
+        'workspacePath': workspace.path,
+        'createdAt': DateTime.now().toIso8601String(),
+        'configuredArguments': <String>[],
+        'prompt': 'x',
+      }),
+    );
+    await File(p.join(directory.path, 'status')).writeAsString('starting');
+    final _CountingJobs jobs = _CountingJobs(jobsRoot);
+    late final NativeAgentJobWatch lease;
+    lease = jobs.watch(id, () => lease.release());
+    await Future<void>.delayed(const Duration(milliseconds: 150));
+    expect(jobs.peeks, 1);
+  });
+
+  test('a transient read failure is retried and recovers', () async {
+    const String id = '00000000-0000-4000-8000-000000000007';
+    final Directory directory = Directory(p.join(jobsRoot.path, id));
+    await directory.create(recursive: true);
+    final _CountingJobs jobs = _CountingJobs(jobsRoot);
+    int changes = 0;
+    final NativeAgentJobWatch lease = jobs.watch(id, () => changes++);
+    await Future<void>.delayed(const Duration(milliseconds: 30));
+    expect(lease.job, isNull);
+    expect(lease.loading, isFalse);
+
+    await File(p.join(directory.path, 'request.json')).writeAsString(
+      jsonEncode(<String, dynamic>{
+        'id': id,
+        'backend': 'codex',
+        'agent': 'codex',
+        'projectId': 'project',
+        'projectName': 'Project',
+        'workspacePath': workspace.path,
+        'createdAt': DateTime.now().toIso8601String(),
+        'configuredArguments': <String>[],
+        'prompt': 'x',
+      }),
+    );
+    await File(p.join(directory.path, 'status')).writeAsString('starting');
+    await Future<void>.delayed(const Duration(milliseconds: 400));
+    expect(lease.job, isNotNull);
+    lease.release();
+  });
+
   test('a derived lost status has no finishedAt', () async {
     const String id = '00000000-0000-4000-8000-000000000003';
     final Directory directory = Directory(p.join(jobsRoot.path, id));

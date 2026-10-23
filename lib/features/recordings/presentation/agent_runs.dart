@@ -76,8 +76,9 @@ class _AgentJobProbeState extends State<AgentJobProbe> {
   void didUpdateWidget(AgentJobProbe oldWidget) {
     super.didUpdateWidget(oldWidget);
     if (oldWidget.jobs != widget.jobs || oldWidget.id != widget.id) {
-      _watch.release();
+      final NativeAgentJobWatch old = _watch;
       _watch = _open();
+      old.release();
     }
   }
 
@@ -247,8 +248,10 @@ class _AgentRunCardState extends State<_AgentRunCard> {
   String? _elapsed(NativeAgentJob job) {
     final DateTime? end = job.isTerminal ? job.finishedAt : DateTime.now();
     if (end == null) return null;
-    final Duration d = end.difference(job.createdAt);
-    if (d.isNegative) return null;
+    // A clock step or a coarse mtime must not show a negative duration.
+    final Duration d = end.isBefore(job.createdAt)
+        ? Duration.zero
+        : end.difference(job.createdAt);
     if (d.inHours == 0) return formatDuration(d);
     String two(int n) => n.toString().padLeft(2, '0');
     return '${d.inHours}:${two(d.inMinutes.remainder(60))}:'
