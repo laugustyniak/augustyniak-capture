@@ -2,7 +2,7 @@
 
 | Field | Value |
 | --- | --- |
-| Status | DONE — PR #368 merged `ee1b2c3` 2026-10-23, issue #367; **hosted `supabase db push` not yet run** |
+| Status | DONE — PR #368 merged `ee1b2c3`; pushed to the hosted project 2026-10-23 (with `20261006200000` and `20261012090000`, which had never been pushed) |
 | Written against | commit `c4c82a1` (branch `main`), 2026-10-23 |
 | Finding | security #8 in `plans/README.md`: the table grants and allows UPDATE though the client only ever inserts |
 | Effort | S (1–2 h; one migration, one pgTAP edit, one doc sentence) |
