@@ -13,6 +13,27 @@ The three ways a capture leaves the queue: appended to a project's `inbox.md`, o
 
 **Agent handoff** (`recordings/domain/agent_handoff.dart`, `recordings/data/project_agent_handoff.dart`) — the queue's second way out, and the one that *does* something rather than filing something: a capture becomes a coding agent's opening task. `RouteKind.agent` existed before anything produced it; this is what produces it. Same seam shape and same delivery-first contract as `CaptureRouter`, with `DisabledAgentHandoff` as the default, so an install with no launcher never shows the control.
 
+- **Background and windowed launches split at `HybridAgentSessionLauncher`.** A
+  background request for Codex, Claude Code or AGY writes the prompt to a
+  private stdin file and starts a detached `/bin/sh` supervisor; a windowed
+  request keeps the existing Zellij launcher. Gemini remains window-only.
+  Native jobs persist under application support with a typed backend and job
+  id in `RouteRecord.agentJob`; `RouteRecord.session` remains the legacy Zellij
+  handle. The supervisor owns and signals only its own process group, and a
+  nonce-bound stop marker prevents a stale or foreign request from becoming a
+  signal. Provider conversation ids are parsed from the structured event
+  stream and an exact id is required for follow-up, including after reopening
+  Capture. A mismatched id leaves a visible failed job that cannot be continued.
+  Launch waits for a provider's prompt-start event or successful result; an
+  initialization event alone does not confirm delivery. A failure after that
+  acknowledgment is reported as the job's outcome.
+  Stop requests graceful termination with SIGTERM. A process that ignores it
+  remains `stopping`; the supervisor does not escalate to SIGKILL.
+- **Prompt and configured arguments are separate.** Native adapters feed the
+  prompt through stdin, while the Zellij adapter adds its provider-specific
+  prompt argument at its own boundary. Permission bypass flags come only from
+  the project's explicit switch; native mode never enables them itself.
+
 - **`renderCaptureBrief` (`recordings/domain/capture_brief.dart`) is the single definition of the brief format**, and it exists before there is a second writer rather than after. `docs/plans/2026-08-06-command-intake-integration.md` puts a second producer of this exact file behind an HTTP control plane in a later slice; writing the format for the launcher that ships today is what stops the two drifting, and it pays off alone because `augustyniak-command plan --brief <path>` already reads it. The file gains YAML front matter — `capture-id`, `created`, `source`, `category`, `tags`, `intent` — and **a key with no answer is omitted rather than written blank**: `category:` with nothing after it is the YAML value `null`, i.e. a claim that the capture was classified as nothing, and the queue draws exactly the opposite distinction (null means enrichment never ran, `capture` means the model looked and could not place it). The italic facts line each `## Handoff` used to print is gone with it — the same three facts, parseable, in one place. The header is written **once**: a second handoff appends only its own section, because a second front-matter block mid-file is ignored by every YAML reader and read as a new document by every human. `intent` is the one key nothing populates yet; the sheet's editable field is the *prompt*, and the one-liner the plan describes arrives with the control plane.
   - **A `---` line in a transcript is body text, and that is a property of placement rather than of escaping.** The block is opened and closed before the transcript is written, and only a fence on a file's first line opens one — so the transcript reaches the agent verbatim (bar a line shaped like a fence marker, which is rewritten — see [the threat model](#threat-model-the-capture-text-is-untrusted)), forged `capture-id:` lines included, sitting harmlessly below. `test/capture_brief_test.dart` pins it **by asserting the exact key set**, not the values: a version that never closes the block still answers every key correctly, because the real keys all sit above the leak. That test passed against deliberately broken code until it was strengthened.
   - It lives in `recordings/domain/` rather than in `projects/domain/` where the plan named it: `RoutedCapture` is here, and `agent_handoff.dart` spells out why the other direction is closed — `ProjectInboxRouter` already makes `recordings` depend on `projects`, so reaching back would close the cycle. `RoutedCapture.type` was added for the `source` key and is **required**, unlike every persisted field in this app: it is built fresh on each delivery, so a default could only mean "the caller forgot", and the value it would invent reads as a plain fact rather than as a gap.

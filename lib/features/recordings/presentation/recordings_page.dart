@@ -45,6 +45,8 @@ import '../../processing/data/native_media_processor.dart';
 import '../../processing/data/video_audio_extractor.dart';
 import '../../processing/data/video_poster_extractor.dart';
 import '../../projects/data/terminal_launcher.dart';
+import '../../projects/data/hybrid_agent_session_launcher.dart';
+import '../../projects/data/native_agent_jobs.dart';
 import '../../projects/data/zellij_agent_session_launcher.dart';
 import '../../projects/data/projects_repository.dart';
 import '../../projects/domain/agent_session_launcher.dart';
@@ -230,6 +232,7 @@ class _RecordingsPageState extends State<RecordingsPage>
   InboxDrainer? _inboxDrainer;
   Future<void>? _drainFuture;
   late final ProjectsController projects;
+  late final NativeAgentJobs agentJobs;
   late final FocusTimerController timer;
 
   /// How much has been finished lately. The counterpart to
@@ -367,8 +370,17 @@ class _RecordingsPageState extends State<RecordingsPage>
     // only in how a window is opened. A null launcher hides the queue's agent
     // button entirely, so this predicate and the one picking an implementation
     // must not be able to disagree.
+    agentJobs = NativeAgentJobs(
+      jobsRoot: () async {
+        final Directory support = await getApplicationSupportDirectory();
+        return Directory(p.join(support.path, 'agent-jobs'));
+      },
+    );
     final AgentSessionLauncher? launcher = TerminalLauncher.isSupportedPlatform
-        ? ZellijAgentSessionLauncher()
+        ? HybridAgentSessionLauncher(
+            windowed: ZellijAgentSessionLauncher(),
+            jobs: agentJobs,
+          )
         : null;
     if (launcher != null) unawaited(_resolveSessionsRoot());
     projects = ProjectsController(
@@ -461,6 +473,7 @@ class _RecordingsPageState extends State<RecordingsPage>
               launcher: launcher,
               sessionsRoot: () => _sessionsRoot,
             ),
+      agentJobs: launcher == null ? null : agentJobs,
       // The fourth way out, and the only one that needs no project: a
       // capture's text goes to a web assistant, the share sheet or the
       // clipboard. Never disabled — Web and Copy exist on every platform.
@@ -1336,6 +1349,10 @@ class _RecordingsPageState extends State<RecordingsPage>
                                 ConsolePageWidth(
                                   child: ProjectsTab(
                                     controller: projects,
+                                      agentJobs:
+                                          TerminalLauncher.isSupportedPlatform
+                                          ? agentJobs
+                                          : null,
                                     recordingsController: controller,
                                     // Read off the settings controller rather
                                     // than held, on the same rule as the

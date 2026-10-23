@@ -20,7 +20,8 @@ class _FakeLauncher implements AgentSessionLauncher {
   /// The session already exists, so a launch attaches instead of starting.
   final bool running;
   final String? failure;
-  final List<AgentSessionLaunchRequest> requests = <AgentSessionLaunchRequest>[];
+  final List<AgentSessionLaunchRequest> requests =
+      <AgentSessionLaunchRequest>[];
   final List<String> attached = <String>[];
 
   @override
@@ -100,11 +101,13 @@ void main() {
     launcher: launcher,
   );
 
-  File taskFile(String id) =>
-      File('${repo.path}${Platform.pathSeparator}.agent-tasks'
-          '${Platform.pathSeparator}$id.md');
+  File taskFile(String id) => File(
+    '${repo.path}${Platform.pathSeparator}.agent-tasks'
+    '${Platform.pathSeparator}$id.md',
+  );
 
-  test('a handoff writes the brief, starts the agent, and closes the capture',
+  test(
+    'a handoff writes the brief, starts the agent, and closes the capture',
       () async {
     final _FakeLauncher launcher = _FakeLauncher();
     final RecordingsController controller = await buildRecordingsController(
@@ -151,12 +154,14 @@ void main() {
     final AgentSessionLaunchRequest request = launcher.requests.single;
     expect(request.repoPath, repo.path);
     expect(request.agent, ProjectAgent.claude);
-    expect(request.arguments, <String>[
+      expect(request.arguments, isEmpty);
+      expect(
+        request.prompt,
       framed('Dictate a note, then hand it to an agent.'),
-    ]);
-    expect(request.arguments.single, startsWith('The user handed you a capture'));
-    expect(request.arguments.single, contains('--- BEGIN CAPTURE TEXT ('));
-    expect(request.arguments.single, contains('--- END CAPTURE TEXT ---'));
+      );
+      expect(request.prompt, startsWith('The user handed you a capture'));
+      expect(request.prompt, contains('--- BEGIN CAPTURE TEXT ('));
+      expect(request.prompt, contains('--- END CAPTURE TEXT ---'));
 
     // Delivery happened, so the capture closes and records where it went.
     final Recording item = controller.recordings.single;
@@ -164,9 +169,11 @@ void main() {
     expect(item.routes, hasLength(1));
     expect(item.routes.single.kind, RouteKind.agent);
     expect(item.routes.single.target, contains('Claude Code'));
-  });
+    },
+  );
 
-  test('a second handoff appends and cannot overwrite the agent\'s own notes',
+  test(
+    'a second handoff appends and cannot overwrite the agent\'s own notes',
       () async {
     final _FakeLauncher launcher = _FakeLauncher();
     final RecordingsController controller = await buildRecordingsController(
@@ -193,15 +200,17 @@ void main() {
 
     // Both deliveries really happened, so both are recorded.
     expect(controller.recordings.single.routes, hasLength(2));
-  });
+    },
+  );
 
   test(
     'a symlinked .agent-tasks refuses the handoff and writes nothing',
     () async {
       final Directory outside = Directory.systemTemp.createTempSync('outside-');
       addTearDown(() => outside.deleteSync(recursive: true));
-      Link('${repo.path}${Platform.pathSeparator}.agent-tasks')
-          .createSync(outside.path);
+      Link(
+        '${repo.path}${Platform.pathSeparator}.agent-tasks',
+      ).createSync(outside.path);
       final _FakeLauncher launcher = _FakeLauncher();
       final RecordingsController controller = await buildRecordingsController(
         appDir,
@@ -232,8 +241,9 @@ void main() {
       addTearDown(() => outside.deleteSync(recursive: true));
       final File victim = File('${outside.path}${Platform.pathSeparator}v.md')
         ..writeAsStringSync('untouched');
-      Directory('${repo.path}${Platform.pathSeparator}.agent-tasks')
-          .createSync();
+      Directory(
+        '${repo.path}${Platform.pathSeparator}.agent-tasks',
+      ).createSync();
       Link(taskFile('r1').path).createSync(victim.path);
       final _FakeLauncher launcher = _FakeLauncher();
       final RecordingsController controller = await buildRecordingsController(
@@ -331,7 +341,8 @@ void main() {
     expect(launcher.attached, <String>['augustyniak-acme-p1-claude']);
   });
 
-  test('a detached handoff onto a running session is a found, not a start',
+  test(
+    'a detached handoff onto a running session is a found, not a start',
       () async {
     final _FakeLauncher launcher = _FakeLauncher(running: true);
     final RecordingsController controller = await buildRecordingsController(
@@ -352,7 +363,8 @@ void main() {
     expect(result!.detached, isTrue);
     expect(result.attachedToExistingSession, isTrue);
     expect(controller.recordings.single.routes.single.session, isNotNull);
-  });
+    },
+  );
 
   test('a failed attach reports why and changes nothing', () async {
     final _FakeLauncher launcher = _FakeLauncher();
@@ -382,10 +394,8 @@ void main() {
 
     await controller.handoff('r1', agentId: AgentKind.antigravity.name);
 
-    expect(launcher.requests.single.arguments, <String>[
-      '--prompt-interactive',
-      framed('Body.'),
-    ]);
+    expect(launcher.requests.single.arguments, isEmpty);
+    expect(launcher.requests.single.prompt, framed('Body.'));
   });
 
   test('skip permissions reaches a handoff with the agent own flag', () async {
@@ -412,8 +422,8 @@ void main() {
 
     expect(launcher.requests.single.arguments, <String>[
       '--dangerously-bypass-approvals-and-sandbox',
-      framed('Body.'),
     ]);
+    expect(launcher.requests.single.prompt, framed('Body.'));
   });
 
   test('a multi-line capture reaches the agent whole', () async {
@@ -434,7 +444,8 @@ void main() {
 
     await controller.handoff('r1', agentId: AgentKind.claudeCode.name);
 
-    expect(launcher.requests.single.arguments, <String>[framed(dictated)]);
+    expect(launcher.requests.single.arguments, isEmpty);
+    expect(launcher.requests.single.prompt, framed(dictated));
   });
 
   test('a capture with no text falls back to its title', () async {
@@ -449,7 +460,8 @@ void main() {
 
     await controller.handoff('r1', agentId: AgentKind.claudeCode.name);
 
-    expect(launcher.requests.single.arguments, const <String>['Rename the tab']);
+    expect(launcher.requests.single.arguments, isEmpty);
+    expect(launcher.requests.single.prompt, 'Rename the tab');
   });
 
   test('an edited instruction replaces the default', () async {
@@ -468,9 +480,11 @@ void main() {
       instruction: '  Read the brief and only write tests.  ',
     );
 
-    expect(launcher.requests.single.arguments, <String>[
+    expect(launcher.requests.single.arguments, isEmpty);
+    expect(
+      launcher.requests.single.prompt,
       framed('Read the brief and only write tests.'),
-    ]);
+    );
   });
 
   test('a capture with no reachable project is offered no agents', () async {
@@ -577,5 +591,4 @@ void main() {
       );
     });
   });
-
 }

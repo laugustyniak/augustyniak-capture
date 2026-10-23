@@ -340,6 +340,11 @@ class ZellijAgentSessionLauncher implements AgentSessionLauncher {
         );
       }
     }
+    if (request.prompt?.contains('\u0000') ?? false) {
+      throw const AgentSessionLaunchException(
+        'Agent prompt cannot contain NUL characters.',
+      );
+    }
   }
 
   static String _buildLayout(
@@ -353,9 +358,14 @@ class ZellijAgentSessionLauncher implements AgentSessionLauncher {
         '  pane cwd="${_escapeKdl(repoPath)}" '
         'command="${_escapeKdl(agentExecutable)}" {',
       );
-    if (request.arguments.isNotEmpty) {
+    final List<String> arguments = <String>[
+      ...request.arguments,
+      if (request.prompt != null)
+        ...request.agent.promptArguments(request.prompt!),
+    ];
+    if (arguments.isNotEmpty) {
       layout.write('    args');
-      for (final String argument in request.arguments) {
+      for (final String argument in arguments) {
         layout.write(' "${_escapeKdl(argument)}"');
       }
       layout.writeln();

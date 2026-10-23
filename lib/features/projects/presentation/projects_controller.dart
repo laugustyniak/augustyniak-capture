@@ -240,6 +240,7 @@ class ProjectsController extends ChangeNotifier {
     Project project,
     AgentKind agent, {
     bool detached = false,
+    String? prompt,
   }) async {
     final AgentSessionLauncher? launcher = _launcher;
     if (launcher == null) {
@@ -259,6 +260,7 @@ class ProjectsController extends ChangeNotifier {
           agent: _launcherAgent(agent),
           sessionName: project.sessionName,
           arguments: _launchArguments(agent, settings),
+          prompt: prompt ?? settings.initialPrompt,
           detached: detached,
         ),
       );
@@ -338,7 +340,5 @@ class ProjectsController extends ChangeNotifier {
     ...settings.additionalArgs,
     if (settings.skipPermissions)
       ..._launcherAgent(agent).skipPermissionsArguments,
-    if (settings.initialPrompt case final String prompt)
-      ..._launcherAgent(agent).promptArguments(prompt),
   ];
 }

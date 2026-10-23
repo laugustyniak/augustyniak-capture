@@ -1,3 +1,5 @@
+import '../../projects/domain/native_agent_types.dart';
+
 /// Where a capture was sent, and when.
 ///
 /// The queue exists to move a thought somewhere — `CaptureCategory` is a set of
@@ -200,6 +202,7 @@ class RouteRecord {
     required this.target,
     this.outcome,
     this.session,
+    this.agentJob,
   });
 
   final DateTime at;
@@ -228,6 +231,7 @@ class RouteRecord {
   /// that opens no session; the key stays out of the JSON then, so an older
   /// row serialises byte for byte as before.
   final String? session;
+  final NativeAgentJobHandle? agentJob;
 
   RouteRecord withOutcome(RouteOutcome? next) => RouteRecord(
     at: at,
@@ -235,6 +239,7 @@ class RouteRecord {
     target: target,
     outcome: next,
     session: session,
+    agentJob: agentJob,
   );
 
   Map<String, dynamic> toJson() => <String, dynamic>{
@@ -243,6 +248,7 @@ class RouteRecord {
     'target': target,
     if (outcome != null) 'outcome': outcome!.toJson(),
     if (session != null) 'session': session,
+    if (agentJob != null) 'agentJob': agentJob!.toJson(),
   };
 
   /// Null when the row cannot be trusted, so the caller can drop exactly that
@@ -262,9 +268,8 @@ class RouteRecord {
       kind: kind,
       target: target,
       outcome: RouteOutcome.fromJson(json['outcome']),
-      session: session is String && isSafeSessionName(session)
-          ? session
-          : null,
+      session: session is String && isSafeSessionName(session) ? session : null,
+      agentJob: NativeAgentJobHandle.fromJson(json['agentJob']),
     );
   }
 

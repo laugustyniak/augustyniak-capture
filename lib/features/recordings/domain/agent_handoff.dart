@@ -1,6 +1,7 @@
 import '../../../core/security/record_id.dart';
 import 'capture_router.dart';
 import 'route_record.dart';
+import '../../projects/domain/native_agent_types.dart';
 
 /// One agent a capture can be handed to, as the queue sees it.
 ///
@@ -71,6 +72,7 @@ class AgentHandoffResult {
     required this.sessionName,
     required this.attachedToExistingSession,
     this.detached = false,
+    this.job,
   });
 
   final RouteRecord record;
@@ -94,6 +96,7 @@ class AgentHandoffResult {
   /// has to say where it is and offer a way in — [AgentHandoff.attach], or the
   /// command to type — or the launch looks like nothing happened.
   final bool detached;
+  final NativeAgentJobHandle? job;
 }
 
 /// Starts a coding agent on a capture, in its project's repository.

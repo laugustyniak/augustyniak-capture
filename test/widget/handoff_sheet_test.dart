@@ -1,6 +1,7 @@
 import 'dart:io';
 
 import 'package:augustyniak_capture/features/projects/domain/agent_session_launcher.dart';
+import 'package:augustyniak_capture/features/projects/domain/native_agent_types.dart';
 import 'package:augustyniak_capture/features/projects/domain/project.dart';
 import 'package:augustyniak_capture/features/recordings/data/project_agent_handoff.dart';
 import 'package:augustyniak_capture/features/recordings/domain/assistant_target.dart';
@@ -16,11 +17,12 @@ import 'package:flutter_test/flutter_test.dart';
 import '../support/harness.dart';
 
 class _FakeLauncher implements AgentSessionLauncher {
-  _FakeLauncher({this.running = false, this.attachFailure});
+  _FakeLauncher({this.running = false, this.attachFailure, this.job});
 
   /// The session already exists, so a launch attaches instead of starting.
   final bool running;
   final String? attachFailure;
+  final NativeAgentJobHandle? job;
   final List<AgentSessionLaunchRequest> requests =
       <AgentSessionLaunchRequest>[];
   final List<String> attached = <String>[];
@@ -34,12 +36,15 @@ class _FakeLauncher implements AgentSessionLauncher {
       sessionName: 'augustyniak-acme-p1-${request.agent.executable}',
       attachedToExistingSession: running,
       detached: request.detached,
+      job: job,
     );
   }
 
   @override
   Future<void> attach(String sessionName) async {
-    if (attachFailure != null) throw AgentSessionLaunchException(attachFailure!);
+    if (attachFailure != null) {
+      throw AgentSessionLaunchException(attachFailure!);
+    }
     attached.add(sessionName);
   }
 }
@@ -292,9 +297,9 @@ void main() {
     },
   );
 
-  testWidgets(
-    'launches in the background by default and offers the way in',
-    (WidgetTester tester) async {
+  testWidgets('launches in the background by default and offers the way in', (
+    WidgetTester tester,
+  ) async {
       final _FakeLauncher launcher = _FakeLauncher();
       final RecordingsController controller = await controllerWith(launcher);
 
@@ -320,8 +325,47 @@ void main() {
 
       expect(launcher.attached, <String>[session]);
       expect(find.text('DONE'), findsOneWidget);
-    },
+  });
+
+  testWidgets('a native background handoff shows the durable job notice', (
+    WidgetTester tester,
+  ) async {
+    final _FakeLauncher launcher = _FakeLauncher(
+      job: const NativeAgentJobHandle(
+        id: '00000000-0000-4000-8000-000000000001',
+        backend: NativeAgentBackend.codex,
+      ),
   );
+    final RecordingsController controller = await controllerWith(launcher);
+
+    await openSheet(tester, controller);
+    await tester.tap(find.text('LAUNCH SESSION'));
+    await settleIo(tester);
+
+    expect(
+      find.byKey(const ValueKey<String>('handoff-native-job-notice')),
+      findsOneWidget,
+    );
+    expect(find.text('Background job accepted the prompt'), findsOneWidget);
+    expect(find.textContaining('zellij attach'), findsNothing);
+  });
+
+  testWidgets('Gemini explains that background jobs are unavailable', (
+    WidgetTester tester,
+  ) async {
+    final RecordingsController controller = await controllerWith(
+      _FakeLauncher(),
+      defaultAgent: AgentKind.geminiCli,
+    );
+
+    await openSheet(tester, controller);
+
+    expect(
+      find.byKey(const ValueKey<String>('gemini-native-unavailable')),
+      findsOneWidget,
+    );
+    expect(find.text('LAUNCH SESSION'), findsOneWidget);
+  });
 
   testWidgets('IN A WINDOW launches through the terminal and closes', (
     WidgetTester tester,
@@ -372,14 +416,20 @@ void main() {
       find.byType(TextField),
       'Read the brief and only write tests.',
     );
+    await tester.ensureVisible(find.text('LAUNCH SESSION'));
     await tester.tap(find.text('LAUNCH SESSION'));
     await settleIo(tester);
 
     // Framed at launch (#306): the edited text is inside the fence.
-    expect(launcher.requests.single.arguments.single, startsWith('The user handed you a capture'));
     expect(
-      launcher.requests.single.arguments.single,
-      contains('\nRead the brief and only write tests.\n--- END CAPTURE TEXT ---'),
+      launcher.requests.single.prompt,
+      startsWith('The user handed you a capture'),
+    );
+    expect(
+      launcher.requests.single.prompt,
+      contains(
+        '\nRead the brief and only write tests.\n--- END CAPTURE TEXT ---',
+      ),
     );
   });
 
