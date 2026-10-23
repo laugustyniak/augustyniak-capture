@@ -310,15 +310,16 @@ class NativeAgentJobs {
       status = NativeAgentJobStatus.failed;
     }
     if (!_terminal(status) && !await _supervisorAlive(directory)) {
-      status = exitCode != null && await _validStopRequested(directory)
-          ? NativeAgentJobStatus.stopped
-          : exitCode == null
-          ? _now().difference(createdAt.toLocal()) > const Duration(seconds: 1)
-                ? NativeAgentJobStatus.lost
-                : status
-          : exitCode == 0
-          ? NativeAgentJobStatus.completed
-          : NativeAgentJobStatus.failed;
+      if (exitCode != null) {
+        status = await _validStopRequested(directory)
+            ? NativeAgentJobStatus.stopped
+            : exitCode == 0
+            ? NativeAgentJobStatus.completed
+            : NativeAgentJobStatus.failed;
+      } else if (status != NativeAgentJobStatus.starting ||
+          _now().difference(createdAt.toLocal()) >= startupTimeout) {
+        status = NativeAgentJobStatus.lost;
+      }
     }
     final String stdout = await _tail(
       File(p.join(directory.path, 'stdout.jsonl')),
