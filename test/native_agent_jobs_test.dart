@@ -38,6 +38,25 @@ class _CompletingProcessRunner implements ProcessRunner {
   }
 }
 
+class _CountingJobs extends NativeAgentJobs {
+  _CountingJobs(Directory root)
+    : super(
+        jobsRoot: () async => root,
+        executables: _Resolver('/bin/true'),
+        watchInterval: const Duration(milliseconds: 20),
+        // Never lost within the test, so the job stays non-terminal.
+        startupTimeout: const Duration(hours: 1),
+      );
+
+  int peeks = 0;
+
+  @override
+  Future<NativeAgentJob> peek(String id) {
+    peeks++;
+    return super.peek(id);
+  }
+}
+
 void main() {
   if (!Platform.isLinux && !Platform.isMacOS) return;
   late Directory temp;
@@ -489,6 +508,141 @@ exit 1
         ),
       ),
     );
+  });
+
+  test('finishedAt is the supervisor-written terminal status only', () async {
+    final File executable = await _fixtureExecutable(temp, r'''
+read prompt
+printf '%s\n' '{"type":"thread.started","thread_id":"t-1"}'
+printf '%s\n' '{"type":"turn.started"}'
+while [ ! -f "$PWD/finish" ]; do sleep 0.02; done
+printf '%s\n' '{"type":"turn.completed"}'
+''');
+    final NativeAgentJobs jobs = manager(executable);
+    final NativeAgentJobHandle handle = await jobs.launch(
+      request(prompt: 'go'),
+    );
+    final NativeAgentJob running = await jobs.read(handle.id);
+    expect(
+      running.isTerminal,
+      isFalse,
+      reason: '${running.status} ${running.error}',
+    );
+    expect(running.finishedAt, isNull);
+
+    await File(p.join(workspace.path, 'finish')).writeAsString('go');
+    final NativeAgentJob done = await _pollJob(
+      jobs,
+      handle.id,
+      (NativeAgentJob value) => value.isTerminal,
+    );
+    expect(done.status, NativeAgentJobStatus.completed);
+    expect(done.finishedAt, isNotNull);
+    expect(done.finishedAt!.isBefore(done.createdAt), isFalse);
+  });
+
+  test('a derived lost status has no finishedAt', () async {
+    const String id = '00000000-0000-4000-8000-000000000003';
+    final Directory directory = Directory(p.join(jobsRoot.path, id));
+    await directory.create(recursive: true);
+    await File(p.join(directory.path, 'request.json')).writeAsString(
+      jsonEncode(<String, dynamic>{
+        'id': id,
+        'backend': 'codex',
+        'agent': 'codex',
+        'projectId': 'project',
+        'projectName': 'Project',
+        'workspacePath': workspace.path,
+        'createdAt': DateTime.utc(2026, 10, 23).toIso8601String(),
+        'configuredArguments': <String>[],
+        'prompt': 'x',
+      }),
+    );
+    await File(p.join(directory.path, 'status')).writeAsString('running');
+    final NativeAgentJobs jobs = NativeAgentJobs(
+      jobsRoot: () async => jobsRoot,
+      executables: _Resolver('/bin/true'),
+      now: () => DateTime.utc(2026, 10, 24),
+    );
+
+    final NativeAgentJob job = await jobs.read(id);
+
+    expect(job.status, NativeAgentJobStatus.lost);
+    expect(job.finishedAt, isNull);
+  });
+
+  test('peek never enforces identity or writes; read still does', () async {
+    final File executable = await _fixtureExecutable(temp, r'''
+read prompt
+printf '%s\n' '{"type":"thread.started","thread_id":"expected-thread"}'
+printf '%s\n' '{"type":"turn.started"}'
+while [ ! -f "$PWD/emit-mismatch" ]; do sleep 0.02; done
+printf '%s\n' '{"type":"thread.started","thread_id":"wrong-thread"}'
+while :; do sleep 1; done
+''');
+    final NativeAgentJobs jobs = manager(executable);
+    final NativeAgentJobHandle handle = await jobs.launch(
+      request(prompt: 'continue'),
+      expectedConversationId: 'expected-thread',
+    );
+    await File(p.join(workspace.path, 'emit-mismatch')).writeAsString('go');
+    final DateTime deadline = DateTime.now().add(const Duration(seconds: 10));
+    NativeAgentJob peeked = await jobs.peek(handle.id);
+    while (!peeked.logs.contains('wrong-thread') &&
+        DateTime.now().isBefore(deadline)) {
+      await Future<void>.delayed(const Duration(milliseconds: 20));
+      peeked = await jobs.peek(handle.id);
+    }
+
+    expect(peeked.logs, contains('wrong-thread'));
+    expect(peeked.status, isNot(NativeAgentJobStatus.failed));
+    expect(
+      File(p.join(jobsRoot.path, handle.id, 'startup-error')).existsSync(),
+      isFalse,
+    );
+    expect(
+      File(p.join(jobsRoot.path, handle.id, 'stop')).existsSync(),
+      isFalse,
+    );
+
+    final NativeAgentJob enforced = await jobs.read(handle.id);
+    expect(enforced.status, NativeAgentJobStatus.failed);
+  });
+
+  test('watch shares one poller and stops with the last listener', () async {
+    const String id = '00000000-0000-4000-8000-000000000004';
+    final Directory directory = Directory(p.join(jobsRoot.path, id));
+    await directory.create(recursive: true);
+    await File(p.join(directory.path, 'request.json')).writeAsString(
+      jsonEncode(<String, dynamic>{
+        'id': id,
+        'backend': 'codex',
+        'agent': 'codex',
+        'projectId': 'project',
+        'projectName': 'Project',
+        'workspacePath': workspace.path,
+        'createdAt': DateTime.now().toIso8601String(),
+        'configuredArguments': <String>[],
+        'prompt': 'x',
+      }),
+    );
+    await File(p.join(directory.path, 'status')).writeAsString('starting');
+    final _CountingJobs jobs = _CountingJobs(jobsRoot);
+    int a = 0;
+    int b = 0;
+    final NativeAgentJobWatch first = jobs.watch(id, () => a++);
+    final NativeAgentJobWatch second = jobs.watch(id, () => b++);
+    await Future<void>.delayed(const Duration(milliseconds: 100));
+    expect(first.job, isNotNull);
+    expect(first.job!.isTerminal, isFalse);
+    expect(jobs.peeks, greaterThan(1));
+    expect(a, b);
+
+    first.release();
+    second.release();
+    final int after = jobs.peeks;
+    await Future<void>.delayed(const Duration(milliseconds: 100));
+    expect(jobs.peeks, after);
   });
 
   test('reopened jobs reject any mismatched provider id', () async {

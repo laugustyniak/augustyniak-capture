@@ -36,11 +36,12 @@ NativeAgentJob _job(
   NativeAgentJobStatus status, {
   String? result,
   String? conversationId = 'conv',
+  DateTime? createdAt,
   DateTime? finishedAt,
 }) => NativeAgentJob(
   handle: _handle,
   status: status,
-  createdAt: DateTime.now().subtract(const Duration(minutes: 2)),
+  createdAt: createdAt ?? DateTime.now().subtract(const Duration(minutes: 2)),
   finishedAt: finishedAt,
   workspacePath: '/work/project',
   logs: 'log output',
@@ -49,18 +50,36 @@ NativeAgentJob _job(
 );
 
 class _FakeJobs extends NativeAgentJobs {
-  _FakeJobs(this.job) : super(jobsRoot: () async => Directory.systemTemp);
+  _FakeJobs(this.job)
+    : super(
+        jobsRoot: () async => Directory.systemTemp,
+        watchInterval: const Duration(milliseconds: 100),
+      );
 
   NativeAgentJob? job;
   bool failReads = false;
   int reads = 0;
   final List<String> stopped = <String>[];
+  final List<String> followedUp = <String>[];
 
+  // The pill, card and section watch through `peek`; `read` has side effects.
   @override
-  Future<NativeAgentJob> read(String id) async {
+  Future<NativeAgentJob> peek(String id) async {
     reads++;
     if (failReads || job == null) throw const FormatException('gone');
     return job!;
+  }
+
+  @override
+  Future<NativeAgentJob> read(String id) => peek(id);
+
+  @override
+  Future<NativeAgentJobHandle> followUp(String id, String prompt) async {
+    followedUp.add('$id:$prompt');
+    return const NativeAgentJobHandle(
+      id: 'child',
+      backend: NativeAgentBackend.claude,
+    );
   }
 
   @override
@@ -79,11 +98,7 @@ void main() {
     await tester.pumpWidget(
       hostTab(
         () => SingleChildScrollView(
-          child: AgentRunsSection(
-            recording: recording,
-            jobs: jobs,
-            pollInterval: const Duration(milliseconds: 100),
-          ),
+          child: AgentRunsSection(recording: recording, jobs: jobs),
         ),
       ),
     );
@@ -110,7 +125,7 @@ void main() {
     expect(find.text('AGENT RUNS'), findsOneWidget);
     expect(find.text('RUNNING'), findsOneWidget);
     expect(find.text('Claude Code'), findsOneWidget);
-    expect(find.textContaining('02:0'), findsOneWidget);
+    expect(find.textContaining(RegExp(r'^\d\d:\d\d$')), findsOneWidget);
     expect(find.text('STOP'), findsOneWidget);
     expect(find.text('FOLLOW UP'), findsNothing);
 
@@ -146,12 +161,14 @@ void main() {
       _job(
         NativeAgentJobStatus.completed,
         result: result,
-        finishedAt: DateTime.now(),
+        createdAt: DateTime(2026, 1, 1, 10),
+        finishedAt: DateTime(2026, 1, 1, 10, 2, 5),
       ),
     );
     await mountSection(tester, _withJob(), jobs);
 
-    expect(find.text('PR #42'), findsOneWidget);
+    expect(find.text('PR acme/app#42'), findsOneWidget);
+    expect(find.text('02:05'), findsOneWidget);
     expect(find.text('FOLLOW UP'), findsOneWidget);
     expect(find.text('STOP'), findsNothing);
     final Text preview = tester.widget<Text>(find.text(result));
@@ -180,6 +197,112 @@ void main() {
 
     expect(find.text('UNAVAILABLE'), findsOneWidget);
     expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('a failed read stops the polling', (tester) async {
+    final _FakeJobs jobs = _FakeJobs(_job(NativeAgentJobStatus.running));
+    await mountSection(tester, _withJob(), jobs);
+    jobs.failReads = true;
+    await tester.pump(const Duration(milliseconds: 150));
+    await tester.pump();
+    final int afterFailure = jobs.reads;
+
+    await tester.pump(const Duration(seconds: 1));
+    expect(jobs.reads, afterFailure);
+    expect(find.text('RUNNING'), findsOneWidget);
+  });
+
+  testWidgets('unmounting stops the polling', (tester) async {
+    final _FakeJobs jobs = _FakeJobs(_job(NativeAgentJobStatus.running));
+    await mountSection(tester, _withJob(), jobs);
+    await tester.pump(const Duration(milliseconds: 150));
+    expect(jobs.reads, greaterThan(1));
+
+    await tester.pumpWidget(const SizedBox.shrink());
+    final int afterUnmount = jobs.reads;
+    await tester.pump(const Duration(seconds: 1));
+    expect(jobs.reads, afterUnmount);
+  });
+
+  testWidgets('pill, card and section on one job share one poller', (
+    tester,
+  ) async {
+    final _FakeJobs jobs = _FakeJobs(_job(NativeAgentJobStatus.running));
+    await tester.pumpWidget(
+      hostTab(
+        () => Column(
+          children: <Widget>[
+            AgentRunPill(jobs: jobs, handle: _handle),
+            AgentRunPill(jobs: jobs, handle: _handle),
+            AgentRunsSection(recording: _withJob(), jobs: jobs),
+          ],
+        ),
+      ),
+    );
+    await tester.pump();
+    await tester.pump();
+    expect(jobs.reads, 1);
+
+    await tester.pump(const Duration(milliseconds: 110));
+    await tester.pump();
+    expect(jobs.reads, 2);
+  });
+
+  testWidgets('lost reads as FAILED and offers no follow up', (tester) async {
+    final _FakeJobs jobs = _FakeJobs(_job(NativeAgentJobStatus.lost));
+    await mountSection(tester, _withJob(), jobs);
+
+    expect(find.text('FAILED'), findsOneWidget);
+    expect(find.text('FOLLOW UP'), findsNothing);
+    expect(find.text('STOP'), findsNothing);
+  });
+
+  testWidgets('FOLLOW UP sends the prompt and opens the new job', (
+    tester,
+  ) async {
+    final _FakeJobs jobs = _FakeJobs(
+      _job(NativeAgentJobStatus.completed, result: 'done'),
+    );
+    await mountSection(tester, _withJob(), jobs);
+
+    await tester.tap(find.text('FOLLOW UP'));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 300));
+    await tester.enterText(
+      find.byKey(const ValueKey<String>('agent-job-follow-up-input')),
+      'next step',
+    );
+    await tester.tap(find.text('SEND'));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 400));
+
+    expect(jobs.followedUp, <String>['job-1:next step']);
+    expect(find.text('Agent jobs'), findsOneWidget);
+    // The card's buttons are usable again behind the sheet.
+    expect(
+      tester
+          .widget<TextButton>(
+            find.ancestor(
+              of: find.text('FOLLOW UP'),
+              matching: find.byWidgetPredicate((w) => w is TextButton),
+            ),
+          )
+          .onPressed,
+      isNotNull,
+    );
+  });
+
+  test('PR url parsing accepts only github pull links, the last wins', () {
+    expect(agentResultPrUrl(null), isNull);
+    expect(agentResultPrUrl('see https://gitlab.com/a/b/pull/3'), isNull);
+    expect(agentResultPrUrl('see http://github.com/a/b/pull/3'), isNull);
+    expect(agentResultPrUrl('see https://github.com/a/b/issues/3'), isNull);
+    expect(
+      agentResultPrUrl(
+        'old https://github.com/a/b/pull/1 new https://github.com/a/b/pull/2',
+      ),
+      Uri.parse('https://github.com/a/b/pull/2'),
+    );
   });
 
   testWidgets('editor renders the section for a capture with a job', (

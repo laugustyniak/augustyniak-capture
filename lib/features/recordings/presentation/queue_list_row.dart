@@ -1,10 +1,10 @@
 import 'package:flutter/material.dart';
 
 import '../../../app/ui_kit.dart';
+import '../../projects/data/native_agent_jobs.dart';
 import '../../settings/domain/queue_density.dart';
 import '../domain/capture_type.dart';
 import '../domain/recording.dart';
-import '../../projects/data/native_agent_jobs.dart';
 import 'agent_runs.dart';
 import 'card_parts.dart';
 

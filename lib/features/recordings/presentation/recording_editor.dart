@@ -7,6 +7,7 @@ import '../../../app/ui_kit.dart';
 import '../../costs/domain/price_book.dart';
 import '../../costs/domain/usage_event.dart';
 import '../../costs/presentation/cost_section.dart';
+import '../../projects/data/native_agent_jobs.dart';
 import '../../projects/domain/project.dart';
 import '../domain/capture_segment.dart';
 import '../domain/capture_type.dart';
@@ -14,7 +15,6 @@ import '../domain/capture_category.dart';
 import '../domain/capture_priority.dart';
 import '../domain/recording.dart';
 import '../domain/recording_revision.dart';
-import '../../projects/data/native_agent_jobs.dart';
 import 'agent_runs.dart';
 import 'card_parts.dart';
 import 'cleanup_section.dart';
@@ -547,15 +547,7 @@ class _RecordingEditorState extends State<RecordingEditor> {
                 ),
                 const SizedBox(height: 8),
               ],
-              if (widget.agentJobs != null &&
-                  agentJobHandles(recording).isNotEmpty) ...<Widget>[
-                const SizedBox(height: 4),
-                AgentRunsSection(
-                  recording: recording,
-                  jobs: widget.agentJobs,
-                ),
-                const SizedBox(height: 4),
-              ],
+              AgentRunsSection(recording: recording, jobs: widget.agentJobs),
               if (recording.segments.length > 1 || widget.canAppend) ...<Widget>[
                 const SizedBox(height: 4),
                 _FragmentsSection(

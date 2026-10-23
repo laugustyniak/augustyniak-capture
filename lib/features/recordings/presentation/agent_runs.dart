@@ -24,8 +24,8 @@ List<NativeAgentJobHandle> agentJobHandles(Recording recording) {
   ];
 }
 
-/// The first `/pull/<n>` GitHub URL in a job's result, last one wins — an
-/// agent that mentions an earlier PR usually ends with the one it opened.
+/// The last `https://github.com/<owner>/<repo>/pull/<n>` URL in a job's result:
+/// an agent that mentions an earlier PR usually ends with the one it opened.
 Uri? agentResultPrUrl(String? result) {
   if (result == null) return null;
   final Iterable<RegExpMatch> matches = RegExp(
@@ -34,21 +34,19 @@ Uri? agentResultPrUrl(String? result) {
   return matches.isEmpty ? null : Uri.tryParse(matches.last.group(0)!);
 }
 
-/// Reads one job and keeps reading **only while it is non-terminal**. A failed
-/// read keeps the last answer and stops polling: this is a view, so it never
-/// throws into the capture it sits on.
+/// Shows one job through the shared poller of [NativeAgentJobs.watch], so a
+/// card, a pill and a section on the same job cost one read, not three. The
+/// poll runs only while the job is non-terminal and ends with the last widget.
 class AgentJobProbe extends StatefulWidget {
   AgentJobProbe({
     super.key,
     required this.jobs,
     required this.id,
     required this.builder,
-    this.pollInterval = const Duration(seconds: 3),
   });
 
   final NativeAgentJobs jobs;
   final String id;
-  final Duration pollInterval;
   final Widget Function(
     BuildContext context,
     NativeAgentJob? job,
@@ -62,43 +60,36 @@ class AgentJobProbe extends StatefulWidget {
 }
 
 class _AgentJobProbeState extends State<AgentJobProbe> {
-  NativeAgentJob? _job;
-  bool _loading = true;
-  Timer? _timer;
+  late NativeAgentJobWatch _watch;
 
   @override
   void initState() {
     super.initState();
-    unawaited(_load());
+    _watch = _open();
+  }
+
+  NativeAgentJobWatch _open() => widget.jobs.watch(widget.id, () {
+    if (mounted) setState(() {});
+  });
+
+  @override
+  void didUpdateWidget(AgentJobProbe oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.jobs != widget.jobs || oldWidget.id != widget.id) {
+      _watch.release();
+      _watch = _open();
+    }
   }
 
   @override
   void dispose() {
-    _timer?.cancel();
+    _watch.release();
     super.dispose();
-  }
-
-  Future<void> _load() async {
-    _timer?.cancel();
-    NativeAgentJob? next = _job;
-    try {
-      next = await widget.jobs.read(widget.id);
-    } catch (_) {
-      // Best effort: keep what was last known.
-    }
-    if (!mounted) return;
-    setState(() {
-      _job = next;
-      _loading = false;
-    });
-    if (next != null && !next.isTerminal) {
-      _timer = Timer(widget.pollInterval, _load);
-    }
   }
 
   @override
   Widget build(BuildContext context) =>
-      widget.builder(context, _job, _loading, _load);
+      widget.builder(context, _watch.job, _watch.loading, _watch.refresh);
 }
 
 String _statusLabel(NativeAgentJobStatus status) => switch (status) {
@@ -153,12 +144,10 @@ class AgentRunsSection extends StatelessWidget {
     super.key,
     required this.recording,
     required this.jobs,
-    this.pollInterval = const Duration(seconds: 3),
   });
 
   final Recording recording;
   final NativeAgentJobs? jobs;
-  final Duration pollInterval;
 
   @override
   Widget build(BuildContext context) {
@@ -175,7 +164,6 @@ class AgentRunsSection extends StatelessWidget {
             key: ValueKey<String>('agent-run-${handle.id}'),
             jobs: jobs!,
             id: handle.id,
-            pollInterval: pollInterval,
             builder:
                 (
                   BuildContext context,
@@ -243,22 +231,17 @@ class _AgentRunCardState extends State<_AgentRunCard> {
       _busy = true;
       _error = null;
     });
+    final NativeAgentJobHandle child;
     try {
-      final NativeAgentJobHandle child = await widget.jobs.followUp(
-        widget.handle.id,
-        prompt,
-      );
-      if (!mounted) return;
-      await showAgentJobsSheet(
-        context,
-        jobs: widget.jobs,
-        focusJobId: child.id,
-      );
+      child = await widget.jobs.followUp(widget.handle.id, prompt);
     } catch (error) {
       if (mounted) setState(() => _error = '$error');
+      return;
     } finally {
       if (mounted) setState(() => _busy = false);
     }
+    if (!mounted) return;
+    await showAgentJobsSheet(context, jobs: widget.jobs, focusJobId: child.id);
   }
 
   String? _elapsed(NativeAgentJob job) {
@@ -364,7 +347,9 @@ class _AgentRunCardState extends State<_AgentRunCard> {
             children: <Widget>[
               if (pr != null)
                 ConsoleChip(
-                  label: 'PR #${pr.pathSegments.last}',
+                  label:
+                      'PR ${pr.pathSegments[0]}/${pr.pathSegments[1]}'
+                      '#${pr.pathSegments.last}',
                   selected: false,
                   onSelected: () => unawaited(
                     launchUrl(

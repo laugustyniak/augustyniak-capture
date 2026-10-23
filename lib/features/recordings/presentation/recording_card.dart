@@ -7,13 +7,13 @@ import 'package:flutter/services.dart';
 import '../../../app/markdown/simple_markdown.dart';
 import '../../../app/ui_kit.dart';
 import '../../gamification/presentation/done_burst_animation.dart';
+import '../../projects/data/native_agent_jobs.dart';
 import '../domain/agent_artifact.dart';
 import '../domain/capture_type.dart';
 import '../domain/recording.dart';
 import '../domain/related_captures.dart';
 import '../domain/route_record.dart';
 import '../domain/suggested_route.dart';
-import '../../projects/data/native_agent_jobs.dart';
 import 'agent_runs.dart';
 import 'card_parts.dart';
 
