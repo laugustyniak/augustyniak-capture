@@ -1,9 +1,10 @@
 begin;
-select plan(14);
+select plan(15);
 
 insert into auth.users (id, email) values
   ('33333333-3333-3333-3333-333333333333', 'e2ee_a@example.com'),
-  ('44444444-4444-4444-4444-444444444444', 'e2ee_b@example.com');
+  ('44444444-4444-4444-4444-444444444444', 'e2ee_b@example.com'),
+  ('55555555-5555-5555-5555-555555555555', 'e2ee_c@example.com');
 
 create function pg_temp.sign_in(uid uuid) returns void language sql as $$
   select set_config('role', 'authenticated', true);
@@ -30,19 +31,27 @@ select is(
   'kdf_iterations is stored next to the salt'
 );
 
+-- The range check is exercised on insert: the row is insert-once, so there is
+-- no update to try it on (issue #367). User C never gets a row.
+select pg_temp.sign_in('55555555-5555-5555-5555-555555555555');
+
 select throws_ok(
-  $$ update public.user_e2ee_settings set kdf_iterations = 10 where owner_id = '33333333-3333-3333-3333-333333333333' $$,
+  $$ insert into public.user_e2ee_settings (kdf_salt, kdf_algorithm, key_check_hash, kdf_iterations)
+     values ('salt789', 'pbkdf2_sha256', 'kc1:hash_c', 10) $$,
   '23514',
   null,
   'an iteration count below the floor is refused'
 );
 
 select throws_ok(
-  $$ update public.user_e2ee_settings set kdf_iterations = 20000000 where owner_id = '33333333-3333-3333-3333-333333333333' $$,
+  $$ insert into public.user_e2ee_settings (kdf_salt, kdf_algorithm, key_check_hash, kdf_iterations)
+     values ('salt789', 'pbkdf2_sha256', 'kc1:hash_c', 20000000) $$,
   '23514',
   null,
   'an iteration count above the ceiling is refused'
 );
+
+select pg_temp.sign_in('33333333-3333-3333-3333-333333333333');
 
 -- 2. Verify encrypted_payload column on recordings
 insert into public.recordings (id, file_path, duration_ms, type, status, created_at, encrypted_payload)
@@ -118,12 +127,19 @@ select is(
   'a row without kdf_iterations defaults to the pre-#298 constant'
 );
 
--- 8. Owner change trigger rejection
+-- 8. The row is insert-once (issue #367): an owner cannot update their own row
 select throws_ok(
-  $$ update public.user_e2ee_settings set owner_id = '33333333-3333-3333-3333-333333333333' where owner_id = '44444444-4444-4444-4444-444444444444' $$,
-  '23514',
-  'owner_id is immutable',
-  'reject_owner_change trigger fires on user_e2ee_settings'
+  $$ update public.user_e2ee_settings set kdf_salt = 'rotated' where owner_id = '44444444-4444-4444-4444-444444444444' $$,
+  '42501',
+  null,
+  'an owner cannot update their own e2ee settings - the row is insert-once'
+);
+
+select is(
+  (select count(*) from pg_policy p join pg_class c on c.oid = p.polrelid
+    where c.relname = 'user_e2ee_settings' and p.polcmd = 'w'),
+  0::bigint,
+  'no update policy exists on user_e2ee_settings'
 );
 
 select * from finish();

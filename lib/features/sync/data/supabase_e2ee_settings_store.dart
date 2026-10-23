@@ -3,9 +3,9 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import '../domain/e2ee_settings_store.dart';
 
 /// `public.user_e2ee_settings`, one row per `owner_id`, readable,
-/// insertable and updatable by its owner only (RLS), with no delete grant.
-/// This client only ever inserts: an update would re-key the account and
-/// orphan every envelope sealed under the first key.
+/// insertable by its owner only (RLS); there is no update or delete grant, so
+/// the row is insert-once. An update would re-key the account and orphan every
+/// envelope sealed under the first key.
 class SupabaseE2eeSettingsStore implements E2eeSettingsStore {
   SupabaseE2eeSettingsStore(this._client);
 
