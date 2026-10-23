@@ -595,8 +595,25 @@ printf '%s\n' '{"type":"turn.completed"}'
     final _CountingJobs jobs = _CountingJobs(jobsRoot);
     late final NativeAgentJobWatch lease;
     lease = jobs.watch(id, () => lease.release());
-    await Future<void>.delayed(const Duration(milliseconds: 150));
+    await _until(() => jobs.peeks >= 1);
+    // Hold well past several intervals: a leaked timer would peek again.
+    await Future<void>.delayed(jobs.watchInterval * 5);
     expect(jobs.peeks, 1);
+  });
+
+  test('a poller that gave up reports stale until resumed', () async {
+    const String id = '00000000-0000-4000-8000-000000000008';
+    await Directory(p.join(jobsRoot.path, id)).create(recursive: true);
+    final _CountingJobs jobs = _CountingJobs(jobsRoot);
+    final NativeAgentJobWatch lease = jobs.watch(id, () {});
+    await _until(() => lease.stale);
+    expect(lease.job, isNull);
+
+    final NativeAgentJobWatch second = jobs.watch(id, () {});
+    expect(second.stale, isFalse);
+    await _until(() => second.stale);
+    lease.release();
+    second.release();
   });
 
   test('a transient read failure is retried and recovers', () async {
@@ -606,9 +623,8 @@ printf '%s\n' '{"type":"turn.completed"}'
     final _CountingJobs jobs = _CountingJobs(jobsRoot);
     int changes = 0;
     final NativeAgentJobWatch lease = jobs.watch(id, () => changes++);
-    await Future<void>.delayed(const Duration(milliseconds: 30));
+    await _until(() => !lease.loading);
     expect(lease.job, isNull);
-    expect(lease.loading, isFalse);
 
     await File(p.join(directory.path, 'request.json')).writeAsString(
       jsonEncode(<String, dynamic>{
@@ -624,8 +640,8 @@ printf '%s\n' '{"type":"turn.completed"}'
       }),
     );
     await File(p.join(directory.path, 'status')).writeAsString('starting');
-    await Future<void>.delayed(const Duration(milliseconds: 400));
-    expect(lease.job, isNotNull);
+    await _until(() => lease.job != null);
+    expect(lease.stale, isFalse);
     lease.release();
   });
 
@@ -827,6 +843,14 @@ Future<File> _fixtureExecutable(Directory root, String body) async {
   await file.writeAsString('#!/bin/sh\n$body');
   await Process.run('chmod', <String>['700', file.path]);
   return file;
+}
+
+Future<void> _until(bool Function() done) async {
+  final DateTime deadline = DateTime.now().add(const Duration(seconds: 10));
+  while (!done()) {
+    if (DateTime.now().isAfter(deadline)) throw StateError('Timed out');
+    await Future<void>.delayed(const Duration(milliseconds: 5));
+  }
 }
 
 Future<NativeAgentJob> _pollJob(

@@ -33,8 +33,10 @@ The three ways a capture leaves the queue: appended to a project's `inbox.md`, o
   RUNS, the queue pill) goes through `NativeAgentJobs.watch`, one shared poller
   per job id: `peek` every `watchInterval` while the job is non-terminal and
   somebody listens, stopped by the last `release()`. A failed read keeps the
-  last answer and retries at 2x, 4x, 8x, 16x the interval, then gives up; a new
-  `watch()` resumes a poller that gave up. `NativeAgentJob.finishedAt` is the
+  last answer and retries at 2x, 4x, 8x, 16x the interval, then gives up and
+  `NativeAgentJobWatch.stale` turns true (the pill and card then say
+  `UNAVAILABLE` rather than a RUNNING nobody is checking); a new `watch()`
+  resumes a poller that gave up. `NativeAgentJob.finishedAt` is the
   `status` file's mtime (clamped to `createdAt`, since mtimes can be truncated
   to the second), set only when the supervisor wrote the terminal status
   itself — a derived `lost`, or a completed run downgraded to failed, has none.

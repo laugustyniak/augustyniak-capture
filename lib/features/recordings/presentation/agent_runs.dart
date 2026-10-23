@@ -51,6 +51,7 @@ class AgentJobProbe extends StatefulWidget {
     BuildContext context,
     NativeAgentJob? job,
     bool loading,
+    bool stale,
     Future<void> Function() refresh,
   )
   builder;
@@ -90,7 +91,13 @@ class _AgentJobProbeState extends State<AgentJobProbe> {
 
   @override
   Widget build(BuildContext context) =>
-      widget.builder(context, _watch.job, _watch.loading, _watch.refresh);
+      widget.builder(
+        context,
+        _watch.job,
+        _watch.loading,
+        _watch.stale,
+        _watch.refresh,
+      );
 }
 
 String _statusLabel(NativeAgentJobStatus status) => switch (status) {
@@ -112,7 +119,8 @@ Color _statusColor(NativeAgentJobStatus status) => switch (status) {
 };
 
 /// `AGENT · RUNNING / DONE / FAILED` for the capture's newest local job.
-/// Draws nothing until the job has been read, and nothing if it cannot be.
+/// Draws nothing until the job has been read; `AGENT · UNAVAILABLE` once the
+/// poller has given up on a job that was not known to be finished.
 class AgentRunPill extends StatelessWidget {
   AgentRunPill({super.key, required this.jobs, required this.handle});
 
@@ -128,8 +136,11 @@ class AgentRunPill extends StatelessWidget {
           BuildContext context,
           NativeAgentJob? job,
           bool loading,
+          bool stale,
           Future<void> Function() refresh,
-        ) => job == null
+        ) => stale
+        ? StatusPill(label: 'AGENT · UNAVAILABLE', color: Console.muted)
+        : job == null
         ? const SizedBox.shrink()
         : StatusPill(
             label: 'AGENT · ${_statusLabel(job.status)}',
@@ -170,11 +181,13 @@ class AgentRunsSection extends StatelessWidget {
                   BuildContext context,
                   NativeAgentJob? job,
                   bool loading,
+                  bool stale,
                   Future<void> Function() refresh,
                 ) => _AgentRunCard(
                   jobs: jobs!,
                   handle: handle,
-                  job: job,
+                  // A stale answer is not shown as current: no RUNNING forever.
+                  job: stale ? null : job,
                   loading: loading,
                   refresh: refresh,
                 ),

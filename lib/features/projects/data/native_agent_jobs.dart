@@ -285,8 +285,11 @@ class NativeAgentJobs {
 
   /// Shares one poller per job id between every widget showing it: [peek] runs
   /// every [watchInterval] only while the job is non-terminal and somebody is
-  /// listening. A failed read keeps the last answer and stops polling.
-  /// [NativeAgentJobWatch.release] must be called when the listener leaves.
+  /// listening. A failed read keeps the last answer and is retried with
+  /// backoff (2x to 16x [watchInterval]); after that the poller gives up and
+  /// [NativeAgentJobWatch.stale] turns true until a read succeeds or a new
+  /// watcher resumes it. [NativeAgentJobWatch.release] must be called when the
+  /// listener leaves.
   NativeAgentJobWatch watch(String id, void Function() onChange) {
     final _JobPoll? existing = _polls[id];
     final _JobPoll poll = existing ?? (_polls[id] = _JobPoll(this, id)..load());
@@ -822,6 +825,10 @@ class NativeAgentJobWatch {
   /// True until the first read has answered, either way.
   bool get loading => _poll.loading;
 
+  /// True once the poller gave up on a job that was not known to be finished:
+  /// [job] is then the last answer, no longer a current one.
+  bool get stale => _poll.stale;
+
   /// Reads now, e.g. after a stop, and resumes polling if still running.
   Future<void> refresh() => _poll.load();
 
@@ -844,6 +851,7 @@ class _JobPoll {
   final List<void Function()> listeners = <void Function()>[];
   NativeAgentJob? job;
   bool loading = true;
+  bool stale = false;
   Timer? _timer;
   int _generation = 0;
   int _failures = 0;
@@ -856,6 +864,7 @@ class _JobPoll {
     if (_disposed || _inFlight || (_timer?.isActive ?? false)) return;
     if (job?.isTerminal ?? false) return;
     _failures = 0;
+    stale = false;
     load();
   }
 
@@ -876,6 +885,7 @@ class _JobPoll {
     job = next;
     loading = false;
     _failures = failed ? _failures + 1 : 0;
+    if (!failed) stale = false;
     for (final void Function() listener in List.of(listeners)) {
       listener();
     }
@@ -886,6 +896,11 @@ class _JobPoll {
       _timer = Timer(_jobs.watchInterval, load);
     } else if (_failures <= _maxRetries) {
       _timer = Timer(_jobs.watchInterval * (1 << _failures), load);
+    } else {
+      stale = true;
+      for (final void Function() listener in List.of(listeners)) {
+        listener();
+      }
     }
   }
 

@@ -230,7 +230,9 @@ void main() {
     expect(settled - afterFirstFailure, lessThanOrEqualTo(5));
     await tester.pump(const Duration(seconds: 10));
     expect(jobs.reads, settled);
-    expect(find.text('RUNNING'), findsOneWidget);
+    // Given up on a running job: no longer shown as current.
+    expect(find.text('RUNNING'), findsNothing);
+    expect(find.text('UNAVAILABLE'), findsOneWidget);
   });
 
   testWidgets('a new watcher resumes a poller that gave up', (tester) async {
@@ -285,6 +287,42 @@ void main() {
     await tester.pump(const Duration(milliseconds: 110));
     await tester.pump();
     expect(jobs.reads, 2);
+  });
+
+  testWidgets('a given-up poller turns the pill UNAVAILABLE', (tester) async {
+    final _FakeJobs jobs = _FakeJobs(_job(NativeAgentJobStatus.running));
+    await tester.pumpWidget(
+      hostTab(() => AgentRunPill(jobs: jobs, handle: _handle)),
+    );
+    await tester.pump();
+    await tester.pump();
+    expect(find.text('AGENT · RUNNING'), findsOneWidget);
+
+    jobs.failReads = true;
+    await tester.pump(const Duration(seconds: 20));
+    expect(find.text('AGENT · UNAVAILABLE'), findsOneWidget);
+    expect(find.text('AGENT · RUNNING'), findsNothing);
+  });
+
+  testWidgets('a negative elapsed time shows 00:00', (tester) async {
+    final _FakeJobs future = _FakeJobs(
+      _job(
+        NativeAgentJobStatus.running,
+        createdAt: DateTime.now().add(const Duration(hours: 1)),
+      ),
+    );
+    await mountSection(tester, _withJob(), future);
+    expect(find.text('00:00'), findsOneWidget);
+
+    final _FakeJobs backwards = _FakeJobs(
+      _job(
+        NativeAgentJobStatus.failed,
+        createdAt: DateTime(2026, 1, 1, 10, 0, 5),
+        finishedAt: DateTime(2026, 1, 1, 10),
+      ),
+    );
+    await mountSection(tester, _withJob(), backwards);
+    expect(find.text('00:00'), findsOneWidget);
   });
 
   testWidgets('lost reads as FAILED and offers no follow up', (tester) async {
