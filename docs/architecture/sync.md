@@ -550,7 +550,10 @@ fact: one `user_e2ee_settings` row per owner (`kdf_salt`, `kdf_algorithm`,
 `key_check_hash`, `kdf_iterations`), read and inserted through
 `E2eeSettingsStore` (`domain/e2ee_settings_store.dart`;
 `SupabaseE2eeSettingsStore` in `data/`, insert-only, no client-side delete
-because the table grants none). `followIdentity` reads the keyring first
+because the table grants none). The row is insert-once at the database
+level: `authenticated` has no UPDATE grant and no update policy (migration
+`20261023011253_e2ee_settings_insert_once.sql`); a re-key would be a new
+migration. `followIdentity` reads the keyring first
 and, only when it holds nothing, asks the store — the answer is
 `E2eeService.keyOnServer`: true, false, or null when the lookup failed or
 timed out (`keyringTimeout` boxes it too). That splits "no key here" into
