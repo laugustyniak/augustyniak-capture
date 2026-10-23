@@ -23,6 +23,8 @@ class NativeAgentJob {
     required this.logs,
     this.projectName,
     this.approvalsOff = false,
+    this.promptAccepted = false,
+    this.errorBeforePromptAccepted = false,
     this.conversationId,
     this.result,
     this.error,
@@ -36,6 +38,8 @@ class NativeAgentJob {
   final String logs;
   final String? projectName;
   final bool approvalsOff;
+  final bool promptAccepted;
+  final bool errorBeforePromptAccepted;
   final String? conversationId;
   final String? result;
   final String? error;
@@ -189,6 +193,19 @@ class NativeAgentJobs {
     final DateTime deadline = _now().add(startupTimeout);
     while (_now().isBefore(deadline)) {
       final NativeAgentJob job = await read(id);
+      final String? providerId = job.conversationId;
+      if (job.promptAccepted &&
+          !job.errorBeforePromptAccepted &&
+          providerId != null) {
+        await _writePrivate(
+          File(p.join(directory.path, 'conversation-id')),
+          providerId,
+        );
+        if (!job.isTerminal) {
+          await _writeStatus(directory, NativeAgentJobStatus.running);
+        }
+        return NativeAgentJobHandle(id: id, backend: backend);
+      }
       if (job.error != null ||
           job.status == NativeAgentJobStatus.failed ||
           job.status == NativeAgentJobStatus.lost ||
@@ -202,29 +219,6 @@ class NativeAgentJobs {
                   ? 'The agent exited before accepting the prompt.'
                   : job.logs.trim()),
         );
-      }
-      if (job.conversationId case final String providerId) {
-        if (expectedConversationId != null &&
-            providerId != expectedConversationId) {
-          if (!job.isTerminal) await stop(id);
-          await _writePrivate(
-            File(p.join(directory.path, 'startup-error')),
-            'The provider resumed `$providerId` instead of the requested '
-            '`$expectedConversationId`.',
-          );
-          await _writeStatus(directory, NativeAgentJobStatus.failed);
-          throw AgentSessionLaunchException(
-            'The provider resumed `$providerId` instead of the requested `$expectedConversationId`.',
-          );
-        }
-        await _writePrivate(
-          File(p.join(directory.path, 'conversation-id')),
-          providerId,
-        );
-        if (!job.isTerminal) {
-          await _writeStatus(directory, NativeAgentJobStatus.running);
-        }
-        return NativeAgentJobHandle(id: id, backend: backend);
       }
       if (job.isTerminal) {
         throw AgentSessionLaunchException(
@@ -286,6 +280,35 @@ class NativeAgentJobs {
       (await _readOptional(File(p.join(directory.path, 'exit-code')))) ?? '',
     );
     NativeAgentJobStatus status = await _readStatus(directory);
+    final String? expectedId = metadata['expectedConversationId'] is String
+        ? (metadata['expectedConversationId'] as String).trim()
+        : null;
+    final List<String> observedIds = <String>[
+      ...parsed.observedConversationIds,
+      if (persistedId?.trim().isNotEmpty == true) persistedId!.trim(),
+    ];
+    String? mismatchedId;
+    if (expectedId != null && expectedId.isNotEmpty) {
+      for (final String value in observedIds) {
+        if (value != expectedId) {
+          mismatchedId = value;
+          break;
+        }
+      }
+    }
+    String? identityError;
+    if (mismatchedId != null) {
+      identityError =
+          'The provider resumed `$mismatchedId` instead of the requested '
+          '`$expectedId`.';
+      await _requestStop(directory);
+      await _writePrivate(
+        File(p.join(directory.path, 'startup-error')),
+        identityError,
+      );
+      await _writeStatus(directory, NativeAgentJobStatus.failed);
+      status = NativeAgentJobStatus.failed;
+    }
     if (!_terminal(status) && !await _supervisorAlive(directory)) {
       status = exitCode != null && await _validStopRequested(directory)
           ? NativeAgentJobStatus.stopped
@@ -306,6 +329,7 @@ class NativeAgentJobs {
       _maxLogBytes ~/ 2,
     );
     String? error =
+        identityError ??
         await _readOptional(File(p.join(directory.path, 'startup-error'))) ??
         parsed.error;
     if (status == NativeAgentJobStatus.completed && parsed.error != null) {
@@ -330,11 +354,15 @@ class NativeAgentJobs {
                 argument == '--dangerously-bypass-approvals-and-sandbox' ||
                 argument == '--dangerously-skip-permissions',
           ),
+      promptAccepted: parsed.promptAccepted,
+      errorBeforePromptAccepted: parsed.errorBeforePromptAccepted,
       logs: <String>[
         if (stdout.trim().isNotEmpty) stdout.trimRight(),
         if (stderr.trim().isNotEmpty) stderr.trimRight(),
       ].join('\n'),
-      conversationId: persistedId?.trim().isNotEmpty == true
+      conversationId: identityError != null
+          ? null
+          : persistedId?.trim().isNotEmpty == true
           ? persistedId!.trim()
           : parsed.conversationId,
       result: parsed.result,
@@ -360,6 +388,15 @@ class NativeAgentJobs {
     ).readAsString()).trim();
     await _writeStatus(directory, NativeAgentJobStatus.stopping);
     await _writePrivate(File(p.join(directory.path, 'stop')), nonce);
+  }
+
+  Future<void> _requestStop(Directory directory) async {
+    if (!await _supervisorAlive(directory)) return;
+    final String? nonce = await _readOptional(
+      File(p.join(directory.path, 'nonce')),
+    );
+    if (nonce?.trim().isEmpty != false) return;
+    await _writePrivate(File(p.join(directory.path, 'stop')), nonce!.trim());
   }
 
   Future<bool> _validStopRequested(Directory directory) async {

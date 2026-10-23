@@ -13,15 +13,21 @@ class NativeAgentInvocation {
 class NativeAgentOutput {
   const NativeAgentOutput({
     this.conversationId,
+    this.observedConversationIds = const <String>[],
     this.result,
     this.error,
     this.terminal = false,
+    this.promptAccepted = false,
+    this.errorBeforePromptAccepted = false,
   });
 
   final String? conversationId;
+  final List<String> observedConversationIds;
   final String? result;
   final String? error;
   final bool terminal;
+  final bool promptAccepted;
+  final bool errorBeforePromptAccepted;
 }
 
 NativeAgentBackend nativeBackendFor(ProjectAgent agent) => switch (agent) {
@@ -90,9 +96,26 @@ NativeAgentOutput parseNativeAgentOutput(
   String? expectedConversationId,
 }) {
   String? conversationId;
+  final List<String> observedConversationIds = <String>[];
   String? result;
   String? error;
   bool terminal = false;
+  bool promptAccepted = false;
+  bool errorBeforePromptAccepted = false;
+  void observeConversationId(Object? value) {
+    final String? id = _nonEmpty(value);
+    if (id == null) return;
+    conversationId = id;
+    if (!observedConversationIds.contains(id)) {
+      observedConversationIds.add(id);
+    }
+  }
+
+  void observeError(String value) {
+    if (!promptAccepted) errorBeforePromptAccepted = true;
+    error = value;
+  }
+
   for (final String line in lines) {
     if (line.trim().isEmpty) continue;
     Object? decoded;
@@ -105,26 +128,40 @@ NativeAgentOutput parseNativeAgentOutput(
     switch (backend) {
       case NativeAgentBackend.claude:
         if (decoded['type'] == 'system' && decoded['subtype'] == 'init') {
-          conversationId = _nonEmpty(decoded['session_id']);
+          observeConversationId(decoded['session_id']);
+        }
+        if (decoded['type'] == 'assistant') {
+          final String? assistantError = _nonEmpty(decoded['error']);
+          if (assistantError == null) {
+            promptAccepted = true;
+          } else {
+            observeError('Claude API error: $assistantError.');
+          }
         }
         if (decoded['type'] == 'result') {
           terminal = true;
           result = _nonEmpty(decoded['result']);
           final Object? denials = decoded['permission_denials'];
           if (decoded['is_error'] == true || decoded['subtype'] != 'success') {
-            error =
-                _nonEmpty(decoded['error']) ??
-                _nonEmpty(decoded['result']) ??
-                (denials is List && denials.isNotEmpty
-                    ? 'Permission denied: ${denials.join(', ')}'
-                    : 'Claude task failed.');
+            observeError(
+              _nonEmpty(decoded['error']) ??
+                  _nonEmpty(decoded['result']) ??
+                  (denials is List && denials.isNotEmpty
+                      ? 'Permission denied: ${denials.join(', ')}'
+                      : 'Claude task failed.'),
+            );
           } else if (denials is List && denials.isNotEmpty) {
-            error = 'Permission denied: ${denials.join(', ')}';
+            observeError('Permission denied: ${denials.join(', ')}');
+          } else {
+            promptAccepted = true;
           }
         }
       case NativeAgentBackend.codex:
         if (decoded['type'] == 'thread.started') {
-          conversationId = _nonEmpty(decoded['thread_id']);
+          observeConversationId(decoded['thread_id']);
+        }
+        if (decoded['type'] == 'turn.started') {
+          promptAccepted = true;
         }
         if (decoded['type'] == 'item.completed') {
           final Object? item = decoded['item'];
@@ -132,47 +169,74 @@ NativeAgentOutput parseNativeAgentOutput(
             result = _nonEmpty(item['text']);
           }
         }
-        if (decoded['type'] == 'turn.completed') terminal = true;
+        if (decoded['type'] == 'turn.completed') {
+          terminal = true;
+          promptAccepted = true;
+        }
         if (decoded['type'] == 'turn.failed') {
           terminal = true;
           final Object? failure = decoded['error'];
-          error = failure is Map<String, dynamic>
-              ? _nonEmpty(failure['message']) ?? 'Codex task failed.'
-              : _nonEmpty(failure) ?? 'Codex task failed.';
+          observeError(
+            failure is Map<String, dynamic>
+                ? _nonEmpty(failure['message']) ?? 'Codex task failed.'
+                : _nonEmpty(failure) ?? 'Codex task failed.',
+          );
         }
       case NativeAgentBackend.antigravity:
         if (decoded['event'] == 'init') {
-          conversationId = _nonEmpty(decoded['conversation_id']);
+          observeConversationId(decoded['conversation_id']);
+        }
+        if (decoded['event'] == 'step_update') {
+          final Object? step = decoded['step_update'];
+          if (step is Map<String, dynamic> &&
+              step['step_type'] == 'user_input' &&
+              step['state'] == 'DONE') {
+            promptAccepted = true;
+          }
         }
         if (decoded['event'] == 'result') {
           terminal = true;
           final Object? value = decoded['result'];
           if (value is Map<String, dynamic>) {
-            conversationId =
-                _nonEmpty(value['conversation_id']) ?? conversationId;
+            observeConversationId(value['conversation_id']);
             final String? response = _nonEmpty(value['response']);
             if (value['status'] == 'SUCCESS') {
               result = response;
+              promptAccepted = true;
             } else {
-              error = response ?? 'Antigravity task failed.';
+              observeError(
+                _nonEmpty(value['error']) ??
+                    response ??
+                    'Antigravity task failed.',
+              );
             }
           }
         }
     }
   }
-  if (expectedConversationId != null &&
-      conversationId != null &&
-      conversationId != expectedConversationId) {
+  String? mismatchedId;
+  if (expectedConversationId != null) {
+    for (final String id in observedConversationIds) {
+      if (id != expectedConversationId) {
+        mismatchedId = id;
+        break;
+      }
+    }
+  }
+  if (mismatchedId != null) {
     throw AgentSessionLaunchException(
-      'The provider resumed `$conversationId` instead of the requested '
+      'The provider resumed `$mismatchedId` instead of the requested '
       '`$expectedConversationId`.',
     );
   }
   return NativeAgentOutput(
     conversationId: conversationId,
+    observedConversationIds: List<String>.unmodifiable(observedConversationIds),
     result: result,
     error: error,
     terminal: terminal,
+    promptAccepted: promptAccepted,
+    errorBeforePromptAccepted: errorBeforePromptAccepted,
   );
 }
 

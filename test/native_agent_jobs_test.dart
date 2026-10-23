@@ -53,6 +53,7 @@ void main() {
     final File executable = await _fixtureExecutable(temp, r'''
 read prompt
 printf '%s\n' '{"type":"thread.started","thread_id":"thread-1"}'
+printf '%s\n' '{"type":"turn.started"}'
 printf '%s\n' '{"type":"item.completed","item":{"type":"agent_message","text":"finished"}}'
 printf '%s\n' '{"type":"turn.completed"}'
 printf '%s\n' "stderr: $prompt" >&2
@@ -89,6 +90,7 @@ printf '%s\n' "stderr: $prompt" >&2
     () async {
       final File executable = await _fixtureExecutable(temp, r'''
 printf '%s\n' '{"type":"thread.started","thread_id":"thread-stop"}'
+printf '%s\n' '{"type":"turn.started"}'
 sh -c 'trap "exit 0" TERM; while :; do sleep 1; done' &
 grandchild=$!
 printf '%s' "$$" > "$PWD/fixture-child.pid"
@@ -162,6 +164,7 @@ while :; do n=$((n + 1)); printf 'tick%s\n' "$n" >&2; sleep 0.05; done
     final File executable = await _fixtureExecutable(temp, r'''
 read prompt
 printf '%s\n' '{"type":"thread.started","thread_id":"thread-follow"}'
+printf '%s\n' '{"type":"turn.started"}'
 printf '%s\n' '{"type":"turn.completed"}'
 ''');
     final NativeAgentJobs jobs = manager(executable);
@@ -190,6 +193,7 @@ printf '%s\n' '{"type":"turn.completed"}'
     final File executable = await _fixtureExecutable(temp, r'''
 read prompt
 printf '%s\n' '{"type":"thread.started","thread_id":"thread-serial"}'
+printf '%s\n' '{"type":"turn.started"}'
 if [ "$prompt" = "first" ]; then
   printf '%s\n' '{"type":"turn.completed"}'
   exit 0
@@ -227,6 +231,7 @@ printf '%s\n' '{"type":"turn.completed"}'
     final File executable = await _fixtureExecutable(temp, r'''
 read prompt
 printf '%s\n' '{"type":"thread.started","thread_id":"owner-exit"}'
+printf '%s\n' '{"type":"turn.started"}'
 sleep 0.3
 printf '%s\n' '{"type":"item.completed","item":{"type":"agent_message","text":"still alive"}}'
 printf '%s\n' '{"type":"turn.completed"}'
@@ -255,6 +260,7 @@ printf '%s\n' '{"type":"turn.completed"}'
     final File executable = await _fixtureExecutable(temp, r'''
 read prompt
 printf '%s\n' '{"type":"thread.started","thread_id":"large-thread"}'
+printf '%s\n' '{"type":"turn.started"}'
 i=0
 while [ "$i" -lt 4000 ]; do
   printf '%s\n' '{"type":"item.started","item":{"type":"command_execution","command":"xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"}}'
@@ -288,6 +294,7 @@ printf '%s\n' '{"type":"turn.completed"}'
       await executable.writeAsString('''#!/usr/bin/env fixture-helper
 read prompt
 printf '%s\\n' '{"type":"thread.started","thread_id":"path-thread"}'
+printf '%s\\n' '{"type":"turn.started"}'
 printf '%s\\n' '{"type":"turn.completed"}'
 ''');
       await Process.run('chmod', <String>['700', executable.path]);
@@ -319,6 +326,7 @@ printf '%s\\n' '{"type":"turn.completed"}'
       final File executable = await _fixtureExecutable(temp, r'''
 read prompt
 printf '%s\n' '{"type":"thread.started","thread_id":"late-failure"}'
+printf '%s\n' '{"type":"turn.started"}'
 while [ ! -f "$PWD/allow-failure" ]; do sleep 0.02; done
 printf '%s\n' '{"type":"turn.failed","error":{"message":"permission denied later"}}'
 exit 0
@@ -339,6 +347,102 @@ exit 0
       expect(job.error, contains('permission denied later'));
     },
   );
+
+  test('provider init alone does not acknowledge the prompt', () async {
+    final File executable = await _fixtureExecutable(temp, r'''
+read prompt
+printf '%s\n' '{"type":"thread.started","thread_id":"init-only"}'
+touch "$PWD/init-observed"
+while [ ! -f "$PWD/release-failure" ]; do sleep 0.02; done
+printf '%s\n' '{"type":"turn.failed","error":{"message":"prompt rejected"}}'
+exit 1
+''');
+    final NativeAgentJobs jobs = manager(executable);
+    bool launchCompleted = false;
+    final Future<NativeAgentJobHandle> launch = jobs
+        .launch(request(prompt: 'must be accepted'))
+        .whenComplete(() => launchCompleted = true);
+
+    await _pollFile(File(p.join(workspace.path, 'init-observed')));
+    final NativeAgentJob initialized = await _pollOnlyJob(
+      jobs,
+      (NativeAgentJob value) => value.conversationId == 'init-only',
+    );
+    expect(initialized.status, NativeAgentJobStatus.starting);
+    expect(launchCompleted, isFalse);
+
+    await File(p.join(workspace.path, 'release-failure')).writeAsString('go');
+    await expectLater(
+      launch,
+      throwsA(
+        isA<AgentSessionLaunchException>().having(
+          (AgentSessionLaunchException error) => error.message,
+          'message',
+          contains('prompt rejected'),
+        ),
+      ),
+    );
+  });
+
+  test('reopened jobs reject any mismatched provider id', () async {
+    final File executable = await _fixtureExecutable(temp, r'''
+read prompt
+printf '%s\n' '{"type":"thread.started","thread_id":"expected-thread"}'
+printf '%s\n' '{"type":"turn.started"}'
+while [ ! -f "$PWD/emit-mismatch" ]; do sleep 0.02; done
+printf '%s\n' '{"type":"thread.started","thread_id":"wrong-thread"}'
+while :; do sleep 1; done
+''');
+    final NativeAgentJobs jobs = manager(executable);
+    final NativeAgentJobHandle handle = await jobs.launch(
+      request(prompt: 'continue'),
+      expectedConversationId: 'expected-thread',
+    );
+    await File(p.join(workspace.path, 'emit-mismatch')).writeAsString('go');
+
+    final NativeAgentJobs reopened = manager(executable);
+    final NativeAgentJob failed = await _pollOnlyJob(
+      reopened,
+      (NativeAgentJob value) => value.error?.contains('wrong-thread') == true,
+    );
+    expect(failed.status, NativeAgentJobStatus.failed);
+    expect(failed.conversationId, isNull);
+    await expectLater(
+      reopened.followUp(handle.id, 'retry'),
+      throwsA(isA<AgentSessionLaunchException>()),
+    );
+    await _pollFile(File(p.join(jobsRoot.path, handle.id, 'exit-code')));
+    final NativeAgentJob persisted = (await reopened.list()).single;
+    expect(persisted.status, NativeAgentJobStatus.failed);
+    expect(persisted.conversationId, isNull);
+  });
+
+  test('reopened jobs reject a mismatched persisted provider id', () async {
+    final File executable = await _fixtureExecutable(temp, r'''
+read prompt
+printf '%s\n' '{"type":"thread.started","thread_id":"expected-thread"}'
+printf '%s\n' '{"type":"turn.completed"}'
+''');
+    final NativeAgentJobs jobs = manager(executable);
+    final NativeAgentJobHandle handle = await jobs.launch(
+      request(prompt: 'continue'),
+      expectedConversationId: 'expected-thread',
+    );
+    await _pollJob(jobs, handle.id, (NativeAgentJob value) => value.isTerminal);
+    await File(
+      p.join(jobsRoot.path, handle.id, 'conversation-id'),
+    ).writeAsString('wrong-persisted');
+
+    final NativeAgentJobs reopened = manager(executable);
+    final NativeAgentJob failed = await reopened.read(handle.id);
+    expect(failed.status, NativeAgentJobStatus.failed);
+    expect(failed.error, contains('wrong-persisted'));
+    expect(failed.conversationId, isNull);
+    await expectLater(
+      reopened.followUp(handle.id, 'retry'),
+      throwsA(isA<AgentSessionLaunchException>()),
+    );
+  });
 
   test(
     'init followed by an early error never reports launch success',
@@ -388,6 +492,28 @@ Future<NativeAgentJob> _pollJob(
     await Future<void>.delayed(const Duration(milliseconds: 20));
   }
   throw StateError('Timed out waiting for $id');
+}
+
+Future<NativeAgentJob> _pollOnlyJob(
+  NativeAgentJobs jobs,
+  bool Function(NativeAgentJob value) done,
+) async {
+  final DateTime deadline = DateTime.now().add(const Duration(seconds: 10));
+  while (DateTime.now().isBefore(deadline)) {
+    final List<NativeAgentJob> values = await jobs.list();
+    if (values.length == 1 && done(values.single)) return values.single;
+    await Future<void>.delayed(const Duration(milliseconds: 20));
+  }
+  throw StateError('Timed out waiting for the only job');
+}
+
+Future<void> _pollFile(File file) async {
+  final DateTime deadline = DateTime.now().add(const Duration(seconds: 10));
+  while (DateTime.now().isBefore(deadline)) {
+    if (await file.exists()) return;
+    await Future<void>.delayed(const Duration(milliseconds: 20));
+  }
+  throw StateError('Timed out waiting for ${file.path}');
 }
 
 Future<String> _mode(String path) async {

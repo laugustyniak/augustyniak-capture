@@ -107,10 +107,71 @@ void main() {
     expect(agy.terminal, isTrue);
   });
 
+  test('parsers distinguish provider init from prompt acceptance', () {
+    final NativeAgentOutput codexInit = parseNativeAgentOutput(
+      NativeAgentBackend.codex,
+      const <String>['{"type":"thread.started","thread_id":"codex-1"}'],
+    );
+    expect(codexInit.promptAccepted, isFalse);
+
+    final NativeAgentOutput codexTurn =
+        parseNativeAgentOutput(NativeAgentBackend.codex, const <String>[
+          '{"type":"thread.started","thread_id":"codex-1"}',
+          '{"type":"turn.started"}',
+        ]);
+    expect(codexTurn.promptAccepted, isTrue);
+
+    final NativeAgentOutput claude =
+        parseNativeAgentOutput(NativeAgentBackend.claude, const <String>[
+          '{"type":"system","subtype":"init","session_id":"claude-1"}',
+          '{"type":"assistant","message":{"content":[]}}',
+        ]);
+    expect(claude.promptAccepted, isTrue);
+
+    final NativeAgentOutput
+    agy = parseNativeAgentOutput(NativeAgentBackend.antigravity, const <String>[
+      '{"event":"init","conversation_id":"agy-1"}',
+      '{"event":"step_update","step_update":{"conversation_id":"agy-1","step_index":0,"state":"DONE","step_type":"user_input"}}',
+    ]);
+    expect(agy.promptAccepted, isTrue);
+  });
+
+  test('successful terminal output confirms prompt acceptance', () {
+    final NativeAgentOutput output =
+        parseNativeAgentOutput(NativeAgentBackend.codex, const <String>[
+          '{"type":"thread.started","thread_id":"codex-1"}',
+          '{"type":"turn.completed"}',
+        ]);
+
+    expect(output.promptAccepted, isTrue);
+  });
+
+  test('Claude API error assistant does not confirm prompt acceptance', () {
+    final NativeAgentOutput
+    output = parseNativeAgentOutput(NativeAgentBackend.claude, const <String>[
+      '{"type":"system","subtype":"init","session_id":"claude-1"}',
+      '{"type":"assistant","error":"authentication_failed","message":{"content":[]}}',
+    ]);
+
+    expect(output.promptAccepted, isFalse);
+    expect(output.errorBeforePromptAccepted, isTrue);
+    expect(output.error, contains('authentication_failed'));
+  });
+
   test('continuation rejects a provider id mismatch', () {
     expect(
       () => parseNativeAgentOutput(NativeAgentBackend.codex, const <String>[
         '{"type":"thread.started","thread_id":"different"}',
+      ], expectedConversationId: 'expected'),
+      throwsA(isA<AgentSessionLaunchException>()),
+    );
+  });
+
+  test('continuation validates every provider id observed', () {
+    expect(
+      () => parseNativeAgentOutput(NativeAgentBackend.codex, const <String>[
+        '{"type":"thread.started","thread_id":"different"}',
+        '{"type":"thread.started","thread_id":"expected"}',
       ], expectedConversationId: 'expected'),
       throwsA(isA<AgentSessionLaunchException>()),
     );
