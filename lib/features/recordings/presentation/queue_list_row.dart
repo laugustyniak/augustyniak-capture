@@ -4,6 +4,8 @@ import '../../../app/ui_kit.dart';
 import '../../settings/domain/queue_density.dart';
 import '../domain/capture_type.dart';
 import '../domain/recording.dart';
+import '../../projects/data/native_agent_jobs.dart';
+import 'agent_runs.dart';
 import 'card_parts.dart';
 
 /// One capture in the master list of the wide Queue.
@@ -31,6 +33,7 @@ class QueueListRow extends StatelessWidget {
     this.narrow = false,
     this.onToggleDone,
     this.isMarkingDone = false,
+    this.agentJobs,
   });
 
   final Recording recording;
@@ -51,6 +54,9 @@ class QueueListRow extends StatelessWidget {
 
   /// The done write is in flight: the check shows a spinner and ignores taps.
   final bool isMarkingDone;
+
+  /// Null hides the AGENT pill.
+  final NativeAgentJobs? agentJobs;
 
   /// Rendered instead of the summary while the model reads the capture, so a
   /// row that is about to change says so instead of showing a stale line.
@@ -145,6 +151,14 @@ class QueueListRow extends StatelessWidget {
                           ],
                         ),
                       ),
+                      if (agentJobs != null &&
+                          agentJobHandles(recording).isNotEmpty) ...<Widget>[
+                        const SizedBox(width: _gap),
+                        AgentRunPill(
+                          jobs: agentJobs!,
+                          handle: agentJobHandles(recording).first,
+                        ),
+                      ],
                       if (!narrow) ...<Widget>[
                         const SizedBox(width: _gap),
                         SizedBox(

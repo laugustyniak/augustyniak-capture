@@ -13,6 +13,8 @@ import '../domain/recording.dart';
 import '../domain/related_captures.dart';
 import '../domain/route_record.dart';
 import '../domain/suggested_route.dart';
+import '../../projects/data/native_agent_jobs.dart';
+import 'agent_runs.dart';
 import 'card_parts.dart';
 
 /// One queue item, in the design's "console card" form.
@@ -56,7 +58,11 @@ class RecordingCard extends StatelessWidget {
     this.processingTicker,
     this.relatedCount = 0,
     this.repeatCount = 0,
+    this.agentJobs,
   });
+
+  /// Null hides the AGENT pill; set when local agent jobs can be read.
+  final NativeAgentJobs? agentJobs;
 
   /// Said in both places the action is offered — the poster and the button —
   /// so a screen reader announces one action, not two different-sounding ones.
@@ -299,6 +305,11 @@ class RecordingCard extends StatelessWidget {
             color: Console.mutedSoft,
             outlined: true,
           ),
+        ),
+      if (agentJobs != null && agentJobHandles(recording).isNotEmpty)
+        AgentRunPill(
+          jobs: agentJobs!,
+          handle: agentJobHandles(recording).first,
         ),
       AnimatedSwitcher(
         duration: const Duration(milliseconds: 260),

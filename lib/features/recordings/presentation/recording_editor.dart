@@ -14,6 +14,8 @@ import '../domain/capture_category.dart';
 import '../domain/capture_priority.dart';
 import '../domain/recording.dart';
 import '../domain/recording_revision.dart';
+import '../../projects/data/native_agent_jobs.dart';
+import 'agent_runs.dart';
 import 'card_parts.dart';
 import 'cleanup_section.dart';
 import 'related_section.dart';
@@ -72,6 +74,7 @@ class RecordingEditor extends StatefulWidget {
     this.cleanupError,
     this.related = const <RelatedEntry>[],
     this.onOpenRelated,
+    this.agentJobs,
   });
 
   /// Public so a test asserts on the same string the widget renders.
@@ -83,6 +86,9 @@ class RecordingEditor extends StatefulWidget {
 
   final Recording recording;
   final List<RecordingRevision> revisions;
+
+  /// Null hides AGENT RUNS, so a host with no local jobs renders as before.
+  final NativeAgentJobs? agentJobs;
 
   /// Tags used on other captures, offered as one-tap chips.
   final List<String> tagSuggestions;
@@ -540,6 +546,15 @@ class _RecordingEditorState extends State<RecordingEditor> {
                   onOpen: widget.onOpenRelated!,
                 ),
                 const SizedBox(height: 8),
+              ],
+              if (widget.agentJobs != null &&
+                  agentJobHandles(recording).isNotEmpty) ...<Widget>[
+                const SizedBox(height: 4),
+                AgentRunsSection(
+                  recording: recording,
+                  jobs: widget.agentJobs,
+                ),
+                const SizedBox(height: 4),
               ],
               if (recording.segments.length > 1 || widget.canAppend) ...<Widget>[
                 const SizedBox(height: 4),

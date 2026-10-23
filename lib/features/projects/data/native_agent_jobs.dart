@@ -31,6 +31,7 @@ class NativeAgentJob {
     this.error,
     this.exitCode,
     this.parentJobId,
+    this.finishedAt,
   });
   final NativeAgentJobHandle handle;
   final NativeAgentJobStatus status;
@@ -46,6 +47,10 @@ class NativeAgentJob {
   final String? error;
   final int? exitCode;
   final String? parentJobId;
+
+  /// When the job reached a terminal state, read off the status file's
+  /// modification time. Null while it runs or when the file is unreadable.
+  final DateTime? finishedAt;
   bool get isTerminal => switch (status) {
     NativeAgentJobStatus.completed ||
     NativeAgentJobStatus.failed ||
@@ -377,7 +382,18 @@ class NativeAgentJobs {
       parentJobId: metadata['parentJobId'] is String
           ? metadata['parentJobId'] as String
           : null,
+      finishedAt: _terminal(status)
+          ? await _statusModified(directory)
+          : null,
     );
+  }
+
+  Future<DateTime?> _statusModified(Directory directory) async {
+    try {
+      return await File(p.join(directory.path, 'status')).lastModified();
+    } catch (_) {
+      return null;
+    }
   }
 
   Future<void> stop(String id) async {
