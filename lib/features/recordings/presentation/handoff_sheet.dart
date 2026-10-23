@@ -346,18 +346,18 @@ class _HandoffSheetState extends State<_HandoffSheet> {
       ],
     ),
     const SizedBox(height: 9),
-    // Where the session shows up. Background is the default and the reason
-    // this group no longer needs a terminal that can open a window: the agent
-    // starts inside Zellij's server, and ATTACH (or the command the notice
-    // prints) opens it when wanted. The chips are disabled once a launch has
-    // happened — the mode is a property of the session that was started.
+    // Where the session runs. Detached is the default: a native background
+    // job with no Zellij and no terminal; its status and result live under
+    // Jobs. A window opens a terminal on a Zellij session. The chips are
+    // disabled once a launch has happened — the mode is a property of the
+    // session that was started.
     Wrap(
       spacing: 8,
       runSpacing: 8,
       children: <Widget>[
         ConsoleChip(
           key: const ValueKey<String>('handoff-mode-background'),
-          label: 'IN BACKGROUND',
+          label: 'DETACHED · NO ZELLIJ',
           selected: _detached,
           onSelected: _busy || _attached != null
               ? () {}
@@ -365,7 +365,7 @@ class _HandoffSheetState extends State<_HandoffSheet> {
         ),
         ConsoleChip(
           key: const ValueKey<String>('handoff-mode-window'),
-          label: 'IN A WINDOW',
+          label: 'WINDOW · ZELLIJ',
           selected: !_detached,
           onSelected: _busy || _attached != null
               ? () {}
@@ -376,7 +376,7 @@ class _HandoffSheetState extends State<_HandoffSheet> {
     if (_detached && _agentId == 'geminiCli') ...<Widget>[
       const SizedBox(height: 9),
       Text(
-        'Gemini CLI background jobs are unavailable. Choose IN A WINDOW.',
+        'Gemini CLI background jobs are unavailable. Choose WINDOW · ZELLIJ.',
         key: const ValueKey<String>('gemini-native-unavailable'),
         style: ConsoleText.micro.copyWith(color: Console.amber),
       ),
