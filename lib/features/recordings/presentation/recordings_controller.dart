@@ -2588,6 +2588,42 @@ class RecordingsController extends ChangeNotifier {
     }
   }
 
+  Future<void> _admitNewImportedFile({
+    required File source,
+    required CaptureType type,
+    String? mimeType,
+    required bool hashImmediately,
+  }) async {
+    final String id = const Uuid().v4();
+    final Recording imported = await _importer.importFile(
+      id: id,
+      type: type,
+      source: source,
+      mimeType: mimeType,
+      createdAt: DateTime.now(),
+    );
+    final Recording saved = imported.copyWith(
+      projectId: activeProjectId,
+      projectAuto: activeProjectId != null,
+    );
+
+    // Critical invariant: index only after the source is copied and verified.
+    _recordings = <Recording>[saved, ..._recordings];
+    await _persistAll();
+    if (hashImmediately) {
+      unawaited(_computeContentHash(saved.id));
+    }
+    unawaited(_gamificationController?.onCaptureCreated(_recordings.length));
+    _logSink.log(
+      'File imported · ${type.name} · ${await File(saved.filePath).length()} B',
+      recordingId: saved.id,
+    );
+
+    // Enqueue for background processing and return; the drain loop runs the
+    // job off the capture lock so it never blocks the next capture.
+    await _enqueueProcessing(saved.id);
+  }
+
   /// Import an existing file (audio, image or video) as a new item. Mirrors the
   /// ordering of [stopRecording]: pick, copy the source into the app directory
   /// and verify it (via [MediaImporter]), index with status `saved`, and only
@@ -2631,32 +2667,12 @@ class RecordingsController extends ChangeNotifier {
         return;
       }
 
-      final String id = const Uuid().v4();
-      final Recording imported = await _importer.importFile(
-        id: id,
-        type: type,
+      await _admitNewImportedFile(
         source: picked.file,
+        type: type,
         mimeType: picked.mimeType,
-        createdAt: DateTime.now(),
+        hashImmediately: true,
       );
-      final Recording saved = imported.copyWith(
-        projectId: activeProjectId,
-        projectAuto: activeProjectId != null,
-      );
-
-      // Critical invariant: index only after the source is copied and verified.
-      _recordings = <Recording>[saved, ..._recordings];
-      await _persistAll();
-      unawaited(_computeContentHash(saved.id));
-      unawaited(_gamificationController?.onCaptureCreated(_recordings.length));
-      _logSink.log(
-        'File imported · ${type.name} · ${await File(saved.filePath).length()} B',
-        recordingId: saved.id,
-      );
-
-      // Enqueue for background processing and return; the drain loop runs the
-      // job off the capture lock so it never blocks the next capture.
-      await _enqueueProcessing(saved.id);
     } catch (exception) {
       _error = exception.toString();
       _logSink.log('Failed to import file: $exception', level: LogLevel.error);
@@ -2707,28 +2723,12 @@ class RecordingsController extends ChangeNotifier {
         return;
       }
 
-      final String id = const Uuid().v4();
-      final Recording imported = await _importer.importFile(
-        id: id,
-        type: type,
+      await _admitNewImportedFile(
         source: file,
+        type: type,
         mimeType: mimeType,
-        createdAt: DateTime.now(),
+        hashImmediately: false,
       );
-      final Recording saved = imported.copyWith(
-        projectId: activeProjectId,
-        projectAuto: activeProjectId != null,
-      );
-
-      _recordings = <Recording>[saved, ..._recordings];
-      await _persistAll();
-      unawaited(_gamificationController?.onCaptureCreated(_recordings.length));
-      _logSink.log(
-        'File imported · ${type.name} · ${await File(saved.filePath).length()} B',
-        recordingId: saved.id,
-      );
-
-      await _enqueueProcessing(saved.id);
     } catch (exception) {
       _error = exception.toString();
       _logSink.log('Failed to import file: $exception', level: LogLevel.error);
