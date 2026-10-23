@@ -164,7 +164,7 @@ class _AgentJobsSheetState extends State<AgentJobsSheet> {
                             color: _statusColor(job.status),
                           ),
                           title: Text(
-                            '${_backendLabel(job.handle.backend)} · ${job.projectName ?? p.basename(job.workspacePath)}',
+                            '${agentBackendLabel(job.handle.backend)} · ${job.projectName ?? p.basename(job.workspacePath)}',
                           ),
                           subtitle: Text(
                             '${job.status.name.toUpperCase()} · ${_jobTime(job.createdAt)} · ${_shortId(job.handle.id)}',
@@ -197,6 +197,13 @@ class _AgentJobsSheetState extends State<AgentJobsSheet> {
     );
   }
 }
+
+/// Asks for the next instruction of a follow-up; null when cancelled.
+Future<String?> promptAgentFollowUp(BuildContext context) =>
+    showDialog<String>(
+      context: context,
+      builder: (BuildContext context) => _FollowUpDialog(),
+    );
 
 class _FollowUpDialog extends StatefulWidget {
   _FollowUpDialog();
@@ -267,7 +274,7 @@ class _JobDetail extends StatelessWidget {
         children: <Widget>[
           Expanded(
             child: Text(
-              _backendLabel(job.handle.backend),
+              agentBackendLabel(job.handle.backend),
               style: ConsoleText.cardTitle,
             ),
           ),
@@ -346,7 +353,7 @@ class _JobDetail extends StatelessWidget {
   );
 }
 
-String _backendLabel(NativeAgentBackend backend) => switch (backend) {
+String agentBackendLabel(NativeAgentBackend backend) => switch (backend) {
   NativeAgentBackend.claude => 'Claude Code',
   NativeAgentBackend.codex => 'Codex',
   NativeAgentBackend.antigravity => 'Antigravity',

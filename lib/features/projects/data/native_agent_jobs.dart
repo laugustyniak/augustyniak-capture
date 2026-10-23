@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
@@ -31,6 +32,7 @@ class NativeAgentJob {
     this.error,
     this.exitCode,
     this.parentJobId,
+    this.finishedAt,
   });
   final NativeAgentJobHandle handle;
   final NativeAgentJobStatus status;
@@ -46,6 +48,10 @@ class NativeAgentJob {
   final String? error;
   final int? exitCode;
   final String? parentJobId;
+
+  /// When the job reached a terminal state, read off the status file's
+  /// modification time. Null while it runs or when the file is unreadable.
+  final DateTime? finishedAt;
   bool get isTerminal => switch (status) {
     NativeAgentJobStatus.completed ||
     NativeAgentJobStatus.failed ||
@@ -66,6 +72,7 @@ class NativeAgentJobs {
     Map<String, String>? environment,
     this.startupTimeout = const Duration(seconds: 30),
     this.pollInterval = const Duration(milliseconds: 50),
+    this.watchInterval = const Duration(seconds: 3),
   }) : _jobsRoot = jobsRoot,
        _executables = executables ?? PathExecutableResolver(),
        _processRunner = processRunner,
@@ -81,6 +88,10 @@ class NativeAgentJobs {
   final Map<String, String> _environment;
   final Duration startupTimeout;
   final Duration pollInterval;
+
+  /// How often [watch] re-reads a job that has not finished.
+  final Duration watchInterval;
+  final Map<String, _JobPoll> _polls = <String, _JobPoll>{};
   final Set<String> _continuationsInFlight = <String>{};
 
   Future<NativeAgentJobHandle> launch(
@@ -263,7 +274,34 @@ class NativeAgentJobs {
     return jobs;
   }
 
-  Future<NativeAgentJob> read(String id) async {
+  /// The full read, **with** the provider-identity enforcement a reopened job
+  /// needs: a mismatched conversation id stops the job and marks it failed.
+  Future<NativeAgentJob> read(String id) => _read(id, enforceIdentity: true);
+
+  /// A read that never writes. Skips the identity enforcement of [read], so a
+  /// view that only displays a job cannot be the thing that stops one. Status
+  /// can therefore lag [read] by the failure that enforcement would record.
+  Future<NativeAgentJob> peek(String id) => _read(id, enforceIdentity: false);
+
+  /// Shares one poller per job id between every widget showing it: [peek] runs
+  /// every [watchInterval] only while the job is non-terminal and somebody is
+  /// listening. A failed read keeps the last answer and is retried with
+  /// backoff (2x to 16x [watchInterval]); after that the poller gives up and
+  /// [NativeAgentJobWatch.stale] turns true until a read succeeds or a new
+  /// watcher resumes it. [NativeAgentJobWatch.release] must be called when the
+  /// listener leaves.
+  NativeAgentJobWatch watch(String id, void Function() onChange) {
+    final _JobPoll? existing = _polls[id];
+    final _JobPoll poll = existing ?? (_polls[id] = _JobPoll(this, id)..load());
+    // A poller that gave up after failed reads starts again for a new viewer.
+    if (existing != null) existing.resume();
+    return NativeAgentJobWatch._(poll, onChange);
+  }
+
+  Future<NativeAgentJob> _read(
+    String id, {
+    required bool enforceIdentity,
+  }) async {
     final Directory directory = await _jobDirectory(id);
     final Map<String, dynamic> metadata = await _metadata(directory);
     final NativeAgentBackend? backend = _backend(metadata['backend']);
@@ -285,6 +323,7 @@ class NativeAgentJobs {
     final String? persistedId = snapshot.persistedId;
     final int? exitCode = snapshot.exitCode;
     NativeAgentJobStatus status = snapshot.status;
+    final NativeAgentJobStatus onDiskStatus = snapshot.status;
     final String? expectedId = metadata['expectedConversationId'] is String
         ? (metadata['expectedConversationId'] as String).trim()
         : null;
@@ -293,7 +332,7 @@ class NativeAgentJobs {
       if (persistedId?.trim().isNotEmpty == true) persistedId!.trim(),
     ];
     String? mismatchedId;
-    if (expectedId != null && expectedId.isNotEmpty) {
+    if (enforceIdentity && expectedId != null && expectedId.isNotEmpty) {
       for (final String value in observedIds) {
         if (value != expectedId) {
           mismatchedId = value;
@@ -377,7 +416,25 @@ class NativeAgentJobs {
       parentJobId: metadata['parentJobId'] is String
           ? metadata['parentJobId'] as String
           : null,
+      // Only when the supervisor itself wrote this terminal status: a derived
+      // `lost`, or a completed run downgraded to failed, has no such moment.
+      finishedAt: _terminal(status) && status == onDiskStatus
+          ? _clampedFinish(await _statusModified(directory), createdAt)
+          : null,
     );
+  }
+
+  /// `lastModified` can be truncated to the second, so a job created and
+  /// finished within one second would otherwise finish before it began.
+  DateTime? _clampedFinish(DateTime? modified, DateTime createdAt) =>
+      modified == null || modified.isBefore(createdAt) ? createdAt : modified;
+
+  Future<DateTime?> _statusModified(Directory directory) async {
+    try {
+      return await File(p.join(directory.path, 'status')).lastModified();
+    } catch (_) {
+      return null;
+    }
   }
 
   Future<void> stop(String id) async {
@@ -751,3 +808,106 @@ else
   write_marker status failed
 fi
 ''';
+
+/// A lease on a shared [NativeAgentJobs] poller. See [NativeAgentJobs.watch].
+class NativeAgentJobWatch {
+  NativeAgentJobWatch._(this._poll, this._onChange) {
+    _poll.listeners.add(_onChange);
+  }
+
+  final _JobPoll _poll;
+  final void Function() _onChange;
+  bool _released = false;
+
+  /// The last job read, or null before the first read and after a failed one.
+  NativeAgentJob? get job => _poll.job;
+
+  /// True until the first read has answered, either way.
+  bool get loading => _poll.loading;
+
+  /// True once the poller gave up on a job that was not known to be finished:
+  /// [job] is then the last answer, no longer a current one.
+  bool get stale => _poll.stale;
+
+  /// Reads now, e.g. after a stop, and resumes polling if still running.
+  Future<void> refresh() => _poll.load();
+
+  void release() {
+    if (_released) return;
+    _released = true;
+    _poll.listeners.remove(_onChange);
+    if (_poll.listeners.isEmpty) _poll.dispose();
+  }
+}
+
+class _JobPoll {
+  _JobPoll(this._jobs, this.id);
+
+  /// Retries after failed reads, spaced 2x, 4x, 8x, 16x [watchInterval].
+  static const int _maxRetries = 4;
+
+  final NativeAgentJobs _jobs;
+  final String id;
+  final List<void Function()> listeners = <void Function()>[];
+  NativeAgentJob? job;
+  bool loading = true;
+  bool stale = false;
+  Timer? _timer;
+  int _generation = 0;
+  int _failures = 0;
+  bool _inFlight = false;
+  bool _disposed = false;
+
+  /// Starts reading again when nothing is scheduled or running and the job is
+  /// not known to be finished.
+  void resume() {
+    if (_disposed || _inFlight || (_timer?.isActive ?? false)) return;
+    if (job?.isTerminal ?? false) return;
+    _failures = 0;
+    stale = false;
+    load();
+  }
+
+  Future<void> load() async {
+    _timer?.cancel();
+    final int generation = ++_generation;
+    _inFlight = true;
+    NativeAgentJob? next = job;
+    bool failed = false;
+    try {
+      next = await _jobs.peek(id);
+    } catch (_) {
+      failed = true;
+    }
+    // A newer load, or the last listener leaving, supersedes this answer.
+    if (_disposed || generation != _generation) return;
+    _inFlight = false;
+    job = next;
+    loading = false;
+    _failures = failed ? _failures + 1 : 0;
+    if (!failed) stale = false;
+    for (final void Function() listener in List.of(listeners)) {
+      listener();
+    }
+    // A listener may have released the last watch while being notified.
+    if (_disposed) return;
+    if (next != null && next.isTerminal) return;
+    if (!failed) {
+      _timer = Timer(_jobs.watchInterval, load);
+    } else if (_failures <= _maxRetries) {
+      _timer = Timer(_jobs.watchInterval * (1 << _failures), load);
+    } else {
+      stale = true;
+      for (final void Function() listener in List.of(listeners)) {
+        listener();
+      }
+    }
+  }
+
+  void dispose() {
+    _disposed = true;
+    _generation++;
+    _timer?.cancel();
+    if (identical(_jobs._polls[id], this)) _jobs._polls.remove(id);
+  }
+}
