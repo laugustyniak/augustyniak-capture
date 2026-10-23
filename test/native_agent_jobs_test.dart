@@ -3,6 +3,7 @@ import 'dart:io';
 
 import 'package:augustyniak_capture/features/projects/data/executable_resolver.dart';
 import 'package:augustyniak_capture/features/projects/data/native_agent_jobs.dart';
+import 'package:augustyniak_capture/features/projects/data/process_runner.dart';
 import 'package:augustyniak_capture/features/projects/domain/agent_session_launcher.dart';
 import 'package:augustyniak_capture/features/projects/domain/native_agent_types.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -15,6 +16,26 @@ class _Resolver implements ExecutableResolver {
 
   @override
   Future<String?> resolve(String name) async => path;
+}
+
+class _CompletingProcessRunner implements ProcessRunner {
+  _CompletingProcessRunner(this.completeJob);
+
+  final Future<void> Function() completeJob;
+  bool _completed = false;
+
+  @override
+  Future<CommandResult> run(
+    String executable,
+    List<String> arguments, {
+    String? workingDirectory,
+  }) async {
+    if (!_completed) {
+      _completed = true;
+      await completeJob();
+    }
+    return const CommandResult(exitCode: 1, stdout: '', stderr: '');
+  }
 }
 
 void main() {
@@ -68,7 +89,7 @@ printf '%s\n' "stderr: $prompt" >&2
     final NativeAgentJob job = await _pollJob(
       reopened,
       handle.id,
-      (NativeAgentJob value) => value.status == NativeAgentJobStatus.completed,
+      (NativeAgentJob value) => value.isTerminal,
     );
 
     expect(job.status, NativeAgentJobStatus.completed);
@@ -121,6 +142,55 @@ printf '%s\n' "stderr: $prompt" >&2
       expect((await jobs.read(id)).status, NativeAgentJobStatus.lost);
     },
   );
+
+  test('dead supervisor refreshes the completed job snapshot', () async {
+    final DateTime now = DateTime.utc(2026, 10, 23, 12);
+    const String id = '00000000-0000-4000-8000-000000000002';
+    final Directory directory = Directory(p.join(jobsRoot.path, id));
+    await directory.create(recursive: true);
+    await File(p.join(directory.path, 'request.json')).writeAsString(
+      jsonEncode(<String, dynamic>{
+        'id': id,
+        'backend': 'codex',
+        'agent': 'codex',
+        'projectId': 'project',
+        'projectName': 'Project',
+        'workspacePath': workspace.path,
+        'createdAt': now.toIso8601String(),
+        'configuredArguments': <String>[],
+        'prompt': 'finish during liveness check',
+      }),
+    );
+    final File output = File(p.join(directory.path, 'stdout.jsonl'));
+    await output.writeAsString(
+      '{"type":"thread.started","thread_id":"snapshot-thread"}\n'
+      '{"type":"turn.started"}\n',
+    );
+    await File(p.join(directory.path, 'status')).writeAsString('running');
+    await File(
+      p.join(directory.path, 'identity.json'),
+    ).writeAsString('{"pid":123,"pgid":123,"nonce":"snapshot-nonce"}');
+    final NativeAgentJobs jobs = NativeAgentJobs(
+      jobsRoot: () async => jobsRoot,
+      executables: _Resolver('/bin/true'),
+      now: () => now,
+      processRunner: _CompletingProcessRunner(() async {
+        await output.writeAsString(
+          '{"type":"item.completed","item":{"type":"agent_message","text":"fresh result"}}\n'
+          '{"type":"turn.completed"}\n',
+          mode: FileMode.append,
+        );
+        await File(p.join(directory.path, 'exit-code')).writeAsString('0');
+        await File(p.join(directory.path, 'status')).writeAsString('completed');
+      }),
+    );
+
+    final NativeAgentJob job = await jobs.read(id);
+
+    expect(job.status, NativeAgentJobStatus.completed);
+    expect(job.result, 'fresh result');
+    expect(job.conversationId, 'snapshot-thread');
+  });
 
   test(
     'stop is nonce-bound, stops the owned group and not another process',
@@ -208,17 +278,13 @@ printf '%s\n' '{"type":"turn.completed"}'
     final NativeAgentJobHandle first = await jobs.launch(
       request(prompt: 'first'),
     );
-    await _pollJob(
-      jobs,
-      first.id,
-      (NativeAgentJob value) => value.status == NativeAgentJobStatus.completed,
-    );
+    await _pollJob(jobs, first.id, (NativeAgentJob value) => value.isTerminal);
 
     final NativeAgentJobHandle second = await jobs.followUp(first.id, 'second');
     final NativeAgentJob child = await _pollJob(
       jobs,
       second.id,
-      (NativeAgentJob value) => value.status == NativeAgentJobStatus.completed,
+      (NativeAgentJob value) => value.isTerminal,
     );
 
     expect(child.parentJobId, first.id);
@@ -247,11 +313,7 @@ printf '%s\n' '{"type":"turn.completed"}'
     final NativeAgentJobHandle parent = await jobs.launch(
       request(prompt: 'first'),
     );
-    await _pollJob(
-      jobs,
-      parent.id,
-      (NativeAgentJob value) => value.status == NativeAgentJobStatus.completed,
-    );
+    await _pollJob(jobs, parent.id, (NativeAgentJob value) => value.isTerminal);
     final NativeAgentJobHandle active = await jobs.followUp(parent.id, 'stay');
 
     await expectLater(
@@ -294,7 +356,7 @@ printf '%s\n' '{"type":"turn.completed"}'
     final NativeAgentJob job = await _pollJob(
       manager(executable),
       id,
-      (NativeAgentJob value) => value.status == NativeAgentJobStatus.completed,
+      (NativeAgentJob value) => value.isTerminal,
     );
 
     expect(job.status, NativeAgentJobStatus.completed);
@@ -357,8 +419,7 @@ printf '%s\\n' '{"type":"turn.completed"}'
       final NativeAgentJob job = await _pollJob(
         jobs,
         handle.id,
-        (NativeAgentJob value) =>
-            value.status == NativeAgentJobStatus.completed,
+        (NativeAgentJob value) => value.isTerminal,
       );
 
       expect(job.status, NativeAgentJobStatus.completed);
@@ -386,7 +447,7 @@ exit 0
       final NativeAgentJob job = await _pollJob(
         jobs,
         handle.id,
-        (NativeAgentJob value) => value.status == NativeAgentJobStatus.failed,
+        (NativeAgentJob value) => value.isTerminal,
       );
 
       expect(job.status, NativeAgentJobStatus.failed);
@@ -474,11 +535,7 @@ printf '%s\n' '{"type":"turn.completed"}'
       request(prompt: 'continue'),
       expectedConversationId: 'expected-thread',
     );
-    await _pollJob(
-      jobs,
-      handle.id,
-      (NativeAgentJob value) => value.status == NativeAgentJobStatus.completed,
-    );
+    await _pollJob(jobs, handle.id, (NativeAgentJob value) => value.isTerminal);
     await File(
       p.join(jobsRoot.path, handle.id, 'conversation-id'),
     ).writeAsString('wrong-persisted');

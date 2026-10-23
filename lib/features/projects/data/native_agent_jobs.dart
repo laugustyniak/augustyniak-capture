@@ -10,6 +10,7 @@ import '../domain/agent_session_launcher.dart';
 import '../domain/native_agent_job.dart';
 import '../domain/native_agent_types.dart';
 import 'executable_resolver.dart';
+import 'process_runner.dart';
 
 const int _maxLogBytes = 256 * 1024;
 const int _parseHeadBytes = 64 * 1024;
@@ -59,6 +60,7 @@ class NativeAgentJobs {
   NativeAgentJobs({
     required Future<Directory> Function() jobsRoot,
     ExecutableResolver? executables,
+    ProcessRunner processRunner = const SystemProcessRunner(),
     String Function()? idFactory,
     DateTime Function()? now,
     Map<String, String>? environment,
@@ -66,12 +68,14 @@ class NativeAgentJobs {
     this.pollInterval = const Duration(milliseconds: 50),
   }) : _jobsRoot = jobsRoot,
        _executables = executables ?? PathExecutableResolver(),
+       _processRunner = processRunner,
        _idFactory = idFactory ?? (() => const Uuid().v4()),
        _now = now ?? DateTime.now,
        _environment = environment ?? Platform.environment;
 
   final Future<Directory> Function() _jobsRoot;
   final ExecutableResolver _executables;
+  final ProcessRunner _processRunner;
   final String Function() _idFactory;
   final DateTime Function() _now;
   final Map<String, String> _environment;
@@ -269,17 +273,18 @@ class NativeAgentJobs {
     if (backend == null || createdAt == null || workspace is! String) {
       throw const FormatException('Invalid native agent job metadata.');
     }
-    final NativeAgentOutput parsed = parseNativeAgentOutput(
-      backend,
-      await _parseOutputLines(directory),
-    );
-    final String? persistedId = await _readOptional(
-      File(p.join(directory.path, 'conversation-id')),
-    );
-    final int? exitCode = int.tryParse(
-      (await _readOptional(File(p.join(directory.path, 'exit-code')))) ?? '',
-    );
-    NativeAgentJobStatus status = await _readStatus(directory);
+    var snapshot = await _readJobSnapshot(directory, backend);
+    bool supervisorAlive = true;
+    if (!_terminal(snapshot.status)) {
+      supervisorAlive = await _supervisorAlive(directory);
+      if (!supervisorAlive) {
+        snapshot = await _readJobSnapshot(directory, backend);
+      }
+    }
+    final NativeAgentOutput parsed = snapshot.parsed;
+    final String? persistedId = snapshot.persistedId;
+    final int? exitCode = snapshot.exitCode;
+    NativeAgentJobStatus status = snapshot.status;
     final String? expectedId = metadata['expectedConversationId'] is String
         ? (metadata['expectedConversationId'] as String).trim()
         : null;
@@ -309,7 +314,7 @@ class NativeAgentJobs {
       await _writeStatus(directory, NativeAgentJobStatus.failed);
       status = NativeAgentJobStatus.failed;
     }
-    if (!_terminal(status) && !await _supervisorAlive(directory)) {
+    if (!_terminal(status) && !supervisorAlive) {
       if (exitCode != null) {
         status = await _validStopRequested(directory)
             ? NativeAgentJobStatus.stopped
@@ -520,6 +525,34 @@ class NativeAgentJobs {
     return value;
   }
 
+  Future<
+    ({
+      int? exitCode,
+      NativeAgentOutput parsed,
+      String? persistedId,
+      NativeAgentJobStatus status,
+    })
+  >
+  _readJobSnapshot(Directory directory, NativeAgentBackend backend) async {
+    final NativeAgentJobStatus status = await _readStatus(directory);
+    final NativeAgentOutput parsed = parseNativeAgentOutput(
+      backend,
+      await _parseOutputLines(directory),
+    );
+    final String? persistedId = await _readOptional(
+      File(p.join(directory.path, 'conversation-id')),
+    );
+    final int? exitCode = int.tryParse(
+      (await _readOptional(File(p.join(directory.path, 'exit-code')))) ?? '',
+    );
+    return (
+      exitCode: exitCode,
+      parsed: parsed,
+      persistedId: persistedId,
+      status: status,
+    );
+  }
+
   Future<String> _supervisorPath(Directory root) async {
     final File file = File(p.join(root.path, 'supervisor-v1.sh'));
     await refuseSymlink(file.path);
@@ -546,14 +579,14 @@ class NativeAgentJobs {
     final Object? pgid = decoded['pgid'];
     final Object? nonce = decoded['nonce'];
     if (supervisorPid is! int || pgid is! int || nonce is! String) return false;
-    final ProcessResult result = await Process.run('/bin/ps', <String>[
+    final CommandResult result = await _processRunner.run('/bin/ps', <String>[
       '-o',
       'pgid=,args=',
       '-p',
       '$supervisorPid',
     ]);
     if (result.exitCode != 0) return false;
-    final String output = '${result.stdout}'.trim();
+    final String output = result.stdout.trim();
     return RegExp('^\\s*$pgid\\s').hasMatch(output) &&
         output.contains(directory.path) &&
         output.contains(nonce);
@@ -635,13 +668,13 @@ class NativeAgentJobs {
   }
 
   Future<String> _currentProcessGroup() async {
-    final ProcessResult result = await Process.run('/bin/ps', <String>[
+    final CommandResult result = await _processRunner.run('/bin/ps', <String>[
       '-o',
       'pgid=',
       '-p',
       '$pid',
     ]);
-    return result.exitCode == 0 ? '${result.stdout}'.trim() : '-1';
+    return result.exitCode == 0 ? result.stdout.trim() : '-1';
   }
 
   static bool _terminal(NativeAgentJobStatus status) => switch (status) {
