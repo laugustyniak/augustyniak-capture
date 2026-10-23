@@ -15,7 +15,7 @@ Verification baseline at `294976b`: `flutter analyze` → `No issues found!`; `f
 | 3 | [003 — Keep agent launch configuration device-local](003-keep-agent-launch-config-device-local.md) | DONE (PR #358 merged `a38bc5c`) | 002 (same codec file; sequential diffs) | M | Remote data must not set `--dangerously-skip-permissions`. Records a product decision; reversible. |
 | 4 | [004 — Processing ticker into a ValueNotifier](004-processing-ticker-value-notifier.md) | DONE (PR #359 merged `89afe9c`; manual screen check still owed) | 001 (same controller file) | M | Whole-shell rebuild at 2 Hz for the length of every job. Pattern already exists in the class. |
 | 5 | [005 — Docs drift: features, CI, tabs, Turso, on-device status](005-docs-drift-features-ci-tabs.md) | DONE (PR #361 merged) | none; do last so counts do not re-drift | S–M | Agent-facing docs are the repo's control surface; eight verified stale claims. |
-| 6 | [006 — `user_e2ee_settings` insert-once: revoke UPDATE](006-revoke-update-on-user-e2ee-settings.md) | TODO | none; needs local Supabase (Docker) to verify; `supabase db push` is maintainer-run | S | A leaked session can re-key the account and lock every other device out with one PATCH the client never makes. |
+| 6 | [006 — `user_e2ee_settings` insert-once: revoke UPDATE](006-revoke-update-on-user-e2ee-settings.md) | DONE (PR #368 merged `ee1b2c3`; hosted `supabase db push` still owed) | none; needs local Supabase (Docker) to verify; `supabase db push` is maintainer-run | S | A leaked session can re-key the account and lock every other device out with one PATCH the client never makes. |
 
 Status values the executor should use: `TODO` → `IN PROGRESS (<branch>)` → `DONE (<PR>)` or `BLOCKED (<reason>)` or `STALE (<why>)`.
 

@@ -2,7 +2,7 @@
 
 | Field | Value |
 | --- | --- |
-| Status | TODO |
+| Status | DONE — PR #368 merged `ee1b2c3` 2026-10-23, issue #367; **hosted `supabase db push` not yet run** |
 | Written against | commit `c4c82a1` (branch `main`), 2026-10-23 |
 | Finding | security #8 in `plans/README.md`: the table grants and allows UPDATE though the client only ever inserts |
 | Effort | S (1–2 h; one migration, one pgTAP edit, one doc sentence) |
@@ -204,3 +204,10 @@ Any future need to change an account's KDF parameters is a **re-key**, which mea
 - Any client code path updates the table (`grep -rn "user_e2ee_settings" lib` showing an `.update(` or `.upsert(`).
 - `supabase db reset` fails on the new migration with anything other than a typo you can see.
 - A migration later than `20261012090000` already touches this table's grants.
+
+## Execution record (2026-10-23)
+
+- Executor: `coder` in `.worktrees/fix-367-e2ee-settings-insert-once` from `3e8074ee`; commit `82ca31b`, `Refs #367`. PR #368, CI 4/4.
+- Local verification: `supabase db reset && supabase test db` 119 → 120 tests, both new assertions seen red first (`caught: no exception / wanted: 42501`; `have: 1 / want: 0`). Flutter suite 2352 green.
+- Migration file: `supabase/migrations/20261023011253_e2ee_settings_insert_once.sql`.
+- **Deployment owed:** `supabase db push` to the hosted project (maintainer-run, per CLAUDE.md).
