@@ -22,7 +22,13 @@ The three ways a capture leaves the queue: appended to a project's `inbox.md`, o
   handle. The supervisor owns and signals only its own process group, and a
   nonce-bound stop marker prevents a stale or foreign request from becoming a
   signal. Provider conversation ids are parsed from the structured event
-  stream and an exact id is required for follow-up.
+  stream and an exact id is required for follow-up, including after reopening
+  Capture. A mismatched id leaves a visible failed job that cannot be continued.
+  Launch waits for a provider's prompt-start event or successful result; an
+  initialization event alone does not confirm delivery. A failure after that
+  acknowledgment is reported as the job's outcome.
+  Stop requests graceful termination with SIGTERM. A process that ignores it
+  remains `stopping`; the supervisor does not escalate to SIGKILL.
 - **Prompt and configured arguments are separate.** Native adapters feed the
   prompt through stdin, while the Zellij adapter adds its provider-specific
   prompt argument at its own boundary. Permission bypass flags come only from

@@ -91,6 +91,9 @@ a new local job against the exact provider conversation id. A long press keeps
 the previous Zellij path and opens the session in a terminal window. Gemini CLI
 is window-only; native background runs support Codex, Claude Code and AGY.
 
+**Stop** requests graceful termination. A job stays **Stopping** until its
+process exits; a process that ignores the request is not reported as stopped.
+
 ## Hand a capture to a local agent
 
 **This section applies to unbound projects only.** A bound project's `agentTask`
