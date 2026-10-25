@@ -370,7 +370,8 @@ class SyncEngine {
             id,
             outbox.table.versioned ? row['version'] as int : 0,
             hash,
-            sealed: result.sealed,
+            // Sticky: a plain push never clears what this device saw sealed.
+            sealed: result.sealed || known[id]?.sealed == true,
           );
         }
       }
@@ -422,6 +423,7 @@ class SyncEngine {
     Map<String, Map<String, Object?>> localRows,
   ) async {
     final _PullOutcome scratch = _PullOutcome();
+    final Map<String, SyncRowState> known = _bookkeeping.loadTable(table.serverName);
     switch (table) {
       case SyncTable.recordings:
         await _applyRecordings(rows, localRecordings, scratch);
@@ -463,7 +465,7 @@ class SyncEngine {
             id,
             version,
             SyncRowCodec.hash(_canonicalServerRow(projected)),
-            sealed: row[syncRowSealedMarker] == true,
+            sealed: row[syncRowSealedMarker] == true || known[id]?.sealed == true,
           );
         }
     }
@@ -889,14 +891,24 @@ class SyncEngine {
       // No downgrade check here: a known id is skipped above before it is
       // decoded, so an unsealed copy of a revision never replaces anything.
       final bool wasSealed = row[syncRowSealedMarker] == true;
-      known[id] = SyncRowState(serverVersion: 0, pushedHash: hash, sealed: wasSealed);
+      known[id] = SyncRowState(
+        serverVersion: 0,
+        pushedHash: hash,
+        sealed: wasSealed,
+      );
       pendingBookkeeping.add((id, hash, wasSealed));
       toAppend.add(rev);
       out.pulled++;
     }
     if (toAppend.isNotEmpty) await _applier.appendRevisions(toAppend);
     for (final (id, hash, sealed) in pendingBookkeeping) {
-      _bookkeeping.put(SyncTable.revisions.serverName, id, 0, hash, sealed: sealed);
+      _bookkeeping.put(
+        SyncTable.revisions.serverName,
+        id,
+        0,
+        hash,
+        sealed: sealed,
+      );
     }
   }
 }

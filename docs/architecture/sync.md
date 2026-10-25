@@ -706,6 +706,15 @@ Four rules, each with a test that fails when it is broken
   0`) apply exactly as before, and the first sealed apply or push flips the
   flag. `revisions` has no refusal because a known id is skipped before it is
   decoded. The migration adds the column to existing databases with default 0.
+  The flag is **sticky**: a plain push or a conflict adoption never clears it,
+  and the only way back is the bookkeeping row going away. A refused
+  push-conflict row leaves the local row dirty, so it re-conflicts and
+  re-logs every run until the server row arrives sealed; that is accepted,
+  nothing is corrupted. Tombstones carry no envelope by design, so an
+  unmarked tombstone for a sealed id still deletes: a server can always
+  withhold or delete rows, and this rule guards content, not presence. A
+  plaintext *push* of a sealed-bookkept row is not refused here; that is the
+  fresh-device decision in plan 007 Part B.
   **Maintenance:** every new synced table must set `sealed` on push and check
   it on pull; a table that forgets is a table the server can downgrade. A new
   codec decode in the engine without the check beside it is a regression.

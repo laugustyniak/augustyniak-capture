@@ -150,7 +150,10 @@ class AppDatabase {
     // gain the column here. Existing rows default to 0, the truthful
     // pre-E2EE state.
     final bool hasSealed = _db
-        .select("SELECT 1 FROM pragma_table_info('sync_rows') WHERE name = 'sealed'")
+        .select(
+          "SELECT 1 FROM pragma_table_info('sync_rows') "
+          "WHERE name = 'sealed'",
+        )
         .isNotEmpty;
     if (!hasSealed) {
       _db.execute(

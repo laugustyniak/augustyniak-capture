@@ -910,6 +910,48 @@ void main() {
       expect(state.sealed, isTrue);
     });
 
+    test('an unmarked push-conflict row for a sealed id is refused, the local row stays dirty', () async {
+      final Recording v1 = recording(id: 'a', transcript: 'v1');
+      bookkeeping.put(
+        'recordings',
+        'a',
+        1,
+        SyncRowCodec.hash(SyncRowCodec.recording(v1)),
+        sealed: true,
+      );
+      await transport.push(SyncTable.recordings, [
+        {
+          ...SyncRowCodec.recording(recording(id: 'a', transcript: 'server edit')),
+          'version': 2,
+        },
+      ]);
+
+      final r = await engine.run(
+        SyncSnapshot(recordings: [recording(id: 'a', transcript: 'local edit')]),
+      );
+
+      expect(r.conflicts, 1);
+      expect(r.downgraded, 1);
+      expect(applier.recordings, isEmpty);
+      final SyncRowState state = bookkeeping.loadTable('recordings')['a']!;
+      expect(state.serverVersion, 1);
+      expect(state.sealed, isTrue);
+    });
+
+    test('adopting a segments push conflict keeps the sealed flag', () async {
+      final rec = recordingWithSegments(id: 'a', segmentCount: 1);
+      final seg = SyncRowCodec.segments(rec).single;
+      await transport.push(SyncTable.segments, [{...seg, 'version': 1}]);
+      bookkeeping.put('segments', 'a/0', 0, 'stale', sealed: true);
+
+      final r = await engine.run(SyncSnapshot(recordings: [rec]));
+
+      expect(r.conflicts, greaterThanOrEqualTo(1));
+      final SyncRowState state = bookkeeping.loadTable('segments')['a/0']!;
+      expect(state.serverVersion, 1);
+      expect(state.sealed, isTrue);
+    });
+
     test('a project last seen sealed is refused when it arrives unmarked', () async {
       final Project mine = project(id: 'p');
       final String hash = SyncRowCodec.hash(SyncRowCodec.project(mine));

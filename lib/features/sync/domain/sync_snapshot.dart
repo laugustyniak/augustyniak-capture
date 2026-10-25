@@ -18,6 +18,10 @@ class SyncRowState {
   /// pulled out of an envelope or pushed into one. A sealed row that later
   /// arrives unsealed is a downgrade and is refused (#377); a row bookkept
   /// unsealed is a legacy plaintext row and applies as it always did.
+  ///
+  /// The flag is sticky: once true it stays true while the bookkeeping row
+  /// exists. The only way back is the row leaving bookkeeping (a tombstone or
+  /// `remove`).
   final bool sealed;
 }
 
