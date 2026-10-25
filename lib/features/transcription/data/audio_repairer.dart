@@ -1,6 +1,7 @@
 import 'dart:io';
 
 import 'package:path/path.dart' as p;
+import '../../../core/process/resolved_executable.dart';
 
 /// Repairs corrupted or unfinalized audio container files (such as .m4a files
 /// missing the trailing `moov` atom due to an interrupted recording stop).
@@ -100,7 +101,7 @@ class FfmpegAudioRepairer implements AudioRepairer {
       );
       tempSyntheticDirFile = File(p.join(tempDir.path, 'reference.m4a'));
       final ProcessResult genRes = await Process.run(
-        ffmpegExecutable,
+        await resolveExecutable(ffmpegExecutable),
         <String>[
           '-y',
           '-f', 'lavfi',
@@ -140,7 +141,7 @@ class FfmpegAudioRepairer implements AudioRepairer {
   Future<File?> _runUntrunc(File reference, File target, String extension) async {
     try {
       final ProcessResult result = await Process.run(
-        untruncExecutable,
+        await resolveExecutable(untruncExecutable),
         <String>[reference.path, target.path],
         stderrEncoding: SystemEncoding(),
       );

@@ -1,6 +1,7 @@
 import 'dart:io';
 
 import 'audio_repairer.dart';
+import '../../../core/process/resolved_executable.dart';
 
 /// Raw audio a speech model can be handed directly.
 ///
@@ -137,7 +138,7 @@ class FfmpegAudioDecoder implements AudioDecoder {
     ];
 
     final ProcessResult result = await Process.run(
-      executable,
+      await resolveExecutable(executable),
       args,
       stderrEncoding: SystemEncoding(),
     );
