@@ -887,6 +887,29 @@ void main() {
       expect(bookkeeping.loadTable('recordings')['a']!.sealed, isFalse);
     });
 
+    test('a still-sealed row for a sealed id is skipped and holds the cursor, not counted as downgraded', () async {
+      bookkeeping.put('recordings', 'a', 1, localHash, sealed: true);
+      transport.tables.putIfAbsent(SyncTable.recordings, () => {})['a'] = {
+        ...SyncRowCodec.recording(local),
+        'title': null,
+        'transcript': null,
+        'encrypted_payload': 'enc:v2:AAAA',
+        'updated_at': t0.toIso8601String(),
+        'version': 2,
+      };
+      advance(const Duration(minutes: 1));
+
+      final r = await engine.run(SyncSnapshot(recordings: [local]));
+
+      expect(r.skipped, 1);
+      expect(r.downgraded, 0);
+      expect(applier.recordings, isEmpty);
+      expect(bookkeeping.cursor('recordings'), t0, reason: 'held at the sealed row');
+      final SyncRowState state = bookkeeping.loadTable('recordings')['a']!;
+      expect(state.serverVersion, 1);
+      expect(state.sealed, isTrue);
+    });
+
     test('a project last seen sealed is refused when it arrives unmarked', () async {
       final Project mine = project(id: 'p');
       final String hash = SyncRowCodec.hash(SyncRowCodec.project(mine));

@@ -671,16 +671,19 @@ class SyncEngine {
         continue;
       }
       if (state != null && serverVersion <= state.serverVersion) continue; // already have it
-      // Sealed -> unsealed is a downgrade (#377): refuse the row untouched,
-      // so it is re-offered, and counted, until it arrives sealed again.
-      final bool wasSealed = row[syncRowSealedMarker] == true;
-      if (state?.sealed == true && !wasSealed) {
-        out.downgraded++;
-        continue;
-      }
       final Recording? theirs = SyncRowCodec.recordingFromRow(row, local: mine);
       if (theirs == null) {
         _recordSkip(row, out);
+        continue;
+      }
+      // Sealed -> unsealed is a downgrade (#377): a row that opened in
+      // plaintext for an id this device last saw sealed is refused untouched
+      // and counted. Bookkeeping keeps `sealed`, so a later sealed version
+      // applies normally. (A row still carrying its envelope never reaches
+      // here: the codec refused it above and the cursor is held.)
+      final bool wasSealed = row[syncRowSealedMarker] == true;
+      if (state?.sealed == true && !wasSealed) {
+        out.downgraded++;
         continue;
       }
 
@@ -829,15 +832,15 @@ class SyncEngine {
         out.tombstones++;
         continue;
       }
+      final T? decoded = decode(row);
+      if (decoded == null) {
+        _recordSkip(row, out);
+        continue;
+      }
       // Sealed -> unsealed is a downgrade; see `_applyRecordings` (#377).
       final bool wasSealed = row[syncRowSealedMarker] == true;
       if (state?.sealed == true && !wasSealed) {
         out.downgraded++;
-        continue;
-      }
-      final T? decoded = decode(row);
-      if (decoded == null) {
-        _recordSkip(row, out);
         continue;
       }
       final String hash = SyncRowCodec.hash(encode(decoded));

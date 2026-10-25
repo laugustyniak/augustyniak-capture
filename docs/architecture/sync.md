@@ -696,10 +696,13 @@ Four rules, each with a test that fails when it is broken
   reports that a push sealed its rows; the engine bookkeeps both. On apply
   (`_applyRecordings`, `_applySimple`, and so push-conflict rows too) a row
   whose bookkept state is `sealed` but which carries no marker is refused
-  per row: no apply, no bookkeeping change, counted as
-  `SupabaseSyncResult.downgraded`, and one `warn` line per run through the
-  engine's `LogSink`. The cursor is not held, but the row is re-offered
-  whenever it changes again on the server. Legacy rows (bookkept `sealed =
+  per row, **after** the codec has decoded it: no apply, no bookkeeping
+  change, counted as `SupabaseSyncResult.downgraded`, and one `warn` line per
+  run through the engine's `LogSink`. The cursor is not held, so the row is
+  seen again only when it changes on the server. A row that still carries its
+  envelope (decrypt failed, key rotated, device locked) never reaches that
+  check: the codec refuses it, so it is skipped with the cursor held exactly
+  as before, and only a row that opened in plaintext is a downgrade. Legacy rows (bookkept `sealed =
   0`) apply exactly as before, and the first sealed apply or push flips the
   flag. `revisions` has no refusal because a known id is skipped before it is
   decoded. The migration adds the column to existing databases with default 0.
