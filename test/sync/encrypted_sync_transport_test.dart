@@ -273,6 +273,47 @@ void main() {
       expect(pulled['title'], 'Old title');
     });
 
+    test('a legacy row comes back without the sealed marker', () async {
+      fakeTransport.tables[SyncTable.recordings] = <String, Map<String, Object?>>{
+        'rec-legacy-1': <String, Object?>{
+          'id': 'rec-legacy-1',
+          'transcript': 'Old unencrypted transcript',
+          'version': 1,
+          'updated_at': _past(),
+        },
+      };
+
+      final SyncPage page = await pullAll(SyncTable.recordings);
+
+      expect(page.rows.single.containsKey(syncRowSealedMarker), isFalse);
+    });
+
+    test('a row it opened comes back with the sealed marker', () async {
+      final SyncPushResult pushed = await encryptedTransport.push(
+        SyncTable.recordings,
+        <Map<String, Object?>>[
+          <String, Object?>{'id': 'rec-1', 'transcript': 'secret', 'version': 1},
+        ],
+      );
+      expect(pushed.sealed, isTrue);
+      fakeTransport.clock = () => DateTime.now().toUtc().add(const Duration(minutes: 5));
+
+      final SyncPage page = await pullAll(SyncTable.recordings);
+
+      expect(page.rows.single['transcript'], 'secret');
+      expect(page.rows.single[syncRowSealedMarker], isTrue);
+    });
+
+    test('a push to a table the transport does not seal reports sealed: false', () async {
+      final SyncPushResult pushed = await encryptedTransport.push(
+        SyncTable.devices,
+        <Map<String, Object?>>[
+          <String, Object?>{'id': 'dev-1', 'name': 'laptop', 'version': 1},
+        ],
+      );
+      expect(pushed.sealed, isFalse);
+    });
+
     test('an envelope transplanted onto another row stays sealed, is logged and is not decodable', () async {
       final String forRec1 = await cipher.seal(
         jsonEncode(<String, Object?>{'title': 'Belongs to rec-1', 'transcript': 't'}),
