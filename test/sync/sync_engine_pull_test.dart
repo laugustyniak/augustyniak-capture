@@ -10,6 +10,7 @@ import 'package:augustyniak_capture/features/sync/domain/sync_engine.dart';
 import 'package:augustyniak_capture/features/sync/domain/sync_row_codec.dart';
 import 'package:augustyniak_capture/features/sync/domain/sync_snapshot.dart';
 import 'package:augustyniak_capture/features/sync/domain/sync_table.dart';
+import 'package:augustyniak_capture/features/sync/domain/sync_transport.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 import 'fake_sync_transport.dart';
@@ -823,5 +824,87 @@ void main() {
     await engine.run(const SyncSnapshot());
 
     expect(applier.recordings.keys, containsAll(<String>['a', 'b', 'c']));
+  });
+
+  group('a row last seen sealed is refused when it arrives unsealed (#377)', () {
+    final Recording local = recording(id: 'a', transcript: 'sealed text');
+    final String localHash = SyncRowCodec.hash(SyncRowCodec.recording(local));
+
+    Future<void> seedNewer({required bool marker}) => transport.push(
+      SyncTable.recordings,
+      [
+        {
+          ...SyncRowCodec.recording(
+            recording(id: 'a', transcript: 'sealed text, edited by the server'),
+          ),
+          'version': 2,
+          if (marker) syncRowSealedMarker: true,
+        },
+      ],
+    );
+
+    test('an unmarked row for a sealed id is counted, not applied or bookkept', () async {
+      bookkeeping.put('recordings', 'a', 1, localHash, sealed: true);
+      await seedNewer(marker: false);
+      advance(const Duration(minutes: 1));
+
+      final r = await engine.run(SyncSnapshot(recordings: [local]));
+
+      expect(r.downgraded, 1);
+      expect(r.pulled, 0);
+      expect(applier.recordings, isEmpty);
+      final SyncRowState state = bookkeeping.loadTable('recordings')['a']!;
+      expect(state.serverVersion, 1);
+      expect(state.pushedHash, localHash);
+      expect(state.sealed, isTrue);
+    });
+
+    test('the same row carrying the marker applies and stays sealed', () async {
+      bookkeeping.put('recordings', 'a', 1, localHash, sealed: true);
+      await seedNewer(marker: true);
+      advance(const Duration(minutes: 1));
+
+      final r = await engine.run(SyncSnapshot(recordings: [local]));
+
+      expect(r.downgraded, 0);
+      expect(r.pulled, 1);
+      expect(applier.recordings['a']!.transcript, 'sealed text, edited by the server');
+      final SyncRowState state = bookkeeping.loadTable('recordings')['a']!;
+      expect(state.serverVersion, 2);
+      expect(state.sealed, isTrue);
+    });
+
+    test('a legacy row (bookkept unsealed) still applies unmarked', () async {
+      bookkeeping.put('recordings', 'a', 1, localHash);
+      await seedNewer(marker: false);
+      advance(const Duration(minutes: 1));
+
+      final r = await engine.run(SyncSnapshot(recordings: [local]));
+
+      expect(r.downgraded, 0);
+      expect(r.pulled, 1);
+      expect(applier.recordings['a']!.transcript, 'sealed text, edited by the server');
+      expect(bookkeeping.loadTable('recordings')['a']!.sealed, isFalse);
+    });
+
+    test('a project last seen sealed is refused when it arrives unmarked', () async {
+      final Project mine = project(id: 'p');
+      final String hash = SyncRowCodec.hash(SyncRowCodec.project(mine));
+      bookkeeping.put('projects', 'p', 1, hash, sealed: true);
+      await transport.push(SyncTable.projects, [
+        {
+          ...SyncRowCodec.project(Project(id: 'p', name: 'Renamed by server', repoPath: '/evil')),
+          'version': 2,
+        },
+      ]);
+      advance(const Duration(minutes: 1));
+
+      final r = await engine.run(SyncSnapshot(projects: [mine]));
+
+      expect(r.downgraded, 1);
+      expect(r.pulled, 0);
+      expect(applier.projects, isEmpty);
+      expect(bookkeeping.loadTable('projects')['p']!.serverVersion, 1);
+    });
   });
 }

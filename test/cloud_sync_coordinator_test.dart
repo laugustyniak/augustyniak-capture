@@ -106,6 +106,14 @@ void main() {
     );
   });
 
+  test('rows refused as downgraded are reported', () async {
+    final CloudSyncReport report = await CloudSyncCoordinator(
+      syncSupabase: () async => const SupabaseSyncResult(downgraded: 2),
+    ).sync();
+
+    expect(report.message, contains('2 refused unencrypted'));
+  });
+
   test('held tombstones are reported as held in trash', () async {
     final CloudSyncReport report = await CloudSyncCoordinator(
       syncSupabase: () async => const SupabaseSyncResult(

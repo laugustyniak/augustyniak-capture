@@ -18,7 +18,9 @@ No hook at any mutation site and no new field on `Recording`. `sync_rows`
 (`app_database.dart`) holds one row per synced id: `table_name`, `id`
 (composite ids joined with `/`), `server_version` (the last version the
 server acknowledged), `pushed_hash` (sha256 of the canonical row last
-pushed). It is per install, not part of the backup archive, and never
+pushed), `sealed` (whether this device last saw the row inside an E2EE
+envelope; absent or 0 means a legacy plaintext row — see "A sealed row never
+comes back unsealed"). It is per install, not part of the backup archive, and never
 appears in `recordings.json`.
 
 At sync time each local row is canonicalised to the exact JSON the server
@@ -685,6 +687,25 @@ Four rules, each with a test that fails when it is broken
   here would re-fetch it forever. A transport that *opened* a row removes
   the envelope, which is how the codec tells the two apart — and why an
   install without the key applies nothing rather than blanks.
+- **A sealed row never comes back unsealed (#377).** The envelope-less
+  branch of `_unsealRow` exists for legacy plaintext rows, but on its own it
+  would let a hostile server strip the envelope from a sealed row and write
+  plaintext of its choosing. So `sync_rows.sealed` records what this device
+  last saw: the transport sets the private `syncRowSealedMarker` key
+  (`__sealed`) on every row it actually opened, and `SyncPushResult.sealed`
+  reports that a push sealed its rows; the engine bookkeeps both. On apply
+  (`_applyRecordings`, `_applySimple`, and so push-conflict rows too) a row
+  whose bookkept state is `sealed` but which carries no marker is refused
+  per row: no apply, no bookkeeping change, counted as
+  `SupabaseSyncResult.downgraded`, and one `warn` line per run through the
+  engine's `LogSink`. The cursor is not held, but the row is re-offered
+  whenever it changes again on the server. Legacy rows (bookkept `sealed =
+  0`) apply exactly as before, and the first sealed apply or push flips the
+  flag. `revisions` has no refusal because a known id is skipped before it is
+  decoded. The migration adds the column to existing databases with default 0.
+  **Maintenance:** every new synced table must set `sealed` on push and check
+  it on pull; a table that forgets is a table the server can downgrade. A new
+  codec decode in the engine without the check beside it is a regression.
 - **The master key never meets AES, and the verifier is not the key.**
   `E2eeKeyDerivation` derives the master key from the passphrase with
   PBKDF2-HMAC-SHA256; `E2eeCipher.forMasterKey` HKDFs a data key from it

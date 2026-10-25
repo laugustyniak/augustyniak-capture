@@ -1410,6 +1410,7 @@ class RecordingsController extends ChangeNotifier {
                   applySyncedRecordingDelete: applySyncedRecordingDelete,
                   recordingExists: _hasRecording,
                 ),
+                log: _logSink,
                 syncClipboard: _syncClipboard?.call() ?? false,
               ).run(snapshot);
             }
