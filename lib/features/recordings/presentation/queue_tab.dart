@@ -973,6 +973,7 @@ class _QueueTabState extends State<QueueTab> {
     final RecordingsController controller = widget.controller;
     return RecordingCard(
       recording: recording,
+      agentJobs: controller.agentJobs,
       isPlaying: controller.playingId == recording.id,
       // View-only: the enrichment stage has no persisted status, so this comes
       // off the controller's in-flight set rather than off the item.
@@ -1066,6 +1067,7 @@ class _QueueTabState extends State<QueueTab> {
                         ? _selectedRowKey
                         : ValueKey<String>(item.id),
                     recording: item,
+                    agentJobs: controller.agentJobs,
                     selected: isSelected,
                     isEnriching: controller.isEnriching(item.id),
                     density: widget.density,
@@ -1172,6 +1174,7 @@ class _QueueTabState extends State<QueueTab> {
                     return QueueListRow(
                       key: ValueKey<String>(item.id),
                       recording: item,
+                      agentJobs: controller.agentJobs,
                       selected: item.id == focusedId,
                       isEnriching: controller.isEnriching(item.id),
                       density: widget.density,
@@ -1408,6 +1411,7 @@ class _QueueTabState extends State<QueueTab> {
     return RecordingEditor(
       key: ValueKey<String>('editor-${recording.id}'),
       recording: recording,
+      agentJobs: controller.agentJobs,
       revisions: controller.revisionsFor(recording.id),
       tagSuggestions: _tagSuggestions(recording),
       projects: widget.projects?.projects ?? const <Project>[],

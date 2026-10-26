@@ -24,6 +24,22 @@ The three ways a capture leaves the queue: appended to a project's `inbox.md`, o
   signal. Provider conversation ids are parsed from the structured event
   stream and an exact id is required for follow-up, including after reopening
   Capture. A mismatched id leaves a visible failed job that cannot be continued.
+- **Views read with `peek`, never `read` (#373).** `NativeAgentJobs.read` enforces
+  the provider identity: a mismatched conversation id stops the job, writes
+  `startup-error` and marks it failed. A pill that merely displays a job must
+  not be the thing that does that, so `peek` is the same read without the
+  enforcement or any write — its status can lag `read` by exactly that failure,
+  and the Jobs sheet keeps `read`. Every display surface (the editor's AGENT
+  RUNS, the queue pill) goes through `NativeAgentJobs.watch`, one shared poller
+  per job id: `peek` every `watchInterval` while the job is non-terminal and
+  somebody listens, stopped by the last `release()`. A failed read keeps the
+  last answer and retries at 2x, 4x, 8x, 16x the interval, then gives up and
+  `NativeAgentJobWatch.stale` turns true (the pill and card then say
+  `UNAVAILABLE` rather than a RUNNING nobody is checking); a new `watch()`
+  resumes a poller that gave up. `NativeAgentJob.finishedAt` is the
+  `status` file's mtime (clamped to `createdAt`, since mtimes can be truncated
+  to the second), set only when the supervisor wrote the terminal status
+  itself — a derived `lost`, or a completed run downgraded to failed, has none.
   Launch waits for a provider's prompt-start event or successful result; an
   initialization event alone does not confirm delivery. A failure after that
   acknowledgment is reported as the job's outcome.
