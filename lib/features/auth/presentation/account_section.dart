@@ -149,6 +149,8 @@ class _EncryptionRows extends StatelessWidget {
       E2eeService(isLocked: true, keyOnServer: null) =>
         ('LOCKED, SERVER NOT REACHED', Console.red),
       E2eeService(isLocked: true) => ('LOCKED ON THIS DEVICE', Console.red),
+      E2eeService(isPlaintextUnconfirmed: true) =>
+        ('NOT SET UP, SYNC PAUSED', Console.red),
       _ => ('NOT SET UP', Console.red),
     };
     return Column(
