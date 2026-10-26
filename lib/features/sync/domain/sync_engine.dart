@@ -1,5 +1,6 @@
 import '../../../core/security/record_id.dart';
 import '../../clipboard/domain/clipboard_item.dart';
+import '../../logs/domain/log_event.dart';
 import '../../projects/domain/project.dart';
 import '../../recordings/domain/recording.dart';
 import '../../recordings/domain/recording_revision.dart';
@@ -58,13 +59,15 @@ class SyncEngine {
     int pageSize = 500,
     bool syncClipboard = false,
     int tombstoneHoldThreshold = defaultTombstoneHoldThreshold,
+    LogSink log = const NoopLogSink(),
   }) : _transport = transport,
        _bookkeeping = bookkeeping,
        _applier = applier,
        _clock = clock ?? (() => DateTime.now().toUtc()),
        _pageSize = pageSize,
        _syncClipboard = syncClipboard,
-       _tombstoneHoldThreshold = tombstoneHoldThreshold;
+       _tombstoneHoldThreshold = tombstoneHoldThreshold,
+       _log = log;
 
   final SyncTransport _transport;
   final SyncBookkeeping _bookkeeping;
@@ -72,6 +75,7 @@ class SyncEngine {
   final DateTime Function() _clock;
   final int _pageSize;
   final int _tombstoneHoldThreshold;
+  final LogSink _log;
 
   /// Tombstones for locally present recordings seen so far in the current
   /// [run], across every batch and page. The hold budget is per run: a
@@ -96,6 +100,7 @@ class SyncEngine {
     int pushed = 0;
     int conflicts = 0;
     int skipped = 0;
+    int downgraded = 0;
     int pulled = 0;
     int tombstones = 0;
     int tombstonesHeld = 0;
@@ -137,6 +142,7 @@ class SyncEngine {
           tombstones += resolved.tombstones;
           tombstonesHeld += resolved.tombstonesHeld;
           skipped += resolved.skipped;
+          downgraded += resolved.downgraded;
           redirtied.addAll(resolved.redirtied);
         }
       }
@@ -147,6 +153,7 @@ class SyncEngine {
       tombstones += pull.tombstones;
       tombstonesHeld += pull.tombstonesHeld;
       skipped += pull.skipped;
+      downgraded += pull.downgraded;
       redirtied.addAll(pull.redirtied);
 
       if (redirtied.isNotEmpty) {
@@ -174,7 +181,15 @@ class SyncEngine {
         tombstonesApplied: tombstones,
         tombstonesHeld: tombstonesHeld,
         skipped: skipped,
+        downgraded: downgraded,
         failureReason: '$error',
+      );
+    }
+    if (downgraded > 0) {
+      _log.log(
+        'Sync: refused $downgraded row(s) that arrived unencrypted after '
+        'being encrypted',
+        level: LogLevel.warn,
       );
     }
     return SupabaseSyncResult(
@@ -184,6 +199,7 @@ class SyncEngine {
       tombstonesApplied: tombstones,
       tombstonesHeld: tombstonesHeld,
       skipped: skipped,
+      downgraded: downgraded,
       failureReason: refusals.isEmpty ? null : refusals.join('; '),
     );
   }
@@ -354,6 +370,8 @@ class SyncEngine {
             id,
             outbox.table.versioned ? row['version'] as int : 0,
             hash,
+            // Sticky: a plain push never clears what this device saw sealed.
+            sealed: result.sealed || known[id]?.sealed == true,
           );
         }
       }
@@ -405,6 +423,7 @@ class SyncEngine {
     Map<String, Map<String, Object?>> localRows,
   ) async {
     final _PullOutcome scratch = _PullOutcome();
+    final Map<String, SyncRowState> known = _bookkeeping.loadTable(table.serverName);
     switch (table) {
       case SyncTable.recordings:
         await _applyRecordings(rows, localRecordings, scratch);
@@ -446,6 +465,7 @@ class SyncEngine {
             id,
             version,
             SyncRowCodec.hash(_canonicalServerRow(projected)),
+            sealed: row[syncRowSealedMarker] == true || known[id]?.sealed == true,
           );
         }
     }
@@ -471,7 +491,8 @@ class SyncEngine {
       if (entry.key == 'owner_id' ||
           entry.key == 'updated_at' ||
           entry.key == 'version' ||
-          entry.key == 'deleted_at') {
+          entry.key == 'deleted_at' ||
+          entry.key == syncRowSealedMarker) {
         continue;
       }
       final Object? value = entry.value;
@@ -604,11 +625,11 @@ class SyncEngine {
     final bool hold = _presentTombstonesThisRun > _tombstoneHoldThreshold;
     final List<Recording> upserts = [];
     final List<RecordingRevision> revisions = [];
-    // (id, version, hash) — the actual `_bookkeeping.put` calls are deferred
-    // until after `upsertRecordings` returns, below, so a repository write
-    // failure (e.g. `IndexUnreadableException`) never leaves bookkeeping
-    // claiming a version the local index does not actually hold.
-    final List<(String, int, String)> pendingBookkeeping = [];
+    // (id, version, hash, sealed) — the actual `_bookkeeping.put` calls are
+    // deferred until after `upsertRecordings` returns, below, so a repository
+    // write failure (e.g. `IndexUnreadableException`) never leaves
+    // bookkeeping claiming a version the local index does not actually hold.
+    final List<(String, int, String, bool)> pendingBookkeeping = [];
     for (final Map<String, Object?> row in rows) {
       final String? id = row['id'] as String?;
       if (id == null) {
@@ -657,6 +678,16 @@ class SyncEngine {
         _recordSkip(row, out);
         continue;
       }
+      // Sealed -> unsealed is a downgrade (#377): a row that opened in
+      // plaintext for an id this device last saw sealed is refused untouched
+      // and counted. Bookkeeping keeps `sealed`, so a later sealed version
+      // applies normally. (A row still carrying its envelope never reaches
+      // here: the codec refused it above and the cursor is held.)
+      final bool wasSealed = row[syncRowSealedMarker] == true;
+      if (state?.sealed == true && !wasSealed) {
+        out.downgraded++;
+        continue;
+      }
 
       // Transcript never shrinks — decided before the conflict diff below,
       // so a transcript the rule kept is never itself reported as an
@@ -686,9 +717,13 @@ class SyncEngine {
       // Update the in-memory maps immediately so a later row in this same
       // page (a duplicate id) sees the fresh state; the persistent
       // bookkeeping write is deferred (see `pendingBookkeeping` above).
-      known[id] = SyncRowState(serverVersion: serverVersion, pushedHash: hash);
+      known[id] = SyncRowState(
+        serverVersion: serverVersion,
+        pushedHash: hash,
+        sealed: wasSealed,
+      );
       local[id] = next;
-      pendingBookkeeping.add((id, serverVersion, hash));
+      pendingBookkeeping.add((id, serverVersion, hash, wasSealed));
       upserts.add(next);
       out.pulled++;
     }
@@ -701,8 +736,14 @@ class SyncEngine {
     // replaced" case for a delete to undo.)
     if (upserts.isNotEmpty) await _applier.upsertRecordings(upserts);
     if (revisions.isNotEmpty) await _applier.appendRevisions(revisions);
-    for (final (id, version, hash) in pendingBookkeeping) {
-      _bookkeeping.put(SyncTable.recordings.serverName, id, version, hash);
+    for (final (id, version, hash, sealed) in pendingBookkeeping) {
+      _bookkeeping.put(
+        SyncTable.recordings.serverName,
+        id,
+        version,
+        hash,
+        sealed: sealed,
+      );
     }
   }
 
@@ -770,9 +811,9 @@ class SyncEngine {
   ) async {
     final Map<String, SyncRowState> known = _bookkeeping.loadTable(table.serverName);
     final List<T> upserts = <T>[];
-    // (id, version, hash) — deferred until `upsert` returns; see
+    // (id, version, hash, sealed) — deferred until `upsert` returns; see
     // `_applyRecordings`'s matching comment for why.
-    final List<(String, int, String)> pendingBookkeeping = [];
+    final List<(String, int, String, bool)> pendingBookkeeping = [];
     for (final Map<String, Object?> row in rows) {
       final String id = SyncRowCodec.rowId(table, row);
       if (!isSafeRecordId(id)) {
@@ -798,15 +839,25 @@ class SyncEngine {
         _recordSkip(row, out);
         continue;
       }
+      // Sealed -> unsealed is a downgrade; see `_applyRecordings` (#377).
+      final bool wasSealed = row[syncRowSealedMarker] == true;
+      if (state?.sealed == true && !wasSealed) {
+        out.downgraded++;
+        continue;
+      }
       final String hash = SyncRowCodec.hash(encode(decoded));
-      known[id] = SyncRowState(serverVersion: serverVersion, pushedHash: hash);
-      pendingBookkeeping.add((id, serverVersion, hash));
+      known[id] = SyncRowState(
+        serverVersion: serverVersion,
+        pushedHash: hash,
+        sealed: wasSealed,
+      );
+      pendingBookkeeping.add((id, serverVersion, hash, wasSealed));
       upserts.add(decoded);
       out.pulled++;
     }
     if (upserts.isNotEmpty) await upsert(upserts);
-    for (final (id, version, hash) in pendingBookkeeping) {
-      _bookkeeping.put(table.serverName, id, version, hash);
+    for (final (id, version, hash, sealed) in pendingBookkeeping) {
+      _bookkeeping.put(table.serverName, id, version, hash, sealed: sealed);
     }
   }
 
@@ -826,7 +877,7 @@ class SyncEngine {
       SyncTable.revisions.serverName,
     );
     final List<RecordingRevision> toAppend = [];
-    final List<(String, String)> pendingBookkeeping = [];
+    final List<(String, String, bool)> pendingBookkeeping = [];
     for (final Map<String, Object?> row in rows) {
       final RecordingRevision? rev = SyncRowCodec.revisionFromRow(row);
       if (rev == null) {
@@ -837,14 +888,27 @@ class SyncEngine {
       final String id = SyncRowCodec.rowId(SyncTable.revisions, canonical);
       if (known.containsKey(id)) continue;
       final String hash = SyncRowCodec.hash(canonical);
-      known[id] = SyncRowState(serverVersion: 0, pushedHash: hash);
-      pendingBookkeeping.add((id, hash));
+      // No downgrade check here: a known id is skipped above before it is
+      // decoded, so an unsealed copy of a revision never replaces anything.
+      final bool wasSealed = row[syncRowSealedMarker] == true;
+      known[id] = SyncRowState(
+        serverVersion: 0,
+        pushedHash: hash,
+        sealed: wasSealed,
+      );
+      pendingBookkeeping.add((id, hash, wasSealed));
       toAppend.add(rev);
       out.pulled++;
     }
     if (toAppend.isNotEmpty) await _applier.appendRevisions(toAppend);
-    for (final (id, hash) in pendingBookkeeping) {
-      _bookkeeping.put(SyncTable.revisions.serverName, id, 0, hash);
+    for (final (id, hash, sealed) in pendingBookkeeping) {
+      _bookkeeping.put(
+        SyncTable.revisions.serverName,
+        id,
+        0,
+        hash,
+        sealed: sealed,
+      );
     }
   }
 }
@@ -886,6 +950,7 @@ class _PullOutcome {
   int tombstones = 0;
   int tombstonesHeld = 0;
   int skipped = 0;
+  int downgraded = 0;
   final List<Recording> redirtied = <Recording>[];
 
   /// `updated_at` of each row a decode failure skipped this run, across

@@ -73,6 +73,7 @@ class EncryptedSyncTransport implements SyncTransport {
       applied: result.applied,
       conflicts: unsealedConflicts,
       rejected: result.rejected,
+      sealed: _seals(table),
     );
   }
 
@@ -125,6 +126,10 @@ class EncryptedSyncTransport implements SyncTransport {
     }
     return '$value';
   }
+
+  /// Whether [_sealRow] puts an envelope on this table's rows.
+  static bool _seals(SyncTable table) =>
+      table != SyncTable.devices && table != SyncTable.syncState;
 
   Future<Map<String, Object?>> _sealRow(
     SyncTable table,
@@ -232,6 +237,7 @@ class EncryptedSyncTransport implements SyncTransport {
       // Opened: the envelope has done its job, and a row still carrying one
       // is the codec's signal that it was *not* opened.
       row.remove('encrypted_payload');
+      row[syncRowSealedMarker] = true;
     } on E2eeDecryptionException catch (error) {
       _log.log(
         'Sync: ${table.serverName} row ${SyncRowCodec.rowId(table, row)} '

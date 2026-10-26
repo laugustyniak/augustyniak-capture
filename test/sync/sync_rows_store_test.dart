@@ -43,4 +43,38 @@ void main() {
     store.setCursor('recordings', at);
     expect(store.cursor('recordings'), at);
   });
+
+  test('sealed round-trips and defaults to false', () {
+    store.put('recordings', 'a', 1, 'h1');
+    store.put('recordings', 'b', 1, 'h2', sealed: true);
+    final Map<String, SyncRowState> rows = store.loadTable('recordings');
+    expect(rows['a']!.sealed, isFalse);
+    expect(rows['b']!.sealed, isTrue);
+    store.put('recordings', 'b', 2, 'h3');
+    expect(store.loadTable('recordings')['b']!.sealed, isFalse);
+  });
+
+  test('a database from before the sealed column gains it, existing rows unsealed', () async {
+    final Database old = sqlite3.openInMemory();
+    addTearDown(old.close);
+    old.execute('''
+      CREATE TABLE sync_rows (
+        table_name TEXT NOT NULL,
+        id TEXT NOT NULL,
+        server_version INTEGER NOT NULL,
+        pushed_hash TEXT NOT NULL,
+        PRIMARY KEY (table_name, id)
+      )
+    ''');
+    old.execute("INSERT INTO sync_rows VALUES ('recordings', 'old', 4, 'hash')");
+    AppDatabase.resetForTesting();
+    await AppDatabase.getInstance(overrideDb: old);
+
+    final SyncRowsStore migrated = SyncRowsStore(old);
+    final SyncRowState row = migrated.loadTable('recordings')['old']!;
+    expect(row.serverVersion, 4);
+    expect(row.sealed, isFalse);
+    migrated.put('recordings', 'old', 5, 'hash2', sealed: true);
+    expect(migrated.loadTable('recordings')['old']!.sealed, isTrue);
+  });
 }

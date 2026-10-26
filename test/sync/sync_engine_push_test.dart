@@ -1,3 +1,4 @@
+import 'package:augustyniak_capture/features/recordings/domain/recording.dart';
 import 'package:augustyniak_capture/features/sync/domain/sync_engine.dart';
 import 'package:augustyniak_capture/features/sync/domain/sync_row_codec.dart';
 import 'package:augustyniak_capture/features/sync/domain/sync_snapshot.dart';
@@ -323,4 +324,37 @@ void main() {
       );
     },
   );
+
+  group('the sealed flag follows the push (#377)', () {
+    test('a push the transport sealed is bookkept sealed, so an unsealed copy is refused', () async {
+      transport.sealsPushes = true;
+      final Recording local = recording(id: 'a', transcript: 'mine');
+      await engine.run(SyncSnapshot(recordings: [local]));
+      expect(bookkeeping.loadTable('recordings')['a']!.sealed, isTrue);
+
+      await transport.push(SyncTable.recordings, [
+        {
+          ...SyncRowCodec.recording(recording(id: 'a', transcript: 'server edit')),
+          'version': 2,
+        },
+      ]);
+      transport.clock = () => DateTime.utc(2026, 9, 21, 12, 5);
+      final r = await engine.run(SyncSnapshot(recordings: [local]));
+
+      expect(r.downgraded, 1);
+      expect(r.pulled, 0);
+      expect(bookkeeping.loadTable('recordings')['a']!.serverVersion, 1);
+    });
+
+    test('a plain push does not clear a sealed flag', () async {
+      bookkeeping.put('recordings', 'a', 1, 'stale', sealed: true);
+      final r = await engine.run(
+        SyncSnapshot(recordings: [recording(id: 'a', transcript: 'edited')]),
+      );
+      expect(r.pushed, 1);
+      final SyncRowState state = bookkeeping.loadTable('recordings')['a']!;
+      expect(state.serverVersion, 2);
+      expect(state.sealed, isTrue);
+    });
+  });
 }
