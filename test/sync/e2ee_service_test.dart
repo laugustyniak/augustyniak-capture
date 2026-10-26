@@ -426,7 +426,7 @@ void main() {
 
     test('no row: set-up derives a key and publishes its parameters', () async {
       await device.followIdentity('u');
-      expect(device.isPlaintext, isTrue);
+      expect(device.isPlaintextUnconfirmed, isTrue);
       await device.enroll('correct horse');
       final E2eePublicParams? row = settings.rows['u'];
       expect(row, isNotNull);
@@ -521,11 +521,12 @@ void main() {
       settings.createError = null;
       await expectLater(device.unlock('correct horse'), throwsA(isA<E2eeNotSetUpException>()));
       expect(device.keyOnServer, isFalse);
-      expect(device.isPlaintext, isTrue);
+      expect(device.isPlaintextUnconfirmed, isTrue);
     });
 
     test('a plaintext run re-checks the row and is refused once another device set up', () async {
       await device.followIdentity('u');
+      await device.confirmPlaintext();
       final FakeSyncTransport inner = FakeSyncTransport();
       final SyncTransport plain = device.wrapTransport(inner, ownerId: 'u');
       expect(plain, isNot(isA<EncryptedSyncTransport>()));
@@ -572,6 +573,7 @@ void main() {
 
     test('a plaintext run whose re-check fails is refused alone; the account stays plaintext', () async {
       await device.followIdentity('u');
+      await device.confirmPlaintext();
       final SyncTransport plain = device.wrapTransport(FakeSyncTransport(), ownerId: 'u');
       settings.readError = StateError('offline');
       await expectLater(
@@ -590,6 +592,7 @@ void main() {
 
     test('a re-check answer that lands after this device set up is dropped', () async {
       await device.followIdentity('u');
+      await device.confirmPlaintext();
       final Completer<void> gate = settings.readGate = Completer<void>();
       final SyncTransport plain = device.wrapTransport(FakeSyncTransport(), ownerId: 'u');
       final Future<DateTime> run = plain.serverNow();
@@ -712,6 +715,120 @@ void main() {
       expect(relaunch.isUnlocked, isTrue);
       expect(relaunch.keyOnServer, isTrue);
       expect(settings.reads, 0);
+    });
+
+    const String okKey = 'ai.augustyniak.capture.e2ee.plaintext-ok.u';
+
+    test('no row on a fresh device: plaintext is unconfirmed, runs are refused until confirmed', () async {
+      await device.followIdentity('u');
+      expect(device.keyOnServer, isFalse);
+      expect(device.isPlaintextUnconfirmed, isTrue);
+      expect(device.isPlaintext, isFalse);
+      expect(device.isLocked, isFalse);
+      expect(
+        () => device.wrapTransport(FakeSyncTransport(), ownerId: 'u'),
+        throwsA(isA<StateError>().having((StateError e) => e.message, 'message', contains('confirm'))),
+      );
+      expect(() => device.wrapMediaStore(_FakeMediaStore(), ownerId: 'u'), throwsStateError);
+
+      await device.confirmPlaintext();
+      expect(device.isPlaintext, isTrue);
+      expect(device.isPlaintextUnconfirmed, isFalse);
+      final FakeSyncTransport inner = FakeSyncTransport();
+      final SyncTransport plain = device.wrapTransport(inner, ownerId: 'u');
+      await plain.push(SyncTable.recordings, <Map<String, Object?>>[]);
+      expect(inner.pushes, hasLength(1));
+      expect(secureStore.values[okKey], '1');
+    });
+
+    test('the confirmation survives a relaunch and a reinstall asks again', () async {
+      await device.followIdentity('u');
+      await device.confirmPlaintext();
+      final E2eeService relaunch = newDevice(keyring: secureStore);
+      await relaunch.followIdentity('u');
+      expect(relaunch.isPlaintext, isTrue);
+      expect(relaunch.isPlaintextUnconfirmed, isFalse);
+      final E2eeService reinstall = newDevice();
+      await reinstall.followIdentity('u');
+      expect(reinstall.isPlaintextUnconfirmed, isTrue);
+      expect(reinstall.isPlaintext, isFalse);
+    });
+
+    test('a keyring that never answers asks again rather than allowing plaintext', () async {
+      await device.followIdentity('u');
+      await device.confirmPlaintext();
+      final E2eeService hung = E2eeService(
+        secureStore: _GatedSecureStore(secureStore, Completer<String?>()),
+        kdf: E2eeKeyDerivation(iterations: 1000),
+        settings: settings,
+        keyringTimeout: const Duration(milliseconds: 50),
+      );
+      addTearDown(hung.dispose);
+      await hung.followIdentity('u');
+      expect(hung.isPlaintextUnconfirmed, isTrue);
+    });
+
+    test('set-up clears the confirmation', () async {
+      await device.followIdentity('u');
+      await device.confirmPlaintext();
+      expect(secureStore.values, contains(okKey));
+      await device.enroll('correct horse');
+      expect(secureStore.values, isNot(contains(okKey)));
+      expect(device.isPlaintext, isFalse);
+      expect(device.isUnlocked, isTrue);
+    });
+
+    test('another device setting up clears the confirmation', () async {
+      await device.followIdentity('u');
+      await device.confirmPlaintext();
+      final SyncTransport guarded = device.wrapTransport(FakeSyncTransport(), ownerId: 'u');
+      final E2eeService second = newDevice();
+      await second.followIdentity('u');
+      await second.confirmPlaintext();
+      await second.enroll('their horse!');
+      await expectLater(guarded.serverNow(), throwsStateError);
+      for (int i = 0; i < 200 && secureStore.values.containsKey(okKey); i++) {
+        await Future<void>.delayed(Duration.zero);
+      }
+      expect(secureStore.values, isNot(contains(okKey)));
+      expect(device.isLocked, isTrue);
+      expect(device.isPlaintext, isFalse);
+    });
+
+    test('confirmPlaintext is refused while locked, restoring, or unlocked', () async {
+      await expectLater(device.confirmPlaintext(), throwsStateError); // no identity
+
+      final E2eeService other = newDevice();
+      await other.followIdentity('v');
+      await other.enroll('correct horse');
+      other.lock();
+      await expectLater(other.confirmPlaintext(), throwsStateError); // locked
+
+      await device.followIdentity('u');
+      await device.enroll('correct horse');
+      await expectLater(device.confirmPlaintext(), throwsStateError); // unlocked
+
+      settings.readGate = Completer<void>();
+      final E2eeService slow = newDevice();
+      final Future<void> restoring = slow.followIdentity('w');
+      expect(slow.isRestoring, isTrue);
+      await expectLater(slow.confirmPlaintext(), throwsStateError); // restoring
+      await restoring;
+      await expectLater(slow.confirmPlaintext(), throwsStateError); // lookup failed: unknown
+      expect(slow.isPlaintext, isFalse);
+    });
+
+    test('a keyring write failure still confirms for this session', () async {
+      final E2eeService noKeyring = E2eeService(
+        secureStore: _ReadOnlySecureStore(),
+        kdf: E2eeKeyDerivation(iterations: 1000),
+        settings: settings,
+      );
+      addTearDown(noKeyring.dispose);
+      await noKeyring.followIdentity('u');
+      await noKeyring.confirmPlaintext();
+      expect(noKeyring.isPlaintext, isTrue);
+      expect(noKeyring.wrapTransport(FakeSyncTransport(), ownerId: 'u'), isNotNull);
     });
 
     test('enroll and unlock need a followed identity and a settings store', () async {
