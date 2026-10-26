@@ -244,6 +244,14 @@ class E2eeService extends ChangeNotifier {
     try {
       await _secureStore.write(_plaintextOkKey(userId), '1');
     } catch (_) {}
+    // The account may have turned encrypted while the write was in flight:
+    // its clear ran first, so this late write would bring the key back.
+    if (!_plaintextConfirmed || _keyOnServer != false || _userId != userId) {
+      unawaited(
+        Future<void>.sync(() => _secureStore.delete(_plaintextOkKey(userId)))
+            .catchError((Object _) {}),
+      );
+    }
   }
 
   /// The account turned out encrypted: forget the plaintext confirmation, in

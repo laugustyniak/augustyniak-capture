@@ -1860,8 +1860,9 @@ class _DensityToggle extends StatelessWidget {
 /// The red line plus the button that ends the state: SET UP ENCRYPTION
 /// for an account that was never set up, UNLOCK for one this device holds
 /// no key to. While plaintext is still unconfirmed, SYNC WITHOUT
-/// ENCRYPTION sits beside SET UP as the one-time opt-out. The dialog reports back through the service the banner
-/// already listens to, so there is nothing to return.
+/// ENCRYPTION sits beside SET UP as the one-time opt-out. The dialog reports
+/// back through the service the banner already listens to, so there is
+/// nothing to return.
 class _EncryptionBanner extends StatelessWidget {
   _EncryptionBanner({required this.e2ee});
 
@@ -1883,8 +1884,8 @@ class _EncryptionBanner extends StatelessWidget {
                 ? QueueTab.unconfirmedBanner
                 : QueueTab.notEncryptedBanner,
           ),
-          Row(
-            mainAxisAlignment: MainAxisAlignment.end,
+          Wrap(
+            alignment: WrapAlignment.end,
             children: <Widget>[
               if (unconfirmed)
                 TextButton(

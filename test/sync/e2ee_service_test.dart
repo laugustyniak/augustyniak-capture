@@ -63,6 +63,34 @@ class _ReadOnlySecureStore extends InMemorySecureStore {
   }
 }
 
+/// A keyring that can hold a write back, or throw on a read or delete of the
+/// plaintext confirmation, to reach the best-effort paths around it.
+class _FlakySecureStore extends InMemorySecureStore {
+  Completer<void>? writeGate;
+  bool throwOnOkRead = false;
+  bool throwOnDelete = false;
+
+  @override
+  Future<String?> read(String key) async {
+    if (throwOnOkRead && key.contains('plaintext-ok')) {
+      throw StateError('keyring unavailable');
+    }
+    return super.read(key);
+  }
+
+  @override
+  Future<void> delete(String key) async {
+    if (throwOnDelete) throw StateError('keyring unavailable');
+    return super.delete(key);
+  }
+
+  @override
+  Future<void> write(String key, String value) async {
+    if (writeGate case final Completer<void> gate) await gate.future;
+    return super.write(key, value);
+  }
+}
+
 class InMemorySecureStore implements SecureValueStore {
   final Map<String, String> values = <String, String>{};
 
@@ -829,6 +857,102 @@ void main() {
       await noKeyring.confirmPlaintext();
       expect(noKeyring.isPlaintext, isTrue);
       expect(noKeyring.wrapTransport(FakeSyncTransport(), ownerId: 'u'), isNotNull);
+    });
+
+    test('a late keyring write cannot re-create the confirmation of an encrypted account', () async {
+      final _FlakySecureStore keyring = _FlakySecureStore();
+      final E2eeService slow = newDevice(keyring: keyring);
+      await slow.followIdentity('u');
+      keyring.writeGate = Completer<void>();
+      final Future<void> confirming = slow.confirmPlaintext();
+      expect(slow.isPlaintext, isTrue);
+      final SyncTransport guarded = slow.wrapTransport(FakeSyncTransport(), ownerId: 'u');
+
+      // Another device sets up while the write is still in flight; the
+      // run's re-check finds the row and the clear runs first.
+      final E2eeService second = newDevice();
+      await second.followIdentity('u');
+      await second.enroll('their horse!');
+      await expectLater(guarded.serverNow(), throwsStateError);
+      expect(slow.isLocked, isTrue);
+
+      keyring.writeGate!.complete();
+      await confirming;
+      for (int i = 0; i < 20; i++) {
+        await Future<void>.delayed(Duration.zero);
+      }
+      expect(keyring.values, isNot(contains(okKey)));
+      expect(slow.isPlaintext, isFalse);
+      expect(slow.isPlaintextUnconfirmed, isFalse);
+    });
+
+    test('a keyring read that throws leaves the account unconfirmed', () async {
+      final _FlakySecureStore keyring = _FlakySecureStore();
+      final E2eeService first = newDevice(keyring: keyring);
+      await first.followIdentity('u');
+      await first.confirmPlaintext();
+      expect(keyring.values[okKey], '1');
+      keyring.throwOnOkRead = true;
+      final E2eeService relaunch = newDevice(keyring: keyring);
+      await relaunch.followIdentity('u');
+      expect(relaunch.isPlaintextUnconfirmed, isTrue);
+      expect(relaunch.isPlaintext, isFalse);
+    });
+
+    test('a keyring delete that throws neither escapes nor keeps the confirmation', () async {
+      final _FlakySecureStore keyring = _FlakySecureStore();
+      final E2eeService flaky = newDevice(keyring: keyring);
+      await flaky.followIdentity('u');
+      await flaky.confirmPlaintext();
+      keyring.throwOnDelete = true;
+      await flaky.enroll('correct horse');
+      for (int i = 0; i < 20; i++) {
+        await Future<void>.delayed(Duration.zero);
+      }
+      expect(flaky.isUnlocked, isTrue);
+      expect(flaky.isPlaintext, isFalse);
+      expect(flaky.isPlaintextUnconfirmed, isFalse);
+    });
+
+    test('unlock finding a row clears a stored confirmation', () async {
+      await device.followIdentity('u');
+      await device.confirmPlaintext();
+      expect(secureStore.values, contains(okKey));
+      final E2eeService second = newDevice();
+      await second.followIdentity('u');
+      await second.enroll('their horse!');
+      await device.unlock('their horse!');
+      expect(secureStore.values, isNot(contains(okKey)));
+      expect(device.isPlaintext, isFalse);
+      expect(device.isUnlocked, isTrue);
+    });
+
+    test('a key in the keyring clears a stale confirmation', () async {
+      await device.followIdentity('u');
+      await device.enroll('correct horse');
+      secureStore.values[okKey] = '1';
+      final E2eeService relaunch = newDevice(keyring: secureStore);
+      await relaunch.followIdentity('u');
+      expect(relaunch.isUnlocked, isTrue);
+      expect(secureStore.values, isNot(contains(okKey)));
+
+      secureStore.values[okKey] = '1';
+      final E2eeService restored = newDevice(keyring: secureStore);
+      expect(await restored.tryRestoreFromKeyring(userId: 'u'), isTrue);
+      expect(secureStore.values, isNot(contains(okKey)));
+    });
+
+    test('the confirmation belongs to one user and is re-read when the identity returns', () async {
+      await device.followIdentity('u');
+      await device.confirmPlaintext();
+      await device.followIdentity('b');
+      expect(device.isPlaintextUnconfirmed, isTrue);
+      expect(device.isPlaintext, isFalse);
+      await device.followIdentity(null);
+      expect(device.isPlaintext, isFalse);
+      await device.followIdentity('u');
+      expect(device.isPlaintext, isTrue);
+      expect(secureStore.values.keys, isNot(contains('ai.augustyniak.capture.e2ee.plaintext-ok.b')));
     });
 
     test('enroll and unlock need a followed identity and a settings store', () async {
