@@ -21,6 +21,7 @@ class FakeSyncTransport implements SyncTransport {
       <SyncTable, Map<String, Map<String, Object?>>>{};
   final List<(SyncTable, List<Map<String, Object?>>)> pushes = [];
   Object? failWith;
+  SyncTable? failPushFor;
 
   /// Makes `push` report `sealed: true`, standing in for the encrypted
   /// transport sealing every row it pushed.
@@ -36,6 +37,9 @@ class FakeSyncTransport implements SyncTransport {
   @override
   Future<SyncPushResult> push(SyncTable table, List<Map<String, Object?>> rows) async {
     if (failWith != null) throw failWith!;
+    if (table == failPushFor) {
+      throw StateError('${table.serverName} mirror failed');
+    }
     pushes.add((table, rows));
     int applied = 0;
     final List<Map<String, Object?>> conflicts = [];

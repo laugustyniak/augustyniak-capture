@@ -16,6 +16,20 @@ import 'package:flutter_test/flutter_test.dart';
 import 'fake_sync_transport.dart';
 import 'sync_fixtures.dart';
 
+class _FailOnRecordingUpsert extends RecordingApplier {
+  _FailOnRecordingUpsert(this.failOnCall);
+
+  final int failOnCall;
+  int _calls = 0;
+
+  @override
+  Future<void> upsertRecordings(List<Recording> rows) async {
+    _calls++;
+    if (_calls == failOnCall) throw StateError('later recording apply failed');
+    await super.upsertRecordings(rows);
+  }
+}
+
 void main() {
   late FakeSyncTransport transport;
   late MemoryBookkeeping bookkeeping;
@@ -533,6 +547,80 @@ void main() {
     expect(r.success, isFalse);
     expect(bookkeeping.loadTable('recordings')['a']!.serverVersion, 1);
     expect(applier.revisions, isEmpty);
+  });
+
+  test('a failed later pull keeps completed conflict outcomes', () async {
+    await engine.run(
+      SyncSnapshot(recordings: <Recording>[recording(id: 'a', title: 'base')]),
+    );
+    await transport.push(SyncTable.recordings, <Map<String, Object?>>[
+      {
+        ...SyncRowCodec.recording(recording(id: 'a', title: 'server')),
+        'version': 2,
+      },
+    ]);
+    transport.beforePull = (SyncTable table) async {
+      if (table == SyncTable.projects) throw StateError('later pull failed');
+    };
+
+    final SupabaseSyncResult result = await engine.run(
+      SyncSnapshot(recordings: <Recording>[recording(id: 'a', title: 'local')]),
+    );
+
+    expect(result.failureReason, contains('later pull failed'));
+    expect(result.pulled, 1);
+    expect(result.conflicts, 1);
+    expect(result.conflictDetails.single.id, 'a');
+  });
+
+  test('a later push-conflict apply failure keeps only completed outcomes', () async {
+    await engine.run(
+      SyncSnapshot(
+        recordings: <Recording>[
+          recording(id: 'a', title: 'base a'),
+          recording(id: 'b', title: 'base b'),
+        ],
+      ),
+    );
+    for (final (String id, String title) in <(String, String)>[
+      ('a', 'server a'),
+      ('b', 'server b'),
+    ]) {
+      await transport.push(SyncTable.recordings, <Map<String, Object?>>[
+        {
+          ...SyncRowCodec.recording(recording(id: id, title: title)),
+          'version': 2,
+        },
+      ]);
+    }
+    final _FailOnRecordingUpsert partialApplier = _FailOnRecordingUpsert(2);
+    engine = SyncEngine(
+      transport: transport,
+      bookkeeping: bookkeeping,
+      applier: partialApplier,
+      clock: () => t0,
+      syncClipboard: true,
+    );
+
+    final SupabaseSyncResult result = await engine.run(
+      SyncSnapshot(
+        recordings: <Recording>[
+          recording(id: 'a', title: 'local a'),
+          recording(id: 'b', title: 'local b'),
+        ],
+      ),
+    );
+
+    expect(result.failureReason, contains('later recording apply failed'));
+    expect(result.pulled, 1);
+    expect(result.conflicts, 1);
+    expect(result.conflictDetails.single.id, 'a');
+    expect(
+      result.conflictDetails.single.resolution,
+      SyncConflictResolution.serverApplied,
+    );
+    expect(partialApplier.recordings.keys, containsAll(<String>['a']));
+    expect(partialApplier.recordings, hasLength(1));
   });
 
   test('a pulled revision already pushed by this device is not re-appended', () async {

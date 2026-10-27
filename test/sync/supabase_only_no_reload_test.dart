@@ -55,7 +55,12 @@ class _RevisionsRepository extends RevisionsRepository {
   Map<String, List<RecordingRevision>> rows = <String, List<RecordingRevision>>{};
 
   @override
-  Future<Map<String, List<RecordingRevision>>> load() async => rows;
+  Future<Map<String, List<RecordingRevision>>> load() async =>
+      <String, List<RecordingRevision>>{
+        for (final MapEntry<String, List<RecordingRevision>> entry
+            in rows.entries)
+          entry.key: List<RecordingRevision>.of(entry.value),
+      };
 
   @override
   Future<void> append(List<RecordingRevision> revisions) async {
@@ -134,7 +139,7 @@ void main() {
     },
   );
 
-  test('a Supabase run refreshes the editor history without a restart', () async {
+  test('a failed sync-state mirror still refreshes editor history', () async {
     final _RevisionsRepository revisions = _RevisionsRepository();
     DateTime now = DateTime.utc(2026, 10, 2, 12);
     final FakeSyncTransport transport = FakeSyncTransport(clock: () => now);
@@ -165,9 +170,12 @@ void main() {
     addTearDown(controller.dispose);
     await controller.initialize();
     expect(controller.revisionsFor('capture-1'), isEmpty);
+    transport.failPushFor = SyncTable.syncState;
 
     final CloudSyncReport report = await controller.syncCloud();
 
+    expect(report.success, isFalse);
+    expect(report.supabase?.failureReason, contains('sync_state mirror failed'));
     expect(report.supabase?.pulled, 1);
     expect(controller.revisionsFor('capture-1').single.from, 'local title');
   });

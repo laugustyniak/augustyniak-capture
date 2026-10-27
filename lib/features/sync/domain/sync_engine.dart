@@ -98,13 +98,7 @@ class SyncEngine {
 
   Future<SupabaseSyncResult> run(SyncSnapshot snapshot) async {
     int pushed = 0;
-    int conflicts = 0;
-    int skipped = 0;
-    int downgraded = 0;
-    int pulled = 0;
-    int tombstones = 0;
-    final List<SyncConflictDetail> conflictDetails = <SyncConflictDetail>[];
-    int tombstonesHeld = 0;
+    final _PullOutcome progress = _PullOutcome();
     _presentTombstonesThisRun = 0;
     // Shared with the pull loop below: a tombstone resolved while applying a
     // push conflict removes its id here so the same run's pull pass — which
@@ -117,7 +111,6 @@ class SyncEngine {
     // adds `'<table.serverName>/<id>'` here so a later call this run (the
     // lag-window re-read) skips it instead of deleting it a second time.
     final Set<String> tombstonedIds = <String>{};
-    final List<Recording> redirtied = <Recording>[];
     // Refusals from the empty-outbox fuse in `_pushTable`, one line per
     // table it tripped for. Collected rather than returned immediately so a
     // refusal on one table does not cost the others their own push.
@@ -127,60 +120,29 @@ class SyncEngine {
         final _PushOutcome outcome = await _pushTable(outbox);
         if (outcome.refusalReason != null) refusals.add(outcome.refusalReason!);
         pushed += outcome.applied;
-        conflicts += outcome.conflicts;
-        skipped += outcome.skipped;
+        progress.skipped += outcome.skipped;
         // Conflicts returned by sync_push are applied with the same path as
         // pulled rows, so the pull pass below does not re-count them.
         if (outcome.conflictRows.isNotEmpty) {
-          final _PullOutcome resolved = await _resolvePushConflicts(
+          final int conflictsBefore = progress.conflicts;
+          await _resolvePushConflicts(
             outbox.table,
             outcome.conflictRows,
             localRecordings,
             tombstonedIds,
             outbox.rows,
+            progress,
           );
-          pulled += resolved.pulled;
-          tombstones += resolved.tombstones;
-          tombstonesHeld += resolved.tombstonesHeld;
-          skipped += resolved.skipped;
-          downgraded += resolved.downgraded;
-          redirtied.addAll(resolved.redirtied);
-          for (final Map<String, Object?> row in outcome.conflictRows) {
-            final String id = SyncRowCodec.rowId(outbox.table, row);
-            final List<SyncConflictDetail> matching = resolved.details
-                .where((SyncConflictDetail detail) => detail.id == id)
-                .toList();
-            conflictDetails.add(
-              matching.isNotEmpty
-                  ? matching.first
-                  : SyncConflictDetail(
-                      table: outbox.table.serverName,
-                      id: id,
-                      resolution:
-                          outbox.table == SyncTable.devices ||
-                              outbox.table == SyncTable.syncState ||
-                              outbox.table == SyncTable.segments
-                          ? SyncConflictResolution.serverAdopted
-                          : row['deleted_at'] != null
-                          ? SyncConflictResolution.serverDeleted
-                          : SyncConflictResolution.serverApplied,
-                    ),
-            );
-          }
+          progress.conflicts +=
+              outcome.conflicts - (progress.conflicts - conflictsBefore);
+        } else {
+          progress.conflicts += outcome.conflicts;
         }
       }
 
-      final _PullOutcome pull = await _pullAll(snapshot, localRecordings, tombstonedIds);
-      pulled += pull.pulled;
-      conflicts += pull.conflicts;
-      tombstones += pull.tombstones;
-      tombstonesHeld += pull.tombstonesHeld;
-      skipped += pull.skipped;
-      downgraded += pull.downgraded;
-      redirtied.addAll(pull.redirtied);
-      conflictDetails.addAll(pull.details);
+      await _pullAll(snapshot, localRecordings, tombstonedIds, progress);
 
-      if (redirtied.isNotEmpty) {
+      if (progress.redirtied.isNotEmpty) {
         // The transcript rule kept a local value the server tried to
         // shorten; push it back so the server converges on the longer text.
         // `sweepDeletes: false` — this outbox is a *partial* view of the
@@ -189,15 +151,16 @@ class SyncEngine {
         // tombstone it on the server.
         final _PushOutcome again = await _pushTable(
           _Outbox(SyncTable.recordings, {
-            for (final Recording r in redirtied) r.id: SyncRowCodec.recording(r),
+            for (final Recording r in progress.redirtied)
+              r.id: SyncRowCodec.recording(r),
           }),
           sweepDeletes: false,
         );
         pushed += again.applied;
-        conflicts += again.conflicts;
-        skipped += again.skipped;
+        progress.skipped += again.skipped;
+        progress.conflicts += again.conflicts;
         for (final Map<String, Object?> row in again.conflictRows) {
-          conflictDetails.add(
+          progress.details.add(
             SyncConflictDetail(
               table: SyncTable.recordings.serverName,
               id: SyncRowCodec.rowId(SyncTable.recordings, row),
@@ -209,32 +172,32 @@ class SyncEngine {
     } catch (error) {
       return SupabaseSyncResult(
         pushed: pushed,
-        pulled: pulled,
-        conflicts: conflicts,
-        conflictDetails: conflictDetails,
-        tombstonesApplied: tombstones,
-        tombstonesHeld: tombstonesHeld,
-        skipped: skipped,
-        downgraded: downgraded,
+        pulled: progress.pulled,
+        conflicts: progress.conflicts,
+        conflictDetails: progress.details,
+        tombstonesApplied: progress.tombstones,
+        tombstonesHeld: progress.tombstonesHeld,
+        skipped: progress.skipped,
+        downgraded: progress.downgraded,
         failureReason: '$error',
       );
     }
-    if (downgraded > 0) {
+    if (progress.downgraded > 0) {
       _log.log(
-        'Sync: refused $downgraded row(s) that arrived unencrypted after '
+        'Sync: refused ${progress.downgraded} row(s) that arrived unencrypted after '
         'being encrypted',
         level: LogLevel.warn,
       );
     }
     return SupabaseSyncResult(
       pushed: pushed,
-      pulled: pulled,
-      conflicts: conflicts,
-      conflictDetails: conflictDetails,
-      tombstonesApplied: tombstones,
-      tombstonesHeld: tombstonesHeld,
-      skipped: skipped,
-      downgraded: downgraded,
+      pulled: progress.pulled,
+      conflicts: progress.conflicts,
+      conflictDetails: progress.details,
+      tombstonesApplied: progress.tombstones,
+      tombstonesHeld: progress.tombstonesHeld,
+      skipped: progress.skipped,
+      downgraded: progress.downgraded,
       failureReason: refusals.isEmpty ? null : refusals.join('; '),
     );
   }
@@ -446,43 +409,109 @@ class SyncEngine {
   /// including server-default ones the device never sends, e.g.
   /// `devices.created_at`/`last_seen_at`, `sync_state.pushed_through` —
   /// hashing those in would never match what a later unchanged local push
-  /// computes), timestamp-normalised (`_canonicalServerRow`). Nothing is
-  /// applied locally, and the conflict is not re-counted here —
-  /// `_pushTable` already counted it — only adopted so it is not
-  /// re-conflicted every subsequent run.
-  Future<_PullOutcome> _resolvePushConflicts(
+  /// computes), timestamp-normalised (`_canonicalServerRow`). Conflicts are
+  /// accounted per row after the local apply or bookkeeping update succeeds,
+  /// so a later failure keeps only completed outcomes.
+  Future<void> _resolvePushConflicts(
     SyncTable table,
     List<Map<String, Object?>> rows,
     Map<String, Recording> localRecordings,
     Set<String> tombstonedIds,
     Map<String, Map<String, Object?>> localRows,
+    _PullOutcome out,
   ) async {
-    final _PullOutcome scratch = _PullOutcome();
     final Map<String, SyncRowState> known = _bookkeeping.loadTable(table.serverName);
+    void addConflictDetail(
+      Map<String, Object?> row, {
+      required int pulledBefore,
+      required int tombstonesBefore,
+      required int conflictsBefore,
+    }) {
+      final String id = SyncRowCodec.rowId(table, row);
+      if (!out.details.any(
+        (SyncConflictDetail detail) =>
+            detail.table == table.serverName && detail.id == id,
+      )) {
+        out.details.add(
+          SyncConflictDetail(
+            table: table.serverName,
+            id: id,
+            resolution: out.tombstones > tombstonesBefore
+                ? SyncConflictResolution.serverDeleted
+                : out.pulled > pulledBefore
+                ? SyncConflictResolution.serverApplied
+                : SyncConflictResolution.serverAdopted,
+          ),
+        );
+      }
+      if (out.conflicts == conflictsBefore) out.conflicts++;
+    }
+
+    Future<void> resolveRows(
+      Future<void> Function(Map<String, Object?> row) apply,
+    ) async {
+      for (final Map<String, Object?> row in rows) {
+        final int pulledBefore = out.pulled;
+        final int tombstonesBefore = out.tombstones;
+        final int conflictsBefore = out.conflicts;
+        try {
+          await apply(row);
+        } catch (_) {
+          if (out.pulled > pulledBefore ||
+              out.tombstones > tombstonesBefore ||
+              out.conflicts > conflictsBefore) {
+            addConflictDetail(
+              row,
+              pulledBefore: pulledBefore,
+              tombstonesBefore: tombstonesBefore,
+              conflictsBefore: conflictsBefore,
+            );
+          }
+          rethrow;
+        }
+        addConflictDetail(
+          row,
+          pulledBefore: pulledBefore,
+          tombstonesBefore: tombstonesBefore,
+          conflictsBefore: conflictsBefore,
+        );
+      }
+    }
+
     switch (table) {
       case SyncTable.recordings:
-        await _applyRecordings(rows, localRecordings, scratch);
+        await resolveRows(
+          (Map<String, Object?> row) => _applyRecordings(
+            <Map<String, Object?>>[row],
+            localRecordings,
+            out,
+          ),
+        );
       case SyncTable.projects:
-        await _applySimple<Project>(
-          table,
-          rows,
-          SyncRowCodec.projectFromRow,
-          SyncRowCodec.project,
-          _applier.upsertProjects,
-          _applier.deleteProject,
-          scratch,
-          tombstonedIds,
+        await resolveRows(
+          (Map<String, Object?> row) => _applySimple<Project>(
+            table,
+            <Map<String, Object?>>[row],
+            SyncRowCodec.projectFromRow,
+            SyncRowCodec.project,
+            _applier.upsertProjects,
+            _applier.deleteProject,
+            out,
+            tombstonedIds,
+          ),
         );
       case SyncTable.clipboardItems:
-        await _applySimple<ClipboardItem>(
-          table,
-          rows,
-          SyncRowCodec.clipboardItemFromRow,
-          SyncRowCodec.clipboardItem,
-          _applier.upsertClipboardItems,
-          _applier.deleteClipboardItem,
-          scratch,
-          tombstonedIds,
+        await resolveRows(
+          (Map<String, Object?> row) => _applySimple<ClipboardItem>(
+            table,
+            <Map<String, Object?>>[row],
+            SyncRowCodec.clipboardItemFromRow,
+            SyncRowCodec.clipboardItem,
+            _applier.upsertClipboardItems,
+            _applier.deleteClipboardItem,
+            out,
+            tombstonedIds,
+          ),
         );
       default:
         for (final Map<String, Object?> row in rows) {
@@ -502,9 +531,16 @@ class SyncEngine {
             SyncRowCodec.hash(_canonicalServerRow(projected)),
             sealed: row[syncRowSealedMarker] == true || known[id]?.sealed == true,
           );
+          out.conflicts++;
+          out.details.add(
+            SyncConflictDetail(
+              table: table.serverName,
+              id: id,
+              resolution: SyncConflictResolution.serverAdopted,
+            ),
+          );
         }
     }
-    return scratch;
   }
 
   /// Normalises every timestamp-shaped string in an already-projected server
@@ -541,12 +577,12 @@ class SyncEngine {
     return canonical;
   }
 
-  Future<_PullOutcome> _pullAll(
+  Future<void> _pullAll(
     SyncSnapshot s,
     Map<String, Recording> localRecordings,
     Set<String> tombstonedIds,
+    _PullOutcome total,
   ) async {
-    final _PullOutcome total = _PullOutcome();
     for (final SyncTable table in _tablesToPull) {
       final DateTime? since = _bookkeeping.cursor(table.serverName);
       DateTime? newest = since;
@@ -626,27 +662,22 @@ class SyncEngine {
           },
       });
       final _PushOutcome mirrored = await _pushTable(syncStateOutbox);
-      total.conflicts += mirrored.conflicts;
-      for (final Map<String, Object?> row in mirrored.conflictRows) {
-        total.details.add(
-          SyncConflictDetail(
-            table: SyncTable.syncState.serverName,
-            id: SyncRowCodec.rowId(SyncTable.syncState, row),
-            resolution: SyncConflictResolution.serverAdopted,
-          ),
-        );
-      }
       if (mirrored.conflictRows.isNotEmpty) {
+        final int conflictsBefore = total.conflicts;
         await _resolvePushConflicts(
           SyncTable.syncState,
           mirrored.conflictRows,
           localRecordings,
           tombstonedIds,
           syncStateOutbox.rows,
+          total,
         );
+        total.conflicts +=
+            mirrored.conflicts - (total.conflicts - conflictsBefore);
+      } else {
+        total.conflicts += mirrored.conflicts;
       }
     }
-    return total;
   }
 
   Future<void> _applyRecordings(
@@ -669,6 +700,7 @@ class SyncEngine {
     final bool hold = _presentTombstonesThisRun > _tombstoneHoldThreshold;
     final List<Recording> upserts = [];
     final List<RecordingRevision> revisions = [];
+    final List<SyncConflictDetail> conflictDetails = <SyncConflictDetail>[];
     // (id, version, hash, sealed) — the actual `_bookkeeping.put` calls are
     // deferred until after `upsertRecordings` returns, below, so a repository
     // write failure (e.g. `IndexUnreadableException`) never leaves
@@ -702,10 +734,17 @@ class SyncEngine {
         }
         // Revisions before the delete — HISTORY must show what was thrown
         // away before the row (and its source file) are gone.
+        final List<RecordingRevision> lost = dirty
+            ? _overwritten(mine, null)
+            : <RecordingRevision>[];
+        if (dirty) {
+          if (lost.isNotEmpty) await _applier.appendRevisions(lost);
+        }
+        await _applier.deleteRecording(id, hold: hold);
+        out.tombstones++;
+        if (hold) out.tombstonesHeld++;
         if (dirty) {
           out.conflicts++;
-          final List<RecordingRevision> lost = _overwritten(mine, null);
-          if (lost.isNotEmpty) await _applier.appendRevisions(lost);
           out.details.add(
             SyncConflictDetail(
               table: SyncTable.recordings.serverName,
@@ -717,14 +756,11 @@ class SyncEngine {
             ),
           );
         }
-        await _applier.deleteRecording(id, hold: hold);
         _bookkeeping.remove(SyncTable.recordings.serverName, id);
         known.remove(id);
         // Prevent a later apply pass in this same run (the lag-window
         // re-read, or a second push-conflict batch) from deleting again.
         local.remove(id);
-        out.tombstones++;
-        if (hold) out.tombstonesHeld++;
         continue;
       }
       if (state != null && serverVersion <= state.serverVersion) continue; // already have it
@@ -758,10 +794,9 @@ class SyncEngine {
       }
 
       if (mine != null && dirty) {
-        out.conflicts++;
         final List<RecordingRevision> overwritten = _overwritten(mine, next);
         revisions.addAll(overwritten);
-        out.details.add(
+        conflictDetails.add(
           SyncConflictDetail(
             table: SyncTable.recordings.serverName,
             id: id,
@@ -794,7 +829,6 @@ class SyncEngine {
       local[id] = next;
       pendingBookkeeping.add((id, serverVersion, hash, wasSealed));
       upserts.add(next);
-      out.pulled++;
     }
     // Conflict revisions after the upsert, not before: a thrown
     // upsertRecordings must not leave a SYNC revision on disk for a row
@@ -803,8 +837,13 @@ class SyncEngine {
     // before deleteRecording, above — HISTORY must show what a delete
     // threw away before the row is gone, and there is no "row never
     // replaced" case for a delete to undo.)
-    if (upserts.isNotEmpty) await _applier.upsertRecordings(upserts);
+    if (upserts.isNotEmpty) {
+      await _applier.upsertRecordings(upserts);
+      out.pulled += upserts.length;
+      out.conflicts += conflictDetails.length;
+    }
     if (revisions.isNotEmpty) await _applier.appendRevisions(revisions);
+    out.details.addAll(conflictDetails);
     for (final (id, version, hash, sealed) in pendingBookkeeping) {
       _bookkeeping.put(
         SyncTable.recordings.serverName,
@@ -897,10 +936,10 @@ class SyncEngine {
       if (state != null && serverVersion <= state.serverVersion) continue;
       if (row['deleted_at'] != null) {
         await delete(id);
+        out.tombstones++;
         _bookkeeping.remove(table.serverName, id);
         known.remove(id);
         tombstonedIds.add(tombstoneKey);
-        out.tombstones++;
         continue;
       }
       final T? decoded = decode(row);
@@ -922,9 +961,11 @@ class SyncEngine {
       );
       pendingBookkeeping.add((id, serverVersion, hash, wasSealed));
       upserts.add(decoded);
-      out.pulled++;
     }
-    if (upserts.isNotEmpty) await upsert(upserts);
+    if (upserts.isNotEmpty) {
+      await upsert(upserts);
+      out.pulled += upserts.length;
+    }
     for (final (id, version, hash, sealed) in pendingBookkeeping) {
       _bookkeeping.put(table.serverName, id, version, hash, sealed: sealed);
     }
@@ -967,9 +1008,11 @@ class SyncEngine {
       );
       pendingBookkeeping.add((id, hash, wasSealed));
       toAppend.add(rev);
-      out.pulled++;
     }
-    if (toAppend.isNotEmpty) await _applier.appendRevisions(toAppend);
+    if (toAppend.isNotEmpty) {
+      await _applier.appendRevisions(toAppend);
+      out.pulled += toAppend.length;
+    }
     for (final (id, hash, sealed) in pendingBookkeeping) {
       _bookkeeping.put(
         SyncTable.revisions.serverName,
@@ -1012,7 +1055,7 @@ class _PushOutcome {
   final String? refusalReason;
 }
 
-/// One pull pass's tally, mutated in place as rows are applied.
+/// One run's pull/apply progress, mutated as each row is committed.
 class _PullOutcome {
   int pulled = 0;
   int conflicts = 0;
