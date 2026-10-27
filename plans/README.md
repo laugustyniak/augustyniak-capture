@@ -16,7 +16,7 @@ Verification baseline at `294976b`: `flutter analyze` → `No issues found!`; `f
 | 4 | [004 — Processing ticker into a ValueNotifier](004-processing-ticker-value-notifier.md) | DONE (PR #359 merged `89afe9c`; manual screen check still owed) | 001 (same controller file) | M | Whole-shell rebuild at 2 Hz for the length of every job. Pattern already exists in the class. |
 | 5 | [005 — Docs drift: features, CI, tabs, Turso, on-device status](005-docs-drift-features-ci-tabs.md) | DONE (PR #361 merged) | none; do last so counts do not re-drift | S–M | Agent-facing docs are the repo's control surface; eight verified stale claims. |
 | 6 | [006 — `user_e2ee_settings` insert-once: revoke UPDATE](006-revoke-update-on-user-e2ee-settings.md) | DONE (PR #368 merged `ee1b2c3`; pushed to hosted 2026-10-23 with the two earlier E2EE migrations) | none; needs local Supabase (Docker) to verify; `supabase db push` is maintainer-run | S | A leaked session can re-key the account and lock every other device out with one PATCH the client never makes. |
-| 7 | [007 — E2EE: no silent downgrade](007-e2ee-no-silent-downgrade.md) | TODO — Part A ready; Part B needs the fresh-device decision | 006 | M + S | A sealed row must never come back unsealed; a fresh device must not default to plaintext without a human seeing it. |
+| 7 | [007 — E2EE: no silent downgrade](007-e2ee-no-silent-downgrade.md) | DONE — #378 (Part A), #379 (Part B) | 006 | M + S | A sealed row must never come back unsealed; a fresh device must not default to plaintext without a human seeing it. |
 
 Status values the executor should use: `TODO` → `IN PROGRESS (<branch>)` → `DONE (<PR>)` or `BLOCKED (<reason>)` or `STALE (<why>)`.
 

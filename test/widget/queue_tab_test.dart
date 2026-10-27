@@ -336,7 +336,7 @@ void main() {
 
     await e2ee.followIdentity('u');
     await tester.pump();
-    expect(find.text(QueueTab.notEncryptedBanner), findsOneWidget);
+    expect(find.text(QueueTab.unconfirmedBanner), findsOneWidget);
     expect(find.text(QueueTab.lockedBanner), findsNothing);
 
     await tester.tap(find.text('SET UP ENCRYPTION'));
@@ -378,6 +378,70 @@ void main() {
     await tester.tap(find.text('SYNC CLOUD'));
     await settleIo(tester);
     expect(find.text('ENCRYPTION · end-to-end, sealed on this device'), findsOneWidget);
+  });
+
+  testWidgets('the unconfirmed banner fits a phone-width viewport (#379)', (
+    WidgetTester tester,
+  ) async {
+    tester.view.physicalSize = const Size(360, 800);
+    tester.view.devicePixelRatio = 1.0;
+    addTearDown(tester.view.reset);
+    AppDatabase.resetForTesting();
+    final Database db = sqlite3.openInMemory();
+    await AppDatabase.getInstance(overrideDb: db);
+    addTearDown(() {
+      AppDatabase.resetForTesting();
+      db.close();
+    });
+    final E2eeService e2ee = await e2eeWith(FakeE2eeSettingsStore());
+    final RecordingsController controller = await buildRecordingsController(appDir);
+    await pumpQueue(tester, controller, e2ee: e2ee);
+
+    await e2ee.followIdentity('u');
+    await tester.pump();
+    expect(find.text('SYNC WITHOUT ENCRYPTION'), findsOneWidget);
+    expect(find.text('SET UP ENCRYPTION'), findsOneWidget);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('a fresh device pauses sync until plaintext is confirmed once (#379)', (
+    WidgetTester tester,
+  ) async {
+    AppDatabase.resetForTesting();
+    final Database db = sqlite3.openInMemory();
+    await AppDatabase.getInstance(overrideDb: db);
+    addTearDown(() {
+      AppDatabase.resetForTesting();
+      db.close();
+    });
+    final E2eeService e2ee = await e2eeWith(FakeE2eeSettingsStore());
+    final RecordingsController controller = await buildRecordingsController(appDir);
+    await pumpQueue(tester, controller, e2ee: e2ee);
+
+    await e2ee.followIdentity('u');
+    await tester.pump();
+    expect(find.text(QueueTab.unconfirmedBanner), findsOneWidget);
+    expect(find.text(QueueTab.notEncryptedBanner), findsNothing);
+    expect(find.text('SET UP ENCRYPTION'), findsOneWidget);
+    expect(find.text('SYNC WITHOUT ENCRYPTION'), findsOneWidget);
+
+    await tester.tap(find.text('SYNC CLOUD'));
+    await settleIo(tester);
+    expect(find.textContaining('NOT CONFIRMED'), findsOneWidget);
+    expect(find.textContaining('ENCRYPTION · NOT ENCRYPTED'), findsNothing);
+
+    await tester.tap(find.text('SYNC WITHOUT ENCRYPTION'));
+    await pumpUntil(tester, () => e2ee.isPlaintext);
+    await tester.pump();
+    expect(find.text(QueueTab.unconfirmedBanner), findsNothing);
+    expect(find.text(QueueTab.notEncryptedBanner), findsOneWidget);
+    expect(find.text('SYNC WITHOUT ENCRYPTION'), findsNothing);
+    expect(find.text('SET UP ENCRYPTION'), findsOneWidget);
+
+    await tester.tap(find.text('SYNC CLOUD'));
+    await settleIo(tester);
+    expect(find.textContaining('ENCRYPTION · NOT ENCRYPTED'), findsOneWidget);
+    expect(find.textContaining('NOT CONFIRMED'), findsNothing);
   });
 
   testWidgets('a second device is locked, refuses the run, and unlocks with the passphrase (#317)', (
@@ -532,7 +596,7 @@ void main() {
     expect(e2ee.keyOnServer, isFalse);
     await tester.tap(find.text('CANCEL'));
     await tester.pump(const Duration(milliseconds: 300));
-    expect(find.text(QueueTab.notEncryptedBanner), findsOneWidget);
+    expect(find.text(QueueTab.unconfirmedBanner), findsOneWidget);
     expect(find.text(QueueTab.lockedBanner), findsNothing);
   });
 

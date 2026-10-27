@@ -2,7 +2,7 @@
 
 | Field | Value |
 | --- | --- |
-| Status | TODO — Part A is specified; Part B needs one product decision first (see "Decision needed") |
+| Status | DONE — Part A merged in #378 (issue #377); Part B decided yes and implemented in #379 |
 | Written against | commit `4ab9f54` (branch `main`), 2026-10-23 |
 | Finding | security #7 in `plans/README.md` (E2EE downgrade) |
 | Effort | Part A: M (one day). Part B: S after the decision (half a day, mostly UI copy). |
@@ -57,6 +57,8 @@ On a device with no key and a server answer of "no encryption row", should the f
 - Alternative: keep the automatic behaviour and only add a non-blocking warning. Cheaper, and changes nothing about the attack.
 
 Until this is answered, execute **Part A only**.
+
+**Decided 2026-10-26: yes.** Implemented in #379 as `isPlaintextUnconfirmed` plus `E2eeService.confirmPlaintext()`.
 
 ## Part A — refuse sealed → unsealed per row
 

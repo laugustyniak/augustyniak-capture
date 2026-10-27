@@ -559,11 +559,36 @@ migration. `followIdentity` reads the keyring first
 and, only when it holds nothing, asks the store — the answer is
 `E2eeService.keyOnServer`: true, false, or null when the lookup failed or
 timed out (`keyringTimeout` boxes it too). That splits "no key here" into
-two states the Queue and the resolvers treat differently:
+three states the Queue and the resolvers treat differently (plus the
+unlocked one, with a key):
 
-- **Plaintext** (`isPlaintext`: `keyOnServer == false`) — the account was
-  never set up. Runs leave plain, with the `warn` line, under the red
-  `QueueTab.notEncryptedBanner` and its `SET UP ENCRYPTION` button.
+- **Plaintext unconfirmed** (`isPlaintextUnconfirmed`: `keyOnServer == false`
+  and no confirmation) — the server answered "no row" on a device with no
+  key. Runs are **refused** (`sync skipped: this device has no encryption
+  key; confirm SYNC WITHOUT ENCRYPTION…`) under
+  `QueueTab.unconfirmedBanner`, which offers `SET UP ENCRYPTION` and `SYNC
+  WITHOUT ENCRYPTION`. "No row" is an answer a server can give falsely to
+  hide an encrypted account, and the device has nothing local to contradict
+  it, so a human has to see the banner once before plaintext leaves (#379).
+  `E2eeService.confirmPlaintext()` is the opt-out; it is refused while the
+  state is still being read, with a key held, or when the account is (or may
+  be) encrypted.
+- **Plaintext** (`isPlaintext`: `keyOnServer == false` and confirmed) — the
+  account was never set up and the user said to sync anyway. Runs leave
+  plain, with the `warn` line, under the red `QueueTab.notEncryptedBanner`
+  and its `SET UP ENCRYPTION` button. The confirmation is a `'1'` under
+  `ai.augustyniak.capture.e2ee.plaintext-ok.<userId>` in the OS keyring,
+  read once by `followIdentity` (an error or timeout reads as "not
+  confirmed", so a keyring that never answers asks again), so a relaunch
+  keeps it and a reinstall asks again. It is cleared, in memory and in the
+  keyring, whenever the account turns out encrypted: set-up or unlock here,
+  a keyring key at sign-in, or the per-run re-check below finding a row
+  another device wrote. The keyring write in `confirmPlaintext` is best
+  effort and follows the in-memory flip: a failed write only means the next
+  launch asks again. **No server, no confirmation:** with no settings store
+  (tests, a build without Supabase) nothing can lie about the row, so the
+  account counts as confirmed and runs go out as before; the shipped app
+  always wires a `SupabaseE2eeSettingsStore` when Supabase is configured.
 - **Locked** (`isLocked`: `keyOnServer != false`) — the account has a key
   this device lacks: a second device, a device after `LOCK` or `FORGET
   KEY`, or a device that could not reach the server to ask. Runs are
