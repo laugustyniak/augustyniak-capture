@@ -1,11 +1,14 @@
 import 'package:flutter/foundation.dart';
 import 'package:uuid/uuid.dart';
 
+import '../../../core/http/transport_guard.dart';
+import '../../../core/security/owner_only_file.dart';
 import '../../costs/domain/model_price.dart';
 import '../../costs/domain/price_book.dart';
 import '../../costs/domain/usage_sink.dart';
 import '../../command/data/http_command_client.dart';
 import '../../command/domain/command_client.dart';
+import '../../enrichment/domain/embedding_service.dart';
 import '../../enrichment/domain/enrichment_service.dart';
 import '../../processing/data/ocr_service.dart';
 import '../../shortcuts/domain/hotkey_binding.dart';
@@ -22,6 +25,19 @@ import '../domain/audio_config.dart';
 import '../domain/provider_profile.dart';
 import '../domain/queue_density.dart';
 import '../domain/token_cipher.dart';
+
+/// [SettingsController.setCommandConfig] refused a plain `http://` address to
+/// a public host, where the fleet token would travel in the clear.
+class InsecureCommandAddress implements Exception {
+  const InsecureCommandAddress(this.baseUrl);
+
+  final String baseUrl;
+
+  @override
+  String toString() =>
+      'Not saved: $baseUrl would send the fleet token over plain HTTP to a '
+      'public host. Use https://, or a loopback or private-network address.';
+}
 
 /// Owns runtime settings: transcription provider profiles and capture
 /// parameters. Every mutation persists the whole `settings.json`, mirroring how
@@ -81,6 +97,8 @@ class SettingsController extends ChangeNotifier {
   TranscriptionService? _service;
   String? _serviceSignature;
   EnrichmentService? _enrichment;
+  EmbeddingService? _embedding;
+  String? _embeddingSignature;
   String? _enrichmentSignature;
   OcrService? _ocr;
   String? _ocrSignature;
@@ -133,6 +151,12 @@ class SettingsController extends ChangeNotifier {
   /// a reason that has not been established yet must not read as "no problem"
   /// combined with [tokenEncryptionActive], which is false at that point too.
   String? get tokenEncryptionIssue => _repository.tokenEncryptionIssue;
+
+  /// The first file-permission tightening that failed this session, if any:
+  /// the tokens, the recordings or both sit at the umask's mode. Reported the
+  /// way [tokenEncryptionIssue] is, because the fix is the same kind of
+  /// out-of-app work.
+  String? get filePermissionIssue => ownerOnlyIssue;
 
   /// True when secrets on disk are encrypted and this launch cannot open them:
   /// a stored value still carries the `enc:v1:` marker after [initialize] has
@@ -230,6 +254,31 @@ class SettingsController extends ChangeNotifier {
     return _enrichment!;
   }
 
+  /// The embedding service for related captures (#272): the enrichment
+  /// profile's endpoint with `/embeddings` in place of `/chat/completions`,
+  /// asked for [embeddingModel]. Disabled while either is missing. Same
+  /// caching rule as [enrichmentService].
+  EmbeddingService get embeddingService {
+    final ProviderProfile? active = _settings.activeEnrichmentProfile;
+    final String? model = _settings.embeddingModel;
+    final String signature = active == null || model == null
+        ? 'disabled'
+        : <String?>[
+            active.id,
+            active.endpoint,
+            active.bearerToken,
+            model,
+          ].join('|');
+
+    if (_embedding == null || _embeddingSignature != signature) {
+      _embedding = active == null || model == null
+          ? const DisabledEmbeddingService()
+          : active.toEmbeddingService(model: model, usageSink: _usageSink);
+      _embeddingSignature = signature;
+    }
+    return _embedding!;
+  }
+
   /// The image-OCR service, derived from the **enrichment** profile — OCR has
   /// no profile kind of its own (see [ProviderProfile.toOcrService]). Returns
   /// the disabled service when no enrichment profile is active, and that is the
@@ -270,6 +319,11 @@ class SettingsController extends ChangeNotifier {
   /// — the same rule `ProviderProfile.toService` follows. Half-typed
   /// configuration is the normal state of a text field, and it must not be able
   /// to fail anything but the call that needs it.
+  ///
+  /// **A public `http://` address degrades to disabled as well.** [setCommandConfig]
+  /// refuses to store one, but a value written before that guard existed is
+  /// still on disk, and the fleet token opens a host that runs agents on the
+  /// user's repositories — it never goes out in the clear (#299).
   CommandClient get commandClient {
     final String raw = _settings.commandBaseUrl?.trim() ?? '';
     final String token = _settings.commandToken ?? '';
@@ -277,7 +331,12 @@ class SettingsController extends ChangeNotifier {
     if (_command != null && _commandSignature == signature) return _command!;
 
     final Uri? url = Uri.tryParse(raw);
-    _command = raw.isEmpty || url == null || !url.hasScheme || url.host.isEmpty
+    _command =
+        raw.isEmpty ||
+            url == null ||
+            !url.hasScheme ||
+            url.host.isEmpty ||
+            transportIsInsecure(url)
         ? const DisabledCommandClient()
         : HttpCommandClient(
             baseUrl: url,
@@ -481,18 +540,76 @@ class SettingsController extends ChangeNotifier {
   Future<void> resetEnrichmentInstructions() =>
       _persist(_settings.copyWith(resetEnrichmentInstructions: true));
 
+  /// Whether [commandClient] would refuse [baseUrl]: plain `http://` to a host
+  /// that is not loopback or RFC 1918. The Command section asks before it
+  /// saves; [setCommandConfig] throws on the same answer.
+  static bool commandAddressIsInsecure(String baseUrl) {
+    final Uri? url = Uri.tryParse(baseUrl.trim());
+    return url != null && transportIsInsecure(url);
+  }
+
   /// The control plane's address and fleet token.
   ///
   /// One setter for both: they are useless apart, and a pair written in two
   /// saves has a moment on disk where the token belongs to an address that is
   /// no longer there.
+  ///
+  /// **A public `http://` address is refused, not reported.** A provider
+  /// profile gets a `NO TLS` pill because `http://localhost` model servers are
+  /// shipped presets; the fleet token is a different kind of secret — it opens
+  /// a host that can run agents on the user's repositories — and nothing on a
+  /// public host answers over plain HTTP on purpose. Loopback and private IPv4
+  /// stay allowed, exactly as for providers. Throws [InsecureCommandAddress]
+  /// before anything is written, so the stored pair is untouched.
   Future<void> setCommandConfig({String? baseUrl, String? token}) async {
+    if (baseUrl != null && commandAddressIsInsecure(baseUrl)) {
+      throw InsecureCommandAddress(baseUrl.trim());
+    }
     await _persist(
       _settings.copyWith(
         commandBaseUrl: baseUrl,
         clearCommandBaseUrl: baseUrl != null && baseUrl.trim().isEmpty,
         commandToken: token,
         clearCommandToken: token != null && token.trim().isEmpty,
+      ),
+    );
+  }
+
+  Future<void> updateS3Storage({
+    String? endpoint,
+    String? bucket,
+    String? region,
+    String? accessKeyId,
+    String? secretAccessKey,
+    String? prefix,
+  }) async {
+    await _persist(
+      _settings.copyWith(
+        s3Endpoint: endpoint,
+        clearS3Endpoint: endpoint != null && endpoint.trim().isEmpty,
+        s3Bucket: bucket,
+        clearS3Bucket: bucket != null && bucket.trim().isEmpty,
+        s3Region: region,
+        clearS3Region: region != null && region.trim().isEmpty,
+        s3AccessKeyId: accessKeyId,
+        clearS3AccessKeyId: accessKeyId != null && accessKeyId.trim().isEmpty,
+        s3SecretAccessKey: secretAccessKey,
+        clearS3SecretAccessKey: secretAccessKey != null && secretAccessKey.trim().isEmpty,
+        s3Prefix: prefix,
+        clearS3Prefix: prefix != null && prefix.trim().isEmpty,
+      ),
+    );
+  }
+
+  Future<void> clearS3Storage() async {
+    await _persist(
+      _settings.copyWith(
+        clearS3Endpoint: true,
+        clearS3Bucket: true,
+        clearS3Region: true,
+        clearS3AccessKeyId: true,
+        clearS3SecretAccessKey: true,
+        clearS3Prefix: true,
       ),
     );
   }
@@ -520,10 +637,71 @@ class SettingsController extends ChangeNotifier {
     return id;
   }
 
+  bool get autoCleanup => _settings.autoCleanup;
+
+  Future<void> setAutoCleanup(bool value) async {
+    if (value == _settings.autoCleanup) return;
+    await _persist(_settings.copyWith(autoCleanup: value));
+  }
+
+  bool get autoInstruction => _settings.autoInstruction;
+
+  Future<void> setAutoInstruction(bool value) async {
+    if (value == _settings.autoInstruction) return;
+    await _persist(_settings.copyWith(autoInstruction: value));
+  }
+
+  String get asrGlossary => _settings.asrGlossary;
+
+  Future<void> setAsrGlossary(String value) async {
+    final String trimmed = value.trim();
+    if (trimmed == _settings.asrGlossary.trim()) return;
+    await _persist(_settings.copyWith(asrGlossary: trimmed));
+  }
+
+  /// The embedding model for related captures, or null when they are off.
+  String? get embeddingModel => _settings.embeddingModel;
+
+  /// Set it, or turn related captures off with a blank value.
+  Future<void> setEmbeddingModel(String? value) async {
+    final String trimmed = value?.trim() ?? '';
+    if (trimmed.isEmpty) {
+      if (_settings.embeddingModel == null) return;
+      await _persist(_settings.copyWith(clearEmbeddingModel: true));
+      return;
+    }
+    if (trimmed == _settings.embeddingModel) return;
+    await _persist(_settings.copyWith(embeddingModel: trimmed));
+  }
+
+  /// The user's `SOUL.md`, or null when the typed profile is the soul.
+  String? get soulPath => _settings.soulPath;
+
+  /// Point the soul at a file, or clear it with a blank value. Stored as
+  /// typed, like [setVaultPath], and for the same reason: the enrichment reads
+  /// it per capture, so a file that appears later is picked up without
+  /// touching this again, and the Config tab reports what it finds.
+  Future<void> setSoulPath(String? value) async {
+    final String trimmed = value?.trim() ?? '';
+    if (trimmed.isEmpty) {
+      if (_settings.soulPath == null) return;
+      await _persist(_settings.copyWith(clearSoulPath: true));
+      return;
+    }
+    if (trimmed == _settings.soulPath) return;
+    await _persist(_settings.copyWith(soulPath: trimmed));
+  }
+
   /// Where captures are mirrored as markdown, or null when nothing is.
   String? get vaultPath => _settings.vaultPath;
   String get vaultFolder => _settings.vaultFolder;
   bool get vaultCopySources => _settings.vaultCopySources;
+  int get clipboardRetentionDays => _settings.clipboardRetentionDays;
+
+  /// The window the clipboard watcher prunes to, or null to keep everything.
+  Duration? get clipboardRetention =>
+      clipboardRetentionDays == 0 ? null : Duration(days: clipboardRetentionDays);
+  bool get syncClipboard => _settings.syncClipboard;
   bool get mirrorsToVault => _settings.mirrorsToVault;
 
   /// Point the mirror at a directory, or clear it with a blank value.
@@ -557,6 +735,17 @@ class SettingsController extends ChangeNotifier {
   Future<void> setVaultCopySources(bool value) async {
     if (value == _settings.vaultCopySources) return;
     await _persist(_settings.copyWith(vaultCopySources: value));
+  }
+
+  Future<void> setClipboardRetentionDays(int value) async {
+    final int days = value.clamp(0, AppSettings.maxClipboardRetentionDays);
+    if (days == _settings.clipboardRetentionDays) return;
+    await _persist(_settings.copyWith(clipboardRetentionDays: days));
+  }
+
+  Future<void> setSyncClipboard(bool value) async {
+    if (value == _settings.syncClipboard) return;
+    await _persist(_settings.copyWith(syncClipboard: value));
   }
 
   /// How long a focus session runs, and what plays when it ends.

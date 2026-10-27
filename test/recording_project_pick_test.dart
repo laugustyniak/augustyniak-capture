@@ -73,6 +73,7 @@ void main() {
   test('a recording is seeded with the active project', () async {
     final RecordingsController controller = build()
       ..activeProjectId = 'project-a';
+    await controller.initialize();
 
     await controller.startRecording();
     expect(controller.recordingProjectId, 'project-a');
@@ -85,6 +86,7 @@ void main() {
       () async {
     final RecordingsController controller = build()
       ..activeProjectId = 'project-a';
+    await controller.initialize();
 
     await controller.startRecording();
     controller.setRecordingProject('project-b');
@@ -104,6 +106,7 @@ void main() {
   test('a capture can be filed under no project at all', () async {
     final RecordingsController controller = build()
       ..activeProjectId = 'project-a';
+    await controller.initialize();
 
     await controller.startRecording();
     controller.setRecordingProject(null);
@@ -115,6 +118,7 @@ void main() {
   test('the picker is inert unless the mic is live', () async {
     final RecordingsController controller = build()
       ..activeProjectId = 'project-a';
+    await controller.initialize();
 
     // A stray tap arriving after SAVE must not attach a project to whatever
     // gets recorded next.

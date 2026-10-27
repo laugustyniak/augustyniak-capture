@@ -9,12 +9,16 @@ plugins {
 
 // Release signing is configured out-of-tree: `android/key.properties` names the
 // keystore and carries its passwords, and neither file is tracked (.gitignore).
-// The file is OPTIONAL by design — a clone without it still builds and runs in
-// release mode, signed with the debug key, because this repo has no CI and a
-// contributor who cannot run `--release` cannot check a build at all. Only a
-// build meant for distribution needs the real key; see key.properties.example.
+// The file is OPTIONAL by design — a clone without it still configures, so a
+// debug build, CI and a Gradle sync work without it. A release build without
+// it is refused at packaging time (see validateSigningRelease below) unless
+// `-PallowDebugSigning` says the debug key is intended. Only a build meant for
+// distribution needs the real key; see key.properties.example.
 val keystorePropertiesFile = rootProject.file("key.properties")
 val hasReleaseKeystore = keystorePropertiesFile.exists()
+// Bare `-PallowDebugSigning` is enough; only an explicit `false` says no.
+val allowDebugSigning =
+    providers.gradleProperty("allowDebugSigning").map { it != "false" }.getOrElse(false)
 val keystoreProperties =
     Properties().apply {
         if (hasReleaseKeystore) {
@@ -127,13 +131,39 @@ android {
     }
 }
 
+// A release artifact signed with the debug key is a mistake nobody sees
+// until Play rejects it, so without key.properties the release build stops
+// here unless asked not to: `-PallowDebugSigning` (Gradle) or
+// `ORG_GRADLE_PROJECT_allowDebugSigning=true` in the environment for
+// `flutter build`, which cannot pass -P. Debug builds are untouched.
+tasks.matching { it.name == "validateSigningRelease" }.configureEach {
+    // Never up-to-date: the check reads a property, not a task input, and an
+    // opted-in build must not leave the next one passing on a cached result.
+    outputs.upToDateWhen { false }
+    doFirst {
+        if (!hasReleaseKeystore && !allowDebugSigning) {
+            throw GradleException(
+                "Release build without android/key.properties would be signed " +
+                    "with the debug key. Add key.properties (see " +
+                    "key.properties.example) or pass -PallowDebugSigning " +
+                    "(ORG_GRADLE_PROJECT_allowDebugSigning=true for flutter build).",
+            )
+        }
+    }
+}
+
 dependencies {
+    // Android Auto car app (ai.augustyniak.capture.car). Plain Android, no Flutter.
+    implementation("androidx.car.app:app:1.7.0")
+    // CarAudioRecord.create() throws without a projected (or automotive) impl.
+    implementation("androidx.car.app:app-projected:1.7.0")
     // Instrumentation only — none of this reaches a release artifact.
     // Pinned to match: the integration_test plugin resolves
     // `androidx.test:runner` to strictly 1.3.0, and a newer rules artifact
     // drags a newer runner in with it and fails resolution.
     androidTestImplementation("androidx.test:runner:1.3.0")
     androidTestImplementation("androidx.test:rules:1.2.0")
+    testImplementation("junit:junit:4.13.2")
 }
 
 kotlin {

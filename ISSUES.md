@@ -1,15 +1,11 @@
 # Backlog
 
-Local issue tracker (no GitHub remote yet). Move to `gh issue` once a remote exists.
+Historical. Issues live on GitHub: `gh issue list`. This file is kept for the "Done" notes below and is not maintained.
 
-## Open
+## Done — on-device models
 
-### On-device models
-
-The Models tab manages *remote* provider profiles only. Local inference
-(whisper.cpp via FFI: model catalog, download with progress, local path,
-delete, active-model selection) is a separate, much larger piece of work and
-needs a native dependency that is not in `pubspec.yaml` today.
+Shipped: `ProfileKind.localWhisper`, `lib/features/transcription/data/whisper_ffi_engine.dart`
+and `whisper_model_store.dart`, with the section in the Models tab. See `docs/architecture/transcription.md`.
 
 **Invariant for any future work here:** must not touch the
 source→verify→persist→process ordering that `RecordingsController.stopRecording()`

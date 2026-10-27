@@ -61,6 +61,7 @@ void main() {
         recorder: _GrantingRecorder(),
         player: _FakePlayer(),
       );
+      await controller.initialize();
 
       int controllerNotifications = 0;
       int tickerNotifications = 0;

@@ -8,7 +8,7 @@ import '../domain/sync_engine.dart';
 
 /// [SyncEngine]'s pull side. Recordings and projects apply through the
 /// owning controller's own funnel — `RecordingsController.
-/// applySyncedRecordings`/`deleteRecording`, `ProjectsController.
+/// applySyncedRecordings`/`applySyncedRecordingDelete`, `ProjectsController.
 /// applySyncedProjects`/`applySyncedProjectDelete` — never through a second
 /// `RecordingsRepository`/`ProjectsRepository` writing underneath that
 /// controller: that second-writer shape is what let a concurrent
@@ -34,14 +34,15 @@ class RepositorySyncApplier implements SyncApplier {
     required Future<void> Function(String id) applySyncedProjectDelete,
     required ClipboardRepository clipboard,
     required RevisionsRepository? revisions,
-    required Future<void> Function(String id) deleteRecording,
+    required Future<void> Function(String id, {required bool hold})
+    applySyncedRecordingDelete,
     required bool Function(String id) recordingExists,
   }) : _applySyncedRecordings = applySyncedRecordings,
        _applySyncedProjects = applySyncedProjects,
        _applySyncedProjectDelete = applySyncedProjectDelete,
        _clipboard = clipboard,
        _revisions = revisions,
-       _deleteRecording = deleteRecording,
+       _applySyncedRecordingDelete = applySyncedRecordingDelete,
        _recordingExists = recordingExists;
 
   final Future<void> Function(List<Recording> upserts) _applySyncedRecordings;
@@ -49,7 +50,8 @@ class RepositorySyncApplier implements SyncApplier {
   final Future<void> Function(String id) _applySyncedProjectDelete;
   final ClipboardRepository _clipboard;
   final RevisionsRepository? _revisions;
-  final Future<void> Function(String id) _deleteRecording;
+  final Future<void> Function(String id, {required bool hold})
+  _applySyncedRecordingDelete;
   final bool Function(String id) _recordingExists;
 
   @override
@@ -84,7 +86,7 @@ class RepositorySyncApplier implements SyncApplier {
     await _revisions?.append(rows);
   }
 
-  /// `RecordingsController.deleteRecording` returns normally on a refusal
+  /// `RecordingsController.applySyncedRecordingDelete` returns normally on a refusal
   /// (the index unreadable, a source file that would not delete) rather
   /// than throwing, so it can be pressed again from the UI without an error
   /// dialog. That silence is exactly wrong for a sync tombstone: the engine
@@ -93,8 +95,8 @@ class RepositorySyncApplier implements SyncApplier {
   /// [_recordingExists] after the call is the only way to tell a refusal
   /// from success, since the callback's return type carries nothing else.
   @override
-  Future<void> deleteRecording(String id) async {
-    await _deleteRecording(id);
+  Future<void> deleteRecording(String id, {bool hold = false}) async {
+    await _applySyncedRecordingDelete(id, hold: hold);
     if (_recordingExists(id)) {
       throw StateError('delete refused for $id');
     }

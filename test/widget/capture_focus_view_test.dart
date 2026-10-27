@@ -5,6 +5,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:augustyniak_capture/app/ui_kit.dart';
 import 'package:augustyniak_capture/features/recordings/domain/capture_type.dart';
+import 'package:augustyniak_capture/features/recordings/domain/agent_artifact.dart';
 import 'package:augustyniak_capture/features/recordings/domain/note_vault.dart';
 import 'package:augustyniak_capture/features/recordings/domain/recording.dart';
 import 'package:augustyniak_capture/features/recordings/presentation/audio_waveform_visualizer.dart';
@@ -116,6 +117,47 @@ void main() {
     await tester.tap(find.text('OPEN'));
     await tester.pumpAndSettle();
   }
+
+  testWidgets('focus view shows saved connections and opens their analysis',
+      (WidgetTester tester) async {
+    final File analysis = File('${appDir.path}/Analysis/focus-links.md');
+    analysis.parent.createSync();
+    analysis.writeAsStringSync('# Connections\n\n[[Projects/Plan]]\n');
+    final Recording seeded = makeRecording(
+      id: 'focus-links',
+      title: 'Connect the notes',
+      transcript: 'A short captured thought.',
+    ).copyWith(artifacts: <AgentArtifact>[
+      AgentArtifact(
+        id: analysis.path,
+        captureId: 'focus-links',
+        title: 'Connections and next step',
+        path: analysis.path,
+        updatedAt: DateTime.now(),
+        snippet: 'Related to the project plan.',
+      ),
+    ]);
+    final RecordingsController controller = await buildRecordingsController(
+      appDir,
+      seed: <Recording>[seeded],
+      noteVault: _FakeTestVault(),
+      connectionVaultRoot: () => appDir,
+    );
+
+    await pumpFocusView(tester, controller, 'focus-links');
+    expect(inFocusView(find.text('CONNECTIONS & NEXT STEP')), findsOneWidget);
+    expect(inFocusView(find.text('Related to the project plan.')), findsOneWidget);
+    await tester.tap(inFocusView(find.text('READ ANALYSIS')));
+    await tester.pump();
+    for (int attempt = 0; attempt < 10; attempt++) {
+      await tester.runAsync(() async {
+        await Future<void>.delayed(const Duration(milliseconds: 20));
+      });
+      await tester.pump(const Duration(milliseconds: 20));
+      if (find.textContaining('[[Projects/Plan]]').evaluate().isNotEmpty) break;
+    }
+    expect(find.textContaining('[[Projects/Plan]]'), findsOneWidget);
+  });
 
   testWidgets('tapping the card body opens inline editing directly', (
     WidgetTester tester,
@@ -327,6 +369,67 @@ void main() {
     expect(find.byType(CaptureDetailPanel), findsNothing);
     // Let the done-feedback timer run out before the test ends.
     await tester.pump(const Duration(seconds: 2));
+  });
+
+  testWidgets('a phone detail page swipes to the neighbouring capture', (
+    WidgetTester tester,
+  ) async {
+    final RecordingsController controller = await buildRecordingsController(
+      appDir,
+      seed: <Recording>[
+        makeRecording(id: 'a', title: 'Alpha', transcript: 'alpha body'),
+        makeRecording(id: 'b', title: 'Bravo', transcript: 'bravo body'),
+        makeRecording(id: 'c', title: 'Charlie', transcript: 'charlie body'),
+      ],
+    );
+    await pumpQueue(tester, controller, surface: const Size(393, 852));
+
+    // The queue's own order, read off the screen, is the order a swipe walks.
+    final List<String> order = <String>['Alpha', 'Bravo', 'Charlie']
+      ..sort(
+        (String x, String y) => tester
+            .getTopLeft(find.text(x))
+            .dy
+            .compareTo(tester.getTopLeft(find.text(y)).dy),
+      );
+    Finder inPanel(String text) => find.descendant(
+      of: find.byType(CaptureDetailPanel),
+      matching: find.text(text),
+    );
+
+    await tester.tap(find.text(order[1]));
+    await tester.pumpAndSettle();
+    expect(inPanel(order[1]), findsOneWidget);
+
+    // Left goes down the list.
+    await tester.fling(
+      find.byType(CaptureDetailPanel),
+      const Offset(-300, 0),
+      1000,
+    );
+    await tester.pumpAndSettle();
+    expect(inPanel(order[2]), findsOneWidget);
+    expect(inPanel(order[1]), findsNothing);
+
+    // Past the last capture there is nowhere to go, and nothing changes.
+    await tester.fling(
+      find.byType(CaptureDetailPanel),
+      const Offset(-300, 0),
+      1000,
+    );
+    await tester.pumpAndSettle();
+    expect(inPanel(order[2]), findsOneWidget);
+
+    // Right goes back up, past where the page was opened.
+    for (int i = 0; i < 2; i++) {
+      await tester.fling(
+        find.byType(CaptureDetailPanel),
+        const Offset(300, 0),
+        1000,
+      );
+      await tester.pumpAndSettle();
+    }
+    expect(inPanel(order[0]), findsOneWidget);
   });
 
   testWidgets('a phone detail page closes itself when its capture is deleted', (

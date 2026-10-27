@@ -1,9 +1,10 @@
 #!/usr/bin/env bash
-# Local stand-in for CI.
+# Local fast gate.
 #
-# GitHub Actions is metered on this private repo and the workflow is parked at
-# .github/workflows/ci.yml.disabled, so nothing on the server gates a push.
-# PR #9 shipped a branch that did not compile because of exactly that gap.
+# CI (.github/workflows/ci.yml) runs the same `flutter analyze` + `flutter test`
+# on the server; this hook fails in seconds on the machine that broke the build
+# instead of after a push and a runner spin-up. PR #9 shipped a branch that did
+# not compile before this existed.
 #
 # Enable once per clone:
 #   git config core.hooksPath .githooks

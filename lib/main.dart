@@ -52,5 +52,10 @@ Future<void> main() async {
     }
   }
 
+  if (supabase == null) {
+    final String? issue = SupabaseConfig.environmentIssue();
+    if (issue != null) debugPrint('Supabase is not initialised: $issue');
+  }
+
   runApp(AugustyniakCaptureApp(supabaseClient: supabaseClient));
 }

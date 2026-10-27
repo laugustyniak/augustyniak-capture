@@ -86,7 +86,9 @@ class BackupCoordinator {
       '${summary.matchedByIdAlone > 0 ? ', ${summary.matchedByIdAlone} of them '
                 'matched by id alone — that archive predates content hashing '
                 'and its rows were not compared by content' : ''}, '
-      '${summary.filesRestored} files restored).',
+      '${summary.filesRestored} files restored'
+      '${summary.unverifiedFiles > 0 ? ', ${summary.unverifiedFiles} of the '
+                'files carried no content hash and were checked by size alone' : ''}).',
     );
     return summary;
   }

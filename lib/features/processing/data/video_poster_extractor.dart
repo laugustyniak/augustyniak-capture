@@ -1,6 +1,7 @@
 import 'dart:io';
 
 import '../domain/processor.dart';
+import '../../../core/process/resolved_executable.dart';
 
 /// Extracts a single still frame from a video so the queue can show a poster
 /// instead of a grey rectangle. The frame is a **derived** artifact: it is not
@@ -51,7 +52,7 @@ class FfmpegVideoPosterExtractor implements VideoPosterExtractor {
       // one.
       List<String> args = _argsFor('1', video, destination);
       ProcessResult result = await Process.run(
-        executable,
+        await resolveExecutable(executable),
         args,
         stderrEncoding: SystemEncoding(),
       );
@@ -62,7 +63,7 @@ class FfmpegVideoPosterExtractor implements VideoPosterExtractor {
       if (!await destination.exists() || await destination.length() == 0) {
         args = _argsFor('0', video, destination);
         result = await Process.run(
-          executable,
+          await resolveExecutable(executable),
           args,
           stderrEncoding: SystemEncoding(),
         );

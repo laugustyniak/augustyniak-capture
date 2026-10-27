@@ -33,6 +33,8 @@ void main() {
   const Map<String, String> allowed = <String, String>{
     'lib/features/recordings/data/markdown_note_vault.dart':
         'the ą→a transliteration map — data, not display text',
+    'lib/features/recordings/data/vault_connection_analyzer.dart':
+        'Polish stopwords for local note matching, not display text',
     'lib/features/enrichment/domain/enrichment_defaults.dart':
         'Polish examples inside an English LLM prompt, teaching the model to '
         'recognise Polish imperatives. Removing them degrades classification.',

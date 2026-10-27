@@ -82,4 +82,29 @@ void main() {
       );
     });
   });
+
+  group('macOS hardened runtime', () {
+    // The Runner *target* configurations are the ones that name the
+    // entitlements file; the project-level pair above them does not.
+    String block(String entitlements) {
+      final String project = read(pbxproj);
+      final int at = project.indexOf('CODE_SIGN_ENTITLEMENTS = $entitlements;');
+      expect(at, isNot(-1), reason: entitlements);
+      final int start = project.lastIndexOf('buildSettings = {', at);
+      return project.substring(start, project.indexOf('};', at));
+    }
+
+    test('the Release build turns it on, the Debug build does not', () {
+      // Release only: library validation and the debugger-attach block would
+      // stop `flutter run` from attaching to a Debug build.
+      expect(
+        block('Runner/Release.entitlements'),
+        contains('ENABLE_HARDENED_RUNTIME = YES;'),
+      );
+      expect(
+        block('Runner/DebugProfile.entitlements'),
+        isNot(contains('ENABLE_HARDENED_RUNTIME')),
+      );
+    });
+  });
 }

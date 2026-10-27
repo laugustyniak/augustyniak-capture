@@ -42,10 +42,11 @@ void main() {
   }
 
   test('the legacy settings file is tightened wherever it is found', () async {
-    // It is never deleted — it is the only copy if this migration is ever
-    // found wrong — so it keeps holding whatever tokens were current when
-    // SQLite took over, plaintext ones included. A build that predates
-    // `restrictToOwner` wrote it at the umask's mode.
+    // It outlives this call — it is the only copy until the row has been read
+    // back (`SettingsRepository.load` deletes it then, #301) — so it keeps
+    // holding whatever tokens were current when SQLite took over, plaintext
+    // ones included. A build that predates `restrictToOwner` wrote it at the
+    // umask's mode.
     writeLegacySettings(<String, dynamic>{'themeMode': 'dark'});
     final File file = File('${docs.path}/recordings/settings.json');
     Process.runSync('chmod', <String>['644', file.path]);

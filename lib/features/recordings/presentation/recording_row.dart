@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart' show ValueListenable;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
@@ -21,7 +22,7 @@ class RecordingRow extends StatelessWidget {
     required this.recording,
     required this.focused,
     required this.isEnriching,
-    this.processingElapsed,
+    this.processingTicker,
     this.onCancelProcessing,
     required this.onTap,
     required this.onToggleProcessed,
@@ -30,7 +31,7 @@ class RecordingRow extends StatelessWidget {
   final Recording recording;
   final bool focused;
   final bool isEnriching;
-  final Duration? processingElapsed;
+  final ValueListenable<Duration>? processingTicker;
   final VoidCallback? onCancelProcessing;
 
   /// Opens the capture. Not a toggle any more — see the class doc.
@@ -118,7 +119,7 @@ class RecordingRow extends StatelessWidget {
                   if (!processing)
                     _CollapsedBadge(
                       recording: recording,
-                      processingElapsed: processingElapsed,
+                      processingTicker: processingTicker,
                     )
                   else
                     const SizedBox.shrink(),
@@ -146,7 +147,7 @@ class RecordingRow extends StatelessWidget {
                   child: ProcessingStrip(
                     enriching: isEnriching,
                     type: recording.type,
-                    elapsed: processingElapsed,
+                    processingTicker: processingTicker,
                   ),
                 ),
               Padding(
@@ -192,10 +193,10 @@ class _StatusDot extends StatelessWidget {
 /// ready. The two running stages are drawn by [ProcessingStrip] instead — see
 /// the call site.
 class _CollapsedBadge extends StatelessWidget {
-  const _CollapsedBadge({required this.recording, this.processingElapsed});
+  const _CollapsedBadge({required this.recording, this.processingTicker});
 
   final Recording recording;
-  final Duration? processingElapsed;
+  final ValueListenable<Duration>? processingTicker;
 
   @override
   Widget build(BuildContext context) {
@@ -203,24 +204,25 @@ class _CollapsedBadge extends StatelessWidget {
       final String transcribingBase = recording.type == CaptureType.image
           ? 'EXTRACTING'
           : 'TRANSCRIBING';
-      final String transcribingText = processingElapsed != null
-          ? '$transcribingBase · ${formatDuration(processingElapsed!)}'
-          : transcribingBase;
       final (String label, Color color) = switch (recording.status) {
         RecordingStatus.saved => ('RAW', Console.muted),
         RecordingStatus.pendingTranscription => ('QUEUED', Console.amber),
-        RecordingStatus.transcribing => (
-          transcribingText,
-          Console.accent,
-        ),
+        RecordingStatus.transcribing => (transcribingBase, Console.accent),
         RecordingStatus.failed => ('FAILED', Console.red),
         RecordingStatus.completed => ('READY', Console.green),
       };
-      return StatusPill(
-        label: label,
-        color: color,
-        pulse: recording.status == RecordingStatus.transcribing,
-      );
+      final bool transcribing = recording.status == RecordingStatus.transcribing;
+      if (transcribing && processingTicker != null) {
+        return ValueListenableBuilder<Duration>(
+          valueListenable: processingTicker!,
+          builder: (BuildContext _, Duration elapsed, Widget? _) => StatusPill(
+            label: '$label · ${formatDuration(elapsed)}',
+            color: color,
+            pulse: true,
+          ),
+        );
+      }
+      return StatusPill(label: label, color: color, pulse: transcribing);
     }
     if (recording.category != null) {
       return StatusPill(

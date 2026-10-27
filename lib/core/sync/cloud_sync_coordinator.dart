@@ -57,8 +57,11 @@ class CloudSyncReport {
                 ? '${result.conflicts} conflicts'
                 : '${result.conflicts - result.conflictDetails.length} other conflicts',
           if (result.tombstonesApplied > 0)
-            '${result.tombstonesApplied} removed',
+            '${result.tombstonesApplied} removed'
+                '${result.tombstonesHeld > 0 ? ' (${result.tombstonesHeld} held in trash)' : ''}',
           if (result.skipped > 0) '${result.skipped} skipped',
+          if (result.downgraded > 0)
+            '${result.downgraded} refused unencrypted',
         ];
         lines.add('Supabase: ${counts.join(' · ')}');
       } else {

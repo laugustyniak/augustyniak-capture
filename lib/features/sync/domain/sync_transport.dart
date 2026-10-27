@@ -1,13 +1,22 @@
 import 'sync_table.dart';
 
+/// A private key the encrypted transport sets on a pulled row it actually
+/// opened from an envelope. It is never a column: the engine reads it to
+/// tell a sealed row from a plaintext one, and the codec ignores it.
+const String syncRowSealedMarker = '__sealed';
+
 class SyncPushResult {
   const SyncPushResult({
     required this.applied,
     required this.conflicts,
     this.rejected = const <Map<String, Object?>>[],
+    this.sealed = false,
   });
   final int applied;
   final List<Map<String, Object?>> conflicts;
+
+  /// True when the transport sealed every content row it pushed in this call.
+  final bool sealed;
 
   /// Rows `sync_push` could not apply to their table at all (a bad cast, a
   /// missing not-null column, an unknown column) — distinct from a

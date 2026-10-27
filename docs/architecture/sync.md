@@ -18,7 +18,9 @@ No hook at any mutation site and no new field on `Recording`. `sync_rows`
 (`app_database.dart`) holds one row per synced id: `table_name`, `id`
 (composite ids joined with `/`), `server_version` (the last version the
 server acknowledged), `pushed_hash` (sha256 of the canonical row last
-pushed). It is per install, not part of the backup archive, and never
+pushed), `sealed` (whether this device last saw the row inside an E2EE
+envelope; absent or 0 means a legacy plaintext row — see "A sealed row never
+comes back unsealed"). It is per install, not part of the backup archive, and never
 appears in `recordings.json`.
 
 At sync time each local row is canonicalised to the exact JSON the server
@@ -42,6 +44,14 @@ rows. **`owner_id` is never read from the payload**: the column default
 fills it and a trigger refuses any later change, so a client cannot push a
 row it does not own no matter what it sends. `table_name` is validated
 against the seven known names before it reaches `format()`.
+
+**Derived fields ride `payload`, with no schema change.** `projectAuto` and
+`suggestedRoute` (#248, `{kind, reason?, auto}`) are written to the capture
+row's `payload` only while present, so an unchanged row hashes as before. The
+cost is the one `projectAuto` already has: a client built before the key
+existed does not know it, drops it on its next push, and so erases a remote
+dismissal (`auto: false`) — the model may then propose that route again. Both
+are advisory, so this is accepted rather than versioned.
 
 Per row, the six versioned tables run an upsert gated `where version =
 excluded.version - 1`; `revisions` runs `insert … on conflict do nothing` —
@@ -115,6 +125,12 @@ decode it comes along (the lag-window re-read above is what makes that
 repeat pull safe). Stored locally under `settings['sync.cursor.<table>']`
 and mirrored to the server's `sync_state` row for this device, so a
 reinstall can see where its predecessor stopped.
+
+In every pulled table (recordings, projects, clipboard items), a row whose id
+is not a safe path segment (`isSafeRecordId`, `core/security/record_id.dart`),
+live or tombstone, is dropped and counted as skipped **without** holding the
+cursor: no build will ever decode it, so holding the cursor on it would stall
+every later row of the table (#292).
 
 **Paging is keyset, not offset (#195).** Each page continues strictly
 after the previous page's last `(updated_at, key…)` tuple
@@ -194,13 +210,58 @@ For each pulled row, keyed by local hash state:
 | clean | live | replace; `sync_rows` ← (version, hash) |
 | dirty | live, version = ours | ours is newer; leave it, the push side sends it |
 | dirty | live, version > ours | **server wins.** Each overwritten field is appended as `RecordingRevision(source: RevisionSource.sync)`; then replace |
-| any | `deleted_at` set | if dirty, write revisions first so HISTORY shows what was thrown away; then the `deleteRecording` callback — the locked removal path, source file included; `sync_rows` row removed |
+| any | `deleted_at` set | if dirty, write revisions first so HISTORY shows what was thrown away; then `SyncApplier.deleteRecording(id, hold:)` → `RecordingsController.applySyncedRecordingDelete` — the row is dropped, the source files go to `.trash/` rather than being unlinked; `sync_rows` row removed |
 
 A pulled tombstone is the user's own intent from another device, not a cloud
-failure, which is why it may reach the source file: it runs through the same
-entry point the delete button calls and nothing else. **Every `delete*` on
-`SyncApplier` tolerates an id it has never heard of** — a tombstone for a
-row this device never had is a no-op, never a throw.
+failure, which is why it may touch the source file at all. It does **not**
+unlink it (#304): a stolen session, a bad server or one bulk delete on one
+device would otherwise wipe every device in a single cycle, with nothing on
+this side corresponding to the index's second durability rule. The controller
+moves the files into `<recordingsDir>/.trash/` as `<epochMs>-<name>` and
+`RecordingsRepository.pruneTrash` removes them 30 days later
+(`trashRetention`; run after each sync and once from `recoverOrphans`). There
+is no restore button: restoring would push a row the server has already
+tombstoned and lose it again. The bytes sit in `.trash/` for the user to copy
+out by hand. The user's own delete button (`deleteRecording`) is unchanged and
+still unlinks.
+
+**Blast-radius cap.** `SyncEngine._applyRecordings` counts the tombstones whose
+row this device actually holds (a tombstone for a row it never had removes
+nothing). The count is cumulative **within one `run()`**: every recordings batch
+adds to it, and once it passes `SyncEngine.defaultTombstoneHoldThreshold` (10,
+a constructor parameter) every further delete in that run is applied with
+`hold: true`. A batch is every page of one run's recordings pull (`_pullAll`
+gathers the pages before applying), and the conflict rows returned by the push
+draw on the same budget, so splitting a bulk delete across pages or across
+push and pull does not slip under the cap. The conflict batch is applied first:
+if it is within budget it is not held, and it is not retroactively held when
+the pull then pushes the run's total over the threshold. The counter starts
+over at the top of each run, so a slow drip of ten or fewer per run across many
+runs is **not** covered; a rolling window needs persisted bookkeeping and is a
+follow-up.
+
+Held files land in `.trash/` as `held-<epochMs>-<name>`, which `pruneTrash`
+never touches. The Queue shows "Another device deleted recordings · N files
+kept in the recordings folder's .trash · CONFIRM removes them after 30 days"
+with a CONFIRM button; `confirmHeldSyncDeletes` renames them to
+`<nowMs>-<name>`, so the 30 days start at confirmation. The threshold is
+absolute on purpose: a fraction of the library would let a large library lose
+dozens of captures without a prompt. `SupabaseSyncResult.tombstonesHeld` counts
+the held ones (they are still in `tombstonesApplied`) and the report says
+"N removed (M held in trash)".
+
+`trashArtifacts` is all or nothing, and every move — forward and the rollback
+— goes through one primitive: `rename`, or copy-then-delete when `rename`
+refuses (a source on another filesystem raises `EXDEV`). A copy that fails, or
+whose source then refuses to delete, is removed again, so the bytes are in one
+place whichever way it ends and a retried tombstone cannot stack a second copy.
+If an artifact still cannot move, the ones already moved are put back through
+the same primitive and the error is rethrown, so the kept row never points at
+files already in `.trash/`. The primitive is injectable (`renameFile`) because
+a single filesystem never refuses a `rename`; the tests force the refusal.
+
+**Every `delete*` on `SyncApplier` tolerates an id it has never heard of** — a
+tombstone for a row this device never had is a no-op, never a throw.
 
 **A live push racing a tombstone always loses to the tombstone**: deletion
 beats a concurrent edit. The editing device is still bookkept at the
@@ -249,6 +310,23 @@ is nothing to go stale — whichever write's `_persistAll` runs second
 persists the union of both. `test/sync/applied_recordings_concurrency_test.dart`
 proves it against a deliberately slowed `saveAll`.
 
+### Clipboard: opt-in (#302)
+
+`clipboard_items` rides a run only when `AppSettings.syncClipboard` is on
+(`SyncEngine(syncClipboard:)`, read per run from the controller's
+resolver, off by default). The clipboard holds whatever was last copied,
+and a source that did not mark its copy sensitive — see
+`docs/architecture/clipboard.md` — is persisted in the clear, so the rows
+that would ride are the ones most likely to be a password; and E2EE is
+per-account opt-in, so "synced" and "sealed" are not the same fact. Off
+means the table is neither pushed, swept nor pulled, and neither its
+bookkeeping nor its cursor is touched, so turning it on later resumes from
+where it stopped rather than re-sending the history. Turning it off does
+**not** tombstone the rows pushed while it was on: a tombstone is applied
+by every other device as a local delete, and the user asked to stop
+syncing, not to lose the history everywhere. The `sync_state` row for
+`clipboard_items` is simply not written while it is off.
+
 ### Clipboard: a known gap, accepted for this slice
 
 `ClipboardRepository` has no collection-update method, so
@@ -281,11 +359,26 @@ or one this device never had, leaves the active id untouched — the same
 tombstone for the active project cannot leave `_activeProjectId` pointing
 at a project that no longer exists.
 
+### Projects: launch settings are device-local
+
+A project row carries `name`, `repository_path`, the description, session
+name, default agent and Command binding. It does **not** carry
+`agentSettings` (extra arguments, initial prompt, skip-permissions).
+`SyncRowCodec.project` strips them, `projectFromRow` ignores them when an
+older build's row still has them, and `applySyncedProjects` keeps this
+device's own settings for an id it already has (a new id gets none). A
+backup archive is imported the same way. Two reasons: a row another device
+or a hostile server wrote must not decide how an agent is started here, and
+leaving them out keeps the row hash stable when they are edited, so a
+local-only change never dirties the outbox. `repository_path` still syncs.
+
 ### History and mirror refresh
 
 A sync run's `appendRevisions` writes through `RevisionsRepository.append`,
 then `RecordingsController.syncCloud()` reloads the history and notifies the
 editor. Overwritten values appear in HISTORY without restarting the app.
+
+### A known staleness gap
 
 `applySyncedRecordings` merges into `_recordings` and calls `_persistAll()`
 directly — it does not go through `_update`, so a pulled upsert also
@@ -323,6 +416,10 @@ segment's `filePath`) unless a local row already supplies this device's own
 path. So an absolute path in `_recordings` was always written by this
 device, and a row can never make it download to — or upload from — a
 location of the row's choosing.
+`artifacts` never arrive from a remote row at all: the codec keeps the local
+row's list (empty for a new row), because the viewer reads whatever path an
+artifact names and `AgentArtifactScanner` rediscovers them on the device that
+ran the agent.
 
 **Step 1 — re-root.** `RecordingsController._rerootSyncedPaths` points every
 bare-name path a pull left behind (`SyncRowCodec.recordingFromRow` with no
@@ -389,10 +486,289 @@ guard refuses the enqueue (every segment must be here) and the row keeps
 `completed`, which the resume sweep does not pick up, so the new fragment is
 not transcribed until something enqueues the row again.
 
-**Known gaps.** `storage_client` 2.8.0's `download()` answers the whole object
-as bytes, so a download holds the file in memory once, and there is no
-resumable (TUS) transfer — #187's resumable-transfer item stays open. Objects
-of a deleted capture are not removed from the bucket yet.
+**Downloads stream.** `MediaObjectStore.download` yields chunks and takes a
+`maxBytes`; `SupabaseMediaStore` reads through `downloadStream`. The service
+writes each chunk to the `.part` and into an incremental sha-256 as it
+arrives, and refuses the object (`rejected`, nothing landed) as soon as it
+crosses the row's `sizeBytes` — 2 GiB for a row an older build synced without
+one. Under E2EE the inner ceiling is `maxBytes` plus the 28-byte envelope. That
+path still holds one ciphertext copy and one clear copy in memory, because
+AES-GCM authenticates the whole envelope: the row's `sizeBytes` (fallback
+2 GiB) is the memory bound there, not a streaming one.
+
+**Known gaps.** There is no resumable (TUS) transfer — #187's
+resumable-transfer item stays open. Objects of a deleted capture are not
+removed from the bucket yet.
+
+## End-to-end encryption: the envelope
+
+`EncryptedSyncTransport` and `EncryptedMediaStore` (`features/sync/data/`)
+decorate the plain transport and the media store. On push a row's content
+columns — `transcript`, `title`, `summary`, `tags`, `payload`, `category`
+for recordings; `text`/`error` for segments; `text`/`preview`/`collections`
+for clipboard items; `repository_path`/`payload` for projects;
+`from_value`/`to_value` for revisions — are packed into one AES-256-GCM
+envelope in `encrypted_payload` and sent null, so Postgres holds no content.
+`devices` and `sync_state` carry none and pass through. The migration that
+adds the columns is `20261006200000_e2ee_encrypted_payload.sql`;
+`20261012090000_e2ee_revisions_payload_kdf_iterations.sql` adds the
+revisions column and the KDF iteration count (#298).
+
+**The wiring (#297).** `app.dart` builds one `E2eeService` next to the
+`AuthController`, under the same condition (Supabase configured), and both
+sync resolvers go through it: `syncTransportResolver` returns
+`e2ee.wrapTransport(SupabaseSyncTransport(client), ownerId:, log:)` and
+`mediaStoreResolver` returns `e2ee.wrapMediaStore(SupabaseMediaStore(...),
+ownerId:)`. With a key held, those are the decorators; without one they are
+the plain transport and store. The controller resolves both at the top of
+`_performCloudSync`, before either slot runs and with no `await` between,
+so the two slots of one run see the same key state and a run is never
+half-sealed. The service follows the identity through
+`E2eeService.followIdentity(userId)`, which the shell calls on every auth
+change: the held key is dropped *before* the new user's is read from the
+keyring (a user without a stored key never inherits the previous one), a
+restore that lands after the identity moved on is discarded (a fast
+sign-out cannot leave a key held), and a repeat call with the same id is a
+no-op (the auth controller notifies on busy and error too). Two runs are
+refused rather than served: one whose owner is not the followed user (the
+gateway's identity moves before the auth controller notifies, so a run can
+start as B while the service still holds A's key), and one that starts
+while the followed user's key is still being read from the keyring (it
+would leave in plaintext although a key exists). Both wrappers throw, and
+`_performCloudSync` turns a throwing resolver into a failed Supabase slot
+with the reason (`sync skipped: signed-in user changed`, `sync skipped:
+encryption key still loading`) — never a plaintext run, never an error
+out of `syncCloud`, which the launch and edit paths do not catch. The
+next run tries again. The keyring read is time-boxed
+(`E2eeService.keyringTimeout`, 10 s): a prompt that never answers counts
+as "no key" rather than refusing every run for the session. `lock()` and
+`forgetKey` end a restore in flight, so a key just locked cannot land a
+moment later. Each resolver is called per run, so a key that
+arrives later applies to the next run and never to one in flight.
+
+**The passphrase flow (#317).** Whether an account is encrypted is a server
+fact: one `user_e2ee_settings` row per owner (`kdf_salt`, `kdf_algorithm`,
+`key_check_hash`, `kdf_iterations`), read and inserted through
+`E2eeSettingsStore` (`domain/e2ee_settings_store.dart`;
+`SupabaseE2eeSettingsStore` in `data/`, insert-only, no client-side delete
+because the table grants none). The row is insert-once at the database
+level: `authenticated` has no UPDATE grant and no update policy (migration
+`20261023011253_e2ee_settings_insert_once.sql`); a re-key would be a new
+migration. `followIdentity` reads the keyring first
+and, only when it holds nothing, asks the store — the answer is
+`E2eeService.keyOnServer`: true, false, or null when the lookup failed or
+timed out (`keyringTimeout` boxes it too). That splits "no key here" into
+three states the Queue and the resolvers treat differently (plus the
+unlocked one, with a key):
+
+- **Plaintext unconfirmed** (`isPlaintextUnconfirmed`: `keyOnServer == false`
+  and no confirmation) — the server answered "no row" on a device with no
+  key. Runs are **refused** (`sync skipped: this device has no encryption
+  key; confirm SYNC WITHOUT ENCRYPTION…`) under
+  `QueueTab.unconfirmedBanner`, which offers `SET UP ENCRYPTION` and `SYNC
+  WITHOUT ENCRYPTION`. "No row" is an answer a server can give falsely to
+  hide an encrypted account, and the device has nothing local to contradict
+  it, so a human has to see the banner once before plaintext leaves (#379).
+  `E2eeService.confirmPlaintext()` is the opt-out; it is refused while the
+  state is still being read, with a key held, or when the account is (or may
+  be) encrypted.
+- **Plaintext** (`isPlaintext`: `keyOnServer == false` and confirmed) — the
+  account was never set up and the user said to sync anyway. Runs leave
+  plain, with the `warn` line, under the red `QueueTab.notEncryptedBanner`
+  and its `SET UP ENCRYPTION` button. The confirmation is a `'1'` under
+  `ai.augustyniak.capture.e2ee.plaintext-ok.<userId>` in the OS keyring,
+  read once by `followIdentity` (an error or timeout reads as "not
+  confirmed", so a keyring that never answers asks again), so a relaunch
+  keeps it and a reinstall asks again. It is cleared, in memory and in the
+  keyring, whenever the account turns out encrypted: set-up or unlock here,
+  a keyring key at sign-in, or the per-run re-check below finding a row
+  another device wrote. The keyring write in `confirmPlaintext` is best
+  effort and follows the in-memory flip: a failed write only means the next
+  launch asks again. **No server, no confirmation:** with no settings store
+  (tests, a build without Supabase) nothing can lie about the row, so the
+  account counts as confirmed and runs go out as before; the shipped app
+  always wires a `SupabaseE2eeSettingsStore` when Supabase is configured.
+- **Locked** (`isLocked`: `keyOnServer != false`) — the account has a key
+  this device lacks: a second device, a device after `LOCK` or `FORGET
+  KEY`, or a device that could not reach the server to ask. Runs are
+  **refused** (`sync skipped: encryption is locked on this device…`, or
+  `…could not check whether this account is encrypted`), never let out in
+  plaintext next to sealed rows under the same owner, under
+  `QueueTab.lockedBanner` and its `UNLOCK` button. Unknown is treated as
+  locked on purpose: "none" is the only answer that permits plaintext, so
+  it has to come from the server. `UNLOCK` in that state opens the unlock
+  form; `unlock` re-reads the row, and if the server now answers "none"
+  the dialog turns into a set-up (`E2eeNotSetUpException`).
+
+"None" is read once, at sign-in, and another device may set the account
+up during the session. So the plain transport and store a plaintext run
+gets are wrapped (`_PlaintextGuardTransport`, `_PlaintextGuardMediaStore`)
+with one more row read in front of their first call: a row that appeared
+since refuses the run (`sync skipped: encryption was set up on another
+device…`) and flips the device to locked, and the Queue follows. The check
+is per run, not per call — a row written while a run is already under way
+lets that run finish plain, and the next one is refused. Only a "row
+exists" answer moves the state: a lookup that fails refuses that run and
+nothing more (an offline blip must not pin an account that never set up to
+locked), and an answer that lands after a set-up or unlock went through is
+dropped.
+
+`E2eeService.enroll(passphrase)` is the set-up: derive a fresh salt and key,
+**insert the row, then** write the keyring and hold the key — in that order,
+so a failed insert leaves no key that could seal rows the server has no
+parameters for, and as an insert rather than an upsert, so a device that
+lost a race against another device's set-up gets
+`E2eeSettingsConflictException`, becomes locked (the row exists, whoever
+wrote it) and is switched to the unlock form instead of publishing a
+second key over the first device's envelopes. An insert that fails any
+other way (a timeout, a dropped connection) may have committed
+server-side, so it leaves `keyOnServer` unknown — locked — until the next
+read. `E2eeService.unlock(passphrase)` reads the row and derives with
+*its* salt and iteration count; a wrong passphrase is
+`InvalidE2eePassphraseException` and the device stays locked. Both take
+no user id: the key binds to the followed identity and no other, and both
+re-check after every `await` that the identity and generation captured at
+entry still hold (`_checkStill`), so a key derived for A never lands while
+B is signed in or after a sign-out. (`setupPassphrase` and
+`unlockWithPassphrase`, the primitives without the row, are
+`@visibleForTesting`: nothing in the app holds a key the server has no
+parameters for.) The table grants its owner `update` as well, but this
+client only ever inserts: an update would re-key the account and orphan
+every envelope sealed under the first key. The UI is `showE2eePassphraseDialog`
+(`presentation/e2ee_passphrase_dialog.dart`), opened from the Queue banner
+and from the Account card's ENCRYPTION row, which also carries `LOCK` (drop
+the key from memory for this session) and `FORGET KEY` (remove it from this
+device's keyring too, after a confirmation). Set-up shows the loss warning
+verbatim from the plan — nothing on the server can open an envelope, so
+nobody can recover a forgotten passphrase — and needs the passphrase twice,
+eight characters or more. **Rows already on the server in plaintext when a
+key is set up stay plaintext until they are next edited**: the engine
+pushes only changed rows, and this slice does not re-push the library. A
+user who wants the back-catalogue sealed edits it, or sets up encryption
+before the first sync; a one-time re-push is a separate change if it is
+ever wanted.
+
+None of this is silent. `E2eeService` is a `ChangeNotifier`, and the Queue
+shows the matching banner (red, persistent, not tied to a run) for as long
+as a signed-in user has no key here and no restore is in flight
+(`isRestoring`; runs are refused meanwhile, so there is nothing to warn
+about yet) — the launch sync and the edit-debounce sync open no panel, so a
+line that only showed during a run would miss exactly the runs that leave
+plaintext unattended. The sync status panel adds `ENCRYPTION · NOT
+ENCRYPTED, notes and files leave in plaintext`, `ENCRYPTION · LOCKED, sync
+paused until this device is unlocked` or `ENCRYPTION · end-to-end, sealed
+on this device` for a signed-in user. And `wrapTransport` logs one `warn`
+line through the controller's `LogSink` on every run it hands back plain,
+so the Logs tab records each one. Tests:
+`test/sync/e2ee_wiring_test.dart` drives the controller's Supabase slot
+through the same resolver shape and reads the wire (sealed with a key,
+plaintext without plus the warn line, the signed-in owner and the
+controller's `LogSink` handed through, and a source pin on `app.dart`'s
+wraps and `followIdentity`); `test/sync/e2ee_service_test.dart` covers A
+to B without a key, restore from the keyring, the same-id no-op, the
+late restore after sign-out, the two refused runs, and the passphrase
+flow (set-up writes the row with the build's iteration count, unlock
+right and wrong, the lost race leaving the device locked, the failed
+insert leaving it unknown, the unanswered lookup, the per-run re-check
+refusing a run once another device set up, a sign-out during set-up and
+a user switch during unlock landing nothing, lock and forget leaving the
+device locked);
+`test/sync/supabase_e2ee_settings_store_test.dart` pins the row shape and
+that a malformed row throws rather than reading as "no key";
+`test/widget/queue_tab_test.dart` covers the banner appearing on sign-in,
+the panel line, set-up from the banner with the loss warning shown first
+and the next run sealed, a second device locked, refused and unlocked, a
+lost race turning the dialog into an unlock, and an unanswered lookup
+turning UNLOCK into a set-up once the server answers "none";
+`test/widget/account_section_test.dart` covers the ENCRYPTION row, LOCK
+and FORGET KEY.
+
+Four rules, each with a test that fails when it is broken
+(`test/sync/e2ee_cipher_test.dart`, `test/sync/encrypted_sync_transport_test.dart`,
+`test/sync/encrypted_media_store_test.dart`, `test/sync/sync_row_codec_test.dart`):
+
+- **Every envelope is bound to its place.** `E2eeCipher.seal` takes
+  associated data and has no default for it. For a sync row it is the owner
+  id, the table name and each key column's value, every part written
+  `<length>:<value>` and newline-joined so no two contexts can spell the same
+  bytes, with `revisions.at` parsed and re-encoded first because the device
+  pushes Dart's `.000Z` and Postgres answers `+00:00`; for a media blob it is
+  `<owner id>\n<object key>`, because the inner store prefixes the owner
+  folder outside the cipher. The owner id is this device's signed-in user,
+  never the row's `owner_id`, which is the server's word. A server that moves `encrypted_payload` between rows,
+  tables or owners, or a blob between keys, gets an envelope that fails
+  authentication — not one that decrypts into the wrong capture. The prefix
+  is `enc:v2:`; `enc:v1:` carried no associated data, was never written by a
+  release, and is refused.
+- **A row that fails to open stays sealed and is skipped.** `_unsealRow`
+  leaves `encrypted_payload` in place, logs one `warn` line through the
+  `LogSink` it was given, and never applies a row whose content columns are
+  the server's nulls. `SyncRowCodec` refuses any row that still carries an
+  envelope (`_stillSealed`), so the engine counts it as a codec skip and
+  holds the cursor at its `updated_at` exactly as for any other undecodable
+  row. The row is **not** removed from the page: the engine continues keyset
+  paging after the last row of the page it was handed, so dropping a row
+  here would re-fetch it forever. A transport that *opened* a row removes
+  the envelope, which is how the codec tells the two apart — and why an
+  install without the key applies nothing rather than blanks.
+- **A sealed row never comes back unsealed (#377).** The envelope-less
+  branch of `_unsealRow` exists for legacy plaintext rows, but on its own it
+  would let a hostile server strip the envelope from a sealed row and write
+  plaintext of its choosing. So `sync_rows.sealed` records what this device
+  last saw: the transport sets the private `syncRowSealedMarker` key
+  (`__sealed`) on every row it actually opened, and `SyncPushResult.sealed`
+  reports that a push sealed its rows; the engine bookkeeps both. On apply
+  (`_applyRecordings`, `_applySimple`, and so push-conflict rows too) a row
+  whose bookkept state is `sealed` but which carries no marker is refused
+  per row, **after** the codec has decoded it: no apply, no bookkeeping
+  change, counted as `SupabaseSyncResult.downgraded`, and one `warn` line per
+  run through the engine's `LogSink`. The cursor is not held, so the row is
+  seen again only when it changes on the server. A row that still carries its
+  envelope (decrypt failed, key rotated, device locked) never reaches that
+  check: the codec refuses it, so it is skipped with the cursor held exactly
+  as before, and only a row that opened in plaintext is a downgrade. Legacy rows (bookkept `sealed =
+  0`) apply exactly as before, and the first sealed apply or push flips the
+  flag. `revisions` has no refusal because a known id is skipped before it is
+  decoded. The migration adds the column to existing databases with default 0.
+  The flag is **sticky**: a plain push or a conflict adoption never clears it,
+  and the only way back is the bookkeeping row going away. A refused
+  push-conflict row leaves the local row dirty, so it re-conflicts and
+  re-logs every run until the server row arrives sealed; that is accepted,
+  nothing is corrupted. Tombstones carry no envelope by design, so an
+  unmarked tombstone for a sealed id still deletes: a server can always
+  withhold or delete rows, and this rule guards content, not presence. A
+  plaintext *push* of a sealed-bookkept row is not refused here; that is the
+  fresh-device decision in plan 007 Part B.
+  **Maintenance:** every new synced table must set `sealed` on push and check
+  it on pull; a table that forgets is a table the server can downgrade. A new
+  codec decode in the engine without the check beside it is a regression.
+- **The master key never meets AES, and the verifier is not the key.**
+  `E2eeKeyDerivation` derives the master key from the passphrase with
+  PBKDF2-HMAC-SHA256; `E2eeCipher.forMasterKey` HKDFs a data key from it
+  under one `info` string and `computeKeyCheckHash` HKDFs the server-side
+  check tag (`kc1:` + hex) under another. The tag stored in
+  `user_e2ee_settings.key_check_hash` lets a second device confirm a
+  passphrase before trusting the key it derived; it opens nothing.
+- **The iteration count is data, not a constant.** It travels with the salt
+  (`user_e2ee_settings.kdf_iterations`, range 1000..10000000 enforced by
+  both the column constraint and `E2eeKeyDerivation`, default for pre-#298
+  rows 100000) and `E2eeService.unlockWithPassphrase` derives with the
+  stored count, never this build's default. The bound is what stops a
+  hostile row from weakening the key or pinning the unlock for hours. A row
+  whose check tag predates the `kc1:` prefix is reported as a legacy row to
+  set up again, not as a wrong passphrase. The default for a new key is
+  `E2eeKeyDerivation.defaultIterations` (600000, OWASP's PBKDF2-SHA256
+  figure; about 1.5 s in pure Dart on a desktop, paid once per passphrase
+  entry). A server-side verifier is an offline guess oracle by construction
+  — anyone with database read can run the KDF against it — so the count is
+  the only cost between a leaked row and the passphrase, and it has to be
+  raisable without orphaning every existing key.
+
+`test/sync/sync_engine_pull_test.dart` drives a still-sealed row and a
+sealed tombstone through the engine: skipped and held, and deleted,
+respectively. The pgTAP file `supabase/tests/e2ee_encrypted_payload_test.sql`
+covers the columns, the push of a sealed revision and the iteration range. CI does not
+run pgTAP; `supabase start && supabase db reset && supabase test db` does.
 
 ## Seam
 
@@ -411,6 +787,12 @@ lib/features/sync/
   domain/media_sync.dart          MediaSyncService, MediaSyncJob, MediaObjectStore
                                   DisabledMediaObjectStore — throws at use
   data/supabase_media_store.dart  the private `captures` bucket
+  domain/e2ee_settings_store.dart E2eeSettingsStore (read, insert-only create),
+                                  E2eePublicParams, E2eeSettingsConflictException
+  data/e2ee_service.dart          E2eeService — the key, followIdentity, enroll,
+                                  unlock, wrapTransport/wrapMediaStore
+  data/supabase_e2ee_settings_store.dart  `user_e2ee_settings`, one row per owner
+  presentation/e2ee_passphrase_dialog.dart  set-up / unlock dialog
 ```
 
 `SyncEngine` is constructed with a `SyncTransport`, a `SyncBookkeeping`
@@ -437,9 +819,13 @@ the Supabase slot out entirely rather than handing the engine an empty
 `_recordings` snapshot against non-empty bookkeeping — the controller-side
 half of the same guard the engine fuse above is the push-side half of:
 
-- `syncTransportResolver: SyncTransport Function()?` — a resolver, not a
-  snapshot, the seam rule the root `CLAUDE.md` states once: a Config change
-  only affects a run started afterwards, never one already in flight.
+- `syncTransportResolver: SyncTransport Function(String ownerId, LogSink
+  log)?` — a resolver, not a snapshot, the seam rule the root `CLAUDE.md`
+  states once: a Config change only affects a run started afterwards, never
+  one already in flight. Called once per run, together with
+  `mediaStoreResolver` and before either slot starts, with the signed-in
+  owner (an E2EE envelope is bound to it) and the controller's `LogSink`,
+  so a row the decorator cannot open is reported in the Logs tab.
 - `authGateway: AuthGateway?` — `currentIdentity != null` gates the whole
   slot.
 - `projectsRepository`, `clipboardRepository` — read once per run to build

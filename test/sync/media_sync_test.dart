@@ -20,8 +20,28 @@ class FakeMediaStore implements MediaObjectStore {
     objects[key] = await source.readAsBytes();
   }
 
+  /// Chunks handed to the consumer so far, to prove a refused read stopped.
+  int pulled = 0;
+
+  /// Throws after this many chunks, like a connection dropped mid-body.
+  int? failAfterChunks;
+
   @override
-  Future<List<int>> download(String key) async => objects[key]!;
+  Stream<List<int>> download(String key, {required int maxBytes}) {
+    final List<int> bytes = objects[key]!;
+    final List<List<int>> chunks = <List<int>>[
+      for (int i = 0; i < bytes.length; i += 4)
+        bytes.sublist(i, i + 4 > bytes.length ? bytes.length : i + 4),
+    ];
+    return boundedObjectBytes(
+      Stream<List<int>>.fromIterable(chunks).map((List<int> chunk) {
+        if (pulled == failAfterChunks) throw StateError('connection reset');
+        pulled++;
+        return chunk;
+      }),
+      maxBytes: maxBytes,
+    );
+  }
 }
 
 String hashOf(List<int> bytes) => sha256.convert(bytes).toString();
@@ -40,11 +60,13 @@ void main() {
     if (await dir.exists()) await dir.delete(recursive: true);
   });
 
-  MediaSyncJob job(String name, {String? hash}) => MediaSyncJob(
-    key: 'captures/r1/$name',
-    localPath: p.join(dir.path, name),
-    contentHash: hash,
-  );
+  MediaSyncJob job(String name, {String? hash, int sizeBytes = 0}) =>
+      MediaSyncJob(
+        key: 'captures/r1/$name',
+        localPath: p.join(dir.path, name),
+        contentHash: hash,
+        sizeBytes: sizeBytes,
+      );
 
   test('uploads a local source the store lacks, once', () async {
     await File(p.join(dir.path, 'r1.m4a')).writeAsBytes(audio);
@@ -143,6 +165,62 @@ void main() {
     expect(dir.listSync(), hasLength(1), reason: 'no .part left behind');
   });
 
+  test('an object larger than the row says is rejected unread', () async {
+    final List<int> big = List<int>.generate(64, (int i) => i);
+    store.objects['captures/r1/r1.m4a'] = big;
+
+    final MediaSyncResult result = await MediaSyncService(store: store).sync(
+      <MediaSyncJob>[job('r1.m4a', hash: hashOf(big), sizeBytes: 8)],
+      downloadRoot: dir.path,
+    );
+
+    expect(result.rejected, 1);
+    expect(result.failed, 0);
+    expect(store.pulled, lessThan(16), reason: 'the read stopped early');
+    expect(dir.listSync(), isEmpty, reason: 'no source and no .part');
+  });
+
+  test('a download is hashed as it streams and lands on a match', () async {
+    final List<int> body = List<int>.generate(21, (int i) => i);
+    store.objects['captures/r1/r1.m4a'] = body;
+
+    final MediaSyncResult result = await MediaSyncService(store: store).sync(
+      <MediaSyncJob>[job('r1.m4a', hash: hashOf(body), sizeBytes: 21)],
+      downloadRoot: dir.path,
+    );
+
+    expect(result.downloaded, 1);
+    expect(await File(p.join(dir.path, 'r1.m4a')).readAsBytes(), body);
+    expect(dir.listSync(), hasLength(1), reason: 'no .part left behind');
+  });
+
+  test('a row without sizeBytes falls back to the hard ceiling', () async {
+    store.objects['captures/r1/r1.m4a'] = audio;
+
+    final MediaSyncResult result = await MediaSyncService(store: store).sync(
+      <MediaSyncJob>[job('r1.m4a', hash: hashOf(audio))],
+      downloadRoot: dir.path,
+    );
+
+    expect(result.downloaded, 1);
+    expect(MediaSyncService.fallbackDownloadCeilingBytes, 2 << 30);
+  });
+
+  test('a body that dies mid-stream fails and leaves no .part', () async {
+    final List<int> body = List<int>.generate(32, (int i) => i);
+    store.objects['captures/r1/r1.m4a'] = body;
+    store.failAfterChunks = 2;
+
+    final MediaSyncResult result = await MediaSyncService(store: store).sync(
+      <MediaSyncJob>[job('r1.m4a', hash: hashOf(body), sizeBytes: 32)],
+      downloadRoot: dir.path,
+    );
+
+    expect(result.failed, 1);
+    expect(result.rejected, 0);
+    expect(dir.listSync(), isEmpty);
+  });
+
   test('a hash mismatch writes nothing and fails the run', () async {
     store.objects['captures/r1/r1.m4a'] = audio;
 
@@ -234,6 +312,7 @@ void main() {
       status: RecordingStatus.completed,
       type: CaptureType.audioRecording,
       contentHash: hashOf(audio),
+      sizeBytes: 7,
     );
 
     test('keys by recording id and file name, carrying the hash', () {
@@ -243,6 +322,7 @@ void main() {
 
       expect(jobs.single.key, 'captures/r1/r1.m4a');
       expect(jobs.single.contentHash, hashOf(audio));
+      expect(jobs.single.sizeBytes, 7);
     });
 
     test('skips bare names and unsafe ids', () {
@@ -278,5 +358,6 @@ class _FailingFirstStore implements MediaObjectStore {
       inner.upload(key, source, sha256: sha256);
 
   @override
-  Future<List<int>> download(String key) => inner.download(key);
+  Stream<List<int>> download(String key, {required int maxBytes}) =>
+      inner.download(key, maxBytes: maxBytes);
 }

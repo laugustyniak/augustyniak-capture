@@ -21,6 +21,54 @@ void main() {
     if (await directory.exists()) await directory.delete(recursive: true);
   });
 
+  test(
+    'applySyncedProjects keeps this device\'s launch settings for a known id '
+    'and gives a new id none',
+    () async {
+      const Project mine = Project(
+        id: 'known',
+        name: 'Old name',
+        repoPath: '/work/known',
+        agentSettings: <AgentKind, AgentSettings>{
+          AgentKind.codex: AgentSettings(additionalArgs: <String>['--local']),
+        },
+      );
+      await repository.saveAll(<Project>[mine], activeProjectId: null);
+      final ProjectsController controller = ProjectsController(
+        repository: repository,
+      );
+      await controller.initialize();
+
+      const Map<AgentKind, AgentSettings> remote = <AgentKind, AgentSettings>{
+        AgentKind.claudeCode: AgentSettings(skipPermissions: true),
+      };
+      await controller.applySyncedProjects(<Project>[
+        mine.copyWith(name: 'New name', agentSettings: remote),
+        const Project(
+          id: 'fresh',
+          name: 'Fresh',
+          repoPath: '/work/fresh',
+          agentSettings: remote,
+        ),
+      ]);
+
+      final Project known = controller.projects.firstWhere(
+        (Project p) => p.id == 'known',
+      );
+      expect(known.name, 'New name');
+      expect(known.agentSettings.keys, <AgentKind>[AgentKind.codex]);
+      expect(known.settingsFor(AgentKind.codex).additionalArgs, <String>[
+        '--local',
+      ]);
+      expect(
+        controller.projects
+            .firstWhere((Project p) => p.id == 'fresh')
+            .agentSettings,
+        isEmpty,
+      );
+    },
+  );
+
   test('create, update, select and delete stay durable', () async {
     final ProjectsController controller = ProjectsController(
       repository: repository,
@@ -71,7 +119,8 @@ void main() {
     expect(controller.activeProjectId, isNull);
   });
 
-  test('active falls back to the first project when the stored id is unknown',
+  test(
+    'active falls back to the first project when the stored id is unknown',
       () async {
     const List<Project> projects = <Project>[
       Project(id: 'first', name: 'First', repoPath: '/work/first'),
@@ -85,10 +134,10 @@ void main() {
     await controller.initialize();
 
     expect(controller.activeProjectId, 'first');
-  });
+    },
+  );
 
-  test('active falls back to the first project when none was stored',
-      () async {
+  test('active falls back to the first project when none was stored', () async {
     const List<Project> projects = <Project>[
       Project(id: 'first', name: 'First', repoPath: '/work/first'),
       Project(id: 'second', name: 'Second', repoPath: '/work/second'),
@@ -122,17 +171,74 @@ void main() {
       },
     );
 
-    await controller.launch(project, AgentKind.claudeCode);
+    final AgentSessionLaunchResult? result = await controller.launch(
+      project,
+      AgentKind.claudeCode,
+    );
 
+    expect(result!.sessionName, 'test-session');
     final AgentSessionLaunchRequest request = launcher.requests.single;
+    expect(request.detached, isFalse);
     expect(request.projectId, 'augustyniak-capture');
     expect(request.projectName, 'Augustyniak Capture');
     expect(request.repoPath, '/work/augustyniak-capture');
     expect(request.sessionName, 'augustyniak-capture-work');
     expect(request.agent, ProjectAgent.claude);
-    expect(request.arguments, <String>['--model', 'sonnet', 'Read AGENTS.md.']);
+    expect(request.arguments, <String>['--model', 'sonnet']);
+    expect(request.prompt, 'Read AGENTS.md.');
     expect(controller.isLaunching(project.id, AgentKind.claudeCode), isFalse);
   });
+
+  test(
+    'a detached launch is passed through, and attach goes by name',
+    () async {
+    final _CapturingLauncher launcher = _CapturingLauncher();
+    final ProjectsController controller = ProjectsController(
+      repository: repository,
+      launcher: launcher,
+    );
+      const Project project = Project(id: 'p', name: 'P', repoPath: '/work/p');
+
+    final AgentSessionLaunchResult? result = await controller.launch(
+      project,
+      AgentKind.codex,
+      detached: true,
+    );
+    await controller.attach(result!.sessionName);
+
+    expect(launcher.requests.single.detached, isTrue);
+    expect(result.detached, isTrue);
+    expect(launcher.attached, <String>['test-session']);
+    },
+  );
+
+  test(
+    'an explicit launch prompt overrides the saved project prompt',
+    () async {
+      final _CapturingLauncher launcher = _CapturingLauncher();
+      final ProjectsController controller = ProjectsController(
+        repository: repository,
+        launcher: launcher,
+      );
+      const Project project = Project(
+        id: 'p',
+        name: 'P',
+        repoPath: '/work/p',
+        agentSettings: <AgentKind, AgentSettings>{
+          AgentKind.codex: AgentSettings(initialPrompt: 'saved prompt'),
+        },
+      );
+
+      await controller.launch(
+        project,
+        AgentKind.codex,
+        detached: true,
+        prompt: 'prompt from dialog',
+      );
+
+      expect(launcher.requests.single.prompt, 'prompt from dialog');
+    },
+  );
 
   test('launch maps Antigravity to AGY interactive prompt arguments', () async {
     final _CapturingLauncher launcher = _CapturingLauncher();
@@ -157,11 +263,38 @@ void main() {
     final AgentSessionLaunchRequest request = launcher.requests.single;
     expect(request.agent, ProjectAgent.antigravity);
     expect(request.agent.executable, 'agy');
-    expect(request.arguments, <String>[
-      '--model',
-      'gemini-2.5-pro',
-      '--prompt-interactive',
-      'Read AGENTS.md.',
+    expect(request.arguments, <String>['--model', 'gemini-2.5-pro']);
+    expect(request.prompt, 'Read AGENTS.md.');
+  });
+
+  test('skip permissions passes each agent its own flag', () async {
+    final _CapturingLauncher launcher = _CapturingLauncher();
+    final ProjectsController controller = ProjectsController(
+      repository: repository,
+      launcher: launcher,
+    );
+    const Project project = Project(
+      id: 'p',
+      name: 'P',
+      repoPath: '/work/p',
+      agentSettings: <AgentKind, AgentSettings>{
+        AgentKind.codex: AgentSettings(
+          skipPermissions: true,
+          initialPrompt: 'Go.',
+        ),
+        AgentKind.claudeCode: AgentSettings(skipPermissions: true),
+      },
+    );
+
+    await controller.launch(project, AgentKind.codex);
+    await controller.launch(project, AgentKind.claudeCode);
+
+    expect(launcher.requests.first.arguments, <String>[
+      '--dangerously-bypass-approvals-and-sandbox',
+    ]);
+    expect(launcher.requests.first.prompt, 'Go.');
+    expect(launcher.requests.last.arguments, <String>[
+      '--dangerously-skip-permissions',
     ]);
   });
 
@@ -199,7 +332,10 @@ void main() {
     await controller.applySyncedProjects(<Project>[
       const Project(id: 'pulled', name: 'Pulled', repoPath: '/work/pulled'),
     ]);
-    expect(controller.projects.map((Project p) => p.id), containsAll(<String>[local.id, 'pulled']));
+    expect(
+      controller.projects.map((Project p) => p.id),
+      containsAll(<String>[local.id, 'pulled']),
+    );
 
     // The user's next action — unrelated to sync — must not rewrite
     // `projects.json` from a pre-sync `_projects` and drop the pulled row.
@@ -209,10 +345,15 @@ void main() {
       repository: ProjectsRepository(directoryProvider: () async => directory),
     );
     await reloaded.initialize();
-    expect(reloaded.projects.map((Project p) => p.id), containsAll(<String>[local.id, 'pulled']));
+    expect(
+      reloaded.projects.map((Project p) => p.id),
+      containsAll(<String>[local.id, 'pulled']),
+    );
   });
 
-  test('applySyncedProjectDelete does not resurrect on the next select — I3', () async {
+  test(
+    'applySyncedProjectDelete does not resurrect on the next select — I3',
+    () async {
     final ProjectsController controller = ProjectsController(
       repository: repository,
     );
@@ -236,12 +377,15 @@ void main() {
     // A later, unrelated select must not bring the deleted project back.
     await controller.select(first.id);
     final ProjectsController reloaded = ProjectsController(
-      repository: ProjectsRepository(directoryProvider: () async => directory),
+        repository: ProjectsRepository(
+          directoryProvider: () async => directory,
+        ),
     );
     await reloaded.initialize();
     expect(reloaded.projects.map((Project p) => p.id), <String>[first.id]);
     expect(reloaded.activeProjectId, first.id);
-  });
+    },
+  );
 
   test(
     'applySyncedProjects after dispose does not throw and still writes — round 2 LOW 2',
@@ -259,7 +403,9 @@ void main() {
       ]);
 
       final ProjectsController reloaded = ProjectsController(
-        repository: ProjectsRepository(directoryProvider: () async => directory),
+        repository: ProjectsRepository(
+          directoryProvider: () async => directory,
+        ),
       );
       await reloaded.initialize();
       expect(reloaded.projects.map((Project p) => p.id), <String>['pulled']);
@@ -276,10 +422,18 @@ class _CapturingLauncher implements AgentSessionLauncher {
     AgentSessionLaunchRequest request,
   ) async {
     requests.add(request);
-    return const AgentSessionLaunchResult(
+    return AgentSessionLaunchResult(
       sessionName: 'test-session',
       attachedToExistingSession: false,
+      detached: request.detached,
     );
+  }
+
+  final List<String> attached = <String>[];
+
+  @override
+  Future<void> attach(String sessionName) async {
+    attached.add(sessionName);
   }
 }
 

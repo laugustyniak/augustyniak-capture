@@ -257,8 +257,11 @@ class _ProjectCapturesSheetState extends State<ProjectCapturesSheet> {
                                         .canRoute(recording),
                                     onRoute: () => widget.recordingsController
                                         .route(recording.id),
-                                    canHandoff: widget.recordingsController
-                                        .canHandoff(recording),
+                                    canHandoff:
+                                        widget.recordingsController
+                                            .canHandoff(recording) ||
+                                        widget.recordingsController
+                                            .canSend(recording),
                                     onHandoff: () => showHandoffSheet(
                                       context,
                                       controller: widget.recordingsController,
@@ -277,9 +280,16 @@ class _ProjectCapturesSheetState extends State<ProjectCapturesSheet> {
                                     onCancelProcessing: () => widget
                                         .recordingsController
                                         .cancelProcessing(recording.id),
-                                    processingElapsed: widget
-                                        .recordingsController
-                                        .processingElapsedFor(recording.id),
+                                    processingTicker:
+                                        widget.recordingsController
+                                                .processingElapsedFor(
+                                                  recording.id,
+                                                ) !=
+                                            null
+                                        ? widget
+                                              .recordingsController
+                                              .processingTicker
+                                        : null,
                                     onEdit: () => setState(
                                       () => _editingId = recording.id,
                                     ),

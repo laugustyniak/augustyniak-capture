@@ -48,7 +48,10 @@ that. One brief with notes about a prospective client reached a public commit
 that way, and clearing it took a history rewrite — after which `refs/pull/*`
 still held the blob. Before the commit exists is the only reliable place to stop
 it. `git commit --no-verify` overrides, if a file there ever genuinely belongs
-in the repo.
+in the repo. The hook also refuses keystore, provisioning, Firebase config and
+`.env` files, at any depth and in any letter case, and the CI `guard` job runs
+the same path rule (`tool/blocked-paths.sh`) plus gitleaks as the server-side
+fallback for the commits a hook never sees.
 
 - Run: `flutter run`
 - Run with transcription token: `flutter run --dart-define=TRANSCRIPTION_TOKEN=secret`
@@ -64,9 +67,12 @@ in the repo.
   app and a web client. Flutter-specific names win when both pairs exist.
   These two values are public client configuration, not secrets. Never pass a
   database password, `service_role`, Supabase secret key or provider-wide API
-  key to the app. Without both values Supabase is not initialized and local
-  capture behaves exactly as before. Persisted sessions and PKCE verifiers use
-  the OS keyring rather than Supabase's Shared Preferences defaults.
+  key to the app. `SupabaseConfig` refuses an `sb_secret_` key and any JWT
+  whose `role` is not `anon`, and the Config tab's account section says why
+  the build has no cloud account. Without both values Supabase is not
+  initialized and local capture behaves exactly as before. Persisted sessions
+  and PKCE verifiers use the OS keyring rather than Supabase's Shared
+  Preferences defaults.
   Google OAuth returns to `ai.augustyniak.capture://login-callback/`; that exact
   URI must be present in the Supabase Auth redirect allow list. Native platform
   registration is checked in, and `tool/deploy.sh` registers the Linux handler.
@@ -81,7 +87,7 @@ CI is **live** (`.github/workflows/ci.yml`) and runs `flutter analyze` + `flutte
 
 ## Architecture
 
-Feature-first layout under `lib/features/<feature>/{domain,data,presentation}`. Seventeen features: `recordings`, `projects`, `transcription`, `processing`, `enrichment`, `settings`, `costs`, `logs`, `shortcuts`, `timer`, `clipboard`, `gamification`, `momentum`, `backup`, `command`, `auth`, `sync`. No state-management or DI package — plain `ChangeNotifier` + constructor injection. The one thing that is not feature-scoped is `core/database/app_database.dart` — see Persistence.
+Feature-first layout under `lib/features/<feature>/{domain,data,presentation}`. Twenty features: `recordings`, `projects`, `transcription`, `processing`, `enrichment`, `settings`, `costs`, `logs`, `shortcuts`, `timer`, `clipboard`, `gamification`, `momentum`, `backup`, `command`, `auth`, `sync`, `mcp`, `connections`, `work_dashboard`. No state-management or DI package — plain `ChangeNotifier` + constructor injection. The one thing that is not feature-scoped is `core/database/app_database.dart` — see Persistence.
 
 **Deep reference lives under `docs/`, one file per area.** This file carries the invariants — the ordering rules, the durability rules and the seams. Open the matching reference before changing anything in its area; each is written to be read whole.
 
@@ -104,6 +110,8 @@ Feature-first layout under `lib/features/<feature>/{domain,data,presentation}`. 
 | `docs/architecture/persistence.md` | `recordings_repository.dart`, `app_database.dart`, any `*_repository.dart`, the JSON indexes or the SQLite mirror |
 | `docs/architecture/processing.md` | `features/processing/`, a `Processor`, `OcrService`, a video extractor, `provider_failure.dart` |
 | `docs/architecture/sync.md` | `features/sync/`, `sync_push`, `sync_rows`, the cursor |
+| `docs/architecture/mcp.md` | `bin/capture_mcp.dart`, `features/mcp/`, the MCP tools or the read-only reader |
+| `docs/architecture/connections-work-dashboard.md` | `features/connections/`, `features/work_dashboard/`, the REVIEW CONNECTIONS dialog, the WORK tab, the Todoist reader |
 | `docs/architecture/testing.md` | writing or debugging any test, before trusting a green run |
 
 `docs/plans/` and `docs/superpowers/specs/` hold the design documents those files cite.
@@ -135,16 +143,16 @@ Any new capture path must mirror those five steps exactly. **A capture may hold 
 
 **2. The index survives a bad read.** `saveAll` rewrites the *whole* `recordings.json`, so anything that makes the in-memory list wrong makes it permanently wrong on disk — which is how history was lost before, when `loadAll` answered `[]` to both "no index yet" and "could not read the index". `loadAll` therefore has **three** outcomes, not two; `_indexUnreadable` refuses every write for the rest of the session; a shrink nobody announced is backed up first; and orphaned sources are re-adopted. Details, the SQLite mirror in front of it and the `recordings.db-stale` marker: `docs/architecture/persistence.md`.
 
-Neither rule is weakened by the two removal paths (`discardRecording`, `deleteRecording`): they govern a capture the app has *accepted*, and both of those are the user saying it should not have been.
+Neither rule is weakened by the three removal paths (`discardRecording`, `deleteRecording`, and the sync-applied `applySyncedRecordingDelete`, which moves the files into `.trash/` instead of unlinking them): they govern a capture the app has *accepted*, and the first two of those are the user saying it should not have been.
 
 ## The features
 
-Seventeen features, sixteen lines — `timer`/`momentum` share one. Read the pointer before changing anything in its area.
+Twenty features, eighteen lines — `timer`/`momentum` share one, and so do `connections`/`work_dashboard`. Read the pointer before changing anything in its area.
 
-- **`recordings`** — the queue, the capture screen, the editor, the controller that owns the pipeline. `docs/architecture/capture-pipeline.md`, `docs/architecture/ui.md`.
+- **`recordings`** — the queue, the capture screen, the editor, the controller that owns the pipeline. `docs/architecture/capture-pipeline.md`, `docs/architecture/ui.md`. External text captures (Siri intent, Android CREATE_NOTE) arrive through an inbox directory drained after load and on resume: `docs/architecture/capture-pipeline.md#inbox-external-capture`.
 - **`processing`** — `Processor` turns a segment's source into text. **The rule to enforce in review: a processor only ever reads the source — never writes, moves or deletes it.** `docs/architecture/processing.md`.
 - **`transcription`** — `TranscriptionService` and the on-device engine behind `ProfileKind.localWhisper`. Long audio has three ceilings and only one of them tells you. `docs/architecture/transcription.md`.
-- **`enrichment`** — the optional second AI stage: processor output becomes `title`, `category`, `summary`, `tags`. Best-effort and last, after the item is already persisted `completed`; it respects field ownership and never touches `status`. `docs/architecture/enrichment.md`.
+- **`enrichment`** — the optional second AI stage: processor output becomes `title`, `category`, `summary`, `tags`, and a `priority` ranked against the user's profile ("soul"). Best-effort and last, after the item is already persisted `completed`; it respects field ownership and never touches `status`. `docs/architecture/enrichment.md`.
 - **`settings`** — provider profiles, and tokens encrypted at rest under a master key in the OS keyring. Transport is **reported, not enforced**. `docs/architecture/settings-security.md`.
 - **`backup`** — the only answer to a mobile reinstall, which deletes the container the recordings live in. A zip merged back in additively; import never overwrites a source. `docs/architecture/backup.md`.
 - **`projects`** — a versioned project list plus the active id, and the three destinations that take a capture off the desk. `docs/architecture/agent-handoff.md`.
@@ -157,6 +165,9 @@ Seventeen features, sixteen lines — `timer`/`momentum` share one. Read the poi
 - **`logs`** — a `ChangeNotifier` ring buffer, newest-first, capacity 500. Read-only view; nothing in the Logs tab mutates recordings.
 - **`auth`** — optional Supabase bootstrap and OS-keyring session storage. Missing config or an unavailable keyring never blocks local capture. The cloud-data transport itself lives in `features/sync/`; the Turso/R2 path it replaced was removed in #202.
 - **`sync`** — Supabase metadata sync: push-then-pull over one version-gated RPC, applied through the controllers' own apply entry points, never a second repository writing underneath them. Runs from SYNC NOW, once at launch and 2 s after a hand edit, only when signed in; media follows through a private Storage bucket, and a download lands only after it hashes to the synced `contentHash`. `docs/architecture/sync.md`.
+- **`mcp`** — a separate, **read-only** stdio MCP server (`bin/capture_mcp.dart`) that lets coding agents search and read captures. SQLite opened `readOnly`, `recordings.db-stale` honoured, no file paths in output, and **no `package:flutter` in its import graph** (a test walks it). Writes belong behind `RecordingsController`, never here. `docs/architecture/mcp.md`.
+- **`connections`** — the REVIEW CONNECTIONS dialog: the active enrichment model reviews one local day of captures and suggests links. Read-only, ephemeral, costed through the usage sink. `docs/architecture/connections-work-dashboard.md`.
+- **`work_dashboard`** — the WORK tab: a read-only Todoist view beside Capture projects and focus sessions; the token is a read token in the OS keyring. `docs/architecture/connections-work-dashboard.md`.
 
 Not feature-scoped: `core/database/app_database.dart` (see Persistence), `core/http/provider_failure.dart`, `core/sync/`.
 

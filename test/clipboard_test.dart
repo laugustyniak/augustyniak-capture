@@ -120,6 +120,7 @@ void main() {
       transcription: _StubTranscription('Dziękuję bardzo.'),
       picked: audioSource(),
     );
+    await controller.initialize();
 
     await controller.addUpload(CaptureType.audioUpload);
     await controller.waitForProcessing();
@@ -133,6 +134,7 @@ void main() {
       clipboard: clipboard,
       picked: audioSource(),
     );
+    await controller.initialize();
 
     // No provider configured -> the processor throws.
     await controller.addUpload(CaptureType.audioUpload);
@@ -145,6 +147,7 @@ void main() {
     final _RecordingClipboard clipboard = _RecordingClipboard();
     final RecordingsController controller = build(clipboard: clipboard);
 
+    await controller.initialize();
     await controller.addTextNote('notatka pisana ręcznie');
     await controller.waitForProcessing();
     expect(controller.recordings.single.status, RecordingStatus.completed);
@@ -157,6 +160,7 @@ void main() {
       transcription: _StubTranscription('tekst wynikowy'),
       picked: audioSource(),
     );
+    await controller.initialize();
 
     await controller.addUpload(CaptureType.audioUpload);
     await controller.waitForProcessing();
@@ -173,6 +177,7 @@ void main() {
       clipboard: clipboard,
       picked: audioSource(),
     );
+    await controller.initialize();
 
     await controller.addUpload(CaptureType.audioUpload);
     await controller.waitForProcessing();

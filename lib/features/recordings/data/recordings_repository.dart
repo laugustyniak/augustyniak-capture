@@ -7,6 +7,7 @@ import 'package:path_provider/path_provider.dart';
 import 'package:sqlite3/sqlite3.dart';
 
 import '../../../core/database/app_database.dart';
+import '../../../core/security/owner_only_file.dart';
 import '../domain/capture_category.dart';
 import '../domain/capture_segment.dart';
 import '../domain/capture_type.dart';
@@ -34,11 +35,24 @@ class IndexUnreadableException implements Exception {
 /// only move where it happens.
 typedef RecordingsDirectoryProvider = Future<Directory> Function();
 
+/// The one primitive [RecordingsRepository.trashArtifacts] cannot exercise on
+/// a single filesystem: `rename` only refuses across mount points (`EXDEV`),
+/// so a test hands in one that refuses, and the copy-then-delete fallback and
+/// its rollback become reachable.
+typedef RenameFile = Future<void> Function(File source, String target);
+
 class RecordingsRepository {
-  RecordingsRepository({RecordingsDirectoryProvider? directoryProvider})
-    : _directoryProvider = directoryProvider ?? _defaultDirectory;
+  RecordingsRepository({
+    RecordingsDirectoryProvider? directoryProvider,
+    RenameFile? renameFile,
+  }) : _directoryProvider = directoryProvider ?? _defaultDirectory,
+       _renameFile = renameFile ?? _rename;
 
   final RecordingsDirectoryProvider _directoryProvider;
+  final RenameFile _renameFile;
+
+  static Future<void> _rename(File source, String target) =>
+      source.rename(target);
 
   static Future<Directory> _defaultDirectory() async {
     final Directory appDirectory = await getApplicationDocumentsDirectory();
@@ -52,23 +66,180 @@ class RecordingsRepository {
 
   void expectRowCount(int count) => _knownCount = count;
 
+  List<String?> _artifactPaths(Recording recording) => <String?>[
+    for (final CaptureSegment segment in recording.segments) segment.filePath,
+    recording.thumbPath,
+    p.join(p.dirname(recording.filePath), '${recording.id}.thumb.jpg'),
+  ];
+
   Future<void> deleteArtifacts(Recording recording) async {
-    final List<String?> paths = <String?>[
-      for (final CaptureSegment segment in recording.segments) segment.filePath,
-      recording.thumbPath,
-      p.join(p.dirname(recording.filePath), '${recording.id}.thumb.jpg'),
-    ];
-    for (final String? path in paths) {
+    for (final String? path in _artifactPaths(recording)) {
       if (path == null || path.isEmpty) continue;
       final File file = File(path);
       if (await file.exists()) await file.delete();
     }
   }
 
+  /// How long a trashed file is kept before [pruneTrash] removes it (#304).
+  static const Duration trashRetention = Duration(days: 30);
+
+  /// Exactly 13 digits (epoch milliseconds): a hand-copied UUID-named file in
+  /// `.trash` starts with hex digits and must not parse as an ancient stamp.
+  static final RegExp _trashName = RegExp(r'^(held-)?(\d{13})-.+$');
+
+  /// `<recordings>/.trash/`, created on first use.
+  ///
+  /// A *subdirectory*, deliberately: [findOrphans] lists the recordings
+  /// directory without recursing, so a file moved in here is never re-adopted
+  /// into the queue. A flat file in the recordings directory would be.
+  Future<Directory> trashDirectory() async {
+    final Directory directory = Directory(
+      p.join((await recordingsDirectory()).path, '.trash'),
+    );
+    if (!await directory.exists()) {
+      await directory.create(recursive: true);
+      await restrictDirectoryToOwner(directory.path);
+    }
+    return directory;
+  }
+
+  /// Move every artifact [deleteArtifacts] would remove into [trashDirectory],
+  /// renaming it to `<ms>-<name>` — or `held-<ms>-<name>` when [held], which
+  /// [pruneTrash] never touches until [releaseHeldTrash] confirms it. A source
+  /// that is already gone is skipped, as in [deleteArtifacts]. Returns how many
+  /// files moved.
+  ///
+  /// All or nothing: every move goes through [_moveFile], which falls back to
+  /// copy-then-delete when `rename` refuses (a source on another filesystem
+  /// raises `EXDEV`), and if an artifact still cannot move, those already moved
+  /// are put back through the same primitive and the error is rethrown. The
+  /// row is kept on a throw, so it must never point at files that are already
+  /// in `.trash`; and a tombstone that cannot be applied would otherwise be
+  /// retried by every sync run for ever.
+  ///
+  /// Two captures trashed in the same millisecond with the same basename would
+  /// collide; the name is a file id, so that needs the same file twice in one
+  /// millisecond, and is accepted.
+  Future<int> trashArtifacts(
+    Recording recording, {
+    required bool held,
+    DateTime? now,
+  }) async {
+    final int stamp = (now ?? DateTime.now()).millisecondsSinceEpoch;
+    final String prefix = held ? 'held-$stamp-' : '$stamp-';
+    final List<(String, String)> moved = <(String, String)>[];
+    Directory? trash;
+    try {
+      for (final String? path in _artifactPaths(recording)) {
+        if (path == null || path.isEmpty) continue;
+        final File file = File(path);
+        if (!await file.exists()) continue;
+        trash ??= await trashDirectory();
+        final String target = p.join(trash.path, '$prefix${p.basename(path)}');
+        await _moveFile(path, target);
+        moved.add((path, target));
+      }
+    } catch (_) {
+      for (final (String from, String to) in moved.reversed) {
+        try {
+          await _moveFile(to, from);
+        } catch (_) {
+          // Best effort: a file that will not go back is still in `.trash`.
+        }
+      }
+      rethrow;
+    }
+    return moved.length;
+  }
+
+  /// `rename`, or copy-then-delete when the two paths are on different
+  /// filesystems. The bytes end up in exactly one place whichever way it
+  /// ends: a copy that fails, or whose source then refuses to delete, is
+  /// removed from [to] before the error leaves, so neither a torn file nor a
+  /// second copy survives for the next attempt to stack another one on.
+  Future<void> _moveFile(String from, String to) async {
+    final File source = File(from);
+    try {
+      await _renameFile(source, to);
+      return;
+    } on FileSystemException {
+      // Fall through to the copy.
+    }
+    try {
+      await source.copy(to);
+      await source.delete();
+    } catch (_) {
+      final File target = File(to);
+      if (await target.exists()) await target.delete();
+      rethrow;
+    }
+  }
+
+  Future<List<File>> _trashFiles() async {
+    final Directory trash = Directory(
+      p.join((await recordingsDirectory()).path, '.trash'),
+    );
+    if (!await trash.exists()) return <File>[];
+    return <File>[
+      await for (final FileSystemEntity e in trash.list())
+        if (e is File) e,
+    ];
+  }
+
+  /// Delete trash entries older than [trashRetention]. Held entries and names
+  /// that do not parse are left alone. Returns how many were removed.
+  Future<int> pruneTrash({DateTime? now}) async {
+    final int cutoff = (now ?? DateTime.now())
+        .subtract(trashRetention)
+        .millisecondsSinceEpoch;
+    int removed = 0;
+    for (final File file in await _trashFiles()) {
+      final RegExpMatch? match = _trashName.firstMatch(p.basename(file.path));
+      if (match == null || match.group(1) != null) continue;
+      final int? stamp = int.tryParse(match.group(2)!);
+      if (stamp == null || stamp >= cutoff) continue;
+      await file.delete();
+      removed++;
+    }
+    return removed;
+  }
+
+  /// How many `held-*` entries wait for the user's confirmation.
+  Future<int> heldTrashCount() async => (await _trashFiles())
+      .where((File f) => p.basename(f.path).startsWith('held-'))
+      .length;
+
+  /// Confirm held deletes: `held-<ms>-<name>` becomes `<now>-<name>`, so the
+  /// retention clock starts at confirmation. Returns how many were released.
+  Future<int> releaseHeldTrash({DateTime? now}) async {
+    final int stamp = (now ?? DateTime.now()).millisecondsSinceEpoch;
+    int released = 0;
+    for (final File file in await _trashFiles()) {
+      final RegExpMatch? match = _trashName.firstMatch(p.basename(file.path));
+      if (match == null || match.group(1) == null) continue;
+      final String base = p.basename(file.path).substring(
+        'held-${match.group(2)}-'.length,
+      );
+      await file.rename(p.join(p.dirname(file.path), '$stamp-$base'));
+      released++;
+    }
+    return released;
+  }
+
+  bool _directoryRestricted = false;
+
+  /// The directory, created on first use and restricted to the owner once per
+  /// repository. The index, every source file, the posters and the `.jsonl`
+  /// logs live in it, and every one of them was readable by every account on
+  /// a shared desktop while only the tokens were locked down (#301).
   Future<Directory> recordingsDirectory() async {
     final Directory directory = await _directoryProvider();
     if (!await directory.exists()) {
       await directory.create(recursive: true);
+    }
+    if (!_directoryRestricted) {
+      _directoryRestricted = true;
+      await restrictDirectoryToOwner(directory.path);
     }
     return directory;
   }
@@ -407,7 +578,11 @@ class RecordingsRepository {
       if (name.endsWith('.thumb.jpg')) continue;
       if (claimed.contains(name)) continue;
 
-      final CaptureType? type = typeForExtension(p.extension(name));
+      final CaptureType? type = typeForExtension(p.extension(name)) ??
+          (RegExp(r'^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$')
+                  .hasMatch(p.basenameWithoutExtension(name))
+              ? CaptureType.file
+              : null);
       if (type == null) continue;
 
       final FileStat stat = await entity.stat();

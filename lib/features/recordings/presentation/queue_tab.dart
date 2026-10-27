@@ -6,28 +6,37 @@ import 'package:flutter/services.dart';
 
 import '../../../app/ui_kit.dart';
 import '../../../core/sync/cloud_sync_coordinator.dart';
+import '../../connections/domain/daily_connections.dart';
+import '../../connections/presentation/daily_connections_dialog.dart';
 import '../../costs/data/usage_repository.dart';
 import '../../costs/domain/price_book.dart';
 import '../../costs/domain/usage_event.dart';
 import '../../projects/domain/project.dart';
 import '../../projects/presentation/projects_controller.dart';
 import '../../settings/domain/queue_density.dart';
+import '../../sync/data/e2ee_service.dart';
 import '../../sync/domain/media_sync.dart';
 import '../../sync/domain/sync_snapshot.dart';
+import '../../sync/presentation/e2ee_passphrase_dialog.dart';
 import '../domain/agent_artifact.dart';
 import '../domain/capture_category.dart';
+import '../domain/capture_priority.dart';
 import '../domain/capture_type.dart';
 import '../domain/recording.dart';
 import '../domain/route_record.dart';
+import '../domain/suggested_route.dart';
 import 'agent_artifact_viewer_modal.dart';
 import 'capture_focus_view.dart';
 import 'card_parts.dart';
 import 'compact_queue_header.dart';
 import 'handoff_sheet.dart';
 import 'queue_list_row.dart';
+import 'queue_priority.dart';
 import 'queue_toolbar.dart';
 import 'recording_card.dart';
 import 'recording_editor.dart';
+import 'related_section.dart';
+import '../domain/related_captures.dart';
 import 'recordings_controller.dart';
 
 /// The five buckets from the design. They **partition** the queue: every item
@@ -57,7 +66,7 @@ enum RecordingFilter { all, queue, ready, failed, raw }
 enum ReviewFilter { desk, handedOff, all }
 
 /// The *capture type* axis — filters the queue by source media type.
-enum CaptureTypeFilter { all, audio, image, text, video }
+enum CaptureTypeFilter { all, audio, image, text, video, file }
 
 /// The original Phase-1 screen: header, review progress, search, status filters
 /// and the capture list. Owns only view state; every mutation goes through
@@ -77,7 +86,39 @@ class QueueTab extends StatefulWidget {
     this.onAppendUpload,
     this.density = QueueDensity.compact,
     this.onDensityChanged,
+    this.dailyConnectionsService,
+    this.e2ee,
   });
+
+  /// Whether cloud sync seals rows and files before they leave. Null where
+  /// Supabase is not configured, so nothing here mentions encryption;
+  /// non-null, a signed-in user without a key sees [notEncryptedBanner] or
+  /// [lockedBanner] for as long as that holds, each with the button that
+  /// ends it, and the sync panel names the state.
+  final E2eeService? e2ee;
+
+  /// Shown while signed in with no encryption key anywhere. Every sync run
+  /// in that state — launch, edit-debounce or SYNC CLOUD — sends notes and
+  /// files in plaintext, so the line stays up, not only during a run.
+  static const String notEncryptedBanner =
+      'NOT ENCRYPTED · cloud sync sends notes and files in plaintext; '
+      'no encryption key on this device';
+
+  /// Shown while signed in, the server says the account was never set up,
+  /// and the user has not yet confirmed syncing without encryption. Runs are
+  /// refused, not let out in plaintext, until SET UP ENCRYPTION or SYNC
+  /// WITHOUT ENCRYPTION ends the state (#379): "no row" is an answer a
+  /// server can give falsely, so a human has to see it once.
+  static const String unconfirmedBanner =
+      'NOT ENCRYPTED · cloud sync is paused until you set up encryption or '
+      'confirm syncing without it';
+
+  /// Shown while signed in to an encrypted account on a device without its
+  /// key (a new install, or after LOCK). Runs are refused, not let out in
+  /// plaintext, until the passphrase unlocks the device (#317).
+  static const String lockedBanner =
+      'ENCRYPTION LOCKED · cloud sync is paused until you unlock this '
+      'device with your passphrase';
 
   /// Row height in the master list. Owned by settings; the toolbar's toggle
   /// writes back through [onDensityChanged], and a host that passes none
@@ -86,6 +127,7 @@ class QueueTab extends StatefulWidget {
   final ValueChanged<QueueDensity>? onDensityChanged;
 
   final RecordingsController controller;
+  final DailyConnectionsService? dailyConnectionsService;
   final ProjectsController? projects;
   final String? initialProjectId;
 
@@ -135,6 +177,11 @@ class QueueTab extends StatefulWidget {
 class _QueueTabState extends State<QueueTab> {
   RecordingFilter selectedFilter = RecordingFilter.all;
   CaptureTypeFilter selectedTypeFilter = CaptureTypeFilter.all;
+  PriorityFilter priorityFilter = PriorityFilter.all;
+
+  /// In memory only, like every other queue filter: a restart opens the queue
+  /// newest first again.
+  QueueSort queueSort = QueueSort.newest;
   ReviewFilter reviewFilter = ReviewFilter.desk;
   String searchQuery = '';
   String? projectFilterId;
@@ -160,6 +207,49 @@ class _QueueTabState extends State<QueueTab> {
   /// re-sorts and re-filters under the user, and an index would silently move
   /// the selection onto whatever item slid into that slot.
   String? focusedId;
+
+  /// Bring [capture] into view the way the layout opens one: selected beside
+  /// the list on a wide screen (every filter cleared, so it cannot be hidden),
+  /// its own page on a phone, the focus view in between. [edit] opens it in
+  /// the editor where the layout allows, for a jump that started in one.
+  void _revealCapture(Recording capture, {bool edit = false}) {
+    final double width =
+        context.size?.width ?? MediaQuery.sizeOf(context).width;
+    if (width >= Console.masterDetailBreakpoint) {
+      setState(() {
+        reviewFilter = ReviewFilter.all;
+        selectedFilter = RecordingFilter.all;
+        selectedTypeFilter = CaptureTypeFilter.all;
+        projectFilterId = null;
+        searchQuery = '';
+        searchController.clear();
+        focusedId = capture.id;
+        if (edit) editingId = capture.id;
+      });
+    } else if (width < Console.compactBreakpoint) {
+      _openDetailPage(capture);
+    } else {
+      _openFocus(capture);
+    }
+  }
+
+  Future<void> _openDailyConnections() async {
+    final DailyConnectionsService? service = widget.dailyConnectionsService;
+    if (service == null) return;
+    final Map<String, String> projectNames = <String, String>{
+      for (final Project project in widget.projects?.projects ?? <Project>[])
+        project.id: project.name,
+    };
+    await showDialog<void>(
+      context: context,
+      builder: (BuildContext context) => DailyConnectionsDialog(
+        service: service,
+        captures: () => widget.controller.recordings,
+        projectNames: projectNames,
+        onOpenCapture: _revealCapture,
+      ),
+    );
+  }
 
   /// Desktop completion feedback has to outlive the card: the default Desk
   /// filter removes a capture the moment its durable review write lands. The
@@ -349,7 +439,12 @@ class _QueueTabState extends State<QueueTab> {
         projects.any((Project project) => project.id == projectFilterId)
         ? projectFilterId
         : null;
-    final List<Recording> visible = _filter(all, effectiveProjectFilterId);
+    // Sorted here, once, so the list, its section headers and the keyboard all
+    // walk the same order — `_visible` is what j/k and mark-done step through.
+    final List<Recording> visible = sortForQueue(
+      _filter(all, effectiveProjectFilterId),
+      queueSort,
+    );
     _visible = visible;
     final int reviewedCount = all
         .where((Recording item) => item.isProcessedByUser)
@@ -391,6 +486,12 @@ class _QueueTabState extends State<QueueTab> {
                 .where((Recording item) => _matchesType(filter, item))
                 .length,
         };
+        final Map<PriorityFilter, int> priorityCounts = <PriorityFilter, int>{
+          for (final PriorityFilter filter in PriorityFilter.values)
+            filter: all
+                .where((Recording item) => matchesPriority(filter, item))
+                .length,
+        };
         // A panel the user did not open, but cannot be allowed to miss: with the
         // control off screen its effect on the list is unexplainable.
         final bool searchOpen = searchPanelOpen || searchQuery.isNotEmpty;
@@ -398,6 +499,8 @@ class _QueueTabState extends State<QueueTab> {
             filterPanelOpen ||
             selectedFilter != RecordingFilter.all ||
             selectedTypeFilter != CaptureTypeFilter.all ||
+            priorityFilter != PriorityFilter.all ||
+            queueSort != QueueSort.newest ||
             effectiveProjectFilterId != null;
         return _QueueShortcuts(
           focusNode: listFocus,
@@ -405,20 +508,7 @@ class _QueueTabState extends State<QueueTab> {
           // can never act on a row that the filters have since removed.
           onNext: () => _moveFocus(visible, 1, from: selectedId),
           onPrevious: () => _moveFocus(visible, -1, from: selectedId),
-          onEdit: () => onSelected((Recording item) {
-            setState(() => editingId = item.id);
-          }),
-          onToggleProcessed: () => onSelected(_toggleProcessed),
-          onTogglePlay: () => onSelected(
-            (Recording item) => controller.togglePlayback(item.id),
-          ),
-          onRoute: () => onSelected((Recording item) {
-            if (controller.canRoute(item)) controller.route(item.id);
-          }),
-          onHandoff: () => onSelected((Recording item) {
-            if (controller.canHandoff(item)) _openHandoff(item);
-          }),
-          // `Ctrl+F` and `/` have to reveal the box before they can focus it —
+          // `Ctrl+F` has to reveal the box before it can focus it —
           // on a phone it is behind the header's search button.
           onSearch: () {
             setState(() => searchPanelOpen = true);
@@ -474,6 +564,25 @@ class _QueueTabState extends State<QueueTab> {
                       const SizedBox(height: 10),
                       ErrorBanner(message: controller.error!),
                     ],
+                    // Persistent, not tied to the sync panel: the launch
+                    // sync and the edit-debounce sync show no panel, and
+                    // those are the runs that would otherwise leave
+                    // plaintext with nothing on screen saying so (#297).
+                    if (widget.e2ee case final E2eeService e2ee)
+                      ListenableBuilder(
+                        listenable: e2ee,
+                        builder: (BuildContext context, Widget? _) =>
+                            e2ee.isPlaintext ||
+                                e2ee.isLocked ||
+                                e2ee.isPlaintextUnconfirmed
+                                ? _EncryptionBanner(e2ee: e2ee)
+                                : const SizedBox.shrink(),
+                      ),
+                    if (controller.heldSyncTrashFiles > 0)
+                      _HeldDeletesBanner(
+                        files: controller.heldSyncTrashFiles,
+                        onConfirm: controller.confirmHeldSyncDeletes,
+                      ),
                     // Pinned above the scroll area, not scrolled with it.
                     //
                     // These four are the screen's entire navigation, and as list children
@@ -541,6 +650,21 @@ class _QueueTabState extends State<QueueTab> {
                                 setState(() => selectedFilter = value);
                               },
                             ),
+                            const SizedBox(height: 10),
+                            Align(
+                              alignment: Alignment.centerLeft,
+                              child: QueuePriorityMenu(
+                                selected: priorityFilter,
+                                counts: priorityCounts,
+                                onSelected: (PriorityFilter value) {
+                                  setState(() => priorityFilter = value);
+                                },
+                                sort: queueSort,
+                                onSortChanged: (QueueSort value) {
+                                  setState(() => queueSort = value);
+                                },
+                              ),
+                            ),
                           ],
                         ),
                       )
@@ -575,6 +699,15 @@ class _QueueTabState extends State<QueueTab> {
                           onStatusChanged: (RecordingFilter value) {
                             setState(() => selectedFilter = value);
                           },
+                          priorityFilter: priorityFilter,
+                          priorityCounts: priorityCounts,
+                          onPriorityChanged: (PriorityFilter value) {
+                            setState(() => priorityFilter = value);
+                          },
+                          sort: queueSort,
+                          onSortChanged: (QueueSort value) {
+                            setState(() => queueSort = value);
+                          },
                           leading: masterDetail
                               ? _ToolbarTitle(
                                   total: all.length,
@@ -597,6 +730,20 @@ class _QueueTabState extends State<QueueTab> {
                               : const <Widget>[],
                         ),
                       ),
+                    if (widget.dailyConnectionsService != null)
+                      Align(
+                        alignment: Alignment.centerRight,
+                        child: Padding(
+                          padding: EdgeInsets.symmetric(
+                            horizontal: compact ? 12 : 20,
+                          ),
+                          child: TextButton.icon(
+                            onPressed: _openDailyConnections,
+                            icon: const Icon(Icons.hub_outlined, size: 18),
+                            label: const Text('REVIEW CONNECTIONS'),
+                          ),
+                        ),
+                      ),
                     if (_syncProgress case final CloudSyncProgress progress)
                       Padding(
                         padding: EdgeInsets.fromLTRB(
@@ -605,7 +752,10 @@ class _QueueTabState extends State<QueueTab> {
                           compact ? 12 : 20,
                           0,
                         ),
-                        child: _CloudSyncStatus(progress: progress),
+                        child: _CloudSyncStatus(
+                          progress: progress,
+                          e2ee: widget.e2ee,
+                        ),
                       ),
                     if (masterDetail && visible.isNotEmpty)
                       Expanded(
@@ -775,12 +925,14 @@ class _QueueTabState extends State<QueueTab> {
         selectedFilter,
         reviewFilter,
         type: selectedTypeFilter,
+        priority: priorityFilter,
         hasAny: all.isNotEmpty,
       ),
       blurb: all.isEmpty
           ? 'Every capture is written to disk and verified before processing '
                 'is even attempted.'
-          : 'Adjust the review, status, type, project, or search filters to '
+          : 'Adjust the review, status, type, priority, project, or search '
+                'filters to '
                 'broaden the queue.',
     );
   }
@@ -809,6 +961,7 @@ class _QueueTabState extends State<QueueTab> {
       if (!_matchesReview(reviewFilter, item)) return false;
       if (!_matches(selectedFilter, item)) return false;
       if (!_matchesType(selectedTypeFilter, item)) return false;
+      if (!matchesPriority(priorityFilter, item)) return false;
       if (effectiveProjectFilterId != null &&
           item.projectId != effectiveProjectFilterId) {
         return false;
@@ -834,6 +987,7 @@ class _QueueTabState extends State<QueueTab> {
     final RecordingsController controller = widget.controller;
     return RecordingCard(
       recording: recording,
+      agentJobs: controller.agentJobs,
       isPlaying: controller.playingId == recording.id,
       // View-only: the enrichment stage has no persisted status, so this comes
       // off the controller's in-flight set rather than off the item.
@@ -843,11 +997,23 @@ class _QueueTabState extends State<QueueTab> {
       isMarkingDone: markingDoneIds.contains(recording.id),
       canRoute: controller.canRoute(recording),
       onRoute: () => controller.route(recording.id),
-      canHandoff: controller.canHandoff(recording),
+      canHandoff:
+          controller.canHandoff(recording) || controller.canSend(recording),
       onHandoff: () => _openHandoff(recording),
+      // Re-checked here, every build, against the item as it is now: the
+      // destination may have been unbound since the model proposed it.
+      suggestedRoute: controller.suggestedRouteAction(recording),
+      onConfirmSuggestedRoute: () => _confirmSuggestedRoute(recording),
+      onDismissSuggestedRoute: () =>
+          controller.dismissSuggestedRoute(recording.id),
       onOpenOutcome: controller.openCommandOutcome,
       canOpenOutcome: (RouteOutcome outcome) =>
           controller.commandOutcomeUrl(outcome) != null,
+      // Offered wherever a session can be launched at all; a session that has
+      // since ended is refused by name, through the controller's error.
+      onAttachSession: controller.canHandoff(recording)
+          ? controller.attachSession
+          : null,
       onSelectArtifact: (AgentArtifact artifact) {
         showAgentArtifactViewer(
           context,
@@ -861,12 +1027,16 @@ class _QueueTabState extends State<QueueTab> {
       onRetry: () => controller.retryTranscription(recording.id),
       onEnrich: () => controller.retryEnrichment(recording.id),
       onCancelProcessing: () => controller.cancelProcessing(recording.id),
-      processingElapsed: controller.processingElapsedFor(recording.id),
+      processingTicker: controller.processingElapsedFor(recording.id) != null
+          ? controller.processingTicker
+          : null,
       onEdit: () => setState(() => editingId = recording.id),
       onToggleProcessed: () => _toggleProcessed(recording),
       onOpenFocus: () => _openFocus(recording),
       onConfigureModels: widget.onConfigureModels,
       costUsd: _costTotals[recording.id],
+      relatedCount: controller.relatedFor(recording.id).length,
+      repeatCount: controller.repeatCount(recording.id),
     );
   }
 
@@ -889,7 +1059,7 @@ class _QueueTabState extends State<QueueTab> {
     final Recording selected = visible.firstWhere(
       (Recording item) => item.id == selectedId,
     );
-    final List<QueueDayGroup> groups = groupByDay(visible, DateTime.now());
+    final List<QueueDayGroup> groups = groupForQueue(visible, queueSort, DateTime.now());
 
     final Widget list = CustomScrollView(
       controller: _masterScroll,
@@ -911,6 +1081,7 @@ class _QueueTabState extends State<QueueTab> {
                         ? _selectedRowKey
                         : ValueKey<String>(item.id),
                     recording: item,
+                    agentJobs: controller.agentJobs,
                     selected: isSelected,
                     isEnriching: controller.isEnriching(item.id),
                     density: widget.density,
@@ -994,7 +1165,7 @@ class _QueueTabState extends State<QueueTab> {
   /// Pull-to-refresh still syncs, as it did over the cards.
   Widget _buildPhoneList(List<Recording> visible) {
     final RecordingsController controller = widget.controller;
-    final List<QueueDayGroup> groups = groupByDay(visible, DateTime.now());
+    final List<QueueDayGroup> groups = groupForQueue(visible, queueSort, DateTime.now());
     return RefreshIndicator(
       onRefresh: () => _handleSync(context, controller),
       color: Console.accent,
@@ -1017,6 +1188,7 @@ class _QueueTabState extends State<QueueTab> {
                     return QueueListRow(
                       key: ValueKey<String>(item.id),
                       recording: item,
+                      agentJobs: controller.agentJobs,
                       selected: item.id == focusedId,
                       isEnriching: controller.isEnriching(item.id),
                       density: widget.density,
@@ -1042,12 +1214,29 @@ class _QueueTabState extends State<QueueTab> {
   Future<void> _openDetailPage(Recording recording) async {
     setState(() => focusedId = recording.id);
     final RecordingsController controller = widget.controller;
+    String? pageEditingId;
     await Navigator.of(context).push<void>(
       MaterialPageRoute<void>(
         builder: (BuildContext context) => ConsolePaletteScope(
           builder: (BuildContext context) => _CaptureDetailPage(
             controller: controller,
             recordingId: recording.id,
+            // The queue's visible order, the one j/k walks, read at the
+            // moment of the swipe so a capture that left the filter is
+            // skipped rather than revisited.
+            neighbour: (String id, int delta) {
+              final int index = _visible.indexWhere(
+                (Recording item) => item.id == id,
+              );
+              final int target = index + delta;
+              if (index < 0 || target < 0 || target >= _visible.length) {
+                return null;
+              }
+              return _visible[target].id;
+            },
+            onShown: (String id) {
+              if (mounted) setState(() => focusedId = id);
+            },
             panelBuilder: (Recording item, VoidCallback onEdit) =>
                 CaptureDetailPanel(
                   controller: controller,
@@ -1084,9 +1273,10 @@ class _QueueTabState extends State<QueueTab> {
             // `editingId` is set while the page edits, so the filters keep
             // the row — the exemption [_filter] documents — even though the
             // editor is drawn on the page, not in the list.
-            onEditingChanged: (bool editing) {
+            onEditingChanged: (String? id) {
+              pageEditingId = id;
               if (!mounted) return;
-              setState(() => editingId = editing ? recording.id : null);
+              setState(() => editingId = id);
             },
             editorBuilder: (Recording item, VoidCallback onDone) =>
                 _buildEditor(
@@ -1103,7 +1293,7 @@ class _QueueTabState extends State<QueueTab> {
         ),
       ),
     );
-    if (mounted && editingId == recording.id) {
+    if (mounted && pageEditingId != null && editingId == pageEditingId) {
       setState(() => editingId = null);
     }
   }
@@ -1202,6 +1392,22 @@ class _QueueTabState extends State<QueueTab> {
     );
   }
 
+  /// Confirms a model-proposed destination through the entry point the manual
+  /// control uses. A file or Command kind goes straight to `route`, delivery
+  /// first and state second. An agent opens the handoff sheet and stops there:
+  /// the prompt is reviewed by a human before anything is launched.
+  void _confirmSuggestedRoute(Recording recording) {
+    final SuggestedRouteAction? action = widget.controller.suggestedRouteAction(
+      recording,
+    );
+    if (action == null) return;
+    if (action.kind == SuggestedRouteKind.agent) {
+      _openHandoff(recording);
+    } else {
+      widget.controller.route(recording.id);
+    }
+  }
+
   /// The same row, in edit mode.
   ///
   /// Every callback is fire-and-forget on purpose: each one persists on its
@@ -1219,6 +1425,7 @@ class _QueueTabState extends State<QueueTab> {
     return RecordingEditor(
       key: ValueKey<String>('editor-${recording.id}'),
       recording: recording,
+      agentJobs: controller.agentJobs,
       revisions: controller.revisionsFor(recording.id),
       tagSuggestions: _tagSuggestions(recording),
       projects: widget.projects?.projects ?? const <Project>[],
@@ -1230,6 +1437,8 @@ class _QueueTabState extends State<QueueTab> {
           controller.editTranscript(recording.id, value),
       onCategoryChanged: (CaptureCategory? value) =>
           controller.setCategory(recording.id, value),
+      onPriorityChanged: (CapturePriority? value) =>
+          controller.setPriority(recording.id, value),
       onTagsChanged: (List<String> values) =>
           controller.setTags(recording.id, values),
       onProjectChanged: (String? value) =>
@@ -1254,6 +1463,23 @@ class _QueueTabState extends State<QueueTab> {
           widget.usageRepository?.forCapture(recording.id) ??
           const <UsageEvent>[],
       storagePrice: widget.storagePrice,
+      onCleanUp: RecordingsController.canCleanUp(recording)
+          ? () => controller.proposeCleanup(recording.id)
+          : null,
+      onAcceptCleanup: () => controller.acceptCleanup(recording.id),
+      onRejectCleanup: () => controller.rejectCleanup(recording.id),
+      cleaning: controller.isCleaning(recording.id),
+      cleanupError: controller.cleanupError(recording.id),
+      related: <RelatedEntry>[
+        for (final RelatedCapture match in controller.relatedFor(recording.id))
+          if (controller.recordings
+                  .where((Recording r) => r.id == match.id)
+                  .firstOrNull
+              case final Recording other)
+            RelatedEntry(recording: other, match: match),
+      ],
+      onOpenRelated: (Recording other) =>
+          _revealCapture(other, edit: true),
     );
   }
 
@@ -1418,6 +1644,7 @@ bool _matchesType(CaptureTypeFilter filter, Recording item) => switch (filter) {
   CaptureTypeFilter.image => item.type == CaptureType.image,
   CaptureTypeFilter.text => item.type == CaptureType.text,
   CaptureTypeFilter.video => item.type == CaptureType.video,
+  CaptureTypeFilter.file => item.type == CaptureType.file,
 };
 
 /// Keyboard control for the queue.
@@ -1433,20 +1660,11 @@ bool _matchesType(CaptureTypeFilter filter, Recording item) => switch (filter) {
 /// Escape fell into. `skipTraversal` keeps it out of the Tab order, so this
 /// node never becomes a stop the user has to press through.
 ///
-/// The single-letter bindings deliberately carry no modifier: they are scoped
-/// to this subtree, and the moment focus enters a text field the field consumes
-/// the key first, so `e` types an "e" in the search box and edits a row
-/// everywhere else.
 class _QueueShortcuts extends StatelessWidget {
   const _QueueShortcuts({
     required this.focusNode,
     required this.onNext,
     required this.onPrevious,
-    required this.onEdit,
-    required this.onToggleProcessed,
-    required this.onTogglePlay,
-    required this.onRoute,
-    required this.onHandoff,
     required this.onOpen,
     required this.onSearch,
     required this.onClearFocus,
@@ -1456,11 +1674,6 @@ class _QueueShortcuts extends StatelessWidget {
   final FocusNode focusNode;
   final VoidCallback onNext;
   final VoidCallback onPrevious;
-  final VoidCallback onEdit;
-  final VoidCallback onToggleProcessed;
-  final VoidCallback onTogglePlay;
-  final VoidCallback onRoute;
-  final VoidCallback onHandoff;
   final VoidCallback onOpen;
   final VoidCallback onSearch;
   final VoidCallback onClearFocus;
@@ -1472,25 +1685,11 @@ class _QueueShortcuts extends StatelessWidget {
       bindings: <ShortcutActivator, VoidCallback>{
         const SingleActivator(LogicalKeyboardKey.arrowDown): onNext,
         const SingleActivator(LogicalKeyboardKey.arrowUp): onPrevious,
-        // vi-style, for the same hands that never leave the home row.
-        const SingleActivator(LogicalKeyboardKey.keyJ): onNext,
-        const SingleActivator(LogicalKeyboardKey.keyK): onPrevious,
-        const SingleActivator(LogicalKeyboardKey.keyE): onEdit,
-        const SingleActivator(LogicalKeyboardKey.keyD): onToggleProcessed,
-        // `x` as in a checkbox — the master–detail design's spelling of done.
-        const SingleActivator(LogicalKeyboardKey.keyX): onToggleProcessed,
-        const SingleActivator(LogicalKeyboardKey.keyR): onRoute,
-        // `A` for agent. `H` would have read as "handoff" for both of these,
-        // and the two destinations must not share a mnemonic.
-        const SingleActivator(LogicalKeyboardKey.keyA): onHandoff,
-        const SingleActivator(LogicalKeyboardKey.space): onTogglePlay,
         // Reading a capture is what the list is *for*, so it takes the key a
         // list already means it with. `O` would have been a second mnemonic
         // for the one thing every row does.
         //
-        // Guarded, unlike every binding above it. The letters need no guard
-        // because a focused field consumes them as text — but a single-line
-        // field does not insert a newline, so `Enter` reaches this layer
+        // A single-line field does not insert a newline, so `Enter` reaches this layer
         // unhandled, and submitting a search query would have opened whatever
         // row the keyboard was last on.
         const SingleActivator(LogicalKeyboardKey.enter): _unlessTyping(onOpen),
@@ -1501,7 +1700,6 @@ class _QueueShortcuts extends StatelessWidget {
         // Both spellings: control on Linux/Windows, meta on macOS.
         const SingleActivator(LogicalKeyboardKey.keyF, control: true): onSearch,
         const SingleActivator(LogicalKeyboardKey.keyF, meta: true): onSearch,
-        const SingleActivator(LogicalKeyboardKey.slash): onSearch,
       },
       child: Focus(
         focusNode: focusNode,
@@ -1541,10 +1739,11 @@ String _emptyLabel(
   RecordingFilter filter,
   ReviewFilter review, {
   CaptureTypeFilter type = CaptureTypeFilter.all,
+  PriorityFilter priority = PriorityFilter.all,
   required bool hasAny,
 }) {
   if (!hasAny) return 'Nothing captured yet.';
-  if (type != CaptureTypeFilter.all) {
+  if (type != CaptureTypeFilter.all || priority != PriorityFilter.all) {
     return 'Nothing matches the selected filters.';
   }
   if (filter != RecordingFilter.all && review != ReviewFilter.all) {
@@ -1665,10 +1864,113 @@ class _DensityToggle extends StatelessWidget {
   }
 }
 
+/// The red line plus the button that ends the state: SET UP ENCRYPTION
+/// for an account that was never set up, UNLOCK for one this device holds
+/// no key to. While plaintext is still unconfirmed, SYNC WITHOUT
+/// ENCRYPTION sits beside SET UP as the one-time opt-out. The dialog reports
+/// back through the service the banner already listens to, so there is
+/// nothing to return.
+class _EncryptionBanner extends StatelessWidget {
+  _EncryptionBanner({required this.e2ee});
+
+  final E2eeService e2ee;
+
+  @override
+  Widget build(BuildContext context) {
+    final bool locked = e2ee.isLocked;
+    final bool unconfirmed = e2ee.isPlaintextUnconfirmed;
+    return Padding(
+      padding: const EdgeInsets.only(top: 10),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: <Widget>[
+          ErrorBanner(
+            message: locked
+                ? QueueTab.lockedBanner
+                : unconfirmed
+                ? QueueTab.unconfirmedBanner
+                : QueueTab.notEncryptedBanner,
+          ),
+          Wrap(
+            alignment: WrapAlignment.end,
+            children: <Widget>[
+              if (unconfirmed)
+                TextButton(
+                  onPressed: () => unawaited(e2ee.confirmPlaintext().catchError((Object _) {})),
+                  style: TextButton.styleFrom(foregroundColor: Console.red),
+                  child: const Text('SYNC WITHOUT ENCRYPTION'),
+                ),
+              TextButton.icon(
+                onPressed: () => showE2eePassphraseDialog(context, e2ee),
+                icon: Icon(
+                  locked ? Icons.lock_open_rounded : Icons.enhanced_encryption_rounded,
+                  size: 16,
+                ),
+                label: Text(locked ? 'UNLOCK' : 'SET UP ENCRYPTION'),
+                style: TextButton.styleFrom(foregroundColor: Console.red),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// A large batch of deletes pulled from another device, parked in the local
+/// trash until the user accepts it (#304). Nothing was unlinked yet.
+class _HeldDeletesBanner extends StatelessWidget {
+  _HeldDeletesBanner({required this.files, required this.onConfirm});
+
+  final int files;
+  final VoidCallback onConfirm;
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.only(top: 10),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: <Widget>[
+          ErrorBanner(
+            message:
+                'Another device deleted recordings · $files '
+                '${files == 1 ? 'file' : 'files'} kept in the recordings '
+                "folder's .trash · CONFIRM removes them after 30 days",
+          ),
+          Align(
+            alignment: Alignment.centerRight,
+            child: TextButton(
+              onPressed: onConfirm,
+              style: TextButton.styleFrom(foregroundColor: Console.red),
+              child: const Text('CONFIRM'),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
 class _CloudSyncStatus extends StatelessWidget {
-  const _CloudSyncStatus({required this.progress});
+  const _CloudSyncStatus({required this.progress, this.e2ee});
 
   final CloudSyncProgress progress;
+  final E2eeService? e2ee;
+
+  /// The line under NOTES and FILES. Red unless sealed: plaintext is the
+  /// state #297 found shipping silently, and locked means the run that
+  /// opened this panel was refused.
+  static String encryptionStatus(E2eeService e2ee) {
+    if (e2ee.isUnlocked) return 'ENCRYPTION · end-to-end, sealed on this device';
+    if (e2ee.isPlaintextUnconfirmed) {
+      return 'ENCRYPTION · NOT CONFIRMED, sync paused until you choose';
+    }
+    if (e2ee.keyOnServer == false) {
+      return 'ENCRYPTION · NOT ENCRYPTED, notes and files leave in plaintext';
+    }
+    return 'ENCRYPTION · LOCKED, sync paused until this device is unlocked';
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -1744,6 +2046,20 @@ class _CloudSyncStatus extends StatelessWidget {
               'FILES · ${_storageStatus(storage, storageActive, storagePassed)}',
               style: ConsoleText.chip.copyWith(color: Console.muted),
             ),
+            // Only for a signed-in user: signed out, no run uses the
+            // transport, so there is no sealed-or-plain fact to state.
+            if (e2ee case final E2eeService e2ee when e2ee.hasIdentity) ...<Widget>[
+              const SizedBox(height: 3),
+              ListenableBuilder(
+                listenable: e2ee,
+                builder: (BuildContext context, Widget? _) => Text(
+                  encryptionStatus(e2ee),
+                  style: ConsoleText.chip.copyWith(
+                    color: e2ee.isUnlocked ? Console.muted : Console.red,
+                  ),
+                ),
+              ),
+            ],
           ],
         ),
       ),
@@ -1839,11 +2155,15 @@ class _SyncButton extends StatelessWidget {
 
 /// A capture on a phone, full screen: the detail panel, or the editor while
 /// editing. Reads through [controller] by id so it follows the capture as it
-/// moves, and pops itself once the id stops resolving.
+/// moves, and pops itself once the id stops resolving. A horizontal swipe
+/// outside the editor steps to the neighbouring capture: left is the next one
+/// down the queue, right the one above.
 class _CaptureDetailPage extends StatefulWidget {
   const _CaptureDetailPage({
     required this.controller,
     required this.recordingId,
+    required this.neighbour,
+    required this.onShown,
     required this.panelBuilder,
     required this.editorBuilder,
     required this.onEditingChanged,
@@ -1851,26 +2171,65 @@ class _CaptureDetailPage extends StatefulWidget {
 
   final RecordingsController controller;
   final String recordingId;
+
+  /// The id [delta] rows away from the given one in the queue, or null past
+  /// either end.
+  final String? Function(String id, int delta) neighbour;
+  final ValueChanged<String> onShown;
   final Widget Function(Recording, VoidCallback onEdit) panelBuilder;
   final Widget Function(Recording, VoidCallback onDone) editorBuilder;
-  final ValueChanged<bool> onEditingChanged;
+
+  /// The id being edited, or null when the editor closes.
+  final ValueChanged<String?> onEditingChanged;
 
   @override
   State<_CaptureDetailPage> createState() => _CaptureDetailPageState();
 }
 
 class _CaptureDetailPageState extends State<_CaptureDetailPage> {
+  late String _id = widget.recordingId;
   bool _editing = false;
   bool _popped = false;
 
   void _setEditing(bool value) {
     setState(() => _editing = value);
-    widget.onEditingChanged(value);
+    widget.onEditingChanged(value ? _id : null);
+  }
+
+  Offset? _swipeStart;
+  Duration _swipeStartTime = Duration.zero;
+
+  void _onPointerDown(PointerDownEvent event) {
+    _swipeStart = event.position;
+    _swipeStartTime = event.timeStamp;
+  }
+
+  /// Read from raw pointers rather than a drag recognizer: the panel's
+  /// `SelectionArea` claims every drag in the gesture arena, so a
+  /// `GestureDetector` here would never hear one.
+  void _onPointerUp(PointerUpEvent event) {
+    final Offset? start = _swipeStart;
+    _swipeStart = null;
+    if (start == null) return;
+    final Offset delta = event.position - start;
+    final Duration elapsed = event.timeStamp - _swipeStartTime;
+    // Mostly sideways, far enough and quick: a page turn, not a scroll, a
+    // tap or a hand resting on the screen.
+    if (delta.dx.abs() < 60 ||
+        delta.dx.abs() < delta.dy.abs() * 2 ||
+        elapsed > const Duration(milliseconds: 600)) {
+      return;
+    }
+    final String? next = widget.neighbour(_id, delta.dx < 0 ? 1 : -1);
+    if (next == null) return;
+    unawaited(HapticFeedback.selectionClick());
+    setState(() => _id = next);
+    widget.onShown(next);
   }
 
   Recording? _resolve() {
     for (final Recording item in widget.controller.recordings) {
-      if (item.id == widget.recordingId) return item;
+      if (item.id == _id) return item;
     }
     return null;
   }
@@ -1914,7 +2273,21 @@ class _CaptureDetailPageState extends State<_CaptureDetailPage> {
                     () => _setEditing(false),
                   ),
                 )
-              : widget.panelBuilder(recording, () => _setEditing(true)),
+              : Listener(
+                  onPointerDown: _onPointerDown,
+                  onPointerUp: _onPointerUp,
+                  onPointerCancel: (_) => _swipeStart = null,
+                  child: AnimatedSwitcher(
+                    duration: const Duration(milliseconds: 150),
+                    child: KeyedSubtree(
+                      key: ValueKey<String>(recording.id),
+                      child: widget.panelBuilder(
+                        recording,
+                        () => _setEditing(true),
+                      ),
+                    ),
+                  ),
+                ),
         );
       },
     );

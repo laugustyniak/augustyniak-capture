@@ -13,11 +13,9 @@ import 'usage_parsing.dart';
 ///
 /// The HTTP classes do not know which capture they are working on;
 /// [beginJob]/[endJob] supply it. That is ambient state, and it is safe only
-/// because exactly one job is ever open at a time. Two paths in
-/// `RecordingsController` open one — `_processOne` (the drain) and
-/// `retryEnrichment` (the ENRICH button) — and both take the *same* mutex,
-/// `_acquireUsageScope`, for the whole of their job and release it from a
-/// `finally`. The exclusion is therefore symmetric: a retry cannot start
+/// because exactly one job is ever open at a time. The drain, enrichment retry,
+/// and connection assessment take the same `_acquireUsageScope` mutex around
+/// their provider calls and release it from `finally`. A retry cannot start
 /// underneath a running job, and a job cannot start on top of a running retry.
 /// Whoever asks second waits and then runs, so neither side is ever silently
 /// dropped. (`_isDraining` is a separate guard and covers only the drain

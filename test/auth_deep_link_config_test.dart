@@ -51,7 +51,7 @@ void main() {
 
     final String deploy = read('tool/deploy.sh');
     expect(deploy, contains(r'x-scheme-handler/$application_id'));
-    expect(deploy, contains(r'Exec=$opt_dir/$binary_name %u'));
+    expect(deploy, contains(r'Exec="$opt_dir/$binary_name" %u'));
 
     final String windows = read('windows/runner/main.cpp');
     expect(windows, contains('SendAppLinkToInstance()'));

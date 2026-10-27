@@ -126,6 +126,52 @@ void main() {
     expect(controller.audio.sampleRate, 44100);
   });
 
+  testWidgets('the clipboard sync switch is off and persists a change', (
+    WidgetTester tester,
+  ) async {
+    final SettingsController controller = buildSettingsController();
+    await controller.initialize();
+    await pumpConfig(tester, controller);
+
+    final Finder toggle = find.byKey(const ValueKey<String>('sync-clipboard'));
+    expect(tester.widget<Switch>(toggle).value, isFalse);
+
+    await tester.tap(toggle);
+    await tester.pumpAndSettle();
+
+    expect(controller.syncClipboard, isTrue);
+    expect(tester.widget<Switch>(toggle).value, isTrue);
+  });
+
+  testWidgets('the clipboard retention field persists the days on submit', (
+    WidgetTester tester,
+  ) async {
+    final SettingsController controller = buildSettingsController();
+    await controller.initialize();
+    await pumpConfig(tester, controller);
+
+    final Finder field = find.byKey(const ValueKey<String>('clipboard-retention'));
+    expect(
+      tester.widget<TextField>(
+        find.descendant(of: field, matching: find.byType(TextField)),
+      ).controller!.text,
+      '30',
+    );
+
+    await tester.enterText(field, '7');
+    await tester.testTextInput.receiveAction(TextInputAction.done);
+    await tester.pumpAndSettle();
+
+    expect(controller.clipboardRetentionDays, 7);
+    expect(controller.clipboardRetention, const Duration(days: 7));
+
+    await tester.enterText(field, '0');
+    await tester.testTextInput.receiveAction(TextInputAction.done);
+    await tester.pumpAndSettle();
+
+    expect(controller.clipboardRetention, isNull);
+  });
+
   testWidgets('switching to stereo updates the channel count', (
     WidgetTester tester,
   ) async {

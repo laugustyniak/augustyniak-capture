@@ -523,6 +523,59 @@ void main() {
       expect(restored.vaultCopySources, isTrue);
     });
 
+    test('clipboard retention and sync survive a round-trip', () {
+      const AppSettings original = AppSettings(
+        clipboardRetentionDays: 7,
+        syncClipboard: true,
+      );
+
+      final AppSettings restored = AppSettings.fromJson(original.toJson());
+
+      expect(restored.clipboardRetentionDays, 7);
+      expect(restored.syncClipboard, isTrue);
+    });
+
+    test('legacy JSON keeps 30 days of clipboard and no clipboard sync', () {
+      final AppSettings legacy = AppSettings.fromJson(<String, dynamic>{
+        'profiles': <dynamic>[],
+      });
+
+      expect(legacy.clipboardRetentionDays, 30);
+      expect(legacy.syncClipboard, isFalse);
+    });
+
+    test('hand-edited clipboard values of the wrong type fall back', () {
+      final AppSettings restored = AppSettings.fromJson(<String, dynamic>{
+        'clipboardRetentionDays': 'forever',
+        'syncClipboard': 'yes',
+      });
+      expect(restored.clipboardRetentionDays, 30);
+      expect(restored.syncClipboard, isFalse);
+
+      expect(
+        AppSettings.fromJson(<String, dynamic>{
+          'clipboardRetentionDays': -5,
+        }).clipboardRetentionDays,
+        0,
+      );
+    });
+
+    test('a retention past a hundred years is capped, not wrapped', () {
+      // `Duration(days: 999999999)` is negative once its microseconds wrap;
+      // a negative window would put the cutoff in the future and prune the
+      // whole history.
+      expect(
+        AppSettings.fromJson(<String, dynamic>{
+          'clipboardRetentionDays': 999999999,
+        }).clipboardRetentionDays,
+        AppSettings.maxClipboardRetentionDays,
+      );
+      expect(
+        Duration(days: AppSettings.maxClipboardRetentionDays).isNegative,
+        isFalse,
+      );
+    });
+
     test('clearing the vault path is a decision copyWith preserves', () {
       const AppSettings mirroring = AppSettings(vaultPath: '/Users/me/Vault');
 
@@ -656,6 +709,25 @@ void main() {
         isA<HttpWhisperTranscriptionService>(),
       );
       expect(repo.saveCount, greaterThan(0));
+    });
+
+    test('setClipboardRetentionDays caps the window and clamps negatives',
+        () async {
+      final SettingsController controller = SettingsController(
+        repository: _FakeSettingsRepository(),
+      );
+      await controller.initialize();
+
+      await controller.setClipboardRetentionDays(999999999);
+      expect(
+        controller.clipboardRetentionDays,
+        AppSettings.maxClipboardRetentionDays,
+      );
+      expect(controller.clipboardRetention!.isNegative, isFalse);
+
+      await controller.setClipboardRetentionDays(-1);
+      expect(controller.clipboardRetentionDays, 0);
+      expect(controller.clipboardRetention, isNull);
     });
 
     test('deleting the active profile falls back to a remaining one', () async {
@@ -1232,6 +1304,41 @@ void main() {
 
       await controller.resetZoom();
       expect(controller.textScale, 1.0);
+    });
+
+    group('ByocS3Storage Settings', () {
+      test('SettingsController can update and clear S3 config', () async {
+        final repository = _FakeSettingsRepository();
+        final controller = SettingsController(repository: repository);
+        await controller.initialize();
+
+        await controller.updateS3Storage(
+          endpoint: 'https://test-endpoint.com',
+          bucket: 'my-test-bucket',
+          region: 'us-east-1',
+          accessKeyId: 'test-key',
+          secretAccessKey: 'test-secret',
+          prefix: 'data/',
+        );
+
+        expect(controller.settings.s3Endpoint, 'https://test-endpoint.com');
+        expect(controller.settings.s3Bucket, 'my-test-bucket');
+        expect(controller.settings.s3Region, 'us-east-1');
+        expect(controller.settings.s3AccessKeyId, 'test-key');
+        expect(controller.settings.s3SecretAccessKey, 'test-secret');
+        expect(controller.settings.s3Prefix, 'data/');
+        expect(controller.settings.hasCustomS3Storage, isTrue);
+
+        await controller.clearS3Storage();
+
+        expect(controller.settings.s3Endpoint, isNull);
+        expect(controller.settings.s3Bucket, isNull);
+        expect(controller.settings.s3Region, isNull);
+        expect(controller.settings.s3AccessKeyId, isNull);
+        expect(controller.settings.s3SecretAccessKey, isNull);
+        expect(controller.settings.s3Prefix, isNull);
+        expect(controller.settings.hasCustomS3Storage, isFalse);
+      });
     });
   });
 }

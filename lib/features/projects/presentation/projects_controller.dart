@@ -203,7 +203,12 @@ class ProjectsController extends ChangeNotifier {
       for (final Project p in _projects) p.id: p,
     };
     for (final Project p in upserts) {
-      byId[p.id] = p;
+      final Project? mine = byId[p.id];
+      // Launch settings never travel (SyncRowCodec.project): an existing
+      // project keeps this device's own and a new one starts with none.
+      byId[p.id] = p.copyWith(
+        agentSettings: mine?.agentSettings ?? const <AgentKind, AgentSettings>{},
+      );
     }
     await _save(byId.values.toList(), activeProjectId: _activeProjectId);
   }
@@ -224,18 +229,30 @@ class ProjectsController extends ChangeNotifier {
     await _save(_projects, activeProjectId: projectId);
   }
 
-  Future<void> launch(Project project, AgentKind agent) async {
+  /// Start the agent's session for [project], or attach to the running one.
+  ///
+  /// [detached] starts it in the background with no window; the result says
+  /// which session to attach to, and [attach] opens it. Returns the launcher's
+  /// result so the card can say whether a window opened, a session was
+  /// started in the background, or an existing one was found; null when a
+  /// launch for this pair is already in flight.
+  Future<AgentSessionLaunchResult?> launch(
+    Project project,
+    AgentKind agent, {
+    bool detached = false,
+    String? prompt,
+  }) async {
     final AgentSessionLauncher? launcher = _launcher;
     if (launcher == null) {
       throw StateError('No agent session launcher is configured.');
     }
     final String key = _launchKey(project.id, agent);
-    if (!_launchesInProgress.add(key)) return;
+    if (!_launchesInProgress.add(key)) return null;
     _error = null;
     if (!_disposed) notifyListeners();
     try {
       final AgentSettings settings = project.settingsFor(agent);
-      await launcher.launch(
+      return await launcher.launch(
         AgentSessionLaunchRequest(
           projectId: project.id,
           projectName: project.name,
@@ -243,8 +260,32 @@ class ProjectsController extends ChangeNotifier {
           agent: _launcherAgent(agent),
           sessionName: project.sessionName,
           arguments: _launchArguments(agent, settings),
+          prompt: prompt ?? settings.initialPrompt,
+          detached: detached,
         ),
       );
+    } catch (exception) {
+      _error = exception.toString();
+      rethrow;
+    } finally {
+      _launchesInProgress.remove(key);
+      if (!_disposed) notifyListeners();
+    }
+  }
+
+  /// Open a terminal on the running session [sessionName]. Throws when it is
+  /// not running or no terminal can open; the card shows the message.
+  Future<void> attach(String sessionName) async {
+    final AgentSessionLauncher? launcher = _launcher;
+    if (launcher == null) {
+      throw StateError('No agent session launcher is configured.');
+    }
+    // Same single-flight set as launch: a double tap must not open two windows.
+    final String key = 'attach:$sessionName';
+    if (!_launchesInProgress.add(key)) return;
+    _error = null;
+    try {
+      await launcher.attach(sessionName);
     } catch (exception) {
       _error = exception.toString();
       rethrow;
@@ -289,6 +330,7 @@ class ProjectsController extends ChangeNotifier {
     AgentKind.codex => ProjectAgent.codex,
     AgentKind.claudeCode => ProjectAgent.claude,
     AgentKind.antigravity => ProjectAgent.antigravity,
+    AgentKind.geminiCli => ProjectAgent.gemini,
   };
 
   static List<String> _launchArguments(
@@ -296,7 +338,7 @@ class ProjectsController extends ChangeNotifier {
     AgentSettings settings,
   ) => <String>[
     ...settings.additionalArgs,
-    if (settings.initialPrompt case final String prompt)
-      ..._launcherAgent(agent).promptArguments(prompt),
+    if (settings.skipPermissions)
+      ..._launcherAgent(agent).skipPermissionsArguments,
   ];
 }

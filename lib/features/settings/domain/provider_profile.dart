@@ -1,5 +1,8 @@
+import '../../../core/http/transport_guard.dart';
 import '../../costs/domain/usage_sink.dart';
 import '../../enrichment/data/http_chat_enrichment_service.dart';
+import '../../enrichment/data/http_embedding_service.dart';
+import '../../enrichment/domain/embedding_service.dart';
 import '../../enrichment/domain/enrichment_service.dart';
 import '../../processing/data/http_vision_ocr_service.dart';
 import '../../processing/data/ocr_service.dart';
@@ -109,35 +112,7 @@ class ProviderProfile {
   /// field would bury the first.
   bool get usesInsecureTransport {
     final Uri? uri = hasEndpoint ? Uri.tryParse(endpoint.trim()) : null;
-    if (uri == null || uri.host.isEmpty) return false;
-    if (uri.scheme.toLowerCase() != 'http') return false;
-    return !_isOwnNetwork(uri.host);
-  }
-
-  /// Loopback, or one of the three private IPv4 ranges.
-  ///
-  /// The `172.16/12` boundary is the one worth getting exactly right: 172.15
-  /// and 172.32 are public, and a range that leaks either way in the
-  /// permissive direction makes the warning above useless.
-  static bool _isOwnNetwork(String host) {
-    final String name = host.toLowerCase();
-    if (name == 'localhost' || name == '::1' || name.endsWith('.localhost')) {
-      return true;
-    }
-
-    final List<String> octets = name.split('.');
-    if (octets.length != 4) return false;
-    final List<int?> parts = octets.map(int.tryParse).toList();
-    if (parts.any((int? part) => part == null || part < 0 || part > 255)) {
-      return false;
-    }
-    final int first = parts[0]!;
-    final int second = parts[1]!;
-    if (first == 127) return true;
-    if (first == 10) return true;
-    if (first == 192 && second == 168) return true;
-    if (first == 172 && second >= 16 && second <= 31) return true;
-    return false;
+    return uri != null && transportIsInsecure(uri);
   }
 
   /// The token a request may actually send: null when unset, blank, or still
@@ -281,6 +256,27 @@ class ProviderProfile {
       endpoint: uri,
       bearerToken: usableBearerToken,
       model: _blankToNull(model),
+      usageSink: usageSink,
+    );
+  }
+
+  /// Build the embedding service for this profile (#272): the same server and
+  /// token, the `/embeddings` path beside `/chat/completions`, and the model
+  /// the user named for it — a chat model cannot embed. Disabled when the
+  /// endpoint has no recognisable chat path, rather than guessing one.
+  EmbeddingService toEmbeddingService({
+    required String model,
+    UsageSink usageSink = const NoopUsageSink(),
+  }) {
+    final Uri? uri = hasEndpoint ? Uri.tryParse(endpoint.trim()) : null;
+    final Uri? embeddings = uri == null || !uri.hasScheme
+        ? null
+        : embeddingsEndpointFor(uri);
+    if (embeddings == null) return const DisabledEmbeddingService();
+    return HttpEmbeddingService(
+      endpoint: embeddings,
+      model: model,
+      bearerToken: usableBearerToken,
       usageSink: usageSink,
     );
   }

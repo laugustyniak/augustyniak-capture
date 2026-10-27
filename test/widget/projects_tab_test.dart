@@ -3,6 +3,7 @@ import 'dart:io';
 import 'package:augustyniak_capture/features/command/domain/command_client.dart';
 import 'package:augustyniak_capture/features/projects/data/directory_picker.dart';
 import 'package:augustyniak_capture/features/projects/data/projects_repository.dart';
+import 'package:augustyniak_capture/features/projects/domain/agent_session_launcher.dart';
 import 'package:augustyniak_capture/features/projects/domain/project.dart';
 import 'package:augustyniak_capture/features/projects/presentation/projects_controller.dart';
 import 'package:augustyniak_capture/features/projects/presentation/projects_tab.dart';
@@ -93,6 +94,45 @@ void main() {
     tester.state<NavigatorState>(find.byType(Navigator).first).pop();
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 300));
+  });
+
+  testWidgets('a background launch asks for an editable prompt', (
+    WidgetTester tester,
+  ) async {
+    controller.dispose();
+    final _FakeLauncher launcher = _FakeLauncher();
+    controller = ProjectsController(
+      repository: ProjectsRepository(directoryProvider: () async => directory),
+      launcher: launcher,
+    );
+    await tester.runAsync(controller.initialize);
+    final Project project = controller.projects.single;
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: ThemeData.dark(useMaterial3: true),
+        home: Scaffold(body: ProjectsTab(controller: controller)),
+      ),
+    );
+
+    await tester.tap(
+      find.byKey(ValueKey<String>('launch-${project.id}-codex')),
+    );
+    await tester.pump();
+    expect(
+      find.byKey(const ValueKey<String>('project-background-prompt')),
+      findsOneWidget,
+    );
+    await tester.enterText(
+      find.byKey(const ValueKey<String>('project-background-prompt')),
+      'Inspect the failing test',
+    );
+    await tester.tap(
+      find.byKey(const ValueKey<String>('project-run-background')),
+    );
+    await tester.pump();
+
+    expect(launcher.requests.single.prompt, 'Inspect the failing test');
+    expect(launcher.requests.single.detached, isTrue);
   });
 
   testWidgets('the folder dialog fills the repository path field', (
@@ -249,6 +289,172 @@ void main() {
     expect(saved.commandBoundAt, isNotNull);
   });
 
+  Future<void> openEditor(WidgetTester tester) async {
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: ThemeData.dark(useMaterial3: true),
+        home: Scaffold(
+          body: ListenableBuilder(
+            listenable: controller,
+            builder: (BuildContext context, Widget? child) =>
+                ProjectsTab(controller: controller),
+          ),
+        ),
+      ),
+    );
+    await tester.tap(find.byIcon(Icons.more_vert));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 300));
+    await tester.tap(find.text('Edit').last);
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 300));
+  }
+
+  Future<void> save(WidgetTester tester) async {
+    await tester.ensureVisible(
+      find.byKey(const ValueKey<String>('save-project')),
+    );
+    await tester.pump();
+    await tester.tap(find.byKey(const ValueKey<String>('save-project')));
+    await tester.pump();
+  }
+
+  Future<void> pumpTab(WidgetTester tester) => tester.pumpWidget(
+    MaterialApp(
+      theme: ThemeData.dark(useMaterial3: true),
+      home: Scaffold(
+        body: ListenableBuilder(
+          listenable: controller,
+          builder: (BuildContext context, Widget? child) =>
+              ProjectsTab(controller: controller),
+        ),
+      ),
+    ),
+  );
+
+  testWidgets('a card flags approvals off only for a project that has it', (
+    WidgetTester tester,
+  ) async {
+    final String plainId = controller.projects.single.id;
+    final Project armed =
+        await tester.runAsync(
+      () => controller.create(
+        name: 'Armed',
+        repoPath: '/work/armed',
+        agentSettings: const <AgentKind, AgentSettings>{
+          AgentKind.codex: AgentSettings(skipPermissions: true),
+        },
+      ),
+            )
+            as Project;
+
+    await pumpTab(tester);
+
+    expect(
+      find.byKey(ValueKey<String>('project-approvals-off-${armed.id}')),
+      findsOneWidget,
+    );
+    expect(
+      find.byKey(ValueKey<String>('project-approvals-off-$plainId')),
+      findsNothing,
+    );
+    expect(find.text('APPROVALS OFF'), findsOneWidget);
+  });
+
+  testWidgets('the skip-permissions switch warns about steerable text', (
+    WidgetTester tester,
+  ) async {
+    await openEditor(tester);
+
+    await tester.scrollUntilVisible(
+      find.text('CODEX').last,
+      120,
+      scrollable: find.byType(Scrollable).last,
+    );
+    await tester.tap(find.text('CODEX').last);
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 300));
+
+    expect(
+      find.text(
+        'The agent runs tools without asking. A capture\'s text can steer it, '
+        'so leave this off for imported, OCR and clipboard captures.',
+      ),
+      findsOneWidget,
+    );
+  });
+
+  testWidgets('skip permissions is a per-agent switch that saves', (
+    WidgetTester tester,
+  ) async {
+    await openEditor(tester);
+
+    await tester.scrollUntilVisible(
+      find.text('CODEX').last,
+      120,
+      scrollable: find.byType(Scrollable).last,
+    );
+    await tester.tap(find.text('CODEX').last);
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 300));
+    final Finder toggle = find.byKey(
+      const ValueKey<String>('skip-permissions-codex'),
+    );
+    await tester.ensureVisible(toggle);
+    await tester.pump();
+    await tester.tap(toggle);
+    await tester.pump();
+
+    await save(tester);
+    await _untilIo(
+      tester,
+      () => controller.projects.single
+          .settingsFor(AgentKind.codex)
+          .skipPermissions,
+    );
+
+    final Project saved = controller.projects.single;
+    expect(saved.settingsFor(AgentKind.codex).skipPermissions, isTrue);
+    expect(saved.settingsFor(AgentKind.claudeCode).skipPermissions, isFalse);
+  });
+
+  testWidgets('a misspelled permission flag is refused on save', (
+    WidgetTester tester,
+  ) async {
+    final Project original = controller.projects.single;
+    // Real file IO, which the fake-async zone does not pump.
+    await tester.runAsync(
+      () => controller.update(
+        project: original,
+        name: original.name,
+        repoPath: original.repoPath,
+        agentSettings: const <AgentKind, AgentSettings>{
+          AgentKind.claudeCode: AgentSettings(
+            additionalArgs: <String>['--dangerously-skip-premissions'],
+          ),
+        },
+      ),
+    );
+    await openEditor(tester);
+
+    // The saved typo opens its agent's section, so the error is on screen.
+    final Finder field = find.byKey(
+      const ValueKey<String>('agent-arguments-claudeCode'),
+    );
+    expect(field, findsOneWidget);
+
+    await save(tester);
+    expect(
+      find.textContaining('Remove --dangerously-skip-premissions'),
+      findsOneWidget,
+    );
+    expect(find.byKey(const ValueKey<String>('save-project')), findsOneWidget);
+
+    tester.state<NavigatorState>(find.byType(Navigator).first).pop();
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 300));
+  });
+
   testWidgets('an unconfigured control plane says so instead of hiding', (
     WidgetTester tester,
   ) async {
@@ -289,7 +495,6 @@ void main() {
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 300));
   });
-
 }
 
 /// Answers from a table instead of a control plane, and records which host it
@@ -340,7 +545,6 @@ class _FakeCommandClient implements CommandClient {
       throw UnimplementedError();
 }
 
-
 /// Stands in for the native folder dialog, the way `_FakeRegistrar` stands in
 /// for the OS hotkey table — the widget suite must not reach `file_picker`.
 class _FakeDirectoryPicker implements DirectoryPicker {
@@ -358,4 +562,24 @@ class _FakeDirectoryPicker implements DirectoryPicker {
     initialDirectories.add(initialDirectory);
     return chosen;
   }
+}
+
+class _FakeLauncher implements AgentSessionLauncher {
+  final List<AgentSessionLaunchRequest> requests =
+      <AgentSessionLaunchRequest>[];
+
+  @override
+  Future<AgentSessionLaunchResult> launch(
+    AgentSessionLaunchRequest request,
+  ) async {
+    requests.add(request);
+    return AgentSessionLaunchResult(
+      sessionName: 'test-session',
+      attachedToExistingSession: false,
+      detached: false,
+    );
+  }
+
+  @override
+  Future<void> attach(String sessionName) async {}
 }

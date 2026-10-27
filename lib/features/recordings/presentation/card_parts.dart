@@ -1,9 +1,11 @@
 import 'dart:io';
 
+import 'package:flutter/foundation.dart' show ValueListenable;
 import 'package:flutter/material.dart';
 
 import '../../../app/ui_kit.dart';
 import '../domain/capture_category.dart';
+import '../domain/capture_priority.dart';
 import '../domain/capture_type.dart';
 import '../domain/recording.dart';
 import '../domain/route_record.dart';
@@ -207,12 +209,22 @@ Color categoryColorFor(CaptureCategory? category) => switch (category) {
   null => Console.accent,
 };
 
+/// Hot to cold: only the two ranks that ask for action get a warm colour, so a
+/// queue of p2/p3 items stays quiet.
+Color priorityColorFor(CapturePriority priority) => switch (priority) {
+  CapturePriority.p0 => Console.red,
+  CapturePriority.p1 => Console.amber,
+  CapturePriority.p2 => Console.muted,
+  CapturePriority.p3 => Console.dimText,
+};
+
 String typeLabelFor(CaptureType type) => switch (type) {
   CaptureType.audioRecording => 'Voice note',
   CaptureType.audioUpload => 'Audio file',
   CaptureType.image => 'Image',
   CaptureType.text => 'Text note',
   CaptureType.video => 'Video',
+  CaptureType.file => 'File',
 };
 
 /// `10:24 · m4a · 2026-07-27 12:00` — duration only when the type has one, so
@@ -252,7 +264,7 @@ class ProcessingStrip extends StatelessWidget {
     super.key,
     required this.enriching,
     this.type = CaptureType.audioRecording,
-    this.elapsed,
+    this.processingTicker,
   });
 
   /// True while the model reads the text; false while the audio is being
@@ -261,8 +273,10 @@ class ProcessingStrip extends StatelessWidget {
   final bool enriching;
   final CaptureType type;
 
-  /// Elapsed duration for currently running transcription or OCR processing.
-  final Duration? elapsed;
+  /// Running time of the current transcription or OCR job, or null when there
+  /// is none to show. Only the label listens to it, so a tick repaints one
+  /// `Text` rather than the page.
+  final ValueListenable<Duration>? processingTicker;
 
   /// Public so a widget test asserts the string that is actually rendered
   /// rather than a copy of it, the same rule `RecordingCard.analyzingLabel`
@@ -275,9 +289,6 @@ class ProcessingStrip extends StatelessWidget {
   Widget build(BuildContext context) {
     final bool isImage = type == CaptureType.image;
     final String baseLabel = isImage ? ocrLabel : transcribingLabel;
-    final String activeLabel = elapsed != null
-        ? '$baseLabel · ${formatDuration(elapsed!)}'
-        : baseLabel;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: <Widget>[
@@ -298,10 +309,19 @@ class ProcessingStrip extends StatelessWidget {
               ),
             ),
             const SizedBox(width: 8),
-            Text(
-              enriching ? analyzingLabel : activeLabel,
-              style: ConsoleText.micro.copyWith(color: Console.accent),
-            ),
+            if (enriching || processingTicker == null)
+              Text(
+                enriching ? analyzingLabel : baseLabel,
+                style: ConsoleText.micro.copyWith(color: Console.accent),
+              )
+            else
+              ValueListenableBuilder<Duration>(
+                valueListenable: processingTicker!,
+                builder: (BuildContext _, Duration elapsed, Widget? _) => Text(
+                  '$baseLabel · ${formatDuration(elapsed)}',
+                  style: ConsoleText.micro.copyWith(color: Console.accent),
+                ),
+              ),
             const SizedBox(width: 8),
             Expanded(
               child: Text(
@@ -339,6 +359,7 @@ IconData typeIconFor(CaptureType type) => switch (type) {
   CaptureType.image => Icons.image_outlined,
   CaptureType.text => Icons.description_outlined,
   CaptureType.video => Icons.movie_outlined,
+  CaptureType.file => Icons.insert_drive_file_outlined,
 };
 
 

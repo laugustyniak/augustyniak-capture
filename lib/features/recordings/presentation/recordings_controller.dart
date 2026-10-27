@@ -11,9 +11,12 @@ import 'package:uuid/uuid.dart';
 import '../../costs/domain/usage_event.dart';
 import '../../command/domain/command_client.dart';
 import '../../costs/domain/usage_sink.dart';
+import '../../enrichment/domain/embedding_service.dart';
 import '../../enrichment/domain/enrichment_context.dart';
 import '../../enrichment/domain/enrichment_result.dart';
 import '../../enrichment/domain/enrichment_service.dart';
+import '../../enrichment/domain/transcript_cleaner.dart';
+import '../../enrichment/domain/instruction_writer.dart';
 import '../../logs/domain/log_event.dart';
 import '../../processing/data/ocr_service.dart';
 import '../../processing/data/video_audio_extractor.dart';
@@ -40,17 +43,29 @@ import '../data/media_picker.dart';
 import '../data/recordings_repository.dart';
 import '../data/revisions_repository.dart';
 import '../../projects/data/projects_repository.dart';
+import '../../projects/data/native_agent_jobs.dart';
+import '../../projects/domain/agent_session_launcher.dart'
+    show attachCommandFor;
 import '../../projects/domain/project.dart';
 import '../data/agent_artifact_scanner.dart';
+import '../data/vault_connection_analyzer.dart';
 import '../data/capture_history.dart';
 import '../domain/agent_artifact.dart';
+import '../domain/connection_reasoner.dart';
 import '../data/source_content_hasher.dart';
 import '../domain/agent_handoff.dart';
 import '../domain/capture_category.dart';
+import '../domain/capture_priority.dart';
+import '../domain/stale_rank.dart';
 import '../domain/capture_segment.dart';
+import '../domain/capture_instruction.dart';
+import '../domain/cleanup_proposal.dart';
+import '../domain/related_captures.dart';
 import '../domain/capture_type.dart';
 import '../domain/clipboard_sink.dart';
+import '../domain/capture_prompt.dart';
 import '../domain/capture_router.dart';
+import '../domain/capture_sender.dart';
 import '../domain/media_opener.dart';
 import '../domain/capture_session.dart';
 import '../domain/note_vault.dart';
@@ -58,6 +73,7 @@ import '../domain/recording.dart';
 import '../domain/recording_revision.dart';
 import '../domain/recording_tag.dart';
 import '../domain/route_record.dart';
+import '../domain/suggested_route.dart';
 // Same layer, not a widget import: `displayNameFor` is the one definition of
 // what an untitled capture is called, and a destination heading must not be
 // allowed to drift from what the card shows.
@@ -84,10 +100,15 @@ class RecordingsController extends ChangeNotifier {
     MediaOpener mediaOpener = const NoopMediaOpener(),
     CaptureRouter captureRouter = const DisabledCaptureRouter(),
     AgentHandoff agentHandoff = const DisabledAgentHandoff(),
+    this.agentJobs,
+    CaptureSender captureSender = const DisabledCaptureSender(),
     NoteVault noteVault = const DisabledNoteVault(),
+    ConnectionReasoner connectionReasoner = const ReviewConnectionReasoner(),
+    VaultConnectionAnalyzer connectionAnalyzer = const VaultConnectionAnalyzer(),
     CaptureSession captureSession = const NoopCaptureSession(),
     Project? Function(String projectId)? projectById,
     Directory? Function()? vaultDirectory,
+    Directory? Function()? connectionVaultRoot,
     AgentArtifactScanner artifactScanner = const AgentArtifactScanner(),
     SourceContentHasher contentHasher = const SourceContentHasher(),
     RevisionsRepository? revisionsRepository,
@@ -104,12 +125,13 @@ class RecordingsController extends ChangeNotifier {
     // every existing call site and in every pure-Dart test, which is what
     // keeps Supabase sync out of the suites that build no database: `hasSupabase`
     // below is false whenever any of the seven it checks is missing.
-    SyncTransport Function()? syncTransportResolver,
+    SyncTransport Function(String ownerId, LogSink log)? syncTransportResolver,
     AuthGateway? authGateway,
     ProjectsRepository? projectsRepository,
     ClipboardRepository? clipboardRepository,
     String? Function()? appVersion,
     Future<String?> Function()? syncDeviceId,
+    bool Function()? syncClipboard,
     // `RepositorySyncApplier`'s only way to touch the live `ProjectsController`
     // — the same reason `deleteRecording` below is a bound callback rather
     // than a repository: a second writer against `ProjectsRepository`
@@ -136,6 +158,7 @@ class RecordingsController extends ChangeNotifier {
        _clipboardRepository = clipboardRepository,
        _appVersion = appVersion,
        _syncDeviceId = syncDeviceId,
+       _syncClipboard = syncClipboard,
        _applySyncedProjects = applySyncedProjects,
        _applySyncedProjectDelete = applySyncedProjectDelete,
        _mediaStoreResolver = mediaStoreResolver,
@@ -158,10 +181,14 @@ class RecordingsController extends ChangeNotifier {
        _mediaOpener = mediaOpener,
        _captureRouter = captureRouter,
        _agentHandoff = agentHandoff,
+       _captureSender = captureSender,
        _noteVault = noteVault,
+       _connectionReasoner = connectionReasoner,
+       _connectionAnalyzer = connectionAnalyzer,
        _captureSession = captureSession,
        _projectById = projectById,
        _vaultDirectory = vaultDirectory,
+       _connectionVaultRoot = connectionVaultRoot,
        _artifactScanner = artifactScanner,
        _contentHasher = contentHasher,
        _mediaPicker = mediaPicker ?? const FilePickerMediaPicker(),
@@ -201,6 +228,9 @@ class RecordingsController extends ChangeNotifier {
     } catch (_) {}
   }
 
+  /// Shared native job store used by the handoff result and Projects tab.
+  final NativeAgentJobs? agentJobs;
+
   final RecordingsRepository _repository;
 
   /// Null disables Supabase sync's `revisions` table entirely — same seam
@@ -211,12 +241,14 @@ class RecordingsController extends ChangeNotifier {
   /// The Supabase sync seam. All eight are null unless the app shell wired
   /// them (Supabase initialised, both repositories built) — see the
   /// constructor's doc comment.
-  final SyncTransport Function()? _syncTransportResolver;
+  final SyncTransport Function(String ownerId, LogSink log)?
+      _syncTransportResolver;
   final AuthGateway? _authGateway;
   final ProjectsRepository? _projectsRepository;
   final ClipboardRepository? _clipboardRepository;
   final String? Function()? _appVersion;
   final Future<String?> Function()? _syncDeviceId;
+  final bool Function()? _syncClipboard;
   final Future<void> Function(List<Project> upserts)? _applySyncedProjects;
   final Future<void> Function(String id)? _applySyncedProjectDelete;
   final MediaObjectStore Function(String ownerId)? _mediaStoreResolver;
@@ -270,13 +302,20 @@ class RecordingsController extends ChangeNotifier {
   /// both write the index.
   bool _refreshingOutcomes = false;
   final AgentHandoff _agentHandoff;
+  final CaptureSender _captureSender;
   final NoteVault _noteVault;
+  ConnectionReasoner _connectionReasoner;
+  final VaultConnectionAnalyzer _connectionAnalyzer;
+  final Set<String> _analyzingConnections = <String>{};
+  final Set<Future<void>> _connectionJobs = <Future<void>>{};
+  final Map<String, String> _connectionErrors = <String, String>{};
 
   /// Keeps the OS off a running capture. Noop everywhere but Android; see
   /// [CaptureSession] for what it is holding back.
   final CaptureSession _captureSession;
   final Project? Function(String projectId)? _projectById;
   final Directory? Function()? _vaultDirectory;
+  final Directory? Function()? _connectionVaultRoot;
   final AgentArtifactScanner _artifactScanner;
   final SourceContentHasher _contentHasher;
   final MediaPicker _mediaPicker;
@@ -322,6 +361,9 @@ class RecordingsController extends ChangeNotifier {
   final ValueNotifier<Duration> _elapsedTicker = ValueNotifier<Duration>(
     Duration.zero,
   );
+  final ValueNotifier<Duration> _processingTicker = ValueNotifier<Duration>(
+    Duration.zero,
+  );
   final ValueNotifier<double> _levelTicker = ValueNotifier<double>(0);
   StreamSubscription<Amplitude>? _amplitudeSub;
   Timer? _timer;
@@ -344,6 +386,10 @@ class RecordingsController extends ChangeNotifier {
   String? _recordingProjectId;
   String? get recordingProjectId => _recordingProjectId;
 
+  /// True once the user chose the in-flight recording's project themselves, so
+  /// the saved row is user-owned rather than an auto stamp.
+  bool _recordingProjectPicked = false;
+
   /// The capture a fragment in progress will be appended to, or null for a
   /// capture that will stand on its own. Read by the capture screen so it can
   /// name what it is adding to.
@@ -359,7 +405,11 @@ class RecordingsController extends ChangeNotifier {
   /// A no-op unless the mic is live, so a stray tap after `SAVE` cannot attach
   /// a project to the next capture instead.
   void setRecordingProject(String? projectId) {
-    if (!_isRecording || _recordingProjectId == projectId) return;
+    if (!_isRecording) return;
+    // Even picking NONE, or the project already seeded: a deliberate choice is
+    // the user's, never a stamp.
+    _recordingProjectPicked = true;
+    if (_recordingProjectId == projectId) return;
     _recordingProjectId = projectId;
     notifyListeners();
   }
@@ -458,6 +508,13 @@ class RecordingsController extends ChangeNotifier {
   /// refuses every write, so the queue is showing nothing rather than nothing
   /// being there — the UI must say so instead of looking empty.
   bool get isIndexUnreadable => _indexUnreadable;
+
+  bool _initialized = false;
+
+  /// True once [initialize] has read the index successfully. Until then the
+  /// in-memory list is empty rather than right, and any `saveAll` would
+  /// overwrite the history with it, so [addTextNote] refuses to run.
+  bool get isInitialized => _initialized;
   bool get isRecording => _isRecording;
   bool get isBusy => _isBusy;
 
@@ -491,6 +548,11 @@ class RecordingsController extends ChangeNotifier {
   /// rather than the whole page.
   ValueListenable<Duration> get elapsedTicker => _elapsedTicker;
 
+  /// Ticks every 500 ms while a processing job is in flight. Listen to this
+  /// instead of the controller when all you render is the running time — it
+  /// repaints one label rather than the whole page.
+  ValueListenable<Duration> get processingTicker => _processingTicker;
+
   /// Input level, `0`–`1`, while recording. Same reasoning as [elapsedTicker]:
   /// the waveform is the only thing that repaints at this rate, so it listens
   /// on its own rather than dragging the whole page along.
@@ -514,6 +576,496 @@ class RecordingsController extends ChangeNotifier {
   set enrichmentService(EnrichmentService value) {
     if (identical(_enrichmentService, value)) return;
     _enrichmentService = value;
+  }
+
+  set connectionReasoner(ConnectionReasoner value) => _connectionReasoner = value;
+
+  /// Applied to the next clean-up, like [enrichmentService]. The default
+  /// throws at use, so an unconfigured install only lacks the proposal.
+  set transcriptCleaner(TranscriptCleaner value) => _transcriptCleaner = value;
+  TranscriptCleaner _transcriptCleaner = const DisabledTranscriptCleaner();
+
+  /// Whether a finished capture gets a clean-up proposal without being asked.
+  /// Off by default: each one is a model call per transcript chunk (#258).
+  bool autoCleanup = false;
+
+  /// In memory only, like `_enrichingIds`: proposing is not a state anything
+  /// resumes, and the item is already whole while it runs.
+  final Set<String> _cleaningIds = <String>{};
+  bool isCleaning(String id) => _cleaningIds.contains(id);
+
+  /// Why the last clean-up of an item produced no proposal, for the editor to
+  /// say so — the log alone would leave CLEAN UP looking like it did nothing.
+  /// In memory only, and cleared by the next attempt.
+  final Map<String, String> _cleanupErrors = <String, String>{};
+  String? cleanupError(String id) => _cleanupErrors[id];
+
+  /// Whether [recording] has text that came from speech or OCR. A note typed
+  /// by hand is already the user's own wording — proposing to "clean" it
+  /// would be rewriting them.
+  static bool canCleanUp(Recording recording) =>
+      (recording.transcript ?? '').trim().isNotEmpty &&
+      recording.segments.any(
+        (CaptureSegment segment) => segment.type != CaptureType.text,
+      );
+
+  /// Ask for a clean-up proposal for [id], from its transcript as it is now.
+  ///
+  /// Holds the usage scope like [retryEnrichment], so the cost lands against
+  /// this capture under `UsageStage.cleanup`. Never writes `transcript`.
+  Future<void> proposeCleanup(String id) async {
+    if (_cleaningIds.contains(id)) return;
+    final void Function() releaseUsageScope = await _acquireUsageScope();
+    try {
+      if (_disposed) return;
+      await _proposeCleanup(id);
+    } finally {
+      releaseUsageScope();
+    }
+  }
+
+  /// The proposal itself; the caller holds the usage scope. Best-effort under
+  /// the `ClipboardSink` contract: every failure is logged and costs only the
+  /// proposal.
+  Future<void> _proposeCleanup(String id) async {
+    final int index = _recordings.indexWhere((Recording i) => i.id == id);
+    if (index < 0) return;
+    final Recording item = _recordings[index];
+    if (!canCleanUp(item) || !_cleaningIds.add(id)) return;
+    final String source = item.transcript!;
+    _cleanupErrors.remove(id);
+    if (!_disposed) notifyListeners();
+    try {
+      final EnrichmentContext context = await _resolveEnrichmentContext(id);
+      _beginUsageJob(id, UsageStage.cleanup);
+      final String cleaned;
+      try {
+        cleaned = await _transcriptCleaner.cleanUp(source, context: context);
+      } finally {
+        _endUsageJob();
+      }
+      if (_disposed) return;
+      // Written only if the transcript is still the one that was cleaned: a
+      // hand edit or an appended segment while the call ran would otherwise get
+      // a proposal for text that no longer exists.
+      await _update(
+        id,
+        (Recording current) => current.transcript == source
+            ? current.copyWith(
+                cleanup: CleanupProposal(
+                  text: cleaned,
+                  source: CleanupProposal.fingerprint(source),
+                ),
+              )
+            : current,
+      );
+      _logSink.log('Clean-up proposed.', recordingId: id);
+    } on CleanupNotConfiguredException catch (exception) {
+      _cleanupErrors[id] = exception.toString();
+      _logSink.log(
+        'Clean-up skipped — no model configured.',
+        level: LogLevel.warn,
+        recordingId: id,
+      );
+    } catch (exception) {
+      _cleanupErrors[id] = exception.toString();
+      _logSink.log(
+        'Clean-up failed: $exception',
+        level: LogLevel.warn,
+        recordingId: id,
+      );
+    } finally {
+      _cleaningIds.remove(id);
+      if (!_disposed) notifyListeners();
+    }
+  }
+
+  /// Replace the transcript with the proposal, through the same funnel as a
+  /// hand edit — so the revision history keeps the raw text. Refused, and
+  /// false, when the proposal is stale: it describes a transcript that has
+  /// since changed, and applying it would silently undo that change.
+  Future<bool> acceptCleanup(String id) async {
+    final int index = _recordings.indexWhere((Recording i) => i.id == id);
+    if (index < 0) return false;
+    final CleanupProposal? proposal = _recordings[index].cleanup;
+    if (proposal == null || !proposal.matches(_recordings[index].transcript)) {
+      return false;
+    }
+    await _update(
+      id,
+      (Recording item) =>
+          item.copyWith(transcript: proposal.text, clearCleanup: true),
+      source: RevisionSource.user,
+    );
+    _logSink.log('Clean-up accepted.', recordingId: id);
+    await _reembed(id);
+    return true;
+  }
+
+  /// Drop the proposal. The transcript is untouched.
+  Future<void> rejectCleanup(String id) async {
+    await _update(
+      id,
+      (Recording item) => item.copyWith(clearCleanup: true),
+      source: RevisionSource.user,
+    );
+    _logSink.log('Clean-up rejected.', recordingId: id);
+  }
+
+  /// Applied to the next instruction pass, like [transcriptCleaner]. The
+  /// default throws at use, so an unconfigured install only lacks the
+  /// instruction.
+  set instructionWriter(InstructionWriter value) => _instructionWriter = value;
+  InstructionWriter _instructionWriter = const DisabledInstructionWriter();
+
+  /// Whether a finished capture is rewritten as an instruction without being
+  /// asked (#281). On by default, like the setting it mirrors.
+  bool autoInstruction = true;
+
+  /// The user's list of misheard terms, sent as reference material.
+  String asrGlossary = '';
+
+  /// In memory only, like `_cleaningIds`.
+  final Set<String> _instructingIds = <String>{};
+  bool isWritingInstruction(String id) => _instructingIds.contains(id);
+
+  /// Why the last instruction pass produced nothing, for the detail views. In
+  /// memory only, and cleared by the next attempt.
+  final Map<String, String> _instructionErrors = <String, String>{};
+  String? instructionError(String id) => _instructionErrors[id];
+
+  /// Rewrite [id] as an instruction now, from its transcript as it is — the
+  /// detail views' REWRITE. Copies the result to the clipboard, as the
+  /// automatic pass does: asking for it is asking to paste it.
+  Future<void> writeInstruction(String id) async {
+    if (_instructingIds.contains(id)) return;
+    final void Function() releaseUsageScope = await _acquireUsageScope();
+    try {
+      if (_disposed) return;
+      await _writeInstruction(id);
+    } finally {
+      releaseUsageScope();
+    }
+  }
+
+  /// The pass itself; the caller holds the usage scope. Best-effort under the
+  /// `ClipboardSink` contract: it never touches `status` or `transcript`, and
+  /// every failure is logged and costs only the instruction.
+  Future<void> _writeInstruction(String id) async {
+    final int index = _recordings.indexWhere((Recording i) => i.id == id);
+    if (index < 0) return;
+    final Recording item = _recordings[index];
+    if (!canCleanUp(item) || !_instructingIds.add(id)) return;
+    final String source = item.transcript!;
+    _instructionErrors.remove(id);
+    if (!_disposed) notifyListeners();
+    try {
+      final EnrichmentContext context = await _resolveEnrichmentContext(id);
+      _beginUsageJob(id, UsageStage.instruction);
+      final String written;
+      try {
+        written = await _instructionWriter.writeInstruction(
+          source,
+          context: context,
+          glossary: asrGlossary,
+        );
+      } finally {
+        _endUsageJob();
+      }
+      if (_disposed || written.trim().isEmpty) return;
+      // Written only if the transcript is still the one rewritten, like a
+      // clean-up proposal: otherwise it describes text that no longer exists.
+      bool stored = false;
+      await _update(id, (Recording current) {
+        if (current.transcript != source) return current;
+        stored = true;
+        return current.copyWith(
+          instruction: CaptureInstruction(
+            text: written,
+            source: CleanupProposal.fingerprint(source),
+          ),
+        );
+      });
+      if (!stored) return;
+      _logSink.log('Instruction written.', recordingId: id);
+      await _copyToClipboard(item.type, written, id);
+    } on InstructionNotConfiguredException catch (exception) {
+      _instructionErrors[id] = exception.toString();
+    } catch (exception) {
+      _instructionErrors[id] = exception.toString();
+      _logSink.log(
+        'Instruction failed: $exception',
+        level: LogLevel.warn,
+        recordingId: id,
+      );
+    } finally {
+      _instructingIds.remove(id);
+      if (!_disposed) notifyListeners();
+    }
+  }
+
+  /// Vectors for related captures (#272). Disabled by default — an install
+  /// with no embedding model finds nothing and sends nothing.
+  set embeddingService(EmbeddingService value) {
+    // The shell re-applies settings on every change; the settings controller
+    // hands back the same instance until the connection changes, so only a
+    // real swap pays for a reload.
+    if (identical(value, _embeddingService)) return;
+    _embeddingService = value;
+    _invalidateVectors();
+    // Turns the RELATED section and the card chips on or off.
+    if (!_disposed) notifyListeners();
+  }
+
+  EmbeddingService _embeddingService = const DisabledEmbeddingService();
+
+  /// In memory by default, so a host without the database still finds related
+  /// captures for the session; the shell installs the SQLite store.
+  set embeddingStore(EmbeddingStore value) {
+    _embeddingStore = value;
+    _invalidateVectors();
+  }
+
+  EmbeddingStore _embeddingStore = InMemoryEmbeddingStore();
+
+  /// The current model's vectors, loaded on first use, and the model they were
+  /// loaded for. A model change empties this — vectors from two models are
+  /// never compared.
+  Map<String, StoredEmbedding>? _vectors;
+  String? _vectorsModel;
+
+  /// Bumped whenever a vector is written or dropped; [_relatedCache] is only
+  /// valid for the version it was computed at.
+  int _vectorsVersion = 0;
+  final Map<String, List<RelatedCapture>> _relatedCache =
+      <String, List<RelatedCapture>>{};
+  int _relatedCacheVersion = -1;
+
+  void _invalidateVectors() {
+    _vectors = null;
+    _vectorsModel = null;
+    _vectorsVersion++;
+  }
+
+  bool get relatedEnabled => _embeddingService.model.isNotEmpty;
+
+  Map<String, StoredEmbedding> _currentVectors() {
+    final String model = _embeddingService.model;
+    if (_vectors == null || _vectorsModel != model) {
+      try {
+        _vectors = model.isEmpty
+            ? <String, StoredEmbedding>{}
+            : _embeddingStore.load(model);
+      } catch (exception) {
+        _logSink.log('Could not read embeddings: $exception', level: LogLevel.warn);
+        _vectors = <String, StoredEmbedding>{};
+      }
+      _vectorsModel = model;
+      _vectorsVersion++;
+    }
+    return _vectors!;
+  }
+
+  /// The vector of [recording] if it was made from its text as it is now.
+  /// A stale one is never used: an edited transcript is not found by what it
+  /// used to say.
+  StoredEmbedding? _freshVector(Recording recording) {
+    final StoredEmbedding? stored = _currentVectors()[recording.id];
+    if (stored == null) return null;
+    return stored.fingerprint == _fingerprintOf(recording) ? stored : null;
+  }
+
+  /// [embeddingFingerprint] of a capture's input, memoised on the transcript
+  /// string itself: the card list asks on every rebuild, and an unchanged
+  /// transcript is the same object until something writes a new one.
+  final Map<String, (String, String?)> _fingerprints =
+      <String, (String, String?)>{};
+  String? _fingerprintOf(Recording recording) {
+    final String transcript = recording.transcript ?? '';
+    final (String, String?)? memo = _fingerprints[recording.id];
+    if (memo != null && identical(memo.$1, transcript)) return memo.$2;
+    final String? input = embeddingInput(recording);
+    final String? fingerprint =
+        input == null ? null : embeddingFingerprint(input);
+    _fingerprints[recording.id] = (transcript, fingerprint);
+    return fingerprint;
+  }
+
+  /// Captures close in meaning to [id], best first. Empty with related
+  /// captures off, or while [id] has no fresh vector.
+  List<RelatedCapture> relatedFor(String id) {
+    if (!relatedEnabled) return const <RelatedCapture>[];
+    _currentVectors();
+    if (_relatedCacheVersion != _vectorsVersion) {
+      _relatedCache.clear();
+      _relatedCacheVersion = _vectorsVersion;
+    }
+    final int index = _recordings.indexWhere((Recording i) => i.id == id);
+    if (index < 0 || _freshVector(_recordings[index]) == null) {
+      return const <RelatedCapture>[];
+    }
+    final List<RelatedCapture> ranked = _relatedCache[id] ??= rankRelated(
+      id,
+      <String, List<double>>{
+        for (final Recording item in _recordings)
+          if (_freshVector(item) case final StoredEmbedding vector)
+            item.id: vector.vector,
+      },
+    );
+    // Re-checked on every read, not only when ranked: a transcript edited
+    // since bumps no version, and its old vector must not keep it listed.
+    return <RelatedCapture>[
+      for (final RelatedCapture other in ranked)
+        if (_recordings.indexWhere((Recording i) => i.id == other.id)
+            case final int j when j >= 0 && _freshVector(_recordings[j]) != null)
+          other,
+    ];
+  }
+
+  /// How many times the thought in [id] was said within
+  /// [RelatedLimits.repeatWindow] of it, [id] included. 1 means only once.
+  int repeatCount(String id) {
+    final int index = _recordings.indexWhere((Recording i) => i.id == id);
+    if (index < 0) return 0;
+    final DateTime at = _recordings[index].createdAt;
+    int count = 1;
+    for (final RelatedCapture other in relatedFor(id)) {
+      if (other.score < RelatedLimits.repeat) continue;
+      final int j = _recordings.indexWhere((Recording i) => i.id == other.id);
+      if (j < 0) continue;
+      if (_recordings[j].createdAt.difference(at).abs() <=
+          RelatedLimits.repeatWindow) {
+        count++;
+      }
+    }
+    return count;
+  }
+
+  /// Captures with text but no fresh vector: what [buildIndex] would embed.
+  List<String> unindexedIds() => <String>[
+    if (relatedEnabled)
+      for (final Recording item in _recordings)
+        if (embeddingInput(item) != null && _freshVector(item) == null) item.id,
+  ];
+
+  /// Embed [id] unless its vector is already fresh. Best-effort under the
+  /// sink contract: the caller holds the usage scope, and every failure is
+  /// logged and costs only the vector.
+  Future<void> _embed(String id) async {
+    if (!relatedEnabled) return;
+    final int index = _recordings.indexWhere((Recording i) => i.id == id);
+    if (index < 0) return;
+    final Recording item = _recordings[index];
+    final String? input = embeddingInput(item);
+    if (input == null || _freshVector(item) != null) return;
+    final EmbeddingService service = _embeddingService;
+    try {
+      _beginUsageJob(id, UsageStage.embedding);
+      final List<double> vector;
+      try {
+        vector = await service.embed(input);
+      } finally {
+        _endUsageJob();
+      }
+      // A model swapped while the call ran made this vector for the old
+      // space; storing it under the new one would mix them.
+      if (_disposed || service.model != _embeddingService.model) return;
+      final StoredEmbedding stored = StoredEmbedding(
+        captureId: id,
+        fingerprint: embeddingFingerprint(input),
+        model: service.model,
+        vector: Float32List.fromList(vector),
+      );
+      _embeddingStore.put(stored);
+      _currentVectors()[id] = stored;
+      _vectorsVersion++;
+    } catch (exception) {
+      _logSink.log(
+        'Embedding failed: $exception',
+        level: LogLevel.warn,
+        recordingId: id,
+      );
+    }
+  }
+
+  /// Re-embed after a hand change to the text, inside its own usage scope.
+  /// Called after the edit is persisted, so a slow or failing endpoint can
+  /// only delay the vector, never the edit.
+  Future<void> _reembed(String id) async {
+    if (!relatedEnabled || _disposed) return;
+    final void Function() releaseUsageScope = await _acquireUsageScope();
+    try {
+      if (!_disposed) await _embed(id);
+    } finally {
+      releaseUsageScope();
+    }
+    if (!_disposed) notifyListeners();
+  }
+
+  /// Non-null while [buildIndex] runs. In memory only.
+  IndexProgress? get indexProgress => _indexProgress;
+  IndexProgress? _indexProgress;
+  bool _indexCancelled = false;
+
+  void cancelIndex() {
+    if (_indexProgress != null) _indexCancelled = true;
+  }
+
+  /// Embed every capture that has text and no fresh vector, one call each,
+  /// sequentially, each inside the usage scope. Single-flight; cancel stops
+  /// after the item in flight. Returns how many were embedded.
+  Future<int> buildIndex() async {
+    if (_indexProgress != null || !relatedEnabled) return 0;
+    final List<String> ids = unindexedIds();
+    if (ids.isEmpty || _disposed) return 0;
+    _indexCancelled = false;
+    _indexProgress = IndexProgress(done: 0, total: ids.length);
+    notifyListeners();
+    _logSink.log('Indexing ${ids.length} captures for related captures.');
+    int embedded = 0;
+    try {
+      for (final String id in ids) {
+        if (_disposed || _indexCancelled) break;
+        final void Function() releaseUsageScope = await _acquireUsageScope();
+        try {
+          if (_disposed) break;
+          final int before = _vectorsVersion;
+          await _embed(id);
+          if (_vectorsVersion != before) embedded++;
+        } finally {
+          releaseUsageScope();
+          _indexProgress = _indexProgress?.advance();
+          if (!_disposed) notifyListeners();
+        }
+      }
+    } finally {
+      _indexProgress = null;
+      if (!_disposed) notifyListeners();
+    }
+    _logSink.log('Indexed $embedded of ${ids.length} captures.');
+    return embedded;
+  }
+
+  bool isAnalyzingConnections(String id) => _analyzingConnections.contains(id);
+  String? connectionAnalysisError(String id) => _connectionErrors[id];
+
+  AgentArtifact? connectionArtifactFor(Recording recording) {
+    final Directory? vault = _connectionVaultRoot?.call();
+    if (vault == null) return null;
+    for (final AgentArtifact artifact in recording.artifacts.reversed) {
+      if (p.isWithin(vault.path, artifact.path) &&
+          p.basename(artifact.path) == '${recording.id}.md' &&
+          p.basename(p.dirname(artifact.path)) == 'Analysis') {
+        return artifact;
+      }
+    }
+    return null;
+  }
+
+  Future<void> waitForConnectionAnalysis() async {
+    while (_connectionJobs.isNotEmpty) {
+      await Future.wait(_connectionJobs.toList());
+    }
   }
 
   /// Applied to the next image OCR attempt. A job already running keeps the
@@ -559,6 +1111,7 @@ class RecordingsController extends ChangeNotifier {
       notifyListeners();
       return;
     }
+    _initialized = true;
     _logSink.log('Loaded ${_recordings.length} captures from disk.');
 
     unawaited(
@@ -774,19 +1327,53 @@ class RecordingsController extends ChangeNotifier {
     // empty snapshot would read as "everything was deleted locally" to the
     // push-side sweep — see the engine's own refusal for an empty outbox,
     // which this gate backs up rather than relies on alone.
+    // A snapshot taken before initialize() is [] for the same reason an
+    // unreadable index is, and the engine's fuse covers `recordings` only.
+    final String? ownerId = _authGateway?.currentIdentity?.id;
     final bool hasSupabase =
+        _initialized &&
         !_indexUnreadable &&
-        _authGateway?.currentIdentity != null &&
+        ownerId != null &&
         _syncTransportResolver != null &&
         _projectsRepository != null &&
         _clipboardRepository != null &&
         _syncDeviceId != null &&
         _applySyncedProjects != null &&
         _applySyncedProjectDelete != null;
+    // Both resolved here, before either slot runs and with no await between
+    // them, so the two slots of one run see the same key state: an E2EE key
+    // arriving or leaving mid-run must not seal the rows and send the media
+    // plain, or the reverse. The resolver gets the owner because an
+    // envelope is bound to it, and the log so a row that fails to open is
+    // reported where the Logs tab can see it.
+    // A resolver may refuse the run (the E2EE wrapper does, when the signed-in
+    // user changed under it or its key is still loading); that is a failed
+    // slot with the reason, never a run in plaintext and never a throw out
+    // of `syncCloud`, which the launch and edit paths do not catch.
+    SyncTransport? transport;
+    MediaObjectStore? mediaStore;
+    String? resolveFailure;
+    if (hasSupabase) {
+      try {
+        transport = _syncTransportResolver(ownerId, _logSink);
+        mediaStore = _mediaStoreResolver?.call(ownerId);
+      } catch (error) {
+        transport = null;
+        mediaStore = null;
+        resolveFailure = error is StateError ? error.message : '$error';
+      }
+    }
+    final SyncTransport? resolvedTransport = transport;
+    final MediaObjectStore? resolvedMediaStore = mediaStore;
 
     final CloudSyncCoordinator coordinator = CloudSyncCoordinator(
       syncSupabase: hasSupabase
           ? () async {
+              if (resolvedTransport == null) {
+                return SupabaseSyncResult(
+                  failureReason: resolveFailure ?? 'sync skipped',
+                );
+              }
               // `ensureSyncDeviceId()` returns null rather than minting and
               // persisting an id when `SettingsController.initialize()`
               // never actually loaded settings — writing one in that state
@@ -812,7 +1399,7 @@ class RecordingsController extends ChangeNotifier {
                 ),
               );
               return SyncEngine(
-                transport: _syncTransportResolver(),
+                transport: resolvedTransport,
                 bookkeeping: store,
                 applier: RepositorySyncApplier(
                   applySyncedRecordings: applySyncedRecordings,
@@ -820,26 +1407,22 @@ class RecordingsController extends ChangeNotifier {
                   applySyncedProjectDelete: _applySyncedProjectDelete,
                   clipboard: _clipboardRepository,
                   revisions: _revisionsRepository,
-                  deleteRecording: deleteRecording,
+                  applySyncedRecordingDelete: applySyncedRecordingDelete,
                   recordingExists: _hasRecording,
                 ),
+                log: _logSink,
+                syncClipboard: _syncClipboard?.call() ?? false,
               ).run(snapshot);
             }
           : null,
       // After the metadata slot: its pull is what adds the rows whose media
       // this fetches. Reads `_recordings` at call time, not the snapshot the
       // metadata slot captured before its pull.
-      syncMedia: hasSupabase && _mediaStoreResolver != null
+      syncMedia: hasSupabase && resolvedMediaStore != null
           ? () async {
-              final String? ownerId = _authGateway?.currentIdentity?.id;
-              if (ownerId == null) {
-                return const MediaSyncResult(
-                  failureReason: 'sync skipped: signed out',
-                );
-              }
               await _rerootSyncedPaths();
               return MediaSyncService(
-                store: _mediaStoreResolver(ownerId),
+                store: resolvedMediaStore,
                 // A capture deleted while its download was in flight must
                 // not come back as an orphan the next launch re-adopts.
                 stillWanted: (MediaSyncJob job) => _recordings.any(
@@ -863,6 +1446,8 @@ class RecordingsController extends ChangeNotifier {
             (_lastCloudSyncReport!.supabase?.tombstonesApplied ?? 0) > 0)) {
       await _history.loadRevisions();
     }
+    // Only a run that reached the metadata slot can have pulled a tombstone.
+    if (_lastCloudSyncReport!.supabase != null) await _housekeepTrash();
     // A pulled row that was mid-pipeline on the device that made it can now
     // be processed here; the funnel filters everything else out by status.
     if ((_lastCloudSyncReport!.media?.downloaded ?? 0) > 0) {
@@ -895,7 +1480,9 @@ class RecordingsController extends ChangeNotifier {
   /// existing item, and it swallows its own errors into the log, so a failed
   /// scan costs a recovery rather than a start-up.
   Future<void> recoverOrphans() async {
-    if (_indexUnreadable || _disposed) return;
+    if (_disposed) return;
+    if (_indexUnreadable) return;
+    await _housekeepTrash();
     try {
       final List<Recording> orphans = await _repository.findOrphans(
         _recordings,
@@ -1195,6 +1782,15 @@ class RecordingsController extends ChangeNotifier {
   }
 
   Future<void> startRecording({String? appendTo}) async {
+    // Before the first load the list is empty, not right: persisting now would
+    // overwrite recordings.json with just this capture (see addTextNote).
+    if (!_initialized) {
+      if (!_indexUnreadable) {
+        _error = 'Captures are still loading — try again.';
+        notifyListeners();
+      }
+      return;
+    }
     if (_isRecording || _isBusy) return;
     _error = null;
 
@@ -1232,6 +1828,7 @@ class RecordingsController extends ChangeNotifier {
     // the choice has to be changeable *while* the mic is live rather than
     // before it opens.
     _recordingProjectId = activeProjectId;
+    _recordingProjectPicked = false;
 
     // Inside a try for the same reason the amplitude subscription is: this
     // buys the capture the right to *continue* off-screen, and a capture that
@@ -1497,6 +2094,7 @@ class RecordingsController extends ChangeNotifier {
         // NONE. Falling back would make "file this one nowhere" impossible to
         // express — the same three-state trap as the enrichment profile.
         projectId: _recordingProjectId,
+        projectAuto: _recordingProjectId != null && !_recordingProjectPicked,
       );
 
       // Critical invariant: persist metadata only after the audio file exists.
@@ -1660,7 +2258,80 @@ class RecordingsController extends ChangeNotifier {
   /// other write is: `saveAll` rewrites the whole file, and a delete is the one
   /// write that is *supposed* to lose rows, so the shrink guard would not catch
   /// it either.
-  Future<void> deleteRecording(String id) async {
+  Future<void> deleteRecording(String id) =>
+      _removeRecording(id, dispose: _repository.deleteArtifacts);
+
+  /// The delete a pulled sync tombstone asks for (#304). Same guards and the
+  /// same files-first, index-second order as [deleteRecording], but the source
+  /// files are moved into the recordings directory's `.trash/` instead of
+  /// being unlinked, so a stolen session or a bad server cannot destroy the
+  /// bytes in one sync cycle. [hold] marks them as waiting for the user's
+  /// [confirmHeldSyncDeletes]; the engine sets it when the batch is large.
+  Future<void> applySyncedRecordingDelete(
+    String id, {
+    required bool hold,
+  }) async {
+    // The banner count moves by what was just trashed — no directory scan per
+    // tombstone, a bulk delete is hundreds of them. The housekeeping after the
+    // sync run recounts from disk. `_removeRecording` notifies once at the end.
+    await _removeRecording(
+      id,
+      dispose: (Recording item) async {
+        final int moved = await _repository.trashArtifacts(item, held: hold);
+        if (hold) _heldSyncTrashFiles += moved;
+      },
+    );
+  }
+
+  /// Files waiting in `.trash/` as `held-*`: deletes another device made that
+  /// this device has not been told to finish. Refreshed after load and after
+  /// every sync run.
+  int get heldSyncTrashFiles => _heldSyncTrashFiles;
+  int _heldSyncTrashFiles = 0;
+
+  /// Accept the held deletes: their 30-day retention clock starts now.
+  Future<void> confirmHeldSyncDeletes() async {
+    try {
+      await _repository.releaseHeldTrash();
+    } catch (exception) {
+      _logSink.log(
+        'Could not confirm held deletes: $exception',
+        level: LogLevel.warn,
+      );
+    }
+    await _refreshHeldTrash();
+  }
+
+  Future<void> _refreshHeldTrash() async {
+    try {
+      final int count = await _repository.heldTrashCount();
+      if (count == _heldSyncTrashFiles) return;
+      _heldSyncTrashFiles = count;
+      if (!_disposed) notifyListeners();
+    } catch (_) {}
+  }
+
+  /// Best-effort, on the best-effort sink contract: a trash that will not
+  /// prune costs disk space, never a capture.
+  Future<void> _housekeepTrash() async {
+    try {
+      final int removed = await _repository.pruneTrash();
+      if (removed > 0) {
+        _logSink.log(
+          'Removed $removed expired file(s) from the sync trash.',
+          level: LogLevel.info,
+        );
+      }
+    } catch (exception) {
+      _logSink.log('Trash cleanup failed: $exception', level: LogLevel.warn);
+    }
+    await _refreshHeldTrash();
+  }
+
+  Future<void> _removeRecording(
+    String id, {
+    required Future<void> Function(Recording item) dispose,
+  }) async {
     if (_indexUnreadable) {
       _error =
           'Deletion is disabled — the recordings index could not be read, so '
@@ -1683,7 +2354,7 @@ class RecordingsController extends ChangeNotifier {
     // download finishing while `deleteArtifacts` runs is not written back.
     _deleting.add(id);
     try {
-      await _deleteRecordingArtifactsAndRow(id, item);
+      await _deleteRecordingArtifactsAndRow(id, item, dispose);
     } finally {
       _deleting.remove(id);
     }
@@ -1692,7 +2363,11 @@ class RecordingsController extends ChangeNotifier {
   /// Ids whose [deleteRecording] is in progress.
   final Set<String> _deleting = <String>{};
 
-  Future<void> _deleteRecordingArtifactsAndRow(String id, Recording item) async {
+  Future<void> _deleteRecordingArtifactsAndRow(
+    String id,
+    Recording item,
+    Future<void> Function(Recording item) dispose,
+  ) async {
     if (_playingId == id) {
       try {
         await _player.stop();
@@ -1704,7 +2379,7 @@ class RecordingsController extends ChangeNotifier {
     }
 
     try {
-      await _repository.deleteArtifacts(item);
+      await dispose(item);
     } catch (exception) {
       // Index untouched on purpose: the row is the only thing that still knows
       // where the file is, so it stays until the file is actually gone.
@@ -1722,6 +2397,12 @@ class RecordingsController extends ChangeNotifier {
     // reuse the id from inheriting them, which `uuid.v4()` makes theoretical.
     _history.forget(id);
     await _persistAll(expectShrink: true);
+    // Derived, so best-effort: a vector left behind matches no live capture.
+    try {
+      _embeddingStore.remove(id);
+      _vectors?.remove(id);
+      _vectorsVersion++;
+    } catch (_) {}
     _logSink.log(
       'Capture deleted · ${item.type.name} · source and index row removed.',
       level: LogLevel.warn,
@@ -1736,10 +2417,35 @@ class RecordingsController extends ChangeNotifier {
   /// text processor is a passthrough, so the item lands `completed` — but it
   /// travels the same persist-then-process path as every other capture, and a
   /// failure never deletes the source.
-  Future<void> addTextNote(String body, {String? appendTo}) async {
-    if (_isRecording || _isBusy) return;
+  ///
+  /// Returns true only once the note is persisted and enqueued — or, when [id]
+  /// is given and a row with that id already exists, without writing anything
+  /// (an external producer retrying after a crash). False means nothing was
+  /// saved: busy, recording, empty, or a failure. [id] lets an inbox file's
+  /// name become the capture's id, which makes re-ingestion idempotent.
+  Future<bool> addTextNote(
+    String body, {
+    String? appendTo,
+    String? id,
+  }) async {
+    if (appendTo != null && id != null) {
+      throw ArgumentError('appendTo and id cannot be combined.');
+    }
+    // Before the first load the list is empty, not right: persisting now would
+    // overwrite recordings.json with just this note.
+    if (!_initialized) {
+      // Callers that ignore the result still show `error`, so say why nothing
+      // was saved. An unreadable-index message already explains more; keep it.
+      if (!_indexUnreadable) {
+        _error = 'Captures are still loading — try again.';
+        notifyListeners();
+      }
+      return false;
+    }
+    if (id != null && _recordings.any((Recording r) => r.id == id)) return true;
+    if (_isRecording || _isBusy) return false;
     final String trimmed = body.trim();
-    if (trimmed.isEmpty) return;
+    if (trimmed.isEmpty) return false;
 
     _isBusy = true;
     _error = null;
@@ -1777,11 +2483,11 @@ class RecordingsController extends ChangeNotifier {
             sizeBytes: fragmentBytes,
           ),
         );
-        return;
+        return true;
       }
 
-      final String id = const Uuid().v4();
-      final File file = await _repository.createSourceFile(id, 'txt');
+      final String noteId = id ?? const Uuid().v4();
+      final File file = await _repository.createSourceFile(noteId, 'txt');
       await file.writeAsString(trimmed, flush: true);
       final int sizeBytes = await file.exists() ? await file.length() : 0;
       if (sizeBytes == 0) {
@@ -1792,7 +2498,7 @@ class RecordingsController extends ChangeNotifier {
       }
 
       final Recording saved = Recording(
-        id: id,
+        id: noteId,
         filePath: file.path,
         createdAt: DateTime.now(),
         durationMs: 0,
@@ -1801,6 +2507,7 @@ class RecordingsController extends ChangeNotifier {
         type: CaptureType.text,
         sourceMimeType: 'text/plain',
         projectId: activeProjectId,
+        projectAuto: activeProjectId != null,
       );
 
       // Critical invariant: index the note only after the .txt exists on disk.
@@ -1813,13 +2520,114 @@ class RecordingsController extends ChangeNotifier {
       // Enqueue for background processing and return; the drain loop runs the
       // job off the capture lock so it never blocks the next capture.
       await _enqueueProcessing(saved.id);
+      return true;
     } catch (exception) {
       _error = exception.toString();
       _logSink.log('Failed to save note: $exception', level: LogLevel.error);
+      return false;
     } finally {
       _isBusy = false;
       notifyListeners();
     }
+  }
+
+  /// Ingest a finished `.m4a` written by the Android Auto car app into the
+  /// inbox. Same ordering as [addTextNote] and [addUpload]: copy the source into
+  /// the app directory and verify it, index with status `saved`, and only then
+  /// process. The source is copied, never moved or deleted; the caller removes
+  /// it once this returns true.
+  ///
+  /// [id] is the inbox file's uuid, so re-ingestion is idempotent: an existing
+  /// row answers true without writing, before the busy check. False means
+  /// nothing was saved: still loading, busy, recording, an empty or missing
+  /// source, or a failure.
+  Future<bool> addAudioFile(String id, File source) async {
+    if (!_initialized) {
+      if (!_indexUnreadable) {
+        _error = 'Captures are still loading — try again.';
+        notifyListeners();
+      }
+      return false;
+    }
+    if (_recordings.any((Recording r) => r.id == id)) return true;
+    if (_isRecording || _isBusy) return false;
+
+    _isBusy = true;
+    _error = null;
+    notifyListeners();
+
+    try {
+      final Recording imported = await _importer.importFile(
+        id: id,
+        type: CaptureType.audioRecording,
+        source: source,
+        mimeType: 'audio/mp4',
+        createdAt: await source.lastModified(),
+      );
+      final Recording saved = imported.copyWith(
+        projectId: activeProjectId,
+        projectAuto: activeProjectId != null,
+      );
+
+      // Critical invariant: index only after the source is copied and verified.
+      _recordings = <Recording>[saved, ..._recordings];
+      await _persistAll();
+      unawaited(_computeContentHash(saved.id));
+      unawaited(_gamificationController?.onCaptureCreated(_recordings.length));
+      _logSink.log(
+        'Car audio saved · ${await File(saved.filePath).length()} B',
+        recordingId: saved.id,
+      );
+
+      await _enqueueProcessing(saved.id);
+      return true;
+    } catch (exception) {
+      _error = exception.toString();
+      _logSink.log(
+        'Failed to import car audio: $exception',
+        level: LogLevel.error,
+      );
+      return false;
+    } finally {
+      _isBusy = false;
+      notifyListeners();
+    }
+  }
+
+  Future<void> _admitNewImportedFile({
+    required File source,
+    required CaptureType type,
+    String? mimeType,
+    required bool hashImmediately,
+  }) async {
+    final String id = const Uuid().v4();
+    final Recording imported = await _importer.importFile(
+      id: id,
+      type: type,
+      source: source,
+      mimeType: mimeType,
+      createdAt: DateTime.now(),
+    );
+    final Recording saved = imported.copyWith(
+      projectId: activeProjectId,
+      projectAuto: activeProjectId != null,
+    );
+
+    // Critical invariant: index only after the source is copied and verified.
+    _recordings = <Recording>[saved, ..._recordings];
+    await _persistAll();
+    if (hashImmediately) {
+      unawaited(_computeContentHash(saved.id));
+    }
+    unawaited(_gamificationController?.onCaptureCreated(_recordings.length));
+    _logSink.log(
+      'File imported · ${type.name} · ${await File(saved.filePath).length()} B',
+      recordingId: saved.id,
+    );
+
+    // Enqueue for background processing and return; the drain loop runs the
+    // job off the capture lock so it never blocks the next capture.
+    await _enqueueProcessing(saved.id);
   }
 
   /// Import an existing file (audio, image or video) as a new item. Mirrors the
@@ -1828,6 +2636,15 @@ class RecordingsController extends ChangeNotifier {
   /// then process. A cancelled pick is a no-op; a copy or processing failure
   /// never deletes the source.
   Future<void> addUpload(CaptureType type, {String? appendTo}) async {
+    // Before the first load the list is empty, not right: persisting now would
+    // overwrite recordings.json with just this capture (see addTextNote).
+    if (!_initialized) {
+      if (!_indexUnreadable) {
+        _error = 'Captures are still loading — try again.';
+        notifyListeners();
+      }
+      return;
+    }
     if (_isRecording || _isBusy) return;
     _isBusy = true;
     _error = null;
@@ -1856,29 +2673,12 @@ class RecordingsController extends ChangeNotifier {
         return;
       }
 
-      final String id = const Uuid().v4();
-      final Recording imported = await _importer.importFile(
-        id: id,
-        type: type,
+      await _admitNewImportedFile(
         source: picked.file,
+        type: type,
         mimeType: picked.mimeType,
-        createdAt: DateTime.now(),
+        hashImmediately: true,
       );
-      final Recording saved = imported.copyWith(projectId: activeProjectId);
-
-      // Critical invariant: index only after the source is copied and verified.
-      _recordings = <Recording>[saved, ..._recordings];
-      await _persistAll();
-      unawaited(_computeContentHash(saved.id));
-      unawaited(_gamificationController?.onCaptureCreated(_recordings.length));
-      _logSink.log(
-        'File imported · ${type.name} · ${await File(saved.filePath).length()} B',
-        recordingId: saved.id,
-      );
-
-      // Enqueue for background processing and return; the drain loop runs the
-      // job off the capture lock so it never blocks the next capture.
-      await _enqueueProcessing(saved.id);
     } catch (exception) {
       _error = exception.toString();
       _logSink.log('Failed to import file: $exception', level: LogLevel.error);
@@ -1893,7 +2693,17 @@ class RecordingsController extends ChangeNotifier {
     File file,
     CaptureType type, {
     String? appendTo,
+    String? mimeType,
   }) async {
+    // Before the first load the list is empty, not right: persisting now would
+    // overwrite recordings.json with just this capture (see addTextNote).
+    if (!_initialized) {
+      if (!_indexUnreadable) {
+        _error = 'Captures are still loading — try again.';
+        notifyListeners();
+      }
+      return;
+    }
     if (_isRecording || _isBusy) return;
     _isBusy = true;
     _error = null;
@@ -1912,31 +2722,19 @@ class RecordingsController extends ChangeNotifier {
             index: next,
             type: type,
             source: file,
+            mimeType: mimeType,
             createdAt: DateTime.now(),
           ),
         );
         return;
       }
 
-      final String id = const Uuid().v4();
-      final Recording imported = await _importer.importFile(
-        id: id,
-        type: type,
+      await _admitNewImportedFile(
         source: file,
-        mimeType: null,
-        createdAt: DateTime.now(),
+        type: type,
+        mimeType: mimeType,
+        hashImmediately: false,
       );
-      final Recording saved = imported.copyWith(projectId: activeProjectId);
-
-      _recordings = <Recording>[saved, ..._recordings];
-      await _persistAll();
-      unawaited(_gamificationController?.onCaptureCreated(_recordings.length));
-      _logSink.log(
-        'File imported · ${type.name} · ${await File(saved.filePath).length()} B',
-        recordingId: saved.id,
-      );
-
-      await _enqueueProcessing(saved.id);
     } catch (exception) {
       _error = exception.toString();
       _logSink.log('Failed to import file: $exception', level: LogLevel.error);
@@ -2028,6 +2826,7 @@ class RecordingsController extends ChangeNotifier {
       source: RevisionSource.user,
     );
     _logSink.log('Text updated.', recordingId: id);
+    await _reembed(id);
   }
 
   /// Set or clear an item's display title. An empty value clears it, and the
@@ -2067,6 +2866,27 @@ class RecordingsController extends ChangeNotifier {
     );
   }
 
+  /// Set the rank by hand, or clear it with null — which asks the next
+  /// enrichment run to rank the item again. The model's reason is dropped
+  /// either way: it argued for a rank that is no longer the one shown.
+  Future<void> setPriority(String id, CapturePriority? priority) async {
+    await _update(
+      id,
+      (Recording item) => item.copyWith(
+        priority: priority,
+        clearPriority: priority == null,
+        clearPriorityReason: true,
+        // A hand-set rank was judged against no profile at all.
+        clearPriorityBasis: true,
+      ),
+      source: RevisionSource.user,
+    );
+    _logSink.log(
+      priority == null ? 'Priority cleared.' : 'Priority set to ${priority.label}.',
+      recordingId: id,
+    );
+  }
+
   /// Overwrite the model's verdict. Null clears it back to "unclassified" — a
   /// wrong category is worse than none, because an export will read this field.
   Future<void> setCategory(String id, CaptureCategory? category) async {
@@ -2091,6 +2911,10 @@ class RecordingsController extends ChangeNotifier {
       (Recording item) => item.copyWith(
         projectId: normalized,
         clearProjectId: normalized == null || normalized.isEmpty,
+        projectAuto: false,
+        // A model's reason describes the old project; a dismissal is the
+        // user's and stays.
+        clearSuggestedRoute: item.suggestedRoute?.auto == true,
       ),
       source: RevisionSource.user,
     );
@@ -2134,6 +2958,10 @@ class RecordingsController extends ChangeNotifier {
         processedAt: nextValue ? DateTime.now() : null,
         clearProcessedAt: !nextValue,
       ),
+      // How the capture left the desk is where it last went: an assistant
+      // send leaves the item open, so "Mark done" afterwards is a handoff and
+      // not a bare review. No routes at all still answers review.
+      closure: _closureKindFor(recording),
     );
     // The tally is raised inside `_update`, which is the only place that can
     // tell a first closure from a re-tick — see [CaptureHistory].
@@ -2192,10 +3020,68 @@ class RecordingsController extends ChangeNotifier {
     _logSink.log('Routed to ${record.target}.', recordingId: id);
   }
 
+  /// The destinations a suggestion for [recording] may name: what [route] would
+  /// really do for it right now (one kind, never both file and Command), plus
+  /// the agent handoff when the project has one. Read at the item's current
+  /// project and category, so a caller that changes either asks again.
+  List<SuggestedRouteKind> availableRouteKinds(Recording recording) {
+    final RouteKind? resolved = _captureRouter.resolvedKind(
+      _routedCapture(recording),
+    );
+    return <SuggestedRouteKind>[
+      if (resolved == RouteKind.command)
+        SuggestedRouteKind.command
+      else if (resolved == RouteKind.file)
+        SuggestedRouteKind.file,
+      if (canHandoff(recording)) SuggestedRouteKind.agent,
+    ];
+  }
+
+  /// The suggestion's action, or null when the card must draw nothing: no
+  /// suggestion, `none`, one the user dismissed, an item that already has a
+  /// route or is done, or a destination that is no longer available (Command
+  /// unbound, repo path cleared). Synchronous because the card calls it during
+  /// `build`.
+  SuggestedRouteAction? suggestedRouteAction(Recording recording) {
+    final SuggestedRoute? suggestion = recording.suggestedRoute;
+    if (suggestion == null ||
+        !suggestion.auto ||
+        suggestion.kind == SuggestedRouteKind.none ||
+        recording.routes.isNotEmpty ||
+        recording.isProcessedByUser ||
+        !availableRouteKinds(recording).contains(suggestion.kind)) {
+      return null;
+    }
+    final List<HandoffAgent> agents = handoffAgents(recording);
+    return SuggestedRouteAction(
+      kind: suggestion.kind,
+      reason: suggestion.reason,
+      agentLabel: suggestion.kind == SuggestedRouteKind.agent
+          ? (agents.where((HandoffAgent a) => a.isDefault).firstOrNull ??
+                    agents.first)
+                .label
+          : null,
+    );
+  }
+
+  /// The user turned the suggestion down. It stays on the row, owned by the
+  /// user, so a later enrichment run cannot bring it back.
+  Future<void> dismissSuggestedRoute(String id) => _update(
+    id,
+    (Recording item) => item.suggestedRoute == null
+        ? item
+        : item.copyWith(suggestedRoute: item.suggestedRoute!.dismissed()),
+    source: RevisionSource.user,
+  );
+
   /// Agents this capture can be handed to. Empty means the control is hidden,
   /// the same rule [canRoute] follows.
   List<HandoffAgent> handoffAgents(Recording recording) =>
-      _agentHandoff.agentsFor(recording.projectId);
+      // An id that cannot name a file is refused by the handoff itself; hiding
+      // the control here saves the user a failure they could not act on.
+      isSafeCaptureId(recording.id)
+      ? _agentHandoff.agentsFor(recording.projectId)
+      : const <HandoffAgent>[];
 
   bool canHandoff(Recording recording) => handoffAgents(recording).isNotEmpty;
 
@@ -2205,8 +3091,27 @@ class RecordingsController extends ChangeNotifier {
   /// written.
   String handoffTaskPath(String id) => _agentHandoff.taskPathFor(id);
 
+  /// The scratch folder the handoff will run in, or null when it uses a
+  /// project's repository. Shown by the sheet before anything is created.
+  String? handoffWorkspace(Recording recording) =>
+      _agentHandoff.workspacePathFor(recording.id, recording.projectId);
+
+  /// Read through [capturePrompt] rather than the handoff seam, so a capture
+  /// with no project — whose handoff is `DisabledAgentHandoff` — still seeds
+  /// the sheet's prompt field.
   String handoffPrompt(Recording recording) =>
-      _agentHandoff.promptFor(_routedCapture(recording));
+      capturePrompt(_routedCapture(recording));
+
+  /// Whether the **Send to…** sheet has anything to send: the capture has text
+  /// of its own. Deliberately *not* `capturePrompt` non-empty — that falls back
+  /// to the card's title, which is never empty (`Voice note · 17:09`), and a
+  /// capture still transcribing must keep the control hidden.
+  bool canSend(Recording recording) =>
+      (recording.transcript ?? '').trim().isNotEmpty ||
+      (recording.summary ?? '').trim().isNotEmpty;
+
+  /// Targets the platform can reach, for the sheet's groups.
+  Future<List<SendTarget>> sendTargets() => _captureSender.availableTargets();
 
   /// The one place a `Recording` is flattened for a destination, so the prompt
   /// the sheet shows and the prompt the launch uses cannot drift apart.
@@ -2250,6 +3155,7 @@ class RecordingsController extends ChangeNotifier {
     String id, {
     required String agentId,
     String? instruction,
+    bool detached = false,
   }) async {
     final int index = _recordings.indexWhere((Recording item) => item.id == id);
     if (index < 0) return null;
@@ -2267,6 +3173,7 @@ class RecordingsController extends ChangeNotifier {
           instruction: instruction?.trim().isNotEmpty == true
               ? instruction!.trim()
               : _agentHandoff.promptFor(capture),
+          detached: detached,
         ),
       );
     } catch (exception) {
@@ -2294,7 +3201,12 @@ class RecordingsController extends ChangeNotifier {
     );
     _logSink.log(
       result.attachedToExistingSession
-          ? 'Attached to ${result.record.target} · brief at ${result.taskPath}'
+          ? '${result.detached ? 'Found running' : 'Attached to'} '
+                '${result.record.target} · brief at ${result.taskPath}'
+          : result.detached
+          ? 'Started ${result.record.target} in the background · '
+                '${attachCommandFor(result.sessionName)} · '
+                'brief at ${result.taskPath}'
           : 'Handed off to ${result.record.target} · brief at ${result.taskPath}',
       recordingId: id,
     );
@@ -2302,17 +3214,149 @@ class RecordingsController extends ChangeNotifier {
     return result;
   }
 
+  /// Open a terminal on the agent session [sessionName] — the way back into a
+  /// session [handoff] started detached, or found already running.
+  ///
+  /// Nothing about the capture changes: the route was recorded when the
+  /// session started, and looking at it is not a second delivery. Returns
+  /// false with [error] set when the session is not running or no terminal
+  /// can open.
+  Future<bool> attachSession(String sessionName) async {
+    try {
+      await _agentHandoff.attach(sessionName);
+    } catch (exception) {
+      _error = exception.toString();
+      _logSink.log('Attach failed: $exception', level: LogLevel.error);
+      notifyListeners();
+      return false;
+    }
+    _error = null;
+    notifyListeners();
+    return true;
+  }
+
+  /// Send a capture's text to an assistant, the share sheet or the clipboard —
+  /// the project-free counterpart of [handoff], and it shares its single-flight
+  /// set so a double tap cannot open two tabs.
+  ///
+  /// **Delivery first, as everywhere:** a throw records nothing and leaves the
+  /// item open, with only [error] set. **Unlike [handoff] a success does not
+  /// close the capture.** A browser opening is not a prompt sent, a share sheet
+  /// confirms little and a clipboard write confirms nothing, so the route is
+  /// recorded — the capture says where it went — and closing stays the user's
+  /// call ("Mark done" in the sheet, which goes through [toggleProcessed]).
+  ///
+  /// Returns null on failure, on a dismissed share sheet, when a send is
+  /// already in flight for [id], and when there is nothing to send. [prompt] is
+  /// the sheet's editable text; a blank one falls back to the capture's own
+  /// text, and a capture with none is refused with [error] rather than sent as
+  /// its stand-in title.
+  ///
+  /// **A delivered send is always returned, even when recording it failed.** If
+  /// the route cannot be persisted the text has still left this device, so
+  /// returning null would tell the user nothing was sent and invite a second
+  /// send. The outcome comes back, nothing is recorded, and [error] says the
+  /// send was not recorded — a non-null [error] after a non-null return is
+  /// that state.
+  Future<SendOutcome?> send(String id, SendTarget target, String prompt) async {
+    final int index = _recordings.indexWhere((Recording item) => item.id == id);
+    if (index < 0) return null;
+    final Recording recording = _recordings[index];
+    if (!_handoffsInProgress.add(id)) return null;
+    // Cleared up front so a failure from an earlier send is not read as this
+    // one's: a dismissed share sets nothing, and the sheet shows [error].
+    _error = null;
+    notifyListeners();
+
+    final RoutedCapture capture = _routedCapture(recording);
+    final String text = prompt.trim().isNotEmpty
+        ? prompt.trim()
+        : canSend(recording)
+        ? capturePrompt(capture)
+        : '';
+    if (text.isEmpty) {
+      _error = 'The prompt is empty — there is nothing to send.';
+      _handoffsInProgress.remove(id);
+      notifyListeners();
+      return null;
+    }
+
+    final SendOutcome? outcome;
+    try {
+      outcome = await _captureSender.send(capture, target, text);
+    } catch (exception) {
+      _error = exception.toString();
+      _logSink.log(
+        'Send failed: $exception',
+        level: LogLevel.error,
+        recordingId: id,
+      );
+      _handoffsInProgress.remove(id);
+      notifyListeners();
+      return null;
+    }
+    _handoffsInProgress.remove(id);
+    if (outcome == null) {
+      // A dismissed share sheet: the user's own answer, not an error.
+      notifyListeners();
+      return null;
+    }
+
+    try {
+      await _update(
+        id,
+        (Recording item) => item.copyWith(
+          routes: <RouteRecord>[...item.routes, outcome!.record],
+        ),
+      );
+    } catch (exception) {
+      _error = 'Sent to ${outcome.record.target}, but not recorded on this '
+          'capture: $exception';
+      _logSink.log(
+        'Send to ${outcome.record.target} was not recorded: $exception',
+        level: LogLevel.error,
+        recordingId: id,
+      );
+      notifyListeners();
+      return outcome;
+    }
+    _logSink.log('Sent to ${outcome.record.target}.', recordingId: id);
+    return outcome;
+  }
+
   /// Scans project repository and note vault for any artifacts or results
   /// generated for capture [id], updating the capture's artifact list.
+  ///
+  /// Where it looks: the project's repository; or, for a capture with no
+  /// repository, its scratch folder when the handoff has one; and the vault.
+  /// A capture with no project and no scratch folder returns its current list
+  /// untouched.
   Future<List<AgentArtifact>> refreshArtifacts(String id) async {
     final int index = _recordings.indexWhere((Recording item) => item.id == id);
     if (index < 0) return const <AgentArtifact>[];
     final Recording recording = _recordings[index];
     final String? projectId = recording.projectId;
-    if (projectId == null || projectId.isEmpty) return recording.artifacts;
-
-    final Project? project = _projectById?.call(projectId);
-    if (project == null) return recording.artifacts;
+    Project? project = projectId == null || projectId.isEmpty
+        ? null
+        : _projectById?.call(projectId);
+    if (project == null || project.repoPath.trim().isEmpty) {
+      // A capture handed off with no repository ran in a scratch folder, and
+      // that folder is where its results are. Scanned as a repository root so
+      // the scanner needs no second code path.
+      final String? workspace = _agentHandoff.workspacePathFor(id, projectId);
+      if (workspace != null) {
+        project = Project(
+          id: 'capture-$id',
+          name: 'Capture',
+          repoPath: workspace,
+        );
+      } else if (project == null) {
+        // No project and no scratch folder: nothing to scan, not even the vault.
+        return recording.artifacts;
+      }
+      // Otherwise a project with an empty `repoPath` and no scratch root is
+      // scanned as it always was — only the vault can match.
+    }
 
     final Directory? vaultDir = _vaultDirectory?.call();
 
@@ -2682,6 +3726,154 @@ class RecordingsController extends ChangeNotifier {
     }
   }
 
+  /// The fingerprint of the profile ("soul") the next capture would be sent —
+  /// what a rank is stale against. Resolved through the same context source
+  /// as enrichment, so a `SOUL.md` and its fallback count exactly as they do
+  /// there. Null when no profile would be sent.
+  Future<String?> currentProfileBasis() async {
+    try {
+      return (await _enrichmentContextSource.contextFor(null)).profileBasis;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  /// How many captures on the desk were ranked under an older soul.
+  Future<int> staleRankCount() async =>
+      staleRanks(_recordings, await currentProfileBasis()).length;
+
+  /// Non-null while [rerankStale] runs. In memory only, like
+  /// `_enrichingIds`: a re-rank is not a state anything resumes.
+  RerankProgress? get rerankProgress => _rerankProgress;
+  RerankProgress? _rerankProgress;
+  bool _rerankCancelled = false;
+
+  /// Stop a running [rerankStale] after the item in flight. The rank that
+  /// item is getting still lands; nothing after it is called.
+  void cancelRerank() {
+    if (_rerankProgress != null) _rerankCancelled = true;
+  }
+
+  /// Re-rank every capture on the desk whose priority was judged against an
+  /// older soul (see [isStaleRank]).
+  ///
+  /// A **ranking pass, not a re-enrichment**: only `priority`,
+  /// `priorityReason` and `priorityBasis` change. Title, category, summary and
+  /// tags stay as they are — the soul changing says nothing about what a
+  /// capture is called.
+  ///
+  /// Sequential, one model call per capture, each inside the usage scope like
+  /// [retryEnrichment], so the cost lands against the right capture. An item
+  /// is re-checked when its turn comes, and again inside the write: a rank the
+  /// user set by hand meanwhile clears its basis, stops being stale, and wins.
+  /// One failure is logged and the pass moves on. Single-flight: a second call
+  /// while one runs returns at once.
+  Future<RerankSummary> rerankStale() async {
+    if (_rerankProgress != null) return const RerankSummary();
+    final String? basis = await currentProfileBasis();
+    final List<String> ids = <String>[
+      for (final Recording item in staleRanks(_recordings, basis)) item.id,
+    ];
+    if (ids.isEmpty || _disposed) return const RerankSummary();
+
+    _rerankCancelled = false;
+    _rerankProgress = RerankProgress(done: 0, total: ids.length);
+    notifyListeners();
+    _logSink.log('Re-ranking ${ids.length} captures against the current soul.');
+
+    int reranked = 0;
+    int skipped = 0;
+    int failed = 0;
+    bool cancelled = false;
+    try {
+      for (final String id in ids) {
+        if (_disposed || _rerankCancelled) {
+          cancelled = _rerankCancelled;
+          break;
+        }
+        final void Function() releaseUsageScope = await _acquireUsageScope();
+        try {
+          if (_disposed) break;
+          final int index = _recordings.indexWhere((Recording i) => i.id == id);
+          final Recording? item = index < 0 ? null : _recordings[index];
+          final String text = item?.transcript ?? '';
+          // `add` is also the mutex against a retry or the drain enriching the
+          // same capture right now — the card's ANALYZING pill shows it too.
+          if (item == null ||
+              !isStaleRank(item, basis) ||
+              text.trim().isEmpty ||
+              !_enrichingIds.add(id)) {
+            skipped++;
+            continue;
+          }
+          if (!_disposed) notifyListeners();
+          try {
+            final EnrichmentContext context = await _resolveEnrichmentContext(
+              id,
+            );
+            _beginUsageJob(id, UsageStage.enrichment);
+            final EnrichmentResult result;
+            try {
+              result = await _enrichmentService.enrich(text, context: context);
+            } finally {
+              _endUsageJob();
+            }
+            final CapturePriority? priority = result.priority;
+            if (priority == null) {
+              skipped++;
+              continue;
+            }
+            bool wrote = false;
+            await _update(id, (Recording current) {
+              if (!isStaleRank(current, basis)) return current;
+              wrote = true;
+              return current.copyWith(
+                priority: priority,
+                priorityReason: result.priorityReason,
+                clearPriorityReason: result.priorityReason == null,
+                priorityBasis: context.profileBasis,
+                clearPriorityBasis: context.profileBasis == null,
+              );
+            }, source: RevisionSource.enrichment);
+            if (wrote) {
+              reranked++;
+              _logSink.log('Re-ranked · ${priority.label}', recordingId: id);
+            } else {
+              skipped++;
+            }
+          } finally {
+            _enrichingIds.remove(id);
+          }
+        } catch (exception) {
+          failed++;
+          _logSink.log(
+            'Re-rank failed: $exception',
+            level: LogLevel.warn,
+            recordingId: id,
+          );
+        } finally {
+          releaseUsageScope();
+          _rerankProgress = _rerankProgress?.advance();
+          if (!_disposed) notifyListeners();
+        }
+      }
+    } finally {
+      _rerankProgress = null;
+      _rerankCancelled = false;
+      if (!_disposed) notifyListeners();
+      _logSink.log(
+        'Re-rank ${cancelled ? 'cancelled' : 'done'} · $reranked re-ranked, '
+        '$skipped skipped, $failed failed',
+      );
+    }
+    return RerankSummary(
+      reranked: reranked,
+      skipped: skipped,
+      failed: failed,
+      cancelled: cancelled,
+    );
+  }
+
   /// Resume jobs left non-terminal or interrupted (e.g. by app termination,
   /// background suspension, timeout or crash).
   ///
@@ -2825,12 +4017,21 @@ class RecordingsController extends ChangeNotifier {
     // otherwise queue it a second time and process it twice.
     _processingId = id; // marks this id in-flight so it can't be re-enqueued
     _processingStartTime = DateTime.now();
+    _processingTicker.value = Duration.zero;
     _processingTickerTimer?.cancel();
+    // Ticks into `processingTicker` rather than a controller-wide
+    // notification: the elapsed time repaints one label, while notifying the
+    // controller rebuilds the whole page. The status transitions above and
+    // below still notify.
     _processingTickerTimer = Timer.periodic(
       const Duration(milliseconds: 500),
       (_) {
-        if (!_disposed && _processingId != null) {
-          notifyListeners();
+        if (!_disposed &&
+            _processingId != null &&
+            _processingStartTime != null) {
+          _processingTicker.value = DateTime.now().difference(
+            _processingStartTime!,
+          );
         }
       },
     );
@@ -2987,6 +4188,14 @@ class RecordingsController extends ChangeNotifier {
         // refusing clipboard cannot undo a successful capture.
         await _copyToClipboard(recording.type, transcript, id);
         if (_cancelledProcessingIds.contains(id)) return;
+        // Straight after the raw copy, before enrichment: the instruction is
+        // what the user is waiting to paste, and it replaces the raw text on
+        // the clipboard as soon as it lands. Best-effort like everything
+        // after the `completed` write.
+        if (autoInstruction) {
+          await _writeInstruction(id);
+          if (_cancelledProcessingIds.contains(id)) return;
+        }
         // Deliberately after the `completed` write as well: the item is already
         // durable, so a model outage, a malformed response or a kill in this
         // window costs a title, never a capture.
@@ -3004,6 +4213,14 @@ class RecordingsController extends ChangeNotifier {
         // changed again. It runs whether or not enrichment succeeded: an
         // install with no profile still wants its captures copied.
         await _mirrorToVault(id);
+        // After everything the capture needs: a proposal is optional and
+        // reviewed later, so it waits behind the title and the vault copy.
+        if (autoCleanup && !_cancelledProcessingIds.contains(id)) {
+          await _proposeCleanup(id);
+        }
+        // Last: a vector only feeds the RELATED section, and it is made from
+        // the transcript as processing left it.
+        if (!_cancelledProcessingIds.contains(id)) await _embed(id);
       } catch (exception) {
         if (_cancelledProcessingIds.contains(id)) {
           await _update(
@@ -3048,7 +4265,8 @@ class RecordingsController extends ChangeNotifier {
     CaptureType.audioRecording ||
     CaptureType.audioUpload ||
     CaptureType.video ||
-    CaptureType.text => UsageStage.transcription,
+    CaptureType.text ||
+    CaptureType.file => UsageStage.transcription,
   };
 
   /// Take the ambient usage scope, waiting for whoever holds it, and return the
@@ -3057,8 +4275,8 @@ class RecordingsController extends ChangeNotifier {
   /// `UsageSink.beginJob`/`endJob` are ambient state — one open job at a time,
   /// or an event lands against whichever capture the *other* job named — so
   /// every path that opens one has to be serialized against every other. There
-  /// are exactly two: [_processOne] (the drain) and [retryEnrichment] (the
-  /// ENRICH button). `_isDraining` covers only the first against itself.
+  /// are three: [_processOne] (the drain), [retryEnrichment] (the ENRICH
+  /// button), and connection assessment. `_isDraining` covers only the first.
   ///
   /// A `Completer` chain rather than a flag, because a refusal here is a silent
   /// no-op on a control the user just pressed: whoever asks second waits and
@@ -3070,7 +4288,7 @@ class RecordingsController extends ChangeNotifier {
   /// the vault mirror. None of those call back into `_processOne`,
   /// `retryEnrichment` or `_drainProcessingQueue` — `_enqueueProcessing` only
   /// appends to a list and kicks the drain *unawaited*, so a capture taken
-  /// while a job runs never blocks on the holder. Both call sites release from
+  /// while a job runs never blocks on the holder. All call sites release from
   /// a `finally`, so a throw cannot strand the chain either; a waiter that
   /// resumes after [dispose] checks `_disposed` and leaves.
   Future<void Function()> _acquireUsageScope() async {
@@ -3169,7 +4387,7 @@ class RecordingsController extends ChangeNotifier {
   }
 
   /// Hand the item's source file to the platform's own player/viewer. Used for
-  /// video, which has no in-app player on the desktop targets this ships on.
+  /// video and generic file attachments, which use the system viewer.
   ///
   /// Deliberately not gated on [CaptureType] here — the card decides what is
   /// openable, exactly as it does for [togglePlayback] — but a missing source
@@ -3246,7 +4464,7 @@ class RecordingsController extends ChangeNotifier {
     if ((item.transcript ?? '').trim().isEmpty) return;
 
     try {
-      await _mirrorOne(item);
+      await _mirrorOne(item, analyze: true);
     } catch (exception) {
       _logSink.log(
         'Vault mirror failed: $exception',
@@ -3259,30 +4477,29 @@ class RecordingsController extends ChangeNotifier {
   /// The write itself. Throws, so [mirrorAll] can count a failure and
   /// [_mirrorToVault] can swallow one — the two callers disagree about what a
   /// failure is worth, and neither should have to infer it from a null.
-  Future<VaultOutcome> _mirrorOne(Recording item) async {
-    final VaultWrite write = await _noteVault.mirror(
-      VaultNote(
-        id: item.id,
-        // The same resolved name the card and the router use, so a note in the
-        // vault can never disagree with the row it came from.
-        title: displayNameFor(item),
-        body: item.transcript ?? '',
-        capturedAt: item.createdAt,
-        type: item.type,
-        summary: item.summary,
-        category: item.category,
-        tags: item.tags,
-        projectId: item.projectId,
-        durationMs: item.durationMs,
-        // Every segment, in order. A text segment attaches nothing — it is the
-        // body printed above it, so attaching it puts the same words in the
-        // vault twice.
-        sourcePaths: <String>[
-          for (final CaptureSegment segment in item.segments)
-            if (segment.type != CaptureType.text) segment.filePath,
-        ],
-      ),
+  Future<VaultOutcome> _mirrorOne(Recording item, {bool analyze = false}) async {
+    final VaultNote note = VaultNote(
+      id: item.id,
+      // The same resolved name the card and the router use, so a note in the
+      // vault can never disagree with the row it came from.
+      title: displayNameFor(item),
+      body: item.transcript ?? '',
+      capturedAt: item.createdAt,
+      type: item.type,
+      summary: item.summary,
+      category: item.category,
+      tags: item.tags,
+      projectId: item.projectId,
+      durationMs: item.durationMs,
+      // Every segment, in order. A text segment attaches nothing — it is the
+      // body printed above it, so attaching it puts the same words in the
+      // vault twice.
+      sourcePaths: <String>[
+        for (final CaptureSegment segment in item.segments)
+          if (segment.type != CaptureType.text) segment.filePath,
+      ],
     );
+    final VaultWrite write = await _noteVault.mirror(note);
 
     switch (write.outcome) {
       case VaultOutcome.created:
@@ -3301,8 +4518,69 @@ class RecordingsController extends ChangeNotifier {
       case VaultOutcome.unchanged:
         break; // Nothing happened; a log line per pipeline tick would be noise.
     }
+    final Directory? vault = _connectionVaultRoot?.call();
+    if (analyze && vault != null && write.path != null) {
+      _startConnectionAnalysis(item, note, vault, write.path!);
+    }
     return write.outcome;
   }
+
+  void _startConnectionAnalysis(
+    Recording item, VaultNote note, Directory vault, String sourcePath,
+  ) {
+    if (!_analyzingConnections.add(item.id)) return;
+    _connectionErrors.remove(item.id);
+    if (!_disposed) notifyListeners();
+    late final Future<void> job;
+    job = () async {
+      try {
+        final EnrichmentContext context = await _resolveEnrichmentContext(item.id);
+        final AgentArtifact artifact = await _connectionAnalyzer.analyze(
+          vault: vault,
+          note: note,
+          sourcePath: sourcePath,
+          reasoner: _UsageScopedConnectionReasoner(
+            delegate: _connectionReasoner,
+            acquire: _acquireUsageScope,
+            begin: () => _beginUsageJob(item.id, UsageStage.enrichment),
+            end: _endUsageJob,
+          ),
+          context: context,
+          priority: item.priority,
+          priorityReason: item.priorityReason,
+        );
+        if (_disposed || !_recordings.any((Recording row) => row.id == item.id)) {
+          return;
+        }
+        await _update(
+          item.id,
+          (Recording current) => current.copyWith(
+            artifacts: <AgentArtifact>[
+              ...current.artifacts.where(
+                (AgentArtifact old) => old.path != artifact.path,
+              ),
+              artifact,
+            ],
+          ),
+        );
+        _logSink.log('Connection analysis saved to vault.', recordingId: item.id);
+      } catch (error) {
+        _connectionErrors[item.id] = error.toString();
+        _logSink.log(
+          'Connection analysis failed: $error',
+          level: LogLevel.warn,
+          recordingId: item.id,
+        );
+      } finally {
+        _analyzingConnections.remove(item.id);
+        _connectionJobs.remove(job);
+        if (!_disposed) notifyListeners();
+      }
+    }();
+    _connectionJobs.add(job);
+  }
+
+  Future<void> retryConnectionAnalysis(String id) => _mirrorToVault(id);
 
   /// Ask the enrichment model to name and classify freshly derived text.
   ///
@@ -3318,7 +4596,10 @@ class RecordingsController extends ChangeNotifier {
     // project's CLAUDE.md — and raising the flag first would put a scan line on
     // screen for an install whose enrichment is disabled, which is the one case
     // the disabled service takes care to fail without ever building a frame.
-    final EnrichmentContext context = await _resolveEnrichmentContext(id);
+    final EnrichmentContext context = await _resolveEnrichmentContext(
+      id,
+      forEnrichment: true,
+    );
     if (_disposed) return;
     // Marked before the call and cleared in `finally`, so the card's scan line
     // cannot outlive the request — including on the throwing paths below, which
@@ -3333,21 +4614,66 @@ class RecordingsController extends ChangeNotifier {
         context: context,
       );
       if (_disposed) return;
+      // Only a run that was shown a project list may judge the stamp: with no
+      // list (none configured, or the context failed) the model had nothing
+      // to choose from, so neither its answer nor its silence says anything.
+      // An answer must be an id that was actually offered *and* still exists.
+      final Set<String> offeredIds = <String>{
+        for (final EnrichmentProjectOption o in context.normalized().projects)
+          o.id,
+      };
+      final bool listOffered = offeredIds.isNotEmpty && result.projectAnswered;
+      final String? answered = result.projectId;
+      final String? chosenProject =
+          answered != null &&
+              offeredIds.contains(answered) &&
+              _projectById?.call(answered) != null
+          ? answered
+          : null;
+      final Set<SuggestedRouteKind> offeredRoutes = context
+          .normalized()
+          .routeKinds
+          .toSet();
       await _update(
         id,
-        (Recording item) => item.copyWith(
-          // User-editable fields are fill-only: a retry must not undo a manual
-          // correction. Clearing a field asks enrichment to fill it again.
-          title: (item.title ?? '').trim().isEmpty ? result.title : null,
-          category: item.category ?? result.category,
-          summary: result.summary,
-          // Fill-only, like `title` and `category`, now that a tag carries no
-          // owner: with nothing marking which tags came from a model, a refresh
-          // could only refresh *all* of them, and a re-run would keep
-          // resurrecting tags the user had deleted. Clearing the list is how
-          // you ask for a fresh set. Re-resolving `item` inside the update is
-          // what makes an edit landing mid-request win over this.
-          tags: item.tags.isEmpty ? RecordingTags.normalize(result.tags) : null,
+        (Recording item) => _withSuggestedRoute(
+          item.copyWith(
+            // User-editable fields are fill-only: a retry must not undo a manual
+            // correction. Clearing a field asks enrichment to fill it again.
+            title: (item.title ?? '').trim().isEmpty ? result.title : null,
+            category: item.category ?? result.category,
+            summary: result.summary,
+            // Fill-only, like `category`: a rank the user set is theirs. The
+            // reason travels with the rank it argues for, never alone.
+            priority: item.priority ?? result.priority,
+            priorityReason: item.priority == null ? result.priorityReason : null,
+            // Which soul the rank was judged against. Only when this run is the
+            // one supplying the rank — a kept rank keeps its own basis.
+            priorityBasis: item.priority == null && result.priority != null
+                ? context.profileBasis
+                : null,
+            // Fill-only, like `title` and `category`, now that a tag carries no
+            // owner: with nothing marking which tags came from a model, a refresh
+            // could only refresh *all* of them, and a re-run would keep
+            // resurrecting tags the user had deleted. Clearing the list is how
+            // you ask for a fresh set. Re-resolving `item` inside the update is
+            // what makes an edit landing mid-request win over this.
+            tags: item.tags.isEmpty ? RecordingTags.normalize(result.tags) : null,
+            // Only a stamp nobody chose is the model's to move. An id that is no
+            // longer in the list (deleted mid-request, or invented) clears it
+            // rather than keeping a guess the model did not make. Stays auto so
+            // a retry may refine it; any user edit flips that off.
+            projectId: item.projectAuto && chosenProject != null
+                ? chosenProject
+                : null,
+            clearProjectId:
+                item.projectAuto &&
+                listOffered &&
+                chosenProject == null &&
+                offeredIds.contains(item.projectId),
+          ),
+          result,
+          offeredRoutes,
         ),
         // The reason this feature exists: `summary` has no editor and is
         // refreshed wholesale on every re-run, so without a record the previous
@@ -3360,8 +4686,11 @@ class RecordingsController extends ChangeNotifier {
       // which file the model was actually given.
       final String? layers = context.sourceSummary;
       final String source = layers == null ? '' : ' \u00b7 context: $layers';
+      final String projectNote = chosenProject == null
+          ? ''
+          : ' \u00b7 project: ${_projectById?.call(chosenProject)?.name}';
       _logSink.log(
-        'Enriched \u00b7 ${result.category.name}$source',
+        'Enriched \u00b7 ${result.category.name}$projectNote$source',
         recordingId: id,
       );
     } on EnrichmentNotConfiguredException {
@@ -3383,16 +4712,98 @@ class RecordingsController extends ChangeNotifier {
     }
   }
 
+  /// Applies the model's route answer to [item], already carrying this run's
+  /// category and project, so the kind is validated for the item as it ends up
+  /// rather than as it started.
+  ///
+  /// Written only when the model was offered routes, answered usably, the item
+  /// has no route yet, and nothing user-owned is there to overwrite (a
+  /// dismissal is `auto: false`). The kind must be both one that was offered
+  /// and one the entry point would perform now; `none` is always allowed. An
+  /// invented or unavailable kind stores nothing and leaves what was there.
+  Recording _withSuggestedRoute(
+    Recording item,
+    EnrichmentResult result,
+    Set<SuggestedRouteKind> offered,
+  ) {
+    final SuggestedRouteKind? kind = result.routeKind;
+    final SuggestedRoute? current = item.suggestedRoute;
+    if (offered.isEmpty ||
+        !result.routeAnswered ||
+        kind == null ||
+        item.routes.isNotEmpty ||
+        (current != null && !current.auto)) {
+      return item;
+    }
+    if (kind != SuggestedRouteKind.none &&
+        !(offered.contains(kind) && availableRouteKinds(item).contains(kind))) {
+      return item;
+    }
+    return item.copyWith(
+      suggestedRoute: SuggestedRoute(kind: kind, reason: result.routeReason),
+    );
+  }
+
   /// Resolve the user profile and the item's project description.
   ///
   /// Swallows everything into the log under the `ClipboardSink` contract: a
   /// repository that has been moved, renamed or unmounted must cost a worse
   /// title, never the enrichment — and certainly never the capture.
-  Future<EnrichmentContext> _resolveEnrichmentContext(String id) async {
+  ///
+  /// [forEnrichment] is true only for [_enrich]: it alone withholds an auto
+  /// stamp's project context and offers the project list. Every other caller
+  /// (clean-up, connection analysis, re-rank) gets the item's project context
+  /// as it always did, and no list.
+  Future<EnrichmentContext> _resolveEnrichmentContext(
+    String id, {
+    bool forEnrichment = false,
+  }) async {
     final int index = _recordings.indexWhere((Recording item) => item.id == id);
-    final String? projectId = index < 0 ? null : _recordings[index].projectId;
+    // An auto stamp is a guess, not a fact about the capture: its project's
+    // CLAUDE.md would pull the model toward the default it is meant to
+    // second-guess, so the model sees the project list and nothing else.
+    final String? projectId =
+        index < 0 || (forEnrichment && _recordings[index].projectAuto)
+        ? null
+        : _recordings[index].projectId;
     try {
-      return await _enrichmentContextSource.contextFor(projectId);
+      final EnrichmentContext context = await _enrichmentContextSource
+          .contextFor(projectId);
+      if (index < 0) return context;
+      final Recording item = _recordings[index];
+      if (!forEnrichment) {
+        return context.withProjects(const <EnrichmentProjectOption>[]);
+      }
+      // A route is asked for only while it is still the model's to write: not
+      // once the item is routed, nor over a dismissal the user made.
+      final bool routeOpen =
+          item.routes.isEmpty &&
+          (item.suggestedRoute == null || item.suggestedRoute!.auto);
+      // One request, so the kinds cannot wait for the reply to learn which
+      // project it picks: offer the union across the current project and, for
+      // a stamp the model may move, every project in the list. The answer is
+      // checked again against the item as it ends up (`_withSuggestedRoute`).
+      final Set<SuggestedRouteKind> kinds = <SuggestedRouteKind>{
+        ...availableRouteKinds(item),
+        if (item.projectAuto)
+          for (final EnrichmentProjectOption option in context.projects)
+            ...availableRouteKinds(item.copyWith(projectId: option.id)),
+      };
+      final EnrichmentContext withRoutes = context.withRouteKinds(
+        routeOpen ? kinds.toList() : const <SuggestedRouteKind>[],
+      );
+      // A list is offered only to a stamp the model may still move: names and
+      // descriptions go to the provider for nothing otherwise, since a
+      // user-owned or legacy item discards the answer. The stamped project
+      // goes first so the 50-project cap can never cut it off.
+      if (!item.projectAuto) {
+        return withRoutes.withProjects(const <EnrichmentProjectOption>[]);
+      }
+      final List<EnrichmentProjectOption> options = context.projects;
+      return withRoutes.withProjects(<EnrichmentProjectOption>[
+        ...options.where((EnrichmentProjectOption o) => o.id == item.projectId),
+        ...options.where((EnrichmentProjectOption o) => o.id != item.projectId),
+      ]);
     } catch (exception) {
       _logSink.log(
         'Enrichment context unavailable: $exception',
@@ -3521,7 +4932,9 @@ class RecordingsController extends ChangeNotifier {
       // Both hand the capture to something that executes it, and the momentum
       // history counts *how it left the desk* rather than which wire carried
       // it — a separate kind here would split one habit across two bars.
-      RouteKind.agent || RouteKind.command => ClosureKind.handoff,
+      RouteKind.agent ||
+      RouteKind.command ||
+      RouteKind.assistant => ClosureKind.handoff,
     };
   }
 
@@ -3711,6 +5124,7 @@ class RecordingsController extends ChangeNotifier {
     _processingTickerTimer = null;
     unawaited(_amplitudeSub?.cancel());
     _elapsedTicker.dispose();
+    _processingTicker.dispose();
     _levelTicker.dispose();
     _playerCompleteSub?.cancel();
     _playerPositionSub?.cancel();
@@ -3722,5 +5136,45 @@ class RecordingsController extends ChangeNotifier {
     // notification outlives the app that posted it.
     if (_isRecording) _endCaptureSession();
     super.dispose();
+  }
+}
+
+class _UsageScopedConnectionReasoner implements ConnectionReasoner {
+  const _UsageScopedConnectionReasoner({
+    required this.delegate,
+    required this.acquire,
+    required this.begin,
+    required this.end,
+  });
+
+  final ConnectionReasoner delegate;
+  final Future<void Function()> Function() acquire;
+  final void Function() begin;
+  final void Function() end;
+
+  @override
+  Future<ConnectionAdvice> assess({
+    required String title,
+    required String text,
+    required List<ConnectionCandidate> candidates,
+    required EnrichmentContext context,
+    CapturePriority? priority,
+    String? priorityReason,
+  }) async {
+    final void Function() release = await acquire();
+    try {
+      begin();
+      return await delegate.assess(
+        title: title,
+        text: text,
+        candidates: candidates,
+        context: context,
+        priority: priority,
+        priorityReason: priorityReason,
+      );
+    } finally {
+      end();
+      release();
+    }
   }
 }

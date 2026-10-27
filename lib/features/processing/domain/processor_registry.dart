@@ -34,6 +34,7 @@ class ProcessorRegistry {
       CaptureType.audioRecording: transcription,
       CaptureType.audioUpload: transcription,
       CaptureType.text: const TextPassthroughProcessor(),
+      CaptureType.file: const FileAttachmentProcessor(),
       CaptureType.image: OcrProcessor(ocrService),
       CaptureType.video: VideoTranscriptionProcessor(
         transcriptionService,

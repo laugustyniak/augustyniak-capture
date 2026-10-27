@@ -35,6 +35,17 @@
 #   tool/deploy.sh --run               # …and launch it when the install lands
 #   tool/deploy.sh --defines path.json # seed dart-defines into the build
 #   tool/deploy.sh --skip-build        # reinstall the bundle already built
+#   tool/deploy.sh --android           # release APK onto every adb device
+#
+# A desktop install also builds and installs the read-only MCP server
+# (`bin/capture_mcp.dart`) through `tool/deploy-mcp.sh`, to
+# `~/.local/opt/<cli>-mcp/` with a symlink in `~/.local/bin`. That is a
+# secondary artefact: if it fails, the deploy warns and keeps the exit status
+# of the app install. `--skip-build` reuses its bundle too; `--android` skips it.
+#
+# `--android` replaces the host install rather than adding to it: one target
+# per run, so a failure names the platform it belongs to. `tool/deploy-all.sh`
+# is the entry point that does every target in turn.
 set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -44,6 +55,7 @@ defines_file=""
 defines_explicit=0
 skip_build=0
 run_after=0
+target_android=0
 
 while [ $# -gt 0 ]; do
   case "$1" in
@@ -55,6 +67,7 @@ while [ $# -gt 0 ]; do
       ;;
     --skip-build) skip_build=1; shift ;;
     --run) run_after=1; shift ;;
+    --android) target_android=1; shift ;;
     -h|--help)
       awk 'NR>1 && /^#/ { sub(/^# ?/, ""); print; next } NR>1 { exit }' \
         "${BASH_SOURCE[0]}"
@@ -145,6 +158,15 @@ fi
 build_revision="$(git describe --always --dirty --abbrev=12)"
 build_args+=("--dart-define=APP_GIT_SHA=$build_revision")
 
+# The MCP server is secondary to the app, so a failure here is a warning and
+# never changes the deploy's exit status.
+install_mcp() {
+  local args=("$cli_name")
+  [ "$skip_build" = 0 ] || args+=(--skip-build)
+  tool/deploy-mcp.sh "${args[@]}" \
+    || echo "deploy: WARNING — MCP bundle was not installed (the app install is unaffected)" >&2
+}
+
 install_linux() {
   local bundle="build/linux/x64/release/bundle"
   local opt_dir="$HOME/.local/opt/$cli_name"
@@ -199,7 +221,7 @@ PY
 Type=Application
 Name=$display_name
 Comment=$(sed -n 's/^description: //p' pubspec.yaml | head -1)
-Exec=$opt_dir/$binary_name %u
+Exec="$opt_dir/$binary_name" %u
 Icon=$application_id
 Terminal=false
 Categories=AudioVideo;Audio;Recorder;
@@ -207,17 +229,28 @@ MimeType=x-scheme-handler/$application_id;
 StartupWMClass=$application_id
 EOF
 
-  command -v desktop-file-validate >/dev/null 2>&1 \
-    && desktop-file-validate "$apps_dir/$application_id.desktop"
-  command -v update-desktop-database >/dev/null 2>&1 \
-    && update-desktop-database "$apps_dir" 2>/dev/null
-  command -v gtk-update-icon-cache >/dev/null 2>&1 \
-    && gtk-update-icon-cache -f -t "$icons_dir" 2>/dev/null
+  # Best-effort: under `set -e` a failing `A && B` list would end the deploy
+  # after the install is already in place, so each step is guarded by `if`.
+  # Stderr stays visible, since it carries the reason.
+  if command -v desktop-file-validate >/dev/null 2>&1; then
+    desktop-file-validate "$apps_dir/$application_id.desktop" \
+      || echo "deploy: warning: desktop-file-validate failed" >&2
+  fi
+  if command -v update-desktop-database >/dev/null 2>&1; then
+    update-desktop-database "$apps_dir" \
+      || echo "deploy: warning: update-desktop-database failed" >&2
+  fi
+  if command -v gtk-update-icon-cache >/dev/null 2>&1; then
+    gtk-update-icon-cache -f -t "$icons_dir" \
+      || echo "deploy: warning: gtk-update-icon-cache failed" >&2
+  fi
 
   echo "deploy: installed $display_name"
   echo "        bundle   $opt_dir"
   echo "        command  $bin_dir/$cli_name"
   echo "        launcher $apps_dir/$application_id.desktop"
+
+  install_mcp
 
   if [ "$run_after" = 1 ]; then
     exec "$bin_dir/$cli_name"
@@ -266,10 +299,108 @@ install_macos() {
   # has already landed.
   codesign -d -r- "/Applications/$display_name.app" 2>&1 | sed 's/^/        /' || true
 
+  install_mcp
+
   if [ "$run_after" = 1 ]; then
     open -a "/Applications/$display_name.app"
   fi
 }
+
+# Every attached device in state `device`, reinstalled in place.
+#
+# **Never uninstalls, and never offers to.** `adb install -r` keeps the app's
+# data; an uninstall deletes the container the recordings live in, which is
+# the one loss this app exists to prevent. The case that tempts it is a
+# signature mismatch — a build signed with a different key than the installed
+# one, usually debug versus release — and that device is reported and skipped.
+# The way through is a backup from the app's own Config tab, then an
+# uninstall the user runs by hand.
+install_android() {
+  local apk="build/app/outputs/flutter-apk/app-release.apk"
+  local adb=""
+  local candidate
+  for candidate in "$(command -v adb 2>/dev/null || true)" \
+    "${ANDROID_HOME:-}/platform-tools/adb" \
+    "${ANDROID_SDK_ROOT:-}/platform-tools/adb" \
+    "$HOME/Android/Sdk/platform-tools/adb" \
+    "$HOME/Library/Android/sdk/platform-tools/adb"; do
+    if [ -n "$candidate" ] && [ -x "$candidate" ]; then
+      adb="$candidate"
+      break
+    fi
+  done
+  [ -n "$adb" ] || { echo "deploy: no adb found — install Android platform-tools" >&2; exit 3; }
+
+  local devices
+  devices="$("$adb" devices | awk 'NR>1 && $2 == "device" { print $1 }')"
+  [ -n "$devices" ] || {
+    echo "deploy: no Android device attached (adb devices lists none in state 'device')" >&2
+    exit 3
+  }
+
+  if [ "$skip_build" = 0 ]; then
+    # No release keystore here means the phone's installs are bound to the
+    # debug keystore on purpose (there is no store upload), so the build is told
+    # the debug signature is intended; the signer is still reported below.
+    if [ ! -f android/key.properties ]; then
+      ORG_GRADLE_PROJECT_allowDebugSigning=true flutter build apk "${build_args[@]}"
+    else
+      flutter build apk "${build_args[@]}"
+    fi
+  fi
+  [ -f "$apk" ] || { echo "deploy: no built APK at $apk — drop --skip-build" >&2; exit 1; }
+
+  # `CN=Android Debug` is the silent fallback when android/key.properties is
+  # missing — see docs/platform-setup.md. Reported, because it decides
+  # whether the install below can replace what is on the phone.
+  local apksigner
+  apksigner="$(ls -1 "$(dirname "$(dirname "$adb")")"/build-tools/*/apksigner 2>/dev/null | sort -V | tail -1 || true)"
+  if [ -n "$apksigner" ]; then
+    "$apksigner" verify --print-certs "$apk" 2>/dev/null \
+      | sed -n 's/^Signer #1 certificate DN: /deploy: APK signed by /p' || true
+  fi
+
+  local serial output failed=0 installed=0
+  for serial in $devices; do
+    local model
+    # Probed with `if`, never as a bare assignment: under `set -e` a failing
+    # `getprop` would end the whole script here — silently, after an earlier
+    # device had already installed — and `deploy-all.sh` would report that as
+    # an install failure with an uninstall hint (#243). The usual cause is a
+    # stale second transport for the same phone (wireless plus USB). A device
+    # that cannot answer is skipped and named, not counted as a failure.
+    if ! model="$("$adb" -s "$serial" shell getprop ro.product.model 2>/dev/null | tr -d '\r')"; then
+      echo "deploy: $serial not reachable — skipped"
+      continue
+    fi
+    echo "deploy: installing on ${model:-unknown} ($serial)"
+    if output="$("$adb" -s "$serial" install -r "$apk" 2>&1)"; then
+      echo "deploy: installed on ${model:-$serial}"
+      installed=1
+    else
+      failed=1
+      echo "$output" | tail -3 | sed 's/^/        /' >&2
+      case "$output" in
+        *INSTALL_FAILED_UPDATE_INCOMPATIBLE*)
+          echo "deploy: ${model:-$serial} has a build signed with a different key." >&2
+          echo "        NOT uninstalling — that deletes the recordings. Back up from" >&2
+          echo "        Config, then uninstall by hand if replacing it is intended." >&2
+          ;;
+      esac
+    fi
+  done
+  # A refused install is the only failure. Nothing installed and nothing
+  # refused means no device could answer — the same "no device" exit as an
+  # empty `adb devices`, which `deploy-all.sh` reports as SKIP.
+  [ "$failed" = 0 ] || return 1
+  [ "$installed" = 1 ] || return 3
+  return 0
+}
+
+if [ "$target_android" = 1 ]; then
+  install_android
+  exit $?
+fi
 
 case "$(uname -s)" in
   Linux) install_linux ;;

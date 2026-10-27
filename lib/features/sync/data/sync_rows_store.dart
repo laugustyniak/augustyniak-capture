@@ -15,7 +15,8 @@ class SyncRowsStore implements SyncBookkeeping {
   @override
   Map<String, SyncRowState> loadTable(String table) {
     final ResultSet rows = _db.select(
-      'SELECT id, server_version, pushed_hash FROM sync_rows WHERE table_name = ?',
+      'SELECT id, server_version, pushed_hash, sealed FROM sync_rows '
+      'WHERE table_name = ?',
       <Object>[table],
     );
     return <String, SyncRowState>{
@@ -23,19 +24,28 @@ class SyncRowsStore implements SyncBookkeeping {
         row['id'] as String: SyncRowState(
           serverVersion: row['server_version'] as int,
           pushedHash: row['pushed_hash'] as String,
+          sealed: (row['sealed'] as int? ?? 0) != 0,
         ),
     };
   }
 
   @override
-  void put(String table, String id, int serverVersion, String pushedHash) {
+  void put(
+    String table,
+    String id,
+    int serverVersion,
+    String pushedHash, {
+    bool sealed = false,
+  }) {
     _db.execute(
-      'INSERT INTO sync_rows (table_name, id, server_version, pushed_hash) '
-      'VALUES (?, ?, ?, ?) '
+      'INSERT INTO sync_rows '
+      '(table_name, id, server_version, pushed_hash, sealed) '
+      'VALUES (?, ?, ?, ?, ?) '
       'ON CONFLICT (table_name, id) DO UPDATE SET '
       'server_version = excluded.server_version, '
-      'pushed_hash = excluded.pushed_hash',
-      <Object>[table, id, serverVersion, pushedHash],
+      'pushed_hash = excluded.pushed_hash, '
+      'sealed = excluded.sealed',
+      <Object>[table, id, serverVersion, pushedHash, sealed ? 1 : 0],
     );
   }
 

@@ -37,6 +37,26 @@ mic is the whole app) and the `UIApplicationSceneManifest` that wires up
 `SceneDelegate.swift` — drop the latter and Flutter warns about the UIScene
 migration on every build.
 
+**The iOS keyboard extension is not shipped.** The `CaptureKeyboard` target
+stays in `ios/Runner.xcodeproj`, but the Runner neither depends on it nor embeds
+it, pinned by `test/ios_keyboard_full_access_test.dart` (#343). Its one feature,
+a strip of recent clipboard entries inserted with `textDocumentProxy.insertText`,
+reads `clipboard_history.json` from the `group.ai.augustyniak.capture`
+container. The host stopped writing that file when the history moved to SQLite
+in Application Support (`SqliteClipboardRepository`; `LocalJsonClipboardRepository`
+is the only writer and nothing wires it). A keyboard that is installed and
+shows nothing is worse than none. `RequestsOpenAccess` in
+`ios/CaptureKeyboard/Info.plist` is `false` (#312), pinned by the same test.
+Full Access is what lets a keyboard reach the network and the App Group, and it
+is the permission iOS warns about as "could transmit anything you type".
+
+To bring the keyboard back, the host must first publish its newest text clips
+into the group on every clipboard write. Then restore the embed phase and the
+target dependency (revert the #343 change to `project.pbxproj`), flip
+`RequestsOpenAccess` to `true`, name the reason here and update the test. The
+keyboard must still never touch `URLSession` or `UIPasteboard`, which the same
+test guards.
+
 **Recording in the background is a platform declaration on both phones, and
 neither failure says anything.** This is not an optimisation: without them a
 locked screen ends a capture mid-sentence, with no exception, no status change
@@ -64,7 +84,13 @@ entirely outside Dart.
   partial `.m4a`, but an AAC file whose container was never finalised is not
   reliably playable — what comes back is a row, not the words.
 
-**Android release signing is opt-in and lives out of the tree.** `android/app/build.gradle.kts` reads `android/key.properties` (untracked; template in `android/key.properties.example`) and, **only if that file exists**, signs release builds with the named keystore. Absent it, release falls back to the debug key exactly as the Flutter template did — deliberate, because there is no CI here and a contributor without the keystore must still be able to run `flutter build apk --release` to check a build. The corollary is the trap: **a release artifact is debug-signed unless you verify otherwise**, and nothing in the build output says so. Check before uploading anything:
+**Nothing the app stores is eligible for an OS backup, and the keyring entries stay on the device.** Both are decisions against the platform default, taken in #300 and pinned by `test/mobile_at_rest_test.dart`, because none of the suite can otherwise see them.
+
+- **Android:** `AndroidManifest.xml` sets `android:allowBackup="false"`, and the two rule files it names — `res/xml/backup_rules.xml` (`fullBackupContent`, pre-API-31) and `res/xml/data_extraction_rules.xml` (`dataExtractionRules`, API 31+, cloud backup _and_ device-to-device transfer) — exclude every domain, so a later flip of the flag still ships nothing by default. The default (`true`) would put the SQLite database (sealed provider tokens, and plaintext ones whenever the keyring is down), the recordings and the clipboard history into Google auto-backup, and into `adb backup` on older API levels. The app's own backup feature (`docs/architecture/backup.md`) is the documented answer to a reinstall; the OS copy added exposure without adding recovery. Verify on the **merged** manifest after a build, as with the services above.
+- **Secure storage** (`lib/core/security/app_secure_storage.dart`, one configuration for the token master key, the Supabase session and the dashboard credential): Android uses `encryptedSharedPreferences: true`, so the entries sit under a Keystore key that cannot leave the device rather than under the plugin's own cipher in plain `SharedPreferences`; iOS uses `KeychainAccessibility.first_unlock_this_device` (`kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly`) rather than the default `WhenUnlocked`, which is eligible for migration to another device inside an encrypted backup. A master key that moves with the database it opens protects nothing. macOS keeps `useDataProtectionKeyChain: false` for the signing reasons below.
+- **Upgrade path, checked against `flutter_secure_storage` 9.2.4's native code rather than assumed:** on Android the plugin decrypts every existing entry with the previously saved cipher and rewrites it into `EncryptedSharedPreferences` on first open (`checkAndMigrateToEncrypted`); below API 23, and whenever `EncryptedSharedPreferences` fails to initialise, it falls back **silently** to the old store (logged, never thrown), so a device that cannot take the upgrade keeps working at the old protection level rather than losing its key. On iOS reads do not filter on accessibility, so an item written under `WhenUnlocked` is still found; only a *write* recreates it under the new attribute. The Supabase session rewrites on every refresh and moves across; **the token master key is written once, so on an upgraded iOS install it stays `WhenUnlocked` and backup-migratable until it is rewritten** — a one-time rewrite inside `MigratingMasterKeyStore` is the follow-up, not part of #300, because that class's rules about retiring a copy only after reading the same key back apply to it. If a read ever comes back empty where sealed data exists, `AesGcmTokenCipher`'s `expectExistingKey` guard refuses to mint a replacement key and the Models tab says so in red — loud, but the right failure. **Still to do once a device is available:** upgrade an install carrying provider tokens from a build before #300 and confirm the tokens remain readable.
+
+**Android release signing is opt-in and lives out of the tree.** `android/app/build.gradle.kts` reads `android/key.properties` (untracked; template in `android/key.properties.example`) and, **only if that file exists**, signs release builds with the named keystore. Absent it, the project still configures (a debug build, CI and a Gradle sync need no keystore), but the release packaging task, `validateSigningRelease`, **refuses to run** with _"Release build without android/key.properties would be signed with the debug key…"_. The debug-key fallback is opt-in per invocation: `-PallowDebugSigning` for Gradle, or `ORG_GRADLE_PROJECT_allowDebugSigning=true` in the environment for `flutter build`, which cannot pass `-P`. `tool/deploy.sh --android` passes the opt-in itself when the file is absent, because the phone's installs are keyed to the debug signature. The trap that remains is the opted-in build: **its artifact is debug-signed, and nothing in the build output says so.** Check before uploading anything:
 
 ```bash
 apksigner verify --print-certs build/app/outputs/flutter-apk/app-release.apk
@@ -78,6 +104,8 @@ A `key.properties` that exists but is incomplete, or that points at a keystore t
 **One entitlement is required anyway, sandbox or no sandbox**: `com.apple.security.files.user-selected.read-only`, in **both** entitlements files. `file_picker` 11 does not rely on the sandbox to enforce it — `FilePickerPlugin.checkEntitlement` calls `SecTaskCopyValueForEntitlement` on its own task and refuses up front, so without the key **every** picker call answers `PlatformException(ENTITLEMENT_NOT_FOUND)`: `pickFiles`, i.e. all three upload capture types, and `getDirectoryPath`, i.e. the project editor's repository-path browse button. It cost the upload path on macOS silently, because nothing in the Dart layer or the test suite can see a check that lives in the signature. Verify it on the built bundle rather than in the file — `codesign -d --entitlements - "build/macos/Build/Products/Debug/Augustyniak Capture.app"` is the same question the plugin asks.
 
 **Signing is opt-in per machine, and defaults to ad-hoc.** `CODE_SIGN_IDENTITY` reads `$(LOCAL_SIGN_IDENTITY)`, which `Debug.xcconfig` and `Release.xcconfig` set to `-` and then override from an **untracked** `macos/Runner/Configs/LocalSigning.xcconfig` via `#include?` — the `?` is what keeps a clone without the file building exactly as before. Same shape and same reasoning as `android/key.properties`. `CODE_SIGN_STYLE` must stay `Manual`: with `Automatic` and a non-empty identity Xcode refuses the build outright with _"requires a development team"_, and a self-signed certificate has no team. `test/macos_signing_test.dart` pins all of it, because `flutter create --platforms=macos .` rewrites these files back to the template.
+
+**The Release build has the hardened runtime on** (`ENABLE_HARDENED_RUNTIME = YES` on the Runner target's Release configuration, pinned by `test/macos_signing_test.dart`). It keeps other processes from injecting libraries into the app or attaching a debugger without an entitlement, and enforces library validation. It costs nothing with an ad-hoc or self-signed identity. The one trap: library validation refuses a dylib whose signature does not match the app's, so if the whisper shim is ever copied into `Contents/Frameworks` (`whisper_ffi_engine.dart` looks for it there) it must be signed in the same build — an Xcode copy phase with code-sign-on-copy — and not dropped in afterwards. A build without the shim is unaffected today. The Debug build stays without the runtime so `flutter run` keeps attaching the debugger. Verify on the built bundle: `codesign -d -vv "/Applications/Augustyniak Capture.app" 2>&1 | grep flags` shows `runtime`.
 
 **Being untracked is exactly why a new worktree signs ad-hoc, and this repo is normally worked from worktrees.** `git worktree add` materialises what is *in the repository*, so `LocalSigning.xcconfig` — deliberately not in it — does not come along, `LOCAL_SIGN_IDENTITY` falls back to `-`, and that worktree's builds are hash-bound strangers again. This is not hypothetical: it is the fourteenth-build story below, reproduced from scratch in a worktree whose only purpose was two unrelated one-line fixes. The launch prompted for the login keychain password, which is precisely the state that once emptied every provider token. Copy the file into each new worktree before the first build, and check the requirement rather than the config, because only the built bundle can answer:
 
@@ -107,7 +135,26 @@ icon sizes and a `.desktop` entry.
 ```bash
 tool/deploy.sh          # build and install for this host
 tool/deploy.sh --run    # …and launch it when the install lands
+tool/deploy.sh --android  # release APK onto every adb device, `install -r`
 ```
+
+**`tool/deploy-all.sh` (and the `/deploy` project command that runs it) does
+every target in turn**: this host, every attached Android device, and, from
+Linux, the Mac over ssh (`DEPLOY_MAC_HOST`, default `macbook-pro`;
+`DEPLOY_MAC_REPO` for its clone). Each target ends as OK, SKIP or FAIL, so an
+asleep Mac or an absent phone does not stop the others. The Mac builds the
+commit, not the working tree: `HEAD` has to be on `origin`, and it is checked
+out in `.worktrees/deploy` on the Mac so that clone's own checkout never moves.
+**The Android step never uninstalls.** A phone holding a build signed with a
+different key answers `INSTALL_FAILED_UPDATE_INCOMPATIBLE`, and the only way
+past that is an uninstall, which deletes the container and the recordings in it.
+So the device is reported and skipped, and replacing it takes a backup plus a
+manual uninstall. A device that cannot even answer `getprop` — typically a
+stale second transport for the same phone, wireless plus USB — is named and
+skipped too, and is not a failure: before #243 it ended the script silently
+under `set -e`, after the real install had already succeeded, and the summary
+read FAIL with an uninstall hint. `deploy.sh --android` exits 0 when something
+installed, 3 when no device answered, and 1 only when an install was refused.
 
 **Nothing in it is a literal.** The Linux launcher names the application
 identifier in six places, none of them compiled, so a stale copy costs the dock
@@ -152,7 +199,10 @@ sudo apt-get install libsecret-1-dev
 ```
 
 **CI runs on GitHub Actions** (`.github/workflows/ci.yml`), on every push to
-`main` and on every pull request. Two jobs: *Analyze + test* on Ubuntu
+`main` and on every pull request. Alongside the build jobs, a *Blocked paths +
+secret scan* (`guard`) job fails the run on a blocked path in the tree or the
+commit range (the `pre-commit` hook's rule, `tool/blocked-paths.sh`), or on a
+gitleaks hit in the pushed commits. Three more jobs: *Analyze + test* on Ubuntu
 (`flutter analyze`, `flutter test`, then a debug APK) and *Build macOS + iOS*
 plus a Windows build on their own runners. It was parked for a long time
 because Actions minutes were metered, which is true of a private repository —
@@ -172,6 +222,21 @@ that reason.
 **The iOS job builds for a device rather than the simulator.** It is the artefact that ships, so it is the one worth gating — but the reason it started that way is worth keeping: `mobile_scanner` 6.x pulled in GoogleMLKit, which **ships no arm64 slice for the simulator**, and `macos-latest` is Apple Silicon with an iOS 26+ simulator where arm64 is required. The plugin was dropped from the link and the build died on `Module 'mobile_scanner' not found`, a message naming neither MLKit nor the architecture. Locally the same state was only a warning and the simulator build succeeded, which is why it read as a runner quirk for a day. `mobile_scanner` 7.x replaced MLKit with native APIs — fourteen CocoaPods dependencies became two, the iOS floor dropped from 15.5 back to the template's 13.0, and the simulator builds cleanly — so this is now a preference rather than a constraint.
 
 Global shortcuts on **Linux** additionally need `sudo apt-get install keybinder-3.0` (`hotkey_manager`'s system dependency). Without it the registrar fails at runtime and the shortcuts degrade to unavailable — everything else still works.
+
+## Android Auto
+
+The car app (`android/app/src/main/kotlin/ai/augustyniak/capture/car/`, plan in `docs/plans/2026-10-14-in-car-audio-capture.md`) is a Car App Library screen with REC and STOP. It needs `androidx.car.app:app` and `androidx.car.app:app-projected`, a service in the manifest with the `androidx.car.app.category.IOT` category, `androidx.car.app.minCarApiLevel` 5 and `res/xml/automotive_app_desc.xml` with `<uses name="template" />`. `test/android_car_manifest_test.dart` pins those, because a missing one still builds and the app simply never appears on the car display. The merged `minSdk` stays at the Flutter default; the library itself needs 21.
+
+**Release build.** `flutter build appbundle` produces `build/app/outputs/bundle/release/app-release.aab`, signed with the `release` signing config when `android/key.properties` exists; without it the build stops unless `allowDebugSigning` is passed, and then it is signed with the debug key (see the signing paragraph above). Play rejects a debug-signed upload, and an upload key that is not the one on file cannot be fixed afterwards, so verify the signer before uploading.
+
+**Distribution is Google Play only.** The Android Auto "Unknown sources" developer setting does not apply to apps built with the Car App Library. A build installed with adb or `/deploy` is not from a trusted source, and Android Auto hides the app until it is reinstalled from Play. The trap to remember: the app works on the phone and simply does not show up in the car.
+
+1. Create the app in the Play Console under `ai.augustyniak.capture` and open an Internal testing track. Add the tester accounts and install from the opt-in link. An Internal test track skips Play review; Internal App Sharing also works for a single build.
+2. Enrol in Play App Signing and upload the **existing release key** rather than letting Play generate one. Play-signed builds and `/deploy` builds then carry the same signature, so one can update the other in place. With two different signatures every switch needs an uninstall, and an uninstall deletes the recordings in the app container. Take a backup first (`docs/architecture/backup.md`) whenever a reinstall is unavoidable.
+3. Each upload needs a higher `versionCode` than the last; it comes from `pubspec.yaml` (`version: x.y.z+N`).
+4. Whether the IOT category is accepted on the internal track is unconfirmed until the first upload.
+
+**Desktop Head Unit (development only).** The DHU, installed from the SDK Manager under Android Auto Desktop Head Unit Emulator, lets a debug build be tried without a car: enable developer mode in Android Auto on the phone, start its head unit server, run `adb forward tcp:5277 tcp:5277`, then start `desktop-head-unit`. A debug build accepts any host (`CaptureCarAppService.createHostValidator`), so the "from Play" rule does not apply to it. It is not a substitute for the Play install: a release build only runs on a real head unit or the DHU once it comes from Play.
 
 ## Supabase OAuth callback
 

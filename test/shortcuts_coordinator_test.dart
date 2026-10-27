@@ -278,6 +278,7 @@ void main() {
     test(
       'toggleRecording captures first, then surfaces the Queue tab',
       () async {
+        await recordings.initialize();
         final ShortcutsCoordinator coordinator = build();
 
         await coordinator.handle(ShortcutAction.toggleRecording);
@@ -303,6 +304,7 @@ void main() {
         recorder: _GrantingRecorder(),
         player: _FakePlayer(),
       );
+      await recordings.initialize();
       final ShortcutsCoordinator coordinator = build();
 
       await coordinator.handle(ShortcutAction.toggleRecording);
@@ -374,6 +376,7 @@ void main() {
     });
 
     test('upload shortcuts route to the matching capture type', () async {
+      await recordings.initialize();
       final ShortcutsCoordinator coordinator = build();
 
       await coordinator.handle(ShortcutAction.uploadImage);

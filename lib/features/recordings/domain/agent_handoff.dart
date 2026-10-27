@@ -1,5 +1,7 @@
+import '../../../core/security/record_id.dart';
 import 'capture_router.dart';
 import 'route_record.dart';
+import '../../projects/domain/native_agent_types.dart';
 
 /// One agent a capture can be handed to, as the queue sees it.
 ///
@@ -14,6 +16,7 @@ class HandoffAgent {
     required this.id,
     required this.label,
     required this.isDefault,
+    this.skipPermissions = false,
   });
 
   final String id;
@@ -22,6 +25,11 @@ class HandoffAgent {
   /// The project's configured default. Preselected by the sheet, so launching
   /// the usual agent stays a single tap.
   final bool isDefault;
+
+  /// The project runs this agent with its tool approvals off. Carried so the
+  /// sheet can say so before the launch: a capture's text is untrusted, and
+  /// with approvals off nothing stands between that text and the agent's tools.
+  final bool skipPermissions;
 }
 
 class AgentHandoffRequest {
@@ -29,6 +37,7 @@ class AgentHandoffRequest {
     required this.capture,
     required this.agentId,
     required this.instruction,
+    this.detached = false,
   });
 
   /// Names the brief this capture owns, so a second handoff appends to the same
@@ -50,6 +59,10 @@ class AgentHandoffRequest {
   /// The opening prompt, carrying the capture's own text — see
   /// [AgentHandoff.promptFor].
   final String instruction;
+
+  /// Start the session in the background rather than in a terminal window.
+  /// See `AgentSessionLaunchRequest.detached`.
+  final bool detached;
 }
 
 class AgentHandoffResult {
@@ -58,6 +71,8 @@ class AgentHandoffResult {
     required this.taskPath,
     required this.sessionName,
     required this.attachedToExistingSession,
+    this.detached = false,
+    this.job,
   });
 
   final RouteRecord record;
@@ -76,6 +91,12 @@ class AgentHandoffResult {
   /// user has to be told to point the running agent at it, or they will wait
   /// for work that was never requested.
   final bool attachedToExistingSession;
+
+  /// The session runs in the background and no window was opened. The caller
+  /// has to say where it is and offer a way in — [AgentHandoff.attach], or the
+  /// command to type — or the launch looks like nothing happened.
+  final bool detached;
+  final NativeAgentJobHandle? job;
 }
 
 /// Starts a coding agent on a capture, in its project's repository.
@@ -102,6 +123,15 @@ abstract interface class AgentHandoff {
   /// capture lands in the same file rather than scattering briefs.
   String taskPathFor(String captureId);
 
+  /// The scratch folder [handoff] will run in for a capture that has no
+  /// repository of its own, or null when the capture uses a project's
+  /// repository (or cannot be handed off at all).
+  ///
+  /// Synchronous and deterministic for the same reason as [taskPathFor]: the
+  /// sheet shows where the session will run before anything is created, and the
+  /// artifact scan reads results from the same place.
+  String? workspacePathFor(String captureId, String? projectId);
+
   /// The default opening prompt: **the capture's own text**, so the agent
   /// starts on the task itself rather than on an errand to go and read it.
   ///
@@ -125,6 +155,13 @@ abstract interface class AgentHandoff {
   /// Throws on failure, under the same contract as [CaptureRouter.route]: the
   /// caller must record nothing when it does.
   Future<AgentHandoffResult> handoff(AgentHandoffRequest request);
+
+  /// Opens a terminal on the running session [sessionName].
+  ///
+  /// The way back into a session started detached, and into one that was
+  /// already running when a second handoff found it. Throws when the session
+  /// is not running or no terminal can open; nothing is written either way.
+  Future<void> attach(String sessionName);
 }
 
 /// The default: no agent can be started, so the queue offers no such control.
@@ -138,12 +175,34 @@ class DisabledAgentHandoff implements AgentHandoff {
   String taskPathFor(String captureId) => '';
 
   @override
+  String? workspacePathFor(String captureId, String? projectId) => null;
+
+  @override
   String promptFor(RoutedCapture capture) => '';
 
   @override
   Future<AgentHandoffResult> handoff(AgentHandoffRequest request) async {
     throw const AgentHandoffUnavailableException();
   }
+
+  @override
+  Future<void> attach(String sessionName) async {
+    throw const AgentHandoffUnavailableException();
+  }
+}
+
+/// Whether [id] can be used as a single path segment: the shared rule in
+/// `core/security/record_id.dart`, which sync and backup import also apply.
+bool isSafeCaptureId(String id) => isSafeRecordId(id);
+
+/// A handoff was refused because the capture's id is not a safe path segment.
+class UnsafeCaptureIdException implements Exception {
+  const UnsafeCaptureIdException();
+
+  @override
+  String toString() =>
+      'This capture has an id that cannot be used as a file name, so it '
+      'cannot be handed to an agent.';
 }
 
 class AgentHandoffUnavailableException implements Exception {

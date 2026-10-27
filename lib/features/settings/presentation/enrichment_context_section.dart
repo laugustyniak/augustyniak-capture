@@ -1,10 +1,17 @@
+import 'dart:io';
+
 import 'package:flutter/material.dart';
 
 import '../../../app/ui_kit.dart';
+import '../../enrichment/data/soul_reader.dart';
 import '../../enrichment/domain/enrichment_context.dart';
+import '../../projects/data/directory_picker.dart';
 import '../../projects/data/project_context_probe.dart';
 import '../../projects/data/project_context_reader.dart';
 import '../../projects/domain/project.dart';
+import '../../recordings/domain/related_captures.dart';
+import '../../recordings/domain/stale_rank.dart';
+import '../../recordings/presentation/recordings_controller.dart';
 import 'settings_controller.dart';
 
 /// The "who I am" text handed to the enrichment model with every capture, plus
@@ -18,9 +25,25 @@ class EnrichmentContextSection extends StatefulWidget {
     super.key,
     required this.controller,
     this.projects = const <Project>[],
+    this.picker = const FilePickerDirectoryPicker(),
+    this.soulReader = const SoulReader(),
+    this.recordings,
   });
 
+  /// Counts and runs the re-rank of captures ranked under an older soul. Null
+  /// hides the row — every test that hosts this section bare, and any host
+  /// with no queue to re-rank.
+  final RecordingsController? recordings;
+
   final SettingsController controller;
+
+  /// Chooses the folder `SOUL.md` lives in. The same desktop-only seam as the
+  /// vault's: a widget test injects a fake, and mobile keeps the typed path.
+  final DirectoryPicker picker;
+
+  /// Reads the soul for the status line — the same reader enrichment uses, so
+  /// the line reports exactly what the next capture will be sent.
+  final SoulReader soulReader;
 
   /// Empty by default, and that default is what keeps this widget free of disk
   /// access: with no projects there is nothing to probe, so the existing Config
@@ -58,6 +81,256 @@ class _EnrichmentContextSectionState extends State<EnrichmentContextSection> {
   String get _stored => widget.controller.enrichmentInstructions;
   bool get _dirty => _field.text.trim() != _synced.trim();
 
+  late final TextEditingController _soulField = TextEditingController(
+    text: _storedSoulPath,
+  );
+  final FocusNode _soulFocus = FocusNode();
+  late String _syncedSoulPath = _storedSoulPath;
+
+  /// What the soul file resolves to right now. Null while unset or while the
+  /// check runs, and only ever probed with a path configured — which is what
+  /// keeps every existing Config test off the filesystem.
+  ResolvedSoul? _soul;
+  String? _pickerError;
+
+  /// Captures on the desk ranked under an older soul. Null until counted.
+  int? _staleCount;
+
+  /// Recounted after anything that can change the current soul or the ranks:
+  /// a path change, a profile save, a finished re-rank. Never from `build` —
+  /// resolving the soul reads the disk.
+  Future<void> _refreshStale() async {
+    final RecordingsController? recordings = widget.recordings;
+    if (recordings == null) return;
+    final int count = await recordings.staleRankCount();
+    if (!mounted) return;
+    setState(() => _staleCount = count);
+  }
+
+  Future<void> _rerank() async {
+    final RecordingsController? recordings = widget.recordings;
+    if (recordings == null) return;
+    await recordings.rerankStale();
+    await _refreshStale();
+  }
+
+  /// The re-rank row, rebuilt from the controller so its progress moves while
+  /// the rest of the section stays still.
+  Widget _rerankRow(RecordingsController recordings) {
+    return ListenableBuilder(
+      listenable: recordings,
+      builder: (BuildContext context, Widget? _) {
+        final RerankProgress? progress = recordings.rerankProgress;
+        if (progress != null) {
+          return Row(
+            children: <Widget>[
+              Expanded(
+                child: Text(
+                  'RE-RANKING ${progress.done} / ${progress.total}',
+                  style: ConsoleText.micro.copyWith(color: Console.accent),
+                ),
+              ),
+              TextButton(
+                onPressed: recordings.cancelRerank,
+                child: const Text('CANCEL'),
+              ),
+            ],
+          );
+        }
+        final int count = _staleCount ?? 0;
+        if (count == 0) return const SizedBox.shrink();
+        return Row(
+          children: <Widget>[
+            Expanded(
+              child: Text(
+                '$count ranked under an older soul · one model call each',
+                style: ConsoleText.micro.copyWith(color: Console.amber),
+              ),
+            ),
+            TextButton(
+              onPressed: _rerank,
+              child: Text('RE-RANK $count'),
+            ),
+          ],
+        );
+      },
+    );
+  }
+
+  late final TextEditingController _glossaryField = TextEditingController(
+    text: widget.controller.asrGlossary,
+  );
+  final FocusNode _glossaryFocus = FocusNode();
+
+  Future<void> _commitGlossary() async {
+    await widget.controller.setAsrGlossary(_glossaryField.text);
+    if (mounted) setState(() {});
+  }
+
+  /// The INSTRUCTION block (#281): the switch, then the glossary it repairs
+  /// misheard terms against.
+  Widget _instructionBlock() {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: <Widget>[
+        Row(
+          children: <Widget>[
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: <Widget>[
+                  Text(
+                    'REWRITE EVERY DICTATION AS AN INSTRUCTION',
+                    style: ConsoleText.micro.copyWith(
+                      color: Console.muted,
+                      fontWeight: FontWeight.w800,
+                      letterSpacing: .6,
+                    ),
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    'Misheard terms fixed against the glossary, then the '
+                    'dictation restated as a prompt for the task. It replaces '
+                    'the raw text on the clipboard; the raw transcript stays '
+                    'under RAW. One extra model call each.',
+                    style: TextStyle(
+                      color: Console.mutedSoft,
+                      fontSize: 10,
+                      height: 1.45,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(width: 10),
+            Switch(
+              key: const ValueKey<String>('auto-instruction'),
+              value: widget.controller.autoInstruction,
+              onChanged: (bool value) async {
+                await widget.controller.setAutoInstruction(value);
+                if (mounted) setState(() {});
+              },
+            ),
+          ],
+        ),
+        const SizedBox(height: 10),
+        Text('ASR GLOSSARY', style: ConsoleText.fieldLabel),
+        const SizedBox(height: 6),
+        ConsoleField(
+          key: const ValueKey<String>('asr-glossary'),
+          controller: _glossaryField,
+          focusNode: _glossaryFocus,
+          minLines: 3,
+          maxLines: 8,
+          fontSize: 12,
+          hintText:
+              'One term per line, with what it is misheard as:\n'
+              'Claude Code — heard as "cloud code"',
+        ),
+      ],
+    );
+  }
+
+  late final TextEditingController _embeddingField = TextEditingController(
+    text: widget.controller.embeddingModel ?? '',
+  );
+  final FocusNode _embeddingFocus = FocusNode();
+
+  Future<void> _commitEmbeddingModel() async {
+    await widget.controller.setEmbeddingModel(_embeddingField.text);
+    if (mounted) setState(() {});
+  }
+
+  /// The RELATED CAPTURES block: the model, then what the index holds and the
+  /// build that fills it — rebuilt from the controller so progress moves.
+  Widget _relatedBlock() {
+    final RecordingsController? recordings = widget.recordings;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: <Widget>[
+        Text('RELATED CAPTURES · EMBEDDING MODEL', style: ConsoleText.fieldLabel),
+        const SizedBox(height: 6),
+        ConsoleField(
+          controller: _embeddingField,
+          focusNode: _embeddingFocus,
+          monospace: true,
+          fontSize: 12,
+          textInputAction: TextInputAction.done,
+          onSubmitted: (String _) => _commitEmbeddingModel(),
+          hintText: 'text-embedding-3-small · nomic-embed-text',
+        ),
+        const SizedBox(height: 6),
+        if (recordings == null)
+          const SizedBox.shrink()
+        else
+          ListenableBuilder(
+            listenable: recordings,
+            builder: (BuildContext context, Widget? _) =>
+                _indexRow(recordings),
+          ),
+      ],
+    );
+  }
+
+  Widget _indexRow(RecordingsController recordings) {
+    final IndexProgress? progress = recordings.indexProgress;
+    if (progress != null) {
+      return Row(
+        children: <Widget>[
+          Expanded(
+            child: Text(
+              'INDEXING ${progress.done} / ${progress.total}',
+              style: ConsoleText.micro.copyWith(color: Console.accent),
+            ),
+          ),
+          TextButton(
+            onPressed: recordings.cancelIndex,
+            child: const Text('CANCEL'),
+          ),
+        ],
+      );
+    }
+    if (widget.controller.embeddingModel == null) {
+      return Text(
+        'Off. Name an embedding model served by the enrichment endpoint to '
+        'see related captures and repeats.',
+        style: ConsoleText.micro.copyWith(color: Console.mutedSoft),
+      );
+    }
+    if (!recordings.relatedEnabled) {
+      return Text(
+        'Needs an active enrichment profile whose endpoint ends in '
+        '/chat/completions.',
+        style: ConsoleText.micro.copyWith(color: Console.amber),
+      );
+    }
+    final int count = recordings.unindexedIds().length;
+    if (count == 0) {
+      return Text(
+        'Every capture is indexed. New ones are indexed as they finish.',
+        style: ConsoleText.micro.copyWith(color: Console.accent),
+      );
+    }
+    return Row(
+      children: <Widget>[
+        Expanded(
+          child: Text(
+            '$count not indexed · one embedding call each',
+            style: ConsoleText.micro.copyWith(color: Console.amber),
+          ),
+        ),
+        TextButton(
+          key: const ValueKey<String>('build-index'),
+          onPressed: recordings.buildIndex,
+          child: Text('BUILD INDEX $count'),
+        ),
+      ],
+    );
+  }
+
+  String get _storedSoulPath => widget.controller.soulPath ?? '';
+  bool get _soulDirty => _soulField.text.trim() != _syncedSoulPath.trim();
+
   @override
   void initState() {
     super.initState();
@@ -69,6 +342,89 @@ class _EnrichmentContextSectionState extends State<EnrichmentContextSection> {
     _focus.addListener(() {
       if (!_focus.hasFocus && _dirty) _commit();
     });
+    _soulFocus.addListener(() {
+      if (!_soulFocus.hasFocus && _soulDirty) _commitSoulPath();
+    });
+    _glossaryFocus.addListener(() {
+      if (!_glossaryFocus.hasFocus) _commitGlossary();
+    });
+    _embeddingFocus.addListener(() {
+      if (!_embeddingFocus.hasFocus) _commitEmbeddingModel();
+    });
+    _probeSoul();
+    _refreshStale();
+  }
+
+  /// Kicked from `initState` and after a path change, never from `build`: it
+  /// reads the disk, the same rule as the project scan below.
+  Future<void> _probeSoul() async {
+    final String path = _syncedSoulPath.trim();
+    if (path.isEmpty) {
+      if (_soul != null && mounted) setState(() => _soul = null);
+      return;
+    }
+    final ResolvedSoul soul = await widget.soulReader.resolve(
+      path: path,
+      typed: _stored,
+    );
+    if (!mounted || path != _syncedSoulPath.trim()) return;
+    setState(() => _soul = soul);
+  }
+
+  Future<void> _commitSoulPath() async {
+    final String value = _soulField.text.trim();
+    setState(() {
+      _syncedSoulPath = value;
+      _soul = null;
+    });
+    await widget.controller.setSoulPath(value);
+    await _probeSoul();
+    await _refreshStale();
+  }
+
+  /// Picks the folder and names `SOUL.md` in it: the seam chooses directories,
+  /// and one fixed file name is also what keeps the file findable later.
+  Future<void> _browseSoul() async {
+    setState(() => _pickerError = null);
+    try {
+      final String current = _syncedSoulPath.trim();
+      final String? folder = await widget.picker.pick(
+        initialDirectory: current.isEmpty ? null : File(current).parent.path,
+      );
+      if (folder == null || !mounted) return;
+      _soulField.text =
+          '$folder${Platform.pathSeparator}${SoulReader.defaultFileName}';
+      await _commitSoulPath();
+    } catch (exception) {
+      if (!mounted) return;
+      setState(() => _pickerError = exception.toString());
+    }
+  }
+
+  /// The line under the path: what the next capture will actually be sent.
+  Widget _soulStatus() {
+    final ResolvedSoul? soul = _soul;
+    final String? error = _pickerError;
+    final (String text, Color color) = switch (soul) {
+      _ when error != null => ('Browse failed: $error', Console.amber),
+      null when _syncedSoulPath.trim().isEmpty => (
+        'Optional. A markdown file you edit anywhere — it replaces the '
+            'profile below and is re-read for every capture.',
+        Console.mutedSoft,
+      ),
+      null => ('Checking…', Console.dimText),
+      ResolvedSoul(origin: SoulOrigin.file) => (
+        'USING ${soul.fileName} · ${soul.text.trim().length} chars'
+            '${soul.truncated ? ' · TRUNCATED WHEN SENT' : ''}',
+        soul.truncated ? Console.amber : Console.accent,
+      ),
+      ResolvedSoul() => (
+        '${soul.fileName} ${soul.origin.name.toUpperCase()} — '
+            'USING THE PROFILE BELOW',
+        Console.amber,
+      ),
+    };
+    return Text(text, style: ConsoleText.micro.copyWith(color: color));
   }
 
   @override
@@ -84,6 +440,11 @@ class _EnrichmentContextSectionState extends State<EnrichmentContextSection> {
     // deeply: the controller hands out a fresh unmodifiable list on every save,
     // so this fires exactly when something was actually written.
     if (!identical(oldWidget.projects, widget.projects)) _rescan();
+    if (_storedSoulPath != _syncedSoulPath && !_soulDirty) {
+      _syncedSoulPath = _storedSoulPath;
+      _soulField.text = _syncedSoulPath;
+      _probeSoul();
+    }
   }
 
   /// The mounted entry point: shows the scanning state, then scans.
@@ -126,6 +487,12 @@ class _EnrichmentContextSectionState extends State<EnrichmentContextSection> {
   void dispose() {
     _focus.dispose();
     _field.dispose();
+    _soulFocus.dispose();
+    _soulField.dispose();
+    _embeddingFocus.dispose();
+    _embeddingField.dispose();
+    _glossaryFocus.dispose();
+    _glossaryField.dispose();
     super.dispose();
   }
 
@@ -133,6 +500,7 @@ class _EnrichmentContextSectionState extends State<EnrichmentContextSection> {
     final String value = _field.text.trim();
     setState(() => _synced = value);
     await widget.controller.setEnrichmentInstructions(value);
+    await _refreshStale();
   }
 
   void _revert() {
@@ -148,6 +516,7 @@ class _EnrichmentContextSectionState extends State<EnrichmentContextSection> {
   /// constant, so the field agrees with whatever settings actually resolved to.
   Future<void> _restoreDefault() async {
     await widget.controller.resetEnrichmentInstructions();
+    await _refreshStale();
     if (!mounted) return;
     setState(() {
       _synced = _stored;
@@ -189,9 +558,10 @@ class _EnrichmentContextSectionState extends State<EnrichmentContextSection> {
                 children: <Widget>[
                   Expanded(
                     child: Text(
-                      'Who you are and what you collect. Sent with every '
-                      'capture so titles, categories and tags match how you '
-                      'actually file things.',
+                      'Your soul: who you are, what you collect, your goals '
+                      'and your priority rules. Sent with every capture so '
+                      'titles, categories, tags and priority match how you '
+                      'actually work.',
                       style: TextStyle(
                         color: Console.mutedSoft,
                         fontSize: 10,
@@ -215,7 +585,39 @@ class _EnrichmentContextSectionState extends State<EnrichmentContextSection> {
                   ),
                 ],
               ),
-              const SizedBox(height: 10),
+              const SizedBox(height: 12),
+              Text('SOUL FILE', style: ConsoleText.fieldLabel),
+              const SizedBox(height: 6),
+              ConsoleField(
+                controller: _soulField,
+                focusNode: _soulFocus,
+                monospace: true,
+                fontSize: 12,
+                textInputAction: TextInputAction.done,
+                onSubmitted: (String _) => _commitSoulPath(),
+                onChanged: (String _) => setState(() {}),
+                hintText: '/Users/you/Notes/SOUL.md',
+                suffixIcon: widget.picker.isAvailable
+                    ? IconButton(
+                        onPressed: _browseSoul,
+                        icon: const Icon(Icons.folder_open, size: 18),
+                        tooltip: 'Choose the folder holding SOUL.md',
+                        color: Console.muted,
+                      )
+                    : null,
+              ),
+              const SizedBox(height: 6),
+              _soulStatus(),
+              if (widget.recordings case final RecordingsController r)
+                _rerankRow(r),
+              const SizedBox(height: 12),
+              Text(
+                _soul?.origin == SoulOrigin.file
+                    ? 'PROFILE · FALLBACK'
+                    : 'PROFILE',
+                style: ConsoleText.fieldLabel,
+              ),
+              const SizedBox(height: 6),
               ConsoleField(
                 controller: _field,
                 focusNode: _focus,
@@ -226,7 +628,8 @@ class _EnrichmentContextSectionState extends State<EnrichmentContextSection> {
                     'e.g. I build offline-first Flutter apps and run a small '
                     'consultancy. I capture product ideas, meeting notes and '
                     'specs for coding agents. File anything with a repo name '
-                    'in it as an agent task.',
+                    'in it as an agent task. p0 is a client waiting; p3 is '
+                    'anything off my current goals.',
                 // Rebuilds the counter and the UNSAVED marker as the user
                 // types; the value itself is not written until blur.
                 onChanged: (String _) => setState(() {}),
@@ -269,6 +672,54 @@ class _EnrichmentContextSectionState extends State<EnrichmentContextSection> {
                     ),
                 ],
               ),
+              Divider(color: Console.border, height: 26),
+              // Off by default: one extra model call per dictation is a cost
+              // the user opts into, and the proposal still waits for ACCEPT.
+              // A Row, not a SwitchListTile: a ListTile inside this card's
+              // decorated box trips the "ink splashes may be invisible" check.
+              Row(
+                children: <Widget>[
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: <Widget>[
+                        Text(
+                          'PROPOSE A CLEAN-UP FOR EVERY DICTATION',
+                          style: ConsoleText.micro.copyWith(
+                            color: Console.muted,
+                            fontWeight: FontWeight.w800,
+                            letterSpacing: .6,
+                          ),
+                        ),
+                        const SizedBox(height: 4),
+                        Text(
+                          'Fillers out, misheard names fixed against your '
+                          'soul. One extra model call each; nothing replaces '
+                          'the transcript until you accept it.',
+                          style: TextStyle(
+                            color: Console.mutedSoft,
+                            fontSize: 10,
+                            height: 1.45,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(width: 10),
+                  Switch(
+                    key: const ValueKey<String>('auto-cleanup'),
+                    value: widget.controller.autoCleanup,
+                    onChanged: (bool value) async {
+                      await widget.controller.setAutoCleanup(value);
+                      if (mounted) setState(() {});
+                    },
+                  ),
+                ],
+              ),
+              Divider(color: Console.border, height: 26),
+              _instructionBlock(),
+              Divider(color: Console.border, height: 26),
+              _relatedBlock(),
               Divider(color: Console.border, height: 26),
               Row(
                 children: <Widget>[

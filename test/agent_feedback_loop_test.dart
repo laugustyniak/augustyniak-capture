@@ -1,7 +1,9 @@
 import 'dart:io';
 
+import 'package:augustyniak_capture/features/projects/domain/agent_session_launcher.dart';
 import 'package:augustyniak_capture/features/projects/domain/project.dart';
 import 'package:augustyniak_capture/features/recordings/data/agent_artifact_scanner.dart';
+import 'package:augustyniak_capture/features/recordings/data/project_agent_handoff.dart';
 import 'package:augustyniak_capture/features/recordings/domain/agent_artifact.dart';
 import 'package:augustyniak_capture/features/recordings/domain/capture_type.dart';
 import 'package:augustyniak_capture/features/recordings/domain/recording.dart';
@@ -164,6 +166,39 @@ Notes linked to capture-xyz.
       expect(artifacts.first.title, 'Connected Analysis');
       expect(artifacts.first.kind, AgentArtifactKind.connectedNote);
     });
+
+    test('keeps a vault connection analysis classified as a result', () async {
+      final Directory vault = Directory(p.join(tempDir.path, 'vault', 'Capture'));
+      final Directory analysis = Directory(p.join(vault.path, 'Analysis'));
+      await analysis.create(recursive: true);
+      final File result = File(p.join(analysis.path, 'cap-links.md'));
+      await result.writeAsString('''---
+parent-capture: cap-links
+analysis-hash: example
+---
+# Connections: Links
+
+[[Projects/Plan]]
+''');
+      final Project project = Project(
+        id: 'proj-links', name: 'Links', repoPath: tempDir.path,
+      );
+      final Recording recording = Recording(
+        id: 'cap-links',
+        filePath: p.join(tempDir.path, 'cap-links.txt'),
+        createdAt: DateTime.now(),
+        durationMs: 0,
+        status: RecordingStatus.completed,
+        projectId: project.id,
+      );
+
+      final List<AgentArtifact> found = await const AgentArtifactScanner()
+          .scanForCapture(recording: recording, project: project,
+              vaultDirectory: vault);
+
+      expect(found, hasLength(1));
+      expect(found.single.kind, AgentArtifactKind.resultNote);
+    });
   });
 
   group('RecordingsController Artifact Integration', () {
@@ -219,5 +254,99 @@ Notes linked to capture-xyz.
       await controller.attachArtifact(captureId, extraFile.path);
       expect(controller.recordings.first.artifacts.length, 2);
     });
+
+    test('a result in a projectless capture\'s scratch workspace is found',
+        () async {
+      final Directory sessions = Directory(p.join(tempDir.path, 'sessions'));
+      const String captureId = 'cap-scratch';
+      final Recording recording = Recording(
+        id: captureId,
+        filePath: p.join(tempDir.path, '$captureId.txt'),
+        createdAt: DateTime.now(),
+        durationMs: 0,
+        type: CaptureType.text,
+        status: RecordingStatus.completed,
+      );
+      final RecordingsController controller = RecordingsController(
+        repository: FakeRecordingsRepository(
+          tempDir,
+          seed: <Recording>[recording],
+        ),
+        transcriptionService: const DisabledTranscriptionService(),
+        projectById: (String id) => null,
+        agentHandoff: ProjectAgentHandoff(
+          projectById: (String id) => null,
+          launcher: _NoopLauncher(),
+          sessionsRoot: () => sessions,
+        ),
+        player: FakePlayer(),
+        recorder: FakeRecorder(),
+      );
+      await controller.initialize();
+
+      final File result = File(
+        p.join(sessions.path, captureId, '.agent-tasks', '$captureId-result.md'),
+      );
+      await result.create(recursive: true);
+      await result.writeAsString('# Scratch Output\nDone.');
+
+      final List<AgentArtifact> found = await controller.refreshArtifacts(
+        captureId,
+      );
+
+      expect(found.single.title, 'Scratch Output');
+      expect(controller.recordings.single.artifacts, hasLength(1));
+    });
+
+    test('a project with no repoPath and no scratch root still scans the vault',
+        () async {
+      final Directory vault = Directory(p.join(tempDir.path, 'vault'))
+        ..createSync();
+      const String captureId = 'cap-norepo';
+      File(p.join(vault.path, 'note.md')).writeAsStringSync(
+        '# Linked\ncapture-id: $captureId\n',
+      );
+      final Recording recording = Recording(
+        id: captureId,
+        filePath: p.join(tempDir.path, '$captureId.txt'),
+        createdAt: DateTime.now(),
+        durationMs: 0,
+        type: CaptureType.text,
+        status: RecordingStatus.completed,
+        projectId: 'empty',
+      );
+      final RecordingsController controller = RecordingsController(
+        repository: FakeRecordingsRepository(
+          tempDir,
+          seed: <Recording>[recording],
+        ),
+        transcriptionService: const DisabledTranscriptionService(),
+        projectById: (String id) =>
+            const Project(id: 'empty', name: 'Empty', repoPath: ''),
+        vaultDirectory: () => vault,
+        player: FakePlayer(),
+        recorder: FakeRecorder(),
+      );
+      await controller.initialize();
+
+      final List<AgentArtifact> found = await controller.refreshArtifacts(
+        captureId,
+      );
+
+      expect(found, hasLength(1));
+    });
   });
+}
+
+class _NoopLauncher implements AgentSessionLauncher {
+  @override
+  Future<AgentSessionLaunchResult> launch(
+    AgentSessionLaunchRequest request,
+  ) async => const AgentSessionLaunchResult(
+    sessionName: 'x',
+    attachedToExistingSession: false,
+  );
+
+  @override
+  Future<void> attach(String sessionName) async {}
 }

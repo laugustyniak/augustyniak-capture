@@ -20,6 +20,13 @@ class MainFlutterWindow: NSWindow {
       guard let self = self else { return }
       if call.method == "getClipboardImage" {
         result(self.getClipboardImage())
+      } else if call.method == "getPasteFile" {
+        let urls = NSPasteboard.general.readObjects(
+          forClasses: [NSURL.self], options: [.urlReadingFileURLsOnly: true]
+        ) as? [NSURL]
+        result(urls?.first?.path)
+      } else if call.method == "getPasteImage" {
+        result(self.getClipboardImage(onlyIfChanged: false, temporary: true))
       } else if call.method == "getClipboardHistoryDirectory" {
         result(self.clipboardHistoryDirectory()?.path)
       } else if call.method == "copyImageToClipboard" {
@@ -32,12 +39,25 @@ class MainFlutterWindow: NSWindow {
       } else if call.method == "autoPaste" {
         self.autoPaste()
         result(true)
+      } else if call.method == "isClipboardSensitive" {
+        result(self.clipboardIsSensitive())
       } else {
         result(FlutterMethodNotImplemented)
       }
     }
 
     super.awakeFromNib()
+  }
+
+  /// The two pasteboard types password managers and OTP apps declare so a
+  /// clipboard history leaves their copy alone (nspasteboard.org): "Concealed"
+  /// for a secret, "Transient" for content that is about to be replaced.
+  /// Neither is set by the system; a source that does not opt in is observed
+  /// as before (#302).
+  private func clipboardIsSensitive() -> Bool {
+    let types = NSPasteboard.general.types ?? []
+    return types.contains(NSPasteboard.PasteboardType("org.nspasteboard.ConcealedType"))
+      || types.contains(NSPasteboard.PasteboardType("org.nspasteboard.TransientType"))
   }
 
   private func clipboardHistoryDirectory() -> URL? {
@@ -54,9 +74,9 @@ class MainFlutterWindow: NSWindow {
     }
   }
 
-  private func getClipboardImage() -> String? {
+  private func getClipboardImage(onlyIfChanged: Bool = true, temporary: Bool = false) -> String? {
     let pasteboard = NSPasteboard.general
-    if pasteboard.changeCount == lastChangeCount {
+    if onlyIfChanged && pasteboard.changeCount == lastChangeCount {
       return nil
     }
 
@@ -72,7 +92,7 @@ class MainFlutterWindow: NSWindow {
       return nil
     }
 
-    lastChangeCount = pasteboard.changeCount
+    if !temporary { lastChangeCount = pasteboard.changeCount }
 
     let bitmapRep = NSBitmapImageRep(cgImage: cgImage)
     guard let pngData = bitmapRep.representation(using: .png, properties: [:]) else {
@@ -80,7 +100,9 @@ class MainFlutterWindow: NSWindow {
     }
 
     let documentsDir = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first!
-    let imagesDir = documentsDir.appendingPathComponent("AugustyniakCapture/images")
+    let imagesDir = temporary
+      ? URL(fileURLWithPath: NSTemporaryDirectory())
+      : documentsDir.appendingPathComponent("AugustyniakCapture/images")
     try? FileManager.default.createDirectory(at: imagesDir, withIntermediateDirectories: true)
 
     let filename = "clip_\(UUID().uuidString).png"

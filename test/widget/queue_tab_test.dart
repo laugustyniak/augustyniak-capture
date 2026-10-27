@@ -13,6 +13,7 @@ import 'package:augustyniak_capture/core/sync/cloud_sync_coordinator.dart';
 import 'package:augustyniak_capture/features/costs/data/usage_repository.dart';
 import 'package:augustyniak_capture/features/costs/domain/usage_event.dart';
 import 'package:augustyniak_capture/features/recordings/domain/capture_category.dart';
+import 'package:augustyniak_capture/features/recordings/domain/capture_priority.dart';
 import 'package:augustyniak_capture/features/recordings/domain/capture_type.dart';
 import 'package:augustyniak_capture/features/recordings/domain/recording.dart';
 import 'package:augustyniak_capture/features/recordings/presentation/capture_focus_view.dart';
@@ -25,8 +26,29 @@ import 'package:augustyniak_capture/features/recordings/presentation/recordings_
 import 'package:augustyniak_capture/features/projects/data/projects_repository.dart';
 import 'package:augustyniak_capture/features/projects/domain/project.dart';
 import 'package:augustyniak_capture/features/projects/presentation/projects_controller.dart';
+import 'package:augustyniak_capture/features/auth/data/secure_auth_storage.dart';
+import 'package:augustyniak_capture/features/sync/data/e2ee_service.dart';
+import 'package:augustyniak_capture/features/sync/domain/e2ee_cipher.dart';
+import 'package:augustyniak_capture/features/sync/presentation/e2ee_passphrase_dialog.dart';
 
 import '../support/harness.dart';
+import '../sync/fake_e2ee_settings_store.dart';
+
+class _InMemorySecureStore implements SecureValueStore {
+  final Map<String, String> values = <String, String>{};
+
+  @override
+  Future<bool> containsKey(String key) async => values.containsKey(key);
+
+  @override
+  Future<void> delete(String key) async => values.remove(key);
+
+  @override
+  Future<String?> read(String key) async => values[key];
+
+  @override
+  Future<void> write(String key, String value) async => values[key] = value;
+}
 
 /// Taken from the widget rather than retyped, so renaming the label cannot
 /// leave a test asserting a string nothing renders any more.
@@ -39,6 +61,26 @@ final Uint8List _pixel = base64Decode(
   'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8'
   'BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==',
 );
+
+/// A repository whose trash holds [held] `held-*` files until released.
+class _HeldTrashRepository extends FakeRecordingsRepository {
+  _HeldTrashRepository(super.directory, {required this.held});
+
+  int held;
+
+  @override
+  Future<int> pruneTrash({DateTime? now}) async => 0;
+
+  @override
+  Future<int> heldTrashCount() async => held;
+
+  @override
+  Future<int> releaseHeldTrash({DateTime? now}) async {
+    final int released = held;
+    held = 0;
+    return released;
+  }
+}
 
 /// Guards the queue list: which items a filter shows, what a card renders per
 /// capture type, what the search matches on, and — since the design put counts
@@ -59,6 +101,7 @@ void main() {
     RecordingsController controller, {
     ProjectsController? projects,
     UsageRepository? usageRepository,
+    E2eeService? e2ee,
   }) async {
     await tester.pumpWidget(
       hostTab(
@@ -66,6 +109,7 @@ void main() {
           controller: controller,
           projects: projects,
           usageRepository: usageRepository,
+          e2ee: e2ee,
         ),
         listenable: projects == null
             ? controller
@@ -74,6 +118,57 @@ void main() {
     );
     await tester.pump();
   }
+
+  testWidgets('held synced deletes show a notice that CONFIRM clears (#304)', (
+    WidgetTester tester,
+  ) async {
+    final _HeldTrashRepository repository = _HeldTrashRepository(
+      appDir,
+      held: 3,
+    );
+    final RecordingsController controller = await buildRecordingsController(
+      appDir,
+      repository: repository,
+    );
+    await tester.runAsync(controller.recoverOrphans);
+
+    await pumpQueue(tester, controller);
+
+    expect(
+      find.text(
+        "Another device deleted recordings · 3 files kept in the recordings "
+        "folder's .trash · CONFIRM removes them after 30 days",
+      ),
+      findsOneWidget,
+    );
+
+    await tester.tap(find.text('CONFIRM'));
+    await tester.runAsync(() => Future<void>.delayed(Duration.zero));
+    await tester.pump();
+
+    expect(find.textContaining('.trash'), findsNothing);
+    expect(controller.heldSyncTrashFiles, 0);
+  });
+
+  testWidgets('the send control shows on a projectless capture with text', (
+    WidgetTester tester,
+  ) async {
+    final SemanticsHandle semantics = tester.ensureSemantics();
+    final RecordingsController controller = await buildRecordingsController(
+      appDir,
+      seed: <Recording>[
+        makeRecording(id: 'with', transcript: 'Something to ask.'),
+        makeRecording(id: 'without', title: 'Still transcribing'),
+      ],
+    );
+
+    await pumpQueue(tester, controller);
+
+    // One of the two: the capture with no text of its own has nothing to send,
+    // and the card's stand-in title is not text.
+    expect(find.bySemanticsLabel(RecordingCard.handoffLabel), findsOneWidget);
+    semantics.dispose();
+  });
 
   /// Lets real filesystem work finish: opening a source stats the file, and
   /// `Image.file` reads and decodes one — neither of which the fake-async zone
@@ -155,6 +250,354 @@ void main() {
     expect(find.text('Cloud sync is not configured'), findsOneWidget);
     expect(find.text('NOTES · not configured'), findsOneWidget);
     expect(find.text('FILES · not configured'), findsOneWidget);
+    // No Supabase, no key holder: encryption is not a question here.
+    expect(find.textContaining('ENCRYPTION'), findsNothing);
+  });
+
+  testWidgets('sync status says NOT ENCRYPTED without a key and follows the key when one arrives', (
+    WidgetTester tester,
+  ) async {
+    // #297: a signed-in install synced in plaintext and nothing on screen
+    // said so. With a key holder present the status line is never silent
+    // about which of the two happened, and it follows the key live.
+    AppDatabase.resetForTesting();
+    final Database db = sqlite3.openInMemory();
+    await AppDatabase.getInstance(overrideDb: db);
+    addTearDown(() {
+      AppDatabase.resetForTesting();
+      db.close();
+    });
+    final E2eeService e2ee = E2eeService(
+      secureStore: _InMemorySecureStore(),
+      kdf: E2eeKeyDerivation(iterations: 1000),
+    );
+    addTearDown(e2ee.dispose);
+    final RecordingsController controller = await buildRecordingsController(appDir);
+    await pumpQueue(tester, controller, e2ee: e2ee);
+
+    // Signed out: nothing syncs, so nothing is said.
+    expect(find.text(QueueTab.notEncryptedBanner), findsNothing);
+
+    // Signed in, no key: the banner is up before any run and without the
+    // sync panel — the launch and edit-debounce syncs never open one.
+    await e2ee.followIdentity('u');
+    await tester.pump();
+    expect(find.text(QueueTab.notEncryptedBanner), findsOneWidget);
+
+    await tester.tap(find.text('SYNC CLOUD'));
+    await settleIo(tester);
+    expect(find.textContaining('ENCRYPTION · NOT ENCRYPTED'), findsOneWidget);
+    expect(find.textContaining('end-to-end'), findsNothing);
+
+    await e2ee.setupPassphrase(userId: 'u', passphrase: 'p');
+    await tester.pump();
+
+    expect(find.text(QueueTab.notEncryptedBanner), findsNothing);
+    expect(find.textContaining('NOT ENCRYPTED'), findsNothing);
+    expect(find.textContaining('end-to-end'), findsOneWidget);
+  });
+
+  /// The derivation runs as real async work; wait for the service to say
+  /// it landed rather than pumping a guessed number of frames. Each pump
+  /// advances the fake clock, which is fine only because the KDF and the
+  /// fakes are microtask-driven pure Dart — nothing here waits on a real
+  /// timer.
+  Future<void> pumpUntil(WidgetTester tester, bool Function() done) async {
+    for (int i = 0; i < 500 && !done(); i++) {
+      await tester.pump(const Duration(milliseconds: 10));
+    }
+    expect(done(), isTrue, reason: 'condition not reached');
+  }
+
+  Future<E2eeService> e2eeWith(FakeE2eeSettingsStore settings, {_InMemorySecureStore? keyring}) async {
+    final E2eeService e2ee = E2eeService(
+      secureStore: keyring ?? _InMemorySecureStore(),
+      kdf: E2eeKeyDerivation(iterations: 1000),
+      settings: settings,
+    );
+    addTearDown(e2ee.dispose);
+    return e2ee;
+  }
+
+  testWidgets('set-up from the banner warns about loss, then seals the next run (#317)', (
+    WidgetTester tester,
+  ) async {
+    AppDatabase.resetForTesting();
+    final Database db = sqlite3.openInMemory();
+    await AppDatabase.getInstance(overrideDb: db);
+    addTearDown(() {
+      AppDatabase.resetForTesting();
+      db.close();
+    });
+    final FakeE2eeSettingsStore settings = FakeE2eeSettingsStore();
+    final E2eeService e2ee = await e2eeWith(settings);
+    final RecordingsController controller = await buildRecordingsController(appDir);
+    await pumpQueue(tester, controller, e2ee: e2ee);
+
+    await e2ee.followIdentity('u');
+    await tester.pump();
+    expect(find.text(QueueTab.unconfirmedBanner), findsOneWidget);
+    expect(find.text(QueueTab.lockedBanner), findsNothing);
+
+    await tester.tap(find.text('SET UP ENCRYPTION'));
+    await tester.pump();
+    // The Queue has its own search field; only the dialog's count here.
+    final Finder fields = find.descendant(
+      of: find.byType(AlertDialog),
+      matching: find.byType(TextField),
+    );
+    // The warning is on screen before anything can be submitted.
+    expect(find.text(E2eePassphraseDialog.lossWarning), findsOneWidget);
+    expect(find.text('SET UP END-TO-END ENCRYPTION'), findsOneWidget);
+    expect(fields, findsNWidgets(2));
+
+    final Finder submit = find.widgetWithText(FilledButton, 'SET UP');
+    expect(tester.widget<FilledButton>(submit).onPressed, isNull);
+    await tester.enterText(fields.first, 'short');
+    await tester.pump();
+    expect(find.text(E2eePassphraseDialog.tooShort), findsOneWidget);
+    await tester.enterText(fields.first, 'correct horse');
+    await tester.enterText(fields.last, 'wrong horse!');
+    await tester.pump();
+    expect(find.text(E2eePassphraseDialog.mismatch), findsOneWidget);
+    expect(tester.widget<FilledButton>(submit).onPressed, isNull);
+    expect(settings.rows, isEmpty);
+
+    await tester.enterText(fields.last, 'correct horse');
+    await tester.pump();
+    expect(tester.widget<FilledButton>(submit).onPressed, isNotNull);
+    await tester.tap(submit);
+    await pumpUntil(tester, () => e2ee.isUnlocked);
+    await tester.pump(const Duration(milliseconds: 300)); // dialog pop transition
+
+    expect(settings.rows['u'], isNotNull);
+    expect(find.text(E2eePassphraseDialog.lossWarning), findsNothing);
+    expect(find.text(QueueTab.notEncryptedBanner), findsNothing);
+    expect(find.text('SET UP ENCRYPTION'), findsNothing);
+
+    await tester.tap(find.text('SYNC CLOUD'));
+    await settleIo(tester);
+    expect(find.text('ENCRYPTION · end-to-end, sealed on this device'), findsOneWidget);
+  });
+
+  testWidgets('the unconfirmed banner fits a phone-width viewport (#379)', (
+    WidgetTester tester,
+  ) async {
+    tester.view.physicalSize = const Size(360, 800);
+    tester.view.devicePixelRatio = 1.0;
+    addTearDown(tester.view.reset);
+    AppDatabase.resetForTesting();
+    final Database db = sqlite3.openInMemory();
+    await AppDatabase.getInstance(overrideDb: db);
+    addTearDown(() {
+      AppDatabase.resetForTesting();
+      db.close();
+    });
+    final E2eeService e2ee = await e2eeWith(FakeE2eeSettingsStore());
+    final RecordingsController controller = await buildRecordingsController(appDir);
+    await pumpQueue(tester, controller, e2ee: e2ee);
+
+    await e2ee.followIdentity('u');
+    await tester.pump();
+    expect(find.text('SYNC WITHOUT ENCRYPTION'), findsOneWidget);
+    expect(find.text('SET UP ENCRYPTION'), findsOneWidget);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('a fresh device pauses sync until plaintext is confirmed once (#379)', (
+    WidgetTester tester,
+  ) async {
+    AppDatabase.resetForTesting();
+    final Database db = sqlite3.openInMemory();
+    await AppDatabase.getInstance(overrideDb: db);
+    addTearDown(() {
+      AppDatabase.resetForTesting();
+      db.close();
+    });
+    final E2eeService e2ee = await e2eeWith(FakeE2eeSettingsStore());
+    final RecordingsController controller = await buildRecordingsController(appDir);
+    await pumpQueue(tester, controller, e2ee: e2ee);
+
+    await e2ee.followIdentity('u');
+    await tester.pump();
+    expect(find.text(QueueTab.unconfirmedBanner), findsOneWidget);
+    expect(find.text(QueueTab.notEncryptedBanner), findsNothing);
+    expect(find.text('SET UP ENCRYPTION'), findsOneWidget);
+    expect(find.text('SYNC WITHOUT ENCRYPTION'), findsOneWidget);
+
+    await tester.tap(find.text('SYNC CLOUD'));
+    await settleIo(tester);
+    expect(find.textContaining('NOT CONFIRMED'), findsOneWidget);
+    expect(find.textContaining('ENCRYPTION · NOT ENCRYPTED'), findsNothing);
+
+    await tester.tap(find.text('SYNC WITHOUT ENCRYPTION'));
+    await pumpUntil(tester, () => e2ee.isPlaintext);
+    await tester.pump();
+    expect(find.text(QueueTab.unconfirmedBanner), findsNothing);
+    expect(find.text(QueueTab.notEncryptedBanner), findsOneWidget);
+    expect(find.text('SYNC WITHOUT ENCRYPTION'), findsNothing);
+    expect(find.text('SET UP ENCRYPTION'), findsOneWidget);
+
+    await tester.tap(find.text('SYNC CLOUD'));
+    await settleIo(tester);
+    expect(find.textContaining('ENCRYPTION · NOT ENCRYPTED'), findsOneWidget);
+    expect(find.textContaining('NOT CONFIRMED'), findsNothing);
+  });
+
+  testWidgets('a second device is locked, refuses the run, and unlocks with the passphrase (#317)', (
+    WidgetTester tester,
+  ) async {
+    AppDatabase.resetForTesting();
+    final Database db = sqlite3.openInMemory();
+    await AppDatabase.getInstance(overrideDb: db);
+    addTearDown(() {
+      AppDatabase.resetForTesting();
+      db.close();
+    });
+    final FakeE2eeSettingsStore settings = FakeE2eeSettingsStore();
+    final E2eeService first = await e2eeWith(settings);
+    await first.followIdentity('u');
+    await first.enroll('correct horse');
+
+    final E2eeService e2ee = await e2eeWith(settings);
+    final RecordingsController controller = await buildRecordingsController(appDir);
+    await pumpQueue(tester, controller, e2ee: e2ee);
+    await e2ee.followIdentity('u');
+    await tester.pump();
+
+    expect(find.text(QueueTab.lockedBanner), findsOneWidget);
+    expect(find.text(QueueTab.notEncryptedBanner), findsNothing);
+
+    // The run that opens the panel is refused, and the panel says why.
+    await tester.tap(find.text('SYNC CLOUD'));
+    await settleIo(tester);
+    expect(find.textContaining('ENCRYPTION · LOCKED'), findsOneWidget);
+    expect(find.textContaining('plaintext'), findsNothing);
+
+    await tester.tap(find.text('UNLOCK'));
+    await tester.pump();
+    final Finder fields = find.descendant(
+      of: find.byType(AlertDialog),
+      matching: find.byType(TextField),
+    );
+    expect(find.text('UNLOCK END-TO-END ENCRYPTION'), findsOneWidget);
+    expect(find.text(E2eePassphraseDialog.lossWarning), findsNothing);
+    expect(fields, findsOneWidget);
+
+    await tester.enterText(fields, 'wrong horse!');
+    await tester.pump();
+    await tester.tap(find.widgetWithText(FilledButton, 'UNLOCK'));
+    await pumpUntil(tester, () => find.text('Invalid E2EE passphrase').evaluate().isNotEmpty);
+    expect(e2ee.isUnlocked, isFalse);
+
+    await tester.enterText(fields, 'correct horse');
+    await tester.pump();
+    await tester.tap(find.widgetWithText(FilledButton, 'UNLOCK'));
+    await pumpUntil(tester, () => e2ee.isUnlocked);
+    await tester.pump(const Duration(milliseconds: 300)); // dialog pop transition
+    expect(find.text('UNLOCK END-TO-END ENCRYPTION'), findsNothing);
+    expect(find.text(QueueTab.lockedBanner), findsNothing);
+    expect(find.text('ENCRYPTION · end-to-end, sealed on this device'), findsOneWidget);
+  });
+
+  testWidgets('a set-up that loses the race becomes an unlock with the winning passphrase (#317)', (
+    WidgetTester tester,
+  ) async {
+    AppDatabase.resetForTesting();
+    final Database db = sqlite3.openInMemory();
+    await AppDatabase.getInstance(overrideDb: db);
+    addTearDown(() {
+      AppDatabase.resetForTesting();
+      db.close();
+    });
+    final FakeE2eeSettingsStore settings = FakeE2eeSettingsStore();
+    final E2eeService e2ee = await e2eeWith(settings);
+    final RecordingsController controller = await buildRecordingsController(appDir);
+    await pumpQueue(tester, controller, e2ee: e2ee);
+    await e2ee.followIdentity('u');
+    await tester.pump();
+
+    await tester.tap(find.text('SET UP ENCRYPTION'));
+    await tester.pump();
+    final Finder fields = find.descendant(
+      of: find.byType(AlertDialog),
+      matching: find.byType(TextField),
+    );
+    await tester.enterText(fields.first, 'my own horse');
+    await tester.enterText(fields.last, 'my own horse');
+    await tester.pump();
+
+    // Another device publishes first, while this dialog is open.
+    final E2eeService other = await e2eeWith(settings);
+    await other.followIdentity('u');
+    await other.enroll('their horse!');
+
+    await tester.tap(find.widgetWithText(FilledButton, 'SET UP'));
+    await pumpUntil(tester, () => find.text(E2eePassphraseDialog.alreadySetUp).evaluate().isNotEmpty);
+    expect(e2ee.isUnlocked, isFalse);
+    expect(find.text('UNLOCK END-TO-END ENCRYPTION'), findsOneWidget);
+    expect(find.text(E2eePassphraseDialog.lossWarning), findsNothing);
+    expect(fields, findsOneWidget);
+    expect(settings.rows['u']!.keyCheckHash, isNotNull);
+
+    await tester.enterText(fields, 'their horse!');
+    await tester.pump();
+    await tester.tap(find.widgetWithText(FilledButton, 'UNLOCK'));
+    await pumpUntil(tester, () => e2ee.isUnlocked);
+    await tester.pump(const Duration(milliseconds: 300));
+    expect(find.text(QueueTab.lockedBanner), findsNothing);
+    expect(find.text(QueueTab.notEncryptedBanner), findsNothing);
+  });
+
+  testWidgets('an unanswered lookup reads as locked; UNLOCK then finds no row and offers set-up (#317)', (
+    WidgetTester tester,
+  ) async {
+    AppDatabase.resetForTesting();
+    final Database db = sqlite3.openInMemory();
+    await AppDatabase.getInstance(overrideDb: db);
+    addTearDown(() {
+      AppDatabase.resetForTesting();
+      db.close();
+    });
+    final FakeE2eeSettingsStore settings = FakeE2eeSettingsStore()
+      ..readError = StateError('offline');
+    final E2eeService e2ee = await e2eeWith(settings);
+    final RecordingsController controller = await buildRecordingsController(appDir);
+    await pumpQueue(tester, controller, e2ee: e2ee);
+    await e2ee.followIdentity('u');
+    await tester.pump();
+
+    // Unknown is shown as locked: the one answer that permits plaintext
+    // has to come from the server, and it did not.
+    expect(e2ee.keyOnServer, isNull);
+    expect(find.text(QueueTab.lockedBanner), findsOneWidget);
+    expect(find.text(QueueTab.notEncryptedBanner), findsNothing);
+
+    await tester.tap(find.text('UNLOCK'));
+    await tester.pump();
+    // The dialog matches the banner's word, not a set-up with the warning.
+    expect(find.text('UNLOCK END-TO-END ENCRYPTION'), findsOneWidget);
+    expect(find.text(E2eePassphraseDialog.lossWarning), findsNothing);
+    final Finder fields = find.descendant(
+      of: find.byType(AlertDialog),
+      matching: find.byType(TextField),
+    );
+    expect(fields, findsOneWidget);
+
+    // The server is back and says there is no row: the form becomes a set-up.
+    settings.readError = null;
+    await tester.enterText(fields, 'correct horse');
+    await tester.pump();
+    await tester.tap(find.widgetWithText(FilledButton, 'UNLOCK'));
+    await pumpUntil(tester, () => find.text(E2eePassphraseDialog.notSetUpYet).evaluate().isNotEmpty);
+    expect(find.text('SET UP END-TO-END ENCRYPTION'), findsOneWidget);
+    expect(find.text(E2eePassphraseDialog.lossWarning), findsOneWidget);
+    expect(fields, findsNWidgets(2));
+    expect(e2ee.keyOnServer, isFalse);
+    await tester.tap(find.text('CANCEL'));
+    await tester.pump(const Duration(milliseconds: 300));
+    expect(find.text(QueueTab.unconfirmedBanner), findsOneWidget);
+    expect(find.text(QueueTab.lockedBanner), findsNothing);
   });
 
   testWidgets('the default All filter lists every item', (
@@ -211,7 +654,7 @@ void main() {
     expect(find.text('zobaczmy czy nadal działa ładowanie'), findsOneWidget);
   });
 
-  testWidgets('arrow keys move a selection and D closes the selected row', (
+  testWidgets('arrow keys move a selection without letter actions', (
     WidgetTester tester,
   ) async {
     // The app ships system-wide global hotkeys, and until this existed the
@@ -248,13 +691,27 @@ void main() {
     await tester.pumpAndSettle();
     expect(cardFor('second').focused, isTrue);
 
-    await tester.sendKeyEvent(LogicalKeyboardKey.keyD);
-    await tester.pumpAndSettle();
+    for (final LogicalKeyboardKey key in <LogicalKeyboardKey>[
+      LogicalKeyboardKey.keyJ,
+      LogicalKeyboardKey.keyK,
+      LogicalKeyboardKey.keyE,
+      LogicalKeyboardKey.keyD,
+      LogicalKeyboardKey.keyX,
+      LogicalKeyboardKey.keyR,
+      LogicalKeyboardKey.keyA,
+      LogicalKeyboardKey.space,
+      LogicalKeyboardKey.slash,
+    ]) {
+      await tester.sendKeyEvent(key);
+      await tester.pump();
+    }
+    expect(cardFor('second').focused, isTrue);
+    expect(find.byType(RecordingEditor), findsNothing);
     expect(
       controller.recordings
           .firstWhere((Recording item) => item.id == 'second')
           .isProcessedByUser,
-      isTrue,
+      isFalse,
     );
   });
 
@@ -1295,10 +1752,178 @@ void main() {
 
     await tester.tap(find.byIcon(Icons.edit_outlined));
     await tester.pump();
-    await tester.tap(find.text('—').last);
+    // The category row's own `—`: the PRIORITY row below carries one too.
+    final Finder categoryRow = find
+        .ancestor(of: find.text('AGENT TASK'), matching: find.byType(Wrap))
+        .first;
+    await tester.tap(
+      find.descendant(of: categoryRow, matching: find.text('—')),
+    );
     await settleIo(tester);
 
     expect(controller.recordings.single.category, isNull);
+  });
+
+  testWidgets('the inline editor sets and clears a priority by hand', (
+    WidgetTester tester,
+  ) async {
+    final RecordingsController controller = await buildRecordingsController(
+      appDir,
+      seed: <Recording>[
+        makeRecording(
+          id: 'rankable',
+          status: RecordingStatus.completed,
+          transcript: 'cokolwiek',
+        ),
+      ],
+    );
+    await pumpQueue(tester, controller);
+
+    await tester.tap(find.byIcon(Icons.edit_outlined));
+    await tester.pump();
+    expect(find.text('PRIORITY'), findsOneWidget);
+
+    // The editor fades in over 220 ms behind an IgnorePointer, and the row
+    // sits below the fold: wait it out and scroll, or the tap misses silently.
+    await tester.pump(const Duration(milliseconds: 300));
+    await tester.ensureVisible(find.text('P0'));
+    await tester.pump();
+    await tester.tap(find.text('P0'));
+    await settleIo(tester);
+    expect(controller.recordings.single.priority, CapturePriority.p0);
+
+    final Finder priorityRow = find
+        .ancestor(of: find.text('P3'), matching: find.byType(Wrap))
+        .first;
+    await tester.tap(
+      find.descendant(of: priorityRow, matching: find.text('—')),
+    );
+    await settleIo(tester);
+    expect(controller.recordings.single.priority, isNull);
+  });
+
+  group('priority filter and sort', () {
+    List<Recording> rankedSeed() => <Recording>[
+      // Controller order, newest first: low, unranked, urgent.
+      makeRecording(
+        id: 'low',
+        title: 'Low item',
+      ).copyWith(priority: CapturePriority.p3),
+      makeRecording(id: 'none', title: 'Unranked item'),
+      makeRecording(
+        id: 'urgent',
+        title: 'Urgent item',
+      ).copyWith(priority: CapturePriority.p0),
+    ];
+
+    Future<void> openPriorityMenu(WidgetTester tester) async {
+      await tester.tap(find.byType(QueuePriorityMenu));
+      await tester.pumpAndSettle();
+    }
+
+    double top(WidgetTester tester, String title) =>
+        tester.getTopLeft(find.text(title)).dy;
+
+    testWidgets('a rank narrows the list, and unranked is its own bucket', (
+      WidgetTester tester,
+    ) async {
+      final RecordingsController controller = await buildRecordingsController(
+        appDir,
+        seed: rankedSeed(),
+      );
+      await pumpQueue(tester, controller);
+
+      await openPriorityMenu(tester);
+      // Counts describe the queue: one item per bucket here.
+      expect(find.text('P0 1'), findsOneWidget);
+      expect(find.text('P3 1'), findsOneWidget);
+      expect(find.text('UNRANKED 1'), findsOneWidget);
+      await tester.tap(find.text('P0 1'));
+      await tester.pumpAndSettle();
+
+      expect(find.text('Urgent item'), findsOneWidget);
+      expect(find.text('Low item'), findsNothing);
+      expect(find.text('Unranked item'), findsNothing);
+
+      await openPriorityMenu(tester);
+      await tester.tap(find.text('UNRANKED 1'));
+      await tester.pumpAndSettle();
+
+      expect(find.text('Unranked item'), findsOneWidget);
+      expect(find.text('Low item'), findsNothing);
+    });
+
+    testWidgets('sorting by priority reorders the list, newest stays default', (
+      WidgetTester tester,
+    ) async {
+      final RecordingsController controller = await buildRecordingsController(
+        appDir,
+        seed: rankedSeed(),
+      );
+      await pumpQueue(tester, controller);
+
+      // Default: the controller's order, untouched.
+      expect(top(tester, 'Low item'), lessThan(top(tester, 'Urgent item')));
+
+      await openPriorityMenu(tester);
+      await tester.tap(find.text(QueuePriorityMenu.sortLabel));
+      await tester.pumpAndSettle();
+
+      expect(top(tester, 'Urgent item'), lessThan(top(tester, 'Low item')));
+      expect(top(tester, 'Low item'), lessThan(top(tester, 'Unranked item')));
+
+      // The same entry turns it back off.
+      await openPriorityMenu(tester);
+      await tester.tap(find.text(QueuePriorityMenu.sortLabel));
+      await tester.pumpAndSettle();
+
+      expect(top(tester, 'Low item'), lessThan(top(tester, 'Urgent item')));
+    });
+
+    testWidgets('the single-line bar carries the icon-only form', (
+      WidgetTester tester,
+    ) async {
+      // Wide enough for the single line, below the master–detail breakpoint.
+      tester.view.physicalSize = const Size(1000, 900);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.reset);
+      final RecordingsController controller = await buildRecordingsController(
+        appDir,
+        seed: rankedSeed(),
+      );
+      await pumpQueue(tester, controller);
+
+      expect(tester.takeException(), isNull);
+      expect(
+        find.descendant(
+          of: find.byType(QueuePriorityMenu),
+          matching: find.byIcon(Icons.flag_outlined),
+        ),
+        findsOneWidget,
+      );
+
+      await openPriorityMenu(tester);
+      await tester.tap(find.text('P0 1'));
+      await tester.pumpAndSettle();
+      expect(find.text('Urgent item'), findsOneWidget);
+      expect(find.text('Low item'), findsNothing);
+    });
+
+    testWidgets('the menu sits on the master-detail toolbar too', (
+      WidgetTester tester,
+    ) async {
+      tester.view.physicalSize = const Size(1400, 900);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.reset);
+      final RecordingsController controller = await buildRecordingsController(
+        appDir,
+        seed: rankedSeed(),
+      );
+      await pumpQueue(tester, controller);
+
+      expect(find.byType(QueuePriorityMenu), findsOneWidget);
+      expect(tester.takeException(), isNull);
+    });
   });
 
   testWidgets('deletion is only reachable from the editor', (
@@ -1622,8 +2247,8 @@ void main() {
       findsOneWidget,
     );
 
-    // `k` moves off the selection — the implied first row counts as one.
-    await tester.sendKeyEvent(LogicalKeyboardKey.keyK);
+    // Up moves off the selection — the implied first row counts as one.
+    await tester.sendKeyEvent(LogicalKeyboardKey.arrowUp);
     await tester.pump();
     expect(
       find.descendant(of: panel, matching: find.text('First transcript')),
@@ -1693,7 +2318,7 @@ void main() {
     await tester.pump(const Duration(seconds: 2));
   });
 
-  testWidgets('x marks the selected capture done and the panel moves on', (
+  testWidgets('row check marks the selected capture done and the panel moves on', (
     WidgetTester tester,
   ) async {
     tester.view.physicalSize = const Size(1800, 1000);
@@ -1732,7 +2357,7 @@ void main() {
     await tester.tap(find.byType(QueueListRow).at(1));
     await tester.pump();
 
-    await tester.sendKeyEvent(LogicalKeyboardKey.keyX);
+    await tester.tap(find.byTooltip('Mark done').at(1));
     await tester.runAsync(
       () => Future<void>.delayed(const Duration(milliseconds: 50)),
     );

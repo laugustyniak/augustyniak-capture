@@ -87,6 +87,46 @@ class RecordingUsageSink implements UsageSink {
       return;
     }
 
+    _recordFor(
+      captureId: captureId,
+      stage: stage,
+      provider: provider,
+      model: model,
+      usage: usage,
+      usePendingAudioFallback: true,
+    );
+  }
+
+  /// A daily review has no single capture owner. Its synthetic id keeps the
+  /// call in overall costs without charging any capture's detail panel.
+  void recordConnections({
+    required DateTime day,
+    required String provider,
+    required String model,
+    required MeasuredUsage usage,
+  }) {
+    final DateTime localDay = day.toLocal();
+    final String date =
+        '${localDay.year.toString().padLeft(4, '0')}-'
+        '${localDay.month.toString().padLeft(2, '0')}-'
+        '${localDay.day.toString().padLeft(2, '0')}';
+    _recordFor(
+      captureId: 'daily-connections:$date',
+      stage: UsageStage.connections,
+      provider: provider,
+      model: model,
+      usage: usage,
+    );
+  }
+
+  void _recordFor({
+    required String captureId,
+    required UsageStage stage,
+    required String provider,
+    required String model,
+    required MeasuredUsage usage,
+    bool usePendingAudioFallback = false,
+  }) {
     try {
       // The database is not open yet (early in `_bootstrap()`). Drop the
       // event rather than throw or queue it — a cost row lost to this window
@@ -97,7 +137,8 @@ class RecordingUsageSink implements UsageSink {
       final UsageRepository? repository = _repository();
       if (repository == null) return;
 
-      final double? seconds = usage.audioSeconds ?? _takeFallbackSeconds();
+      final double? seconds = usage.audioSeconds ??
+          (usePendingAudioFallback ? _takeFallbackSeconds() : null);
       final UsageEvent unpriced = UsageEvent(
         id: _idFactory(),
         captureId: captureId,

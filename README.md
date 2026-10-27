@@ -15,6 +15,8 @@ Your thought lands on disk *before* anything clever is attempted with it.
 [![Website](https://img.shields.io/badge/website-laugustyniak.github.io-1056C6)](https://laugustyniak.github.io/augustyniak-capture/)
 
 [Quick start](#-quick-start) ·
+[Anti-shutdown](#️-the-anti-shutdown-covenant--longevity) ·
+[The guarantee](#-the-one-guarantee) ·
 [What it captures](#-what-it-captures) ·
 [Note vault](#-note-vault--obsidian-and-friends) ·
 [Build & deploy](#-build--deploy) ·
@@ -56,6 +58,8 @@ git clone <this-repo> && cd augustyniak-capture
 flutter pub get
 flutter run                       # pick a device when prompted
 ```
+
+Linux: install `keybinder-3.0 libsecret-1-dev` first (see Build & deploy).
 
 That is genuinely all — the app is fully usable with **no** API key. Recording,
 notes, uploads, storage, search, projects and hand-off all work offline. Only
@@ -115,6 +119,36 @@ is still being transcribed — the queue simply grows.
 
 ---
 
+## 🛡️ The Anti-Shutdown Covenant & Longevity
+
+Capture and voice-memo tools have a notorious track record of disappearing:
+startups burn through VC money, get acquired, hike subscriptions to $20+/month,
+or abruptly shut down with 30-day export warnings.
+
+Augustyniak Capture is built on the inverse premise — an explicit **anti-shutdown commitment**:
+
+1. **Never sold, never abruptly shut down**: The creator commits to never
+   selling the app or shutting it down. The application is offline-first:
+   your notes, audio, images, and index files reside permanently on your local
+   filesystem in standard, open formats (`.m4a`, UTF-8 `.txt`, SQLite, Markdown).
+   It continues running indefinitely even if every remote server on earth goes dark.
+2. **Zero fixed-cost infrastructure (Scale-to-Zero)**: The project avoids
+   expensive, 24/7 dedicated virtual machines that force commercialization.
+   Cloud synchronization is powered by serverless Supabase PostgreSQL (with
+   zero-knowledge E2EE), and media storage runs on AWS S3 / S3-compatible tiers.
+   At average usage (100 recordings/month), cloud media storage costs under
+   **$0.01 / user / month**.
+3. **Bring Your Own Cloud (BYOC) & Self-Hosting**: You can connect your own
+   free Supabase project or personal AWS S3 bucket. The data and keys belong
+   entirely to you, with zero dependency on a central company.
+4. **Transparent Cost-Pass-Through**: Any managed synchronization services
+   operate on a pure cost-pass-through endowment basis, with real-time in-app cost
+   visibility.
+
+Detailed architectural blueprint: [`docs/plans/2026-10-07-anti-shutdown-low-cost-architecture.md`](docs/plans/2026-10-07-anti-shutdown-low-cost-architecture.md).
+
+---
+
 ## 📥 What it captures
 
 | | Type | Stored as | Processing | Where it works |
@@ -152,13 +186,33 @@ later and press retry.
 
 | Tab | What it is for |
 | --- | --- |
-| **Queue** | every capture, review progress, search, filters, playback, inline editing |
+| **Queue** | every capture, review progress, search, filters, playback, inline editing, manual daily connection review |
 | **Timer** | a focus session — countdown dial, session goal, alarm at zero — plus what got finished lately |
 | **Projects** | repository contexts, active project, per-project captures, one-click coding-agent sessions |
+| **Work** | read-only Todoist focus list, due counts, and manually linked Capture project context |
 | **Clipboard** | clipboard history, searchable, with a preview pane and in-place editing |
 | **Models** | provider profiles — transcription and enrichment, add / edit / activate |
 | **Logs** | live pipeline events (persist, queue, transcribe, errors) with a level filter |
 | **Config** | appearance, audio parameters, global shortcuts, enrichment profile, note vault, keyring status |
+
+**Work dashboard:** Open Work and paste a personal API token from Todoist
+Settings → Integrations → Developer. Capture stores it in the OS keyring, reads
+projects and tasks from Todoist API v1, and never changes Todoist tasks. The
+focus list shows up to five `@founder` P1/P2 tasks and urgent due tasks; the
+due counts include all tasks due today or overdue. Choose a Todoist project and
+map it to a Capture project to see recent captures and completed focus sessions.
+The mapping is local to this device. Refresh is manual, and task rows open in
+Todoist.
+
+**Daily connections:** In Queue, choose **REVIEW CONNECTIONS**, pick a date,
+then run **REVIEW DAY**. The active enrichment model reviews every capture from
+that local calendar day with processed text, using its title, summary and text
+excerpts. It suggests overlapping topics, complementary ideas, different
+perspectives and app improvements, with links back to the original captures.
+The report stays in the open dialog; closing it discards the suggestions. The
+review never edits or merges captures. Model-provider charges may apply; review
+calls appear in overall model costs rather than on a capture card. Missing usage
+or pricing remains unpriced.
 
 ### A queue row, annotated
 
@@ -409,6 +463,25 @@ no text yet. On desktop the directory field carries a browse button behind the
 same `DirectoryPicker` seam the project editor uses; the typed field stays
 authoritative everywhere.
 
+### Connections and next step
+
+After a new capture is mirrored, Capture searches Markdown notes in the vault
+for shared terms and selects up to five candidates. The configured enrichment
+model receives the capture text, the candidate titles and short excerpts, plus
+the existing profile/project context. It suggests whether to act now, keep the
+idea for later, or clarify it. An existing P0–P3 priority takes precedence
+over a contradictory suggestion. With no model configured, the decision stays
+`clarify`; keyword overlap alone is not a priority judgment.
+
+The result is a separate `Capture/Analysis/<capture-id>.md` note with Obsidian
+links and the shared terms behind each match. The capture detail view shows the
+assessment and has **READ ANALYSIS** and **REFRESH CONNECTIONS** controls. A
+failed analysis can be retried without affecting the capture or its vault note.
+Capture does not overwrite an analysis note you edited in Obsidian. The model
+only suggests a next step; it does not create a task or run an agent command.
+`MIRROR EVERYTHING` copies old captures without automatically requesting model
+analysis for the whole library.
+
 ### What lands in the vault
 
 ```
@@ -433,12 +506,15 @@ Second Brain/                 ← your vault, your filing system
 ---
 title: "Sprint planning — migration postponed"
 created: 2026-08-05T14:32:11.482Z
-type: audioRecording
+date: 2026-08-05
+type: note
+capture-type: audioRecording
 category: meetingNote
 project: "augustyniak-capture"
 tags: ["backend", "migration"]
 duration: 3m 04s
 source: "3f2a1c4e-….m4a"
+related: ["[[MOC-Augustyniak-Capture]]"]
 capture-id: 3f2a1c4e-…-c81b
 capture-hash: 8f14e45fceea167a5a36dedd4bea2543…
 ---
@@ -523,6 +599,15 @@ links them, and reorders lists by modification time. So:
 4. **An unchanged note is not rewritten at all.** A no-op write would still bump
    the mtime and shove the note to the top of your "recently modified" list on
    every unrelated pipeline tick.
+5. **Front matter the app did not write is kept.** `type` is always `note`, so
+   the file fits a vault whose `type` is a closed list of note kinds; what was
+   captured sits in `capture-type`. `related` is seeded with one map-of-content
+   link so the note is never an orphan, and once you extend that list it is
+   yours. `tags` is always present: a capture that enrichment left untagged
+   carries `tags: ["capture"]`, because your linter wants the key on every
+   note and a tag you add by hand in the vault would be gone on the next
+   rewrite. Anything your indexer appends below `capture-hash` — `pagerank`,
+   `cluster`, `aliases` — comes back verbatim on the next update.
 
 Every mirror reports which of these applied, and a sweep over the queue counts
 them for the Config tab:
@@ -1111,15 +1196,15 @@ enriched from the part that survived.
 
 ```bash
 flutter analyze                                  # flutter_lints + avoid_print
-flutter test                                     # 56 test files, pure Dart + widget
+flutter test                                     # pure Dart by default, a few widget tests
 flutter test test/index_durability_test.dart     # one file
 flutter test --plain-name "legacy JSON defaults" # one test
 ```
 
-**There is no server-side CI** — GitHub Actions is metered on this private repo,
-so the workflow is parked at `.github/workflows/ci.yml.disabled`. A `pre-push`
-hook runs `flutter analyze` + `flutter test` in its place. Enable it once per
-clone:
+CI (`.github/workflows/ci.yml`) runs analyze, test and the platform builds on
+every push to `main` and every PR. The `pre-push` hook runs the same
+`flutter analyze` + `flutter test` locally in seconds and is worth enabling,
+once per clone:
 
 ```bash
 git config core.hooksPath .githooks
@@ -1136,7 +1221,10 @@ that. One brief with notes about a prospective client reached a public commit
 that way, and clearing it took a history rewrite — after which `refs/pull/*`
 still held the blob. Before the commit exists is the only reliable place to stop
 it. `git commit --no-verify` overrides, if a file there ever genuinely belongs
-in the repo.
+in the repo. The hook also refuses keystore, provisioning, Firebase config and
+`.env` files, at any depth and in any letter case, and the CI `guard` job runs
+the same path rule (`tool/blocked-paths.sh`) plus gitleaks as the server-side
+fallback for the commits a hook never sees.
 
 <details>
 <summary><b>Three traps in the widget suite, all paid for once already</b></summary>

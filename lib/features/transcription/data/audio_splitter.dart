@@ -3,6 +3,7 @@ import 'dart:io';
 import 'package:path/path.dart' as p;
 
 import 'audio_repairer.dart';
+import '../../../core/process/resolved_executable.dart';
 
 /// The result of asking an [AudioSplitter] for a file small enough to send.
 ///
@@ -142,7 +143,7 @@ class FfmpegAudioSplitter implements AudioSplitter {
     ];
 
     final ProcessResult result = await Process.run(
-      executable,
+      await resolveExecutable(executable),
       args,
       stderrEncoding: SystemEncoding(),
     );

@@ -2,6 +2,8 @@ import 'dart:io';
 
 import 'package:path/path.dart' as p;
 
+import '../../../core/security/owner_only_file.dart';
+import '../../../core/security/symlink_guard.dart';
 import '../domain/agent_session_launcher.dart';
 import 'executable_resolver.dart';
 import 'process_runner.dart';
@@ -25,6 +27,13 @@ import 'terminal_launcher.dart';
 /// one call (Zellij itself, the layout file, `list-sessions`, the agent CLIs)
 /// behaves identically on Linux, so the platform gate was costing the feature
 /// rather than describing it.
+///
+/// **A detached launch never touches the terminal.** `zellij attach
+/// --create-background` (0.41+) starts the server with the layout and returns
+/// at once, so the agent is running before any window exists — and the
+/// session is then confirmed through `list-sessions`, which is the only thing
+/// that tells the truth about whether one started (#291). The terminal is
+/// resolved only by [attach], when the user asks to see it.
 class ZellijAgentSessionLauncher implements AgentSessionLauncher {
   ZellijAgentSessionLauncher({
     ProcessRunner processRunner = const SystemProcessRunner(),
@@ -58,14 +67,32 @@ class ZellijAgentSessionLauncher implements AgentSessionLauncher {
     // Both asked for before anything is spawned: a missing tool has to be
     // reported as a missing tool, and a window that opens and closes again is
     // the one failure shape this launcher has already been caught producing.
-    final ResolvedTerminal? terminal = await _terminal.resolve();
-    if (terminal == null) {
+    // A detached launch opens no window, so it asks for no terminal — that is
+    // the point of it on a host whose terminal cannot open one.
+    final ResolvedTerminal? terminal = request.detached
+        ? null
+        : await _terminal.resolve();
+    if (terminal == null && !request.detached) {
       throw AgentSessionLaunchException(_terminal.missingTerminalMessage);
     }
     final String zellij = await _require('zellij');
     final String canonicalRepoPath = repo.absolute.path;
     final String sessionName = buildSessionName(request);
     final bool exists = await _sessionExists(zellij, sessionName);
+
+    if (request.detached) {
+      // Already running: there is nothing to start and no window to open. The
+      // caller surfaces the attach the same way it does for a terminal launch
+      // — the agent inside never received this prompt.
+      if (!exists) {
+        await _startInBackground(request, zellij, sessionName, canonicalRepoPath);
+      }
+      return AgentSessionLaunchResult(
+        sessionName: sessionName,
+        attachedToExistingSession: exists,
+        detached: true,
+      );
+    }
 
     final List<String> zellijArguments;
     if (exists) {
@@ -94,7 +121,7 @@ class ZellijAgentSessionLauncher implements AgentSessionLauncher {
     }
 
     final CommandResult result = await _run(
-      terminal.executable,
+      terminal!.executable,
       terminal.argumentsFor(canonicalRepoPath, <String>[
         zellij,
         ...zellijArguments,
@@ -110,6 +137,74 @@ class ZellijAgentSessionLauncher implements AgentSessionLauncher {
       sessionName: sessionName,
       attachedToExistingSession: exists,
     );
+  }
+
+  @override
+  Future<void> attach(String sessionName) async {
+    final ResolvedTerminal? terminal = await _terminal.resolve();
+    if (terminal == null) {
+      throw AgentSessionLaunchException(_terminal.missingTerminalMessage);
+    }
+    final String zellij = await _require('zellij');
+    // Checked here rather than left to Zellij: `attach` on a missing name
+    // offers to create an empty session, and a window on an empty shell is
+    // exactly the "agent with nothing to say" shape this launcher refuses.
+    if (!await _sessionExists(zellij, sessionName)) {
+      throw AgentSessionLaunchException(
+        'Session `$sessionName` is not running. Hand the capture off again '
+        'to start a new one.',
+      );
+    }
+    // The session has its own working directory; the window's is irrelevant,
+    // and a bundled app's current directory is `/`.
+    final String home =
+        Platform.environment['HOME'] ?? Directory.systemTemp.path;
+    final CommandResult result = await _run(
+      terminal.executable,
+      terminal.argumentsFor(home, <String>[zellij, 'attach', sessionName]),
+    );
+    if (result.exitCode != 0) {
+      throw AgentSessionLaunchException(
+        'The terminal failed to open: ${_errorText(result)}',
+      );
+    }
+  }
+
+  /// `zellij --new-session-with-layout FILE attach --create-background NAME`:
+  /// the server starts the layout's agent pane and the client returns
+  /// without attaching. Then `list-sessions` has to show the name, because a
+  /// Zellij that exited 0 is not proof — the terminal path learned that the
+  /// hard way (#291) and this path is not allowed to repeat it.
+  Future<void> _startInBackground(
+    AgentSessionLaunchRequest request,
+    String zellij,
+    String sessionName,
+    String repoPath,
+  ) async {
+    final String layoutPath = await _writeLayout(
+      sessionName,
+      _buildLayout(request, repoPath, await _require(request.agent.executable)),
+    );
+    final CommandResult result = await _run(zellij, <String>[
+      '--new-session-with-layout',
+      layoutPath,
+      'attach',
+      '--create-background',
+      sessionName,
+    ]);
+    if (result.exitCode != 0) {
+      throw AgentSessionLaunchException(
+        'Zellij could not start the session in the background: '
+        '${_errorText(result)}',
+      );
+    }
+    if (!await _sessionExists(zellij, sessionName)) {
+      throw AgentSessionLaunchException(
+        'Zellij reported success but `$sessionName` is not running. '
+        "Run `zellij --new-session-with-layout '$layoutPath' attach "
+        '--create-background $sessionName` in a terminal to see why.',
+      );
+    }
   }
 
   /// Absolute path of [name], or a failure that names the missing tool.
@@ -128,17 +223,23 @@ class ZellijAgentSessionLauncher implements AgentSessionLauncher {
     return resolved;
   }
 
-  /// One file per session name, overwritten on each launch, in the system temp
-  /// directory. It is read by Zellij at start-up and is a derived artifact —
-  /// deleting it after the fact would race `open`, which returns long before
-  /// Ghostty has execed anything.
+  /// One fresh directory per launch under the system temp directory (or the
+  /// `layoutDirectory` seam), restricted to the owner before the file is
+  /// written. A shared, predictably named `<tmp>/augustyniak-capture/` was a
+  /// path another account could own or pre-link, and the layout is what the
+  /// agent starts from (#310). Dart's `createTemp` creates at the umask's mode,
+  /// so [restrictDirectoryToOwner] follows at once and the file is refused if
+  /// something got in as a link meanwhile. The directory is never deleted:
+  /// Zellij reads the file at start-up, and deleting it after the fact would
+  /// race `open`, which returns long before Ghostty has execed anything.
   Future<String> _writeLayout(String sessionName, String layout) async {
-    final Directory directory =
-        _layoutDirectory ??
-        Directory(p.join(Directory.systemTemp.path, 'augustyniak-capture'));
     try {
-      await directory.create(recursive: true);
+      final Directory directory = await (_layoutDirectory ??
+              Directory.systemTemp)
+          .createTemp('augustyniak-capture-');
+      await restrictDirectoryToOwner(directory.path);
       final File file = File(p.join(directory.path, '$sessionName.kdl'));
+      await refuseSymlink(file.path);
       await file.writeAsString(layout);
       return file.path;
     } on FileSystemException catch (error) {
@@ -239,6 +340,11 @@ class ZellijAgentSessionLauncher implements AgentSessionLauncher {
         );
       }
     }
+    if (request.prompt?.contains('\u0000') ?? false) {
+      throw const AgentSessionLaunchException(
+        'Agent prompt cannot contain NUL characters.',
+      );
+    }
   }
 
   static String _buildLayout(
@@ -252,9 +358,14 @@ class ZellijAgentSessionLauncher implements AgentSessionLauncher {
         '  pane cwd="${_escapeKdl(repoPath)}" '
         'command="${_escapeKdl(agentExecutable)}" {',
       );
-    if (request.arguments.isNotEmpty) {
+    final List<String> arguments = <String>[
+      ...request.arguments,
+      if (request.prompt != null)
+        ...request.agent.promptArguments(request.prompt!),
+    ];
+    if (arguments.isNotEmpty) {
       layout.write('    args');
-      for (final String argument in request.arguments) {
+      for (final String argument in arguments) {
         layout.write(' "${_escapeKdl(argument)}"');
       }
       layout.writeln();

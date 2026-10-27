@@ -6,6 +6,7 @@ import 'package:augustyniak_capture/features/projects/data/process_runner.dart';
 import 'package:augustyniak_capture/features/projects/data/terminal_launcher.dart';
 import 'package:augustyniak_capture/features/projects/domain/agent_session_launcher.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:path/path.dart' as p;
 
 /// Stands in for the machine's installed tools. Every name resolves under
 /// `/opt/fake/bin` unless [missing] names it — which is how the "not installed"
@@ -91,12 +92,38 @@ void main() {
   AgentSessionLaunchRequest request({
     ProjectAgent agent = ProjectAgent.codex,
     List<String> arguments = const <String>[],
+    bool detached = false,
   }) => AgentSessionLaunchRequest(
     projectId: '550E8400-E29B-41D4-A716-446655440000',
     projectName: 'Client / Legal Pilot',
     repoPath: repo.path,
     agent: agent,
     arguments: arguments,
+    detached: detached,
+  );
+
+  test(
+    'writes the layout into a fresh owner-only directory under the seam',
+    () async {
+      // mkdtemp already made `layouts` 0700; widen it so a launcher that
+      // writes straight into the parent cannot pass by inheriting that mode.
+      await Process.run('chmod', <String>['755', layouts.path]);
+      final _FakeProcessRunner runner = _FakeProcessRunner(<CommandResult>[
+        _success,
+        _success,
+      ]);
+
+      await build(runner).launch(request());
+
+      final List<String> arguments = runner.invocations.last.arguments;
+      final String path =
+          arguments[arguments.indexOf('--new-session-with-layout') + 1];
+      final Directory parent = File(path).parent;
+      expect(p.isWithin(layouts.path, path), isTrue);
+      expect(parent.path, isNot(layouts.path));
+      expect(parent.statSync().mode & 0x1ff, 0x1c0, reason: 'not 0700');
+    },
+    skip: Platform.isWindows,
   );
 
   test(
@@ -440,6 +467,165 @@ void main() {
       expect(runner.invocations, isEmpty);
     },
   );
+
+  group('detached', () {
+    const CommandResult noSessions = CommandResult(
+      exitCode: 1,
+      stdout: '',
+      stderr: 'No active zellij sessions found.',
+    );
+    CommandResult listing(String name) =>
+        CommandResult(exitCode: 0, stdout: '$name\n', stderr: '');
+
+    test(
+      'starts the session in the background with no terminal at all',
+      () async {
+        final _FakeProcessRunner runner = _FakeProcessRunner(<CommandResult>[
+          noSessions,
+          _success,
+          listing('augustyniak-client-legal-pilot-550e8400-codex'),
+        ]);
+        // No terminal on the machine: a detached launch must not need one.
+        final ZellijAgentSessionLauncher launcher = build(
+          runner,
+          terminal: LinuxTerminalLauncher(
+            executables: const _FakeResolver(missing: <String>{'kitty'}),
+            candidates: const <LinuxTerminal>[LinuxTerminal.kitty],
+          ),
+        );
+
+        final AgentSessionLaunchResult result = await launcher.launch(
+          request(detached: true),
+        );
+
+        expect(result.detached, isTrue);
+        expect(result.attachedToExistingSession, isFalse);
+        expect(
+          result.sessionName,
+          'augustyniak-client-legal-pilot-550e8400-codex',
+        );
+        expect(
+          runner.invocations.map((_Invocation call) => call.executable),
+          everyElement('/opt/fake/bin/zellij'),
+          reason: 'nothing but Zellij itself may run',
+        );
+        final _Invocation start = runner.invocations[1];
+        expect(start.arguments.first, '--new-session-with-layout');
+        expect(start.arguments.sublist(2), <String>[
+          'attach',
+          '--create-background',
+          result.sessionName,
+        ]);
+        expect(
+          layoutFrom(start.arguments),
+          contains('command="/opt/fake/bin/codex"'),
+        );
+        // Confirmed by `list-sessions` after the start, not by the exit code.
+        expect(runner.invocations.last.arguments.first, 'list-sessions');
+      },
+    );
+
+    test(
+      'a session Zellij does not list after a clean exit is a failure',
+      () async {
+        final _FakeProcessRunner runner = _FakeProcessRunner(<CommandResult>[
+          noSessions,
+          _success,
+          noSessions,
+        ]);
+
+        await expectLater(
+          build(runner).launch(request(detached: true)),
+          throwsA(
+            isA<AgentSessionLaunchException>().having(
+              (AgentSessionLaunchException error) => error.message,
+              'message',
+              contains('is not running'),
+            ),
+          ),
+        );
+      },
+    );
+
+    test('a background start that exits non-zero is a failure', () async {
+      final _FakeProcessRunner runner = _FakeProcessRunner(<CommandResult>[
+        noSessions,
+        const CommandResult(
+          exitCode: 2,
+          stdout: '',
+          stderr: "error: Found argument '--create-background'",
+        ),
+      ]);
+
+      await expectLater(
+        build(runner).launch(request(detached: true)),
+        throwsA(
+          isA<AgentSessionLaunchException>().having(
+            (AgentSessionLaunchException error) => error.message,
+            'message',
+            contains('--create-background'),
+          ),
+        ),
+      );
+      expect(runner.invocations, hasLength(2), reason: 'no further probe');
+    });
+
+    test('an already running session is reported, not restarted', () async {
+      final _FakeProcessRunner runner = _FakeProcessRunner(<CommandResult>[
+        listing('augustyniak-client-legal-pilot-550e8400-codex'),
+      ]);
+
+      final AgentSessionLaunchResult result = await build(
+        runner,
+      ).launch(request(detached: true));
+
+      expect(result.detached, isTrue);
+      expect(result.attachedToExistingSession, isTrue);
+      expect(runner.invocations, hasLength(1));
+    });
+
+    test('attach opens the terminal on a running session', () async {
+      final _FakeProcessRunner runner = _FakeProcessRunner(<CommandResult>[
+        listing('augustyniak-x-codex'),
+        _success,
+      ]);
+      final ZellijAgentSessionLauncher launcher = build(
+        runner,
+        terminal: LinuxTerminalLauncher(
+          executables: const _FakeResolver(),
+          candidates: const <LinuxTerminal>[LinuxTerminal.kitty],
+        ),
+      );
+
+      await launcher.attach('augustyniak-x-codex');
+
+      final _Invocation open = runner.invocations.last;
+      expect(open.executable, '/opt/fake/bin/kitty');
+      expect(open.arguments.skip(2), <String>[
+        '/opt/fake/bin/zellij',
+        'attach',
+        'augustyniak-x-codex',
+      ]);
+    });
+
+    test('attach refuses a session that is not running, by name', () async {
+      final _FakeProcessRunner runner = _FakeProcessRunner(<CommandResult>[
+        listing('something-else'),
+      ]);
+
+      await expectLater(
+        build(runner).attach('augustyniak-x-codex'),
+        throwsA(
+          isA<AgentSessionLaunchException>().having(
+            (AgentSessionLaunchException error) => error.message,
+            'message',
+            contains('augustyniak-x-codex'),
+          ),
+        ),
+      );
+      expect(runner.invocations, hasLength(1), reason: 'no window opened');
+    });
+  });
 
   test('rejects a missing repository before running a process', () async {
     repo.deleteSync(recursive: true);

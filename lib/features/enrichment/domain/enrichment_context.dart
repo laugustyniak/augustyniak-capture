@@ -1,3 +1,24 @@
+import 'dart:convert';
+
+import 'package:crypto/crypto.dart';
+
+import '../../recordings/domain/suggested_route.dart';
+import '../../recordings/domain/untrusted_markdown.dart' as markdown;
+
+/// One project the model may file a capture under: its id (the only thing the
+/// answer is checked against), its name, and an optional one-line description.
+class EnrichmentProjectOption {
+  const EnrichmentProjectOption({
+    required this.id,
+    required this.name,
+    this.description,
+  });
+
+  final String id;
+  final String name;
+  final String? description;
+}
+
 /// Who the user is, and what the capture's project is about.
 ///
 /// The two layers are kept apart rather than pre-joined into one string because
@@ -6,13 +27,32 @@
 /// off disk* from a repository file the user did not necessarily write. The
 /// prompt labels them separately for that reason.
 class EnrichmentContext {
-  const EnrichmentContext({this.profile, this.project, this.projectSource});
+  const EnrichmentContext({
+    this.profile,
+    this.profileSource,
+    this.profileFallback,
+    this.project,
+    this.projectSource,
+    this.projects = const <EnrichmentProjectOption>[],
+    this.routeKinds = const <SuggestedRouteKind>[],
+  });
 
   static const EnrichmentContext none = EnrichmentContext();
 
   /// Free-form "this is me" text from the Config tab: goals, what gets
   /// captured, how it should be filed. Persisted in `settings.json`.
   final String? profile;
+
+  /// Which file [profile] came from (`SOUL.md`), or null when it is the text
+  /// typed in the Config tab. Named in the log for the same reason
+  /// [projectSource] is: otherwise "the soul file was used" is invisible.
+  final String? profileSource;
+
+  /// Why a configured soul file was **not** used (`SOUL.md missing`), when the
+  /// typed profile stood in for it. Carried here rather than only logged at
+  /// the read site, because the read site cannot log — and a soul file that
+  /// silently stopped being read is exactly the failure worth seeing.
+  final String? profileFallback;
 
   /// The active project's own description, read from its repository — see
   /// `ProjectContextReader`. Null when the capture has no project, the repo is
@@ -24,17 +64,62 @@ class EnrichmentContext {
   /// controller can report it next to the item it actually enriched.
   final String? projectSource;
 
+  /// The projects a capture may be filed under, offered to the model so it can
+  /// answer with the best fit. Independent of [project], which describes the
+  /// one project already attached.
+  final List<EnrichmentProjectOption> projects;
+
+  /// The destinations the capture could actually be sent to, computed by the
+  /// controller from what its entry points would perform. Never contains
+  /// [SuggestedRouteKind.none]: leaving it on the desk is always allowed and
+  /// the prompt adds it itself. Empty means no route is asked for.
+  final List<SuggestedRouteKind> routeKinds;
+
+  /// The same context offering different destinations.
+  EnrichmentContext withRouteKinds(List<SuggestedRouteKind> next) =>
+      EnrichmentContext(
+        profile: profile,
+        profileSource: profileSource,
+        profileFallback: profileFallback,
+        project: project,
+        projectSource: projectSource,
+        projects: projects,
+        routeKinds: next,
+      );
+
+  /// The same context offering a different project list.
+  EnrichmentContext withProjects(List<EnrichmentProjectOption> next) =>
+      EnrichmentContext(
+        profile: profile,
+        profileSource: profileSource,
+        profileFallback: profileFallback,
+        project: project,
+        projectSource: projectSource,
+        projects: next,
+        routeKinds: routeKinds,
+      );
+
   /// Hard ceilings, applied here rather than only in the editor.
   ///
   /// [maxProjectChars] is the larger of the two and still much smaller than a
   /// real `CLAUDE.md`: this one is over 20 000 characters, and sending that on
   /// every capture would cost more than the enrichment it is meant to improve.
   /// The profile is hand-typed, so a smaller bound is enough.
-  static const int maxProfileChars = 2000;
+  ///
+  /// The profile was raised from 2000 when it became the user's "soul": it now
+  /// carries goals and priority rules on top of the filing rules, and the
+  /// shipped default alone is close to the old bound.
+  static const int maxProfileChars = 4000;
   static const int maxProjectChars = 4000;
+  static const int maxProjectOptions = 50;
+  static const int maxProjectNameChars = 80;
+  static const int maxProjectDescriptionChars = 200;
 
   bool get isEmpty =>
-      _blankToNull(profile) == null && _blankToNull(project) == null;
+      _blankToNull(profile) == null &&
+      _blankToNull(project) == null &&
+      normalized().projects.isEmpty &&
+      normalized().routeKinds.isEmpty;
 
   /// Names the layers that were actually sent, for the log line. Null when
   /// nothing was — the caller then omits the segment entirely.
@@ -46,7 +131,11 @@ class EnrichmentContext {
   String? get sourceSummary {
     final EnrichmentContext resolved = normalized();
     final List<String> layers = <String>[
-      if (resolved.profile != null) 'profile',
+      if (resolved.profile != null)
+        resolved.profileSource ??
+            (resolved.profileFallback == null
+                ? 'profile'
+                : 'profile (${resolved.profileFallback})'),
       if (resolved.project != null) resolved.projectSource ?? 'project',
     ];
     return layers.isEmpty ? null : layers.join(' + ');
@@ -61,35 +150,68 @@ class EnrichmentContext {
   /// the tail is build flags and licence notes.
   EnrichmentContext normalized() => EnrichmentContext(
     profile: _clamp(defuseFenceMarkers(profile), maxProfileChars),
+    profileSource: _blankToNull(profileSource),
+    profileFallback: _blankToNull(profileFallback),
     project: _clamp(defuseFenceMarkers(project), maxProjectChars),
     projectSource: _blankToNull(projectSource),
+    projects: _normalizedProjects(),
+    routeKinds: <SuggestedRouteKind>{
+      for (final SuggestedRouteKind kind in routeKinds)
+        if (kind != SuggestedRouteKind.none) kind,
+    }.toList(),
   );
 
-  /// A line shaped like one of the prompt's own fence markers, rewritten so it
-  /// cannot close the block it sits inside.
-  ///
-  /// The fence in `_appendContext` is what separates *reference material* from
-  /// *instructions*, and a fence made of a literal string is only as strong as
-  /// the guarantee that the fenced text does not contain it. It does not: a
-  /// `CLAUDE.md` is a file written to brief a model, and one line reading
-  /// `--- END PROJECT CONTEXT ---` puts everything after it back at the top
-  /// level of the system prompt, where the standing order not to follow
-  /// instructions no longer applies to it.
-  ///
-  /// Narrow on purpose. Only a line that *is* a marker is rewritten — a
-  /// horizontal rule, a YAML front-matter fence and a `--- BEGINNING ---`
-  /// heading all survive, because the pattern requires `BEGIN` or `END` as a
-  /// whole word between the dashes.
-  static final RegExp _fenceMarker = RegExp(
-    r'^[ \t]*-{3,}[ \t]*(BEGIN|END)\b.*$',
-    multiLine: true,
-    caseSensitive: false,
-  );
+  /// Blank ids or names are dropped, names and descriptions are clamped to one
+  /// line each (a newline could start a fake marker), and the list is cut at
+  /// [maxProjectOptions].
+  List<EnrichmentProjectOption> _normalizedProjects() {
+    final List<EnrichmentProjectOption> result = <EnrichmentProjectOption>[];
+    for (final EnrichmentProjectOption option in projects) {
+      final String? id = _oneLine(option.id, 200);
+      final String? name = _oneLine(option.name, maxProjectNameChars);
+      if (id == null || name == null) continue;
+      result.add(
+        EnrichmentProjectOption(
+          id: id,
+          name: name,
+          description: _oneLine(
+            option.description,
+            maxProjectDescriptionChars,
+          ),
+        ),
+      );
+      if (result.length == maxProjectOptions) break;
+    }
+    return result;
+  }
 
-  static const String fenceMarkerReplacement = '[removed: fence marker]';
+  static String? _oneLine(String? value, int limit) {
+    final String? flat = _blankToNull(
+      defuseFenceMarkers(value)?.replaceAll(RegExp(r'\s+'), ' '),
+    );
+    if (flat == null) return null;
+    return flat.length <= limit ? flat : '${flat.substring(0, limit)}...';
+  }
+
+  /// A short fingerprint of the profile **as sent** — after the ceiling and
+  /// the fence defusing — or null when no profile was sent.
+  ///
+  /// Stored beside a capture's priority, it answers "was this ranked under my
+  /// old goals?" without storing the goals themselves on every row. Eight hex
+  /// characters: it only has to tell versions of one person's profile apart,
+  /// not resist an adversary.
+  String? get profileBasis {
+    final String? sent = normalized().profile;
+    if (sent == null) return null;
+    return sha256.convert(utf8.encode(sent)).toString().substring(0, 8);
+  }
+
+  /// See the top-level `defuseFenceMarkers` in `untrusted_markdown.dart`, where
+  /// the rule and the reasoning live; the capture brief shares it.
+  static const String fenceMarkerReplacement = markdown.fenceMarkerReplacement;
 
   static String? defuseFenceMarkers(String? value) =>
-      value?.replaceAll(_fenceMarker, fenceMarkerReplacement);
+      value == null ? null : markdown.defuseFenceMarkers(value);
 
   static String? _clamp(String? value, int limit) {
     final String? trimmed = _blankToNull(value);

@@ -7,13 +7,18 @@ import '../../../app/ui_kit.dart';
 import '../../costs/domain/price_book.dart';
 import '../../costs/domain/usage_event.dart';
 import '../../costs/presentation/cost_section.dart';
+import '../../projects/data/native_agent_jobs.dart';
 import '../../projects/domain/project.dart';
 import '../domain/capture_segment.dart';
 import '../domain/capture_type.dart';
 import '../domain/capture_category.dart';
+import '../domain/capture_priority.dart';
 import '../domain/recording.dart';
 import '../domain/recording_revision.dart';
+import 'agent_runs.dart';
 import 'card_parts.dart';
+import 'cleanup_section.dart';
+import 'related_section.dart';
 import 'revision_history.dart';
 import 'tag_editor.dart';
 
@@ -51,6 +56,7 @@ class RecordingEditor extends StatefulWidget {
     this.onSummaryChanged,
     required this.onTextChanged,
     required this.onCategoryChanged,
+    this.onPriorityChanged,
     required this.onTagsChanged,
     required this.onDone,
     this.onDelete,
@@ -61,6 +67,14 @@ class RecordingEditor extends StatefulWidget {
     this.onAppendRecording,
     this.onAppendNote,
     this.onAppendUpload,
+    this.onCleanUp,
+    this.onAcceptCleanup,
+    this.onRejectCleanup,
+    this.cleaning = false,
+    this.cleanupError,
+    this.related = const <RelatedEntry>[],
+    this.onOpenRelated,
+    this.agentJobs,
   });
 
   /// Public so a test asserts on the same string the widget renders.
@@ -73,6 +87,9 @@ class RecordingEditor extends StatefulWidget {
   final Recording recording;
   final List<RecordingRevision> revisions;
 
+  /// Null hides AGENT RUNS, so a host with no local jobs renders as before.
+  final NativeAgentJobs? agentJobs;
+
   /// Tags used on other captures, offered as one-tap chips.
   final List<String> tagSuggestions;
 
@@ -80,6 +97,10 @@ class RecordingEditor extends StatefulWidget {
   final ValueChanged<String>? onSummaryChanged;
   final ValueChanged<String> onTextChanged;
   final ValueChanged<CaptureCategory?> onCategoryChanged;
+
+  /// Null hides the PRIORITY row, so a host with no way to persist a rank
+  /// renders the editor exactly as before.
+  final ValueChanged<CapturePriority?>? onPriorityChanged;
   final ValueChanged<List<String>> onTagsChanged;
   final VoidCallback onDone;
 
@@ -99,6 +120,24 @@ class RecordingEditor extends StatefulWidget {
   final VoidCallback? onAppendRecording;
   final VoidCallback? onAppendNote;
   final ValueChanged<CaptureType>? onAppendUpload;
+
+  /// Clean-up proposals (#258). [onCleanUp] null hides the CLEAN UP button —
+  /// a typed note, or a host with nothing to clean with; [onAcceptCleanup]
+  /// null hides a stored proposal too, so a bare host renders as before.
+  final VoidCallback? onCleanUp;
+  final VoidCallback? onAcceptCleanup;
+  final VoidCallback? onRejectCleanup;
+  final bool cleaning;
+  final String? cleanupError;
+
+  bool get showsCleanup =>
+      onCleanUp != null ||
+      (recording.cleanup != null && onAcceptCleanup != null);
+
+  /// Captures close in meaning (#272), resolved by the host. Empty, or a null
+  /// [onOpenRelated], draws no RELATED section.
+  final List<RelatedEntry> related;
+  final ValueChanged<Recording>? onOpenRelated;
 
   bool get canAppend =>
       onAppendRecording != null ||
@@ -385,6 +424,47 @@ class _RecordingEditorState extends State<RecordingEditor> {
                   ],
                 ),
               ),
+              if (widget.onPriorityChanged != null)
+                _Field(
+                  label: 'PRIORITY',
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: <Widget>[
+                      Wrap(
+                        spacing: 6,
+                        runSpacing: 6,
+                        children: <Widget>[
+                          // `—` is "never ranked", which asks the next
+                          // enrichment run for a rank; P3 is "ranked low".
+                          ConsoleChip(
+                            label: '—',
+                            selected: recording.priority == null,
+                            onSelected: () => widget.onPriorityChanged!(null),
+                          ),
+                          for (final CapturePriority value
+                              in CapturePriority.values)
+                            ConsoleChip(
+                              label: value.label,
+                              selected: recording.priority == value,
+                              onSelected: () =>
+                                  widget.onPriorityChanged!(value),
+                            ),
+                        ],
+                      ),
+                      if (recording.priorityReason != null) ...<Widget>[
+                        const SizedBox(height: 6),
+                        Text(
+                          recording.priorityReason!,
+                          style: TextStyle(
+                            color: Console.mutedSoft,
+                            fontSize: 11,
+                            height: 1.4,
+                          ),
+                        ),
+                      ],
+                    ],
+                  ),
+                ),
               if (widget.projects.isNotEmpty && widget.onProjectChanged != null)
                 _Field(
                   label: 'PROJECT',
@@ -443,6 +523,31 @@ class _RecordingEditorState extends State<RecordingEditor> {
                   onChanged: (String _) => setState(() {}),
                 ),
               ),
+              if (widget.showsCleanup) ...<Widget>[
+                const SizedBox(height: 4),
+                CleanupSection(
+                  recording: recording,
+                  cleaning: widget.cleaning,
+                  error: widget.cleanupError,
+                  onCleanUp: widget.onCleanUp,
+                  onAccept: widget.onAcceptCleanup,
+                  onReject: widget.onRejectCleanup,
+                  acceptBlockedReason: _textDirty
+                      ? 'Save or revert the text above first.'
+                      : null,
+                ),
+                const SizedBox(height: 8),
+              ],
+              if (widget.related.isNotEmpty &&
+                  widget.onOpenRelated != null) ...<Widget>[
+                const SizedBox(height: 4),
+                RelatedSection(
+                  entries: widget.related,
+                  onOpen: widget.onOpenRelated!,
+                ),
+                const SizedBox(height: 8),
+              ],
+              AgentRunsSection(recording: recording, jobs: widget.agentJobs),
               if (recording.segments.length > 1 || widget.canAppend) ...<Widget>[
                 const SizedBox(height: 4),
                 _FragmentsSection(

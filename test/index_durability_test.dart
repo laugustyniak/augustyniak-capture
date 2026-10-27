@@ -301,6 +301,7 @@ void main() {
     test('a second writer waits rather than sharing the .tmp file', () async {
       final TempRepository repository = TempRepository(root);
       final Completer<void> holdMerge = Completer<void>();
+      final Completer<void> mergeStarted = Completer<void>();
       final List<String> order = <String>[];
 
       // `updateAll` holds the gate across load, merge and write. The `saveAll`
@@ -311,12 +312,16 @@ void main() {
         List<Recording> current,
       ) async {
         order.add('merge-start');
+        mergeStarted.complete();
         await holdMerge.future;
         order.add('merge-end');
         return <Recording>[...current, row('imported')];
       });
 
-      await pumpEventQueue();
+      // Awaited rather than pumped: the merge only starts after real file IO
+      // (the directory check and `loadAll`), and a fixed number of event-loop
+      // turns is not enough on a machine busy running the rest of the suite.
+      await mergeStarted.future;
       final Future<void> saving = repository.saveAll(<Recording>[row('live')])
         ..whenComplete(() => order.add('save-done'));
 

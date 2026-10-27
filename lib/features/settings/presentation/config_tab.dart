@@ -22,12 +22,14 @@ import '../domain/provider_profile.dart';
 import '../domain/queue_density.dart';
 import '../domain/token_cipher.dart';
 import 'backup_section.dart';
+import 'byoc_storage_section.dart';
 import 'command_section.dart';
 import 'enrichment_context_section.dart';
 import 'settings_controller.dart';
 import 'vault_section.dart';
 import '../../momentum/domain/closure_event.dart';
 import '../../momentum/presentation/momentum_section.dart';
+import '../../sync/data/e2ee_service.dart';
 
 /// Categories for organizing configuration settings into dedicated views.
 enum ConfigCategory {
@@ -48,6 +50,7 @@ class ConfigTab extends StatefulWidget {
     super.key,
     required this.controller,
     this.authController,
+    this.e2ee,
     this.recordingsController,
     required this.storagePath,
     required this.recordingsCount,
@@ -68,6 +71,7 @@ class ConfigTab extends StatefulWidget {
     this.unknownQuantityCount = 0,
     this.verifiedOn,
     this.onRateChanged = _noRateChange,
+    this.onRefreshRate,
     this.onBackfillClosures,
     this.onExportArchive,
     this.onImportArchive,
@@ -83,6 +87,9 @@ class ConfigTab extends StatefulWidget {
 
   final SettingsController controller;
   final AuthController? authController;
+
+  /// Passed through to `AccountSection`; null where Supabase is not configured.
+  final E2eeService? e2ee;
   final RecordingsController? recordingsController;
   final String? storagePath;
   final int recordingsCount;
@@ -132,6 +139,8 @@ class ConfigTab extends StatefulWidget {
   /// Persists an edited or reset rate, then backfills the rows it unblocks.
   /// The no-op default is what every pre-existing Config test still gets.
   final void Function(String key, ModelPrice? price) onRateChanged;
+  final Future<ModelPrice> Function(String key, bool isTranscription)?
+      onRefreshRate;
 
   /// Reads already-closed captures back into the closure history. Null under
   /// the same rule as [onMirrorAll] — the button renders disabled, not absent.
@@ -155,6 +164,15 @@ class ConfigTab extends StatefulWidget {
 
 class _ConfigTabState extends State<ConfigTab> {
   late ConfigCategory _selectedCategory = widget.initialCategory;
+  late final TextEditingController _clipboardRetention = TextEditingController(
+    text: '${widget.controller.clipboardRetentionDays}',
+  );
+
+  @override
+  void dispose() {
+    _clipboardRetention.dispose();
+    super.dispose();
+  }
 
   @override
   void didUpdateWidget(ConfigTab oldWidget) {
@@ -368,17 +386,77 @@ class _ConfigTabState extends State<ConfigTab> {
           children: <Widget>[
             InfoRow(
               label: 'KEYBOARD EXTENSION',
-              value: 'Ready for iOS & Android',
+              value: 'Ready for Android',
               valueColor: Console.accent,
             ),
-            InfoRow(
-              label: 'CLIPBOARD SYNC',
-              value: 'Multi-Clipboard Active',
+            // Same padding and label column as `InfoRow`, with a switch
+            // where the value would be.
+            Padding(
+              padding: const EdgeInsets.symmetric(vertical: 5),
+              child: Row(
+                children: <Widget>[
+                  SizedBox(
+                    width: 110,
+                    child: Text(
+                      'CLIPBOARD SYNC',
+                      style: ConsoleText.micro.copyWith(
+                        fontSize: 9.5,
+                        fontWeight: FontWeight.w600,
+                        letterSpacing: .6,
+                      ),
+                    ),
+                  ),
+                  const Spacer(),
+                  Switch(
+                    key: const ValueKey<String>('sync-clipboard'),
+                    value: widget.controller.syncClipboard,
+                    onChanged: (bool value) async {
+                      await widget.controller.setSyncClipboard(value);
+                      if (mounted) setState(() {});
+                    },
+                  ),
+                ],
+              ),
+            ),
+            Text(
+              'Off by default: the clipboard holds whatever was last copied.',
+              style: TextStyle(
+                color: Console.mutedSoft,
+                fontSize: 10,
+                height: 1.45,
+              ),
             ),
             InfoRow(
               label: 'CLIPBOARD CAPACITY',
               value: '100,000 items (100k)',
               monospace: true,
+            ),
+            const SizedBox(height: 8),
+            Text('CLIPBOARD RETENTION', style: ConsoleText.fieldLabel),
+            const SizedBox(height: 6),
+            ConsoleField(
+              key: const ValueKey<String>('clipboard-retention'),
+              controller: _clipboardRetention,
+              monospace: true,
+              fontSize: 12,
+              keyboardType: TextInputType.number,
+              textInputAction: TextInputAction.done,
+              onSubmitted: (String value) async {
+                await widget.controller.setClipboardRetentionDays(
+                  int.tryParse(value.trim()) ?? 30,
+                );
+                _clipboardRetention.text =
+                    '${widget.controller.clipboardRetentionDays}';
+              },
+            ),
+            const SizedBox(height: 6),
+            Text(
+              'days, 0 keeps everything',
+              style: TextStyle(
+                color: Console.mutedSoft,
+                fontSize: 10,
+                height: 1.45,
+              ),
             ),
             const SizedBox(height: 8),
             Text(
@@ -526,6 +604,13 @@ class _ConfigTabState extends State<ConfigTab> {
                 widget.controller.tokenEncryptionActive,
               ),
             ),
+            if (widget.controller.filePermissionIssue
+                case final String issue)
+              InfoRow(
+                label: 'FILE MODES',
+                value: issue,
+                valueColor: Console.amber,
+              ),
             const SizedBox(height: 10),
             Align(
               alignment: Alignment.centerRight,
@@ -542,6 +627,7 @@ class _ConfigTabState extends State<ConfigTab> {
       EnrichmentContextSection(
         controller: widget.controller,
         projects: widget.projects,
+        recordings: widget.recordingsController,
       ),
       const SizedBox(height: 22),
       VaultSection(
@@ -556,9 +642,11 @@ class _ConfigTabState extends State<ConfigTab> {
   List<Widget> _buildSyncCategory(BuildContext context) {
     return <Widget>[
       // Primary cloud block: the account this library will belong to.
-      AccountSection(controller: widget.authController),
+      AccountSection(controller: widget.authController, e2ee: widget.e2ee),
       const SizedBox(height: 22),
       CommandSection(controller: widget.controller),
+      const SizedBox(height: 22),
+      ByocStorageSection(controller: widget.controller),
     ];
   }
 
@@ -575,6 +663,7 @@ class _ConfigTabState extends State<ConfigTab> {
         unknownQuantityCount: widget.unknownQuantityCount,
         verifiedOn: widget.verifiedOn ?? PriceBookDefaults.verifiedOn,
         onRateChanged: widget.onRateChanged,
+        onRefreshRate: widget.onRefreshRate,
       ),
       const SizedBox(height: 22),
       MomentumSection(onBackfill: widget.onBackfillClosures),

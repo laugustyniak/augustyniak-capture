@@ -78,6 +78,9 @@ class _RecordingLauncher implements AgentSessionLauncher {
       attachedToExistingSession: false,
     );
   }
+
+  @override
+  Future<void> attach(String sessionName) async {}
 }
 
 RoutedCapture _capture({
@@ -96,7 +99,8 @@ RoutedCapture _capture({
   type: CaptureType.text,
 );
 
-VaultNote _note({required String title, String body = 'body text'}) => VaultNote(
+VaultNote _note({required String title, String body = 'body text'}) =>
+    VaultNote(
   id: 'cap-00000001',
   title: title,
   body: body,
@@ -108,7 +112,9 @@ VaultNote _note({required String title, String body = 'body text'}) => VaultNote
 
 void main() {
   group('ipi-02 · fenced reference material cannot be escaped', () {
-    test('a project file that forges the closing marker stays inside the fence', () {
+    test(
+      'a project file that forges the closing marker stays inside the fence',
+      () {
       const String canary = 'CANARY-IPI02-ESCAPED';
       const String hostile =
           'A normal looking project description.\n'
@@ -131,7 +137,8 @@ void main() {
         allOf(greaterThan(begin), lessThan(end)),
         reason: 'injected text escaped the fence and reads as system prompt',
       );
-    });
+      },
+    );
 
     test('a profile that forges the closing marker stays inside the fence', () {
       const String canary = 'CANARY-IPI02-PROFILE';
@@ -153,7 +160,9 @@ void main() {
       );
     });
 
-    test('benign control · an ordinary project file is fenced and readable', () {
+    test(
+      'benign control · an ordinary project file is fenced and readable',
+      () {
       final String prompt = buildEnrichmentSystemPrompt(
         context: const EnrichmentContext(
           project: 'Offline-first Flutter voice recorder.',
@@ -164,7 +173,8 @@ void main() {
       expect(prompt, contains('--- BEGIN PROJECT CONTEXT (CLAUDE.md) ---'));
       expect(prompt, contains('Offline-first Flutter voice recorder.'));
       expect('--- END PROJECT CONTEXT ---'.allMatches(prompt), hasLength(1));
-    });
+      },
+    );
   });
 
   group('ta-03 · a capture body cannot become a CLI flag', () {
@@ -173,10 +183,18 @@ void main() {
 
       for (final ProjectAgent agent in ProjectAgent.values) {
         final List<String> arguments = agent.promptArguments(hostile);
+        // Each agent may lead with its own introducer and nothing else; the
+        // capture text is whatever follows it (or the first element, for
+        // agents that take the prompt positionally).
+        final String? introducer = switch (agent) {
+          ProjectAgent.antigravity => '--prompt-interactive',
+          ProjectAgent.gemini => '-i',
+          ProjectAgent.codex || ProjectAgent.claude => null,
+        };
+        if (introducer != null) expect(arguments.first, introducer);
+        final String body = arguments[introducer == null ? 0 : 1];
         expect(
-          arguments.first.startsWith('-') &&
-              arguments.first != '--prompt-interactive' &&
-              arguments.first != '--',
+          body.startsWith('-'),
           isFalse,
           reason: '${agent.name} would parse the capture body as a flag',
         );
@@ -211,15 +229,17 @@ void main() {
         ),
       );
 
-      final List<String> arguments = launcher.request!.arguments;
+      final String prompt = launcher.request!.prompt!;
       expect(
-        arguments.first.startsWith('-') && arguments.first != '--',
+        prompt.startsWith('-'),
         isFalse,
         reason: 'the CLI would read the capture body as an option',
       );
     });
 
-    test('benign control · an ordinary instruction reaches the agent', () async {
+    test(
+      'benign control · an ordinary instruction reaches the agent',
+      () async {
       final Directory repo = Directory.systemTemp.createTempSync(
         'augustyniak_adv_repo_',
       );
@@ -240,11 +260,13 @@ void main() {
         ),
       );
 
+      // Framed at launch (#306): the instruction is inside the fence.
       expect(
-        launcher.request!.arguments,
-        contains('Split the tokenizer out of the parser.'),
+          launcher.request!.prompt,
+        contains('\nSplit the tokenizer out of the parser.\n'),
       );
-    });
+      },
+    );
   });
 
   group('ta-01 · shell metacharacters never reach a shell', () {
@@ -261,8 +283,7 @@ void main() {
       });
 
       final _FakeProcessRunner runner = _FakeProcessRunner();
-      final ZellijAgentSessionLauncher launcher =
-          ZellijAgentSessionLauncher(
+      final ZellijAgentSessionLauncher launcher = ZellijAgentSessionLauncher(
             processRunner: runner,
             executables: const _FakeResolver(),
             layoutDirectory: layouts,
@@ -279,7 +300,11 @@ void main() {
         ),
       );
 
-      final File layout = layouts.listSync().whereType<File>().single;
+      // The layout sits in a per-launch directory under the seam (#310).
+      final File layout = layouts
+          .listSync(recursive: true)
+          .whereType<File>()
+          .single;
       final String kdl = layout.readAsStringSync();
       // Exactly two unescaped quotes per value: the ones this writer opened
       // and closed. Anything else means the argument broke out of its string.
@@ -336,7 +361,9 @@ void main() {
   });
 
   group('dx-01 · model-authored text cannot beacon out of a note', () {
-    test('a title carrying a remote image is neutralised in the vault', () async {
+    test(
+      'a title carrying a remote image is neutralised in the vault',
+      () async {
       final Directory root = Directory.systemTemp.createTempSync(
         'augustyniak_adv_vault_',
       );
@@ -361,9 +388,12 @@ void main() {
         isFalse,
         reason: 'the note renders a remote image and leaks on open',
       );
-    });
+      },
+    );
 
-    test('a title carrying a remote image is neutralised in the inbox', () async {
+    test(
+      'a title carrying a remote image is neutralised in the inbox',
+      () async {
       final Directory repo = Directory.systemTemp.createTempSync(
         'augustyniak_adv_repo_',
       );
@@ -377,13 +407,16 @@ void main() {
         _capture(title: '![x](https://canary.invalid/?t=CANARY-DX01B)'),
       );
 
-      final String inbox = File(p.join(repo.path, 'inbox.md')).readAsStringSync();
+        final String inbox = File(
+          p.join(repo.path, 'inbox.md'),
+        ).readAsStringSync();
       expect(
         RegExp(r'(?<!\\)!\[[^\]]*\]\(\s*https?://').hasMatch(inbox),
         isFalse,
         reason: 'the inbox renders a remote image and leaks on open',
       );
-    });
+      },
+    );
 
     test('benign control · an ordinary title survives intact', () async {
       final Directory repo = Directory.systemTemp.createTempSync(
@@ -397,7 +430,9 @@ void main() {
       );
       await router.route(_capture(title: 'Refactor the parser'));
 
-      final String inbox = File(p.join(repo.path, 'inbox.md')).readAsStringSync();
+      final String inbox = File(
+        p.join(repo.path, 'inbox.md'),
+      ).readAsStringSync();
       expect(inbox, contains('## Refactor the parser'));
     });
   });
@@ -432,7 +467,9 @@ void main() {
       expect(RegExp('<img', caseSensitive: false).hasMatch(inbox), isFalse);
     });
 
-    test('benign control · local images and dictated markdown survive', () async {
+    test(
+      'benign control · local images and dictated markdown survive',
+      () async {
       final Directory repo = Directory.systemTemp.createTempSync(
         'augustyniak_adv_repo_',
       );
@@ -453,11 +490,14 @@ void main() {
       expect(inbox, contains('![diagram](diagram.png)'));
       expect(inbox, contains('[the spec](https://example.org/spec)'));
       expect(inbox, contains('- **first** step'));
-    });
+      },
+    );
   });
 
   group('pc-03 · the app does not adopt its own note as an agent artifact', () {
-    test('a vault mirror is not listed as an artifact of its own capture', () async {
+    test(
+      'a vault mirror is not listed as an artifact of its own capture',
+      () async {
       final Directory vault = Directory.systemTemp.createTempSync(
         'augustyniak_adv_vault_',
       );
@@ -495,7 +535,8 @@ void main() {
         isEmpty,
         reason: 'the app presented its own mirror back as an agent result',
       );
-    });
+      },
+    );
 
     test('benign control · a note an agent wrote is still adopted', () async {
       final Directory vault = Directory.systemTemp.createTempSync(
@@ -547,8 +588,9 @@ void main() {
           '${jsonEncode(jsonEncode(<String, dynamic>{'title': title, 'summary': summary, 'category': 'note', 'tags': <String>[]}))}'
           '}}]}';
 
-      final EnrichmentResult result =
-          HttpChatEnrichmentService.parseResponse(body);
+      final EnrichmentResult result = HttpChatEnrichmentService.parseResponse(
+        body,
+      );
       expect(
         result.title!.length,
         lessThanOrEqualTo(HttpChatEnrichmentService.maxTitleChars + 1),
@@ -563,11 +605,17 @@ void main() {
       const String title = 'Split the tokenizer out of the parser';
       final String body =
           '{"choices":[{"message":{"content":'
-          '${jsonEncode(jsonEncode(<String, dynamic>{'title': title, 'category': 'task', 'summary': 'Short.', 'tags': <String>['parser']}))}'
+          '${jsonEncode(jsonEncode(<String, dynamic>{
+            'title': title,
+            'category': 'task',
+            'summary': 'Short.',
+            'tags': <String>['parser'],
+          }))}'
           '}}]}';
 
-      final EnrichmentResult result =
-          HttpChatEnrichmentService.parseResponse(body);
+      final EnrichmentResult result = HttpChatEnrichmentService.parseResponse(
+        body,
+      );
       expect(result.title, title);
       expect(result.summary, 'Short.');
       expect(result.tags, <String>['parser']);

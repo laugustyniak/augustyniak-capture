@@ -6,6 +6,8 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:path/path.dart' as p;
 import 'package:record/record.dart';
 import 'package:augustyniak_capture/features/command/domain/command_client.dart';
+import 'package:augustyniak_capture/features/enrichment/domain/enrichment_context.dart';
+import 'package:augustyniak_capture/features/enrichment/domain/enrichment_service.dart';
 import 'package:augustyniak_capture/features/costs/domain/usage_sink.dart';
 import 'package:augustyniak_capture/features/logs/data/log_store.dart';
 import 'package:augustyniak_capture/features/gamification/presentation/gamification_controller.dart';
@@ -20,8 +22,10 @@ import 'package:augustyniak_capture/features/recordings/domain/capture_type.dart
 import 'package:augustyniak_capture/features/recordings/domain/media_opener.dart';
 import 'package:augustyniak_capture/features/recordings/domain/note_vault.dart';
 import 'package:augustyniak_capture/features/recordings/domain/capture_router.dart';
+import 'package:augustyniak_capture/features/recordings/domain/capture_sender.dart';
 import 'package:augustyniak_capture/features/recordings/domain/recording.dart';
 import 'package:augustyniak_capture/features/recordings/domain/route_record.dart';
+import 'package:augustyniak_capture/features/recordings/domain/suggested_route.dart';
 import 'package:augustyniak_capture/features/recordings/presentation/recordings_controller.dart';
 import 'package:augustyniak_capture/features/settings/data/settings_repository.dart';
 import 'package:augustyniak_capture/features/settings/domain/app_settings.dart';
@@ -128,14 +132,19 @@ Future<RecordingsController> buildRecordingsController(
   MediaOpener mediaOpener = const NoopMediaOpener(),
   CaptureRouter captureRouter = const DisabledCaptureRouter(),
   AgentHandoff agentHandoff = const DisabledAgentHandoff(),
+  CaptureSender captureSender = const DisabledCaptureSender(),
   FakeRecordingsRepository? repository,
   UsageSink usageSink = const NoopUsageSink(),
   ClosureLog closureLog = const NoopClosureLog(),
   NoteVault noteVault = const DisabledNoteVault(),
+  Directory? Function()? connectionVaultRoot,
   Project? Function(String projectId)? projectById,
   GamificationController? gamificationController,
   CommandClient commandClient = const DisabledCommandClient(),
   String? Function()? commandBaseUrl,
+  EnrichmentService enrichmentService = const DisabledEnrichmentService(),
+  EnrichmentContextSource enrichmentContextSource =
+      const EmptyEnrichmentContextSource(),
 }) async {
   final RecordingsController controller = RecordingsController(
     repository: repository ?? FakeRecordingsRepository(appDir, seed: seed),
@@ -144,15 +153,19 @@ Future<RecordingsController> buildRecordingsController(
     mediaOpener: mediaOpener,
     captureRouter: captureRouter,
     agentHandoff: agentHandoff,
+    captureSender: captureSender,
     recorder: FakeRecorder(),
     player: FakePlayer(),
     usageSink: usageSink,
     closureLog: closureLog,
     noteVault: noteVault,
+    connectionVaultRoot: connectionVaultRoot,
     projectById: projectById,
     gamificationController: gamificationController,
     commandClient: commandClient,
     commandBaseUrl: commandBaseUrl,
+    enrichmentService: enrichmentService,
+    enrichmentContextSource: enrichmentContextSource,
   );
   addTearDown(controller.dispose);
   await controller.initialize();
@@ -233,6 +246,7 @@ Recording makeRecording({
   List<RouteRecord> routes = const <RouteRecord>[],
   String? filePath,
   String? thumbPath,
+  SuggestedRoute? suggestedRoute,
 }) {
   return Recording(
     id: id,
@@ -253,5 +267,6 @@ Recording makeRecording({
     projectId: projectId,
     error: error,
     isProcessedByUser: isProcessedByUser,
+    suggestedRoute: suggestedRoute,
   );
 }

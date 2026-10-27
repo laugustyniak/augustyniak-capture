@@ -58,6 +58,7 @@ void main() {
 
   test('the hold is taken before the recorder opens the input', () async {
     final RecordingsController controller = build();
+    await controller.initialize();
     await controller.startRecording();
 
     expect(
@@ -73,6 +74,7 @@ void main() {
 
   test('saving a capture releases the hold', () async {
     final RecordingsController controller = build();
+    await controller.initialize();
     await controller.startRecording();
     await controller.stopRecording();
     await controller.waitForProcessing();
@@ -83,6 +85,7 @@ void main() {
 
   test('discarding a capture releases the hold', () async {
     final RecordingsController controller = build();
+    await controller.initialize();
     await controller.startRecording();
     await controller.discardRecording();
 
@@ -100,6 +103,7 @@ void main() {
     // was ever called, so it is salvaged — but the hold is the question here,
     // and it has to come off on the way through either way.
     final RecordingsController controller = build(recorderFailsOnStop: true);
+    await controller.initialize();
     await controller.startRecording();
     await controller.stopRecording();
     await controller.waitForProcessing();
@@ -115,6 +119,7 @@ void main() {
     final RecordingsController controller = build(
       sessionFailsWith: Exception('service refused'),
     );
+    await controller.initialize();
     await controller.startRecording();
 
     expect(events, contains('recorder.start'));

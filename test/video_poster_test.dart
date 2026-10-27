@@ -132,6 +132,7 @@ void main() {
         videoPosterExtractor: poster,
         mediaPicker: _FakePicker(PickedMedia(file: src, mimeType: 'video/mp4')),
       );
+      await controller.initialize();
       addTearDown(controller.dispose);
 
       await controller.addUpload(CaptureType.video);
@@ -162,6 +163,7 @@ void main() {
             PickedMedia(file: src, mimeType: 'video/mp4'),
           ),
         );
+        await controller.initialize();
         addTearDown(controller.dispose);
 
         await controller.addUpload(CaptureType.video);
@@ -190,6 +192,7 @@ void main() {
         videoPosterExtractor: poster,
         mediaPicker: _FakePicker(PickedMedia(file: src, mimeType: 'video/mp4')),
       );
+      await controller.initialize();
       addTearDown(controller.dispose);
 
       await controller.addUpload(CaptureType.video);
@@ -220,6 +223,7 @@ void main() {
             PickedMedia(file: src, mimeType: 'video/mp4'),
           ),
         );
+        await controller.initialize();
         addTearDown(controller.dispose);
 
         await controller.addUpload(CaptureType.video);
@@ -247,6 +251,7 @@ void main() {
       );
       addTearDown(controller.dispose);
 
+      await controller.initialize();
       await controller.addTextNote('a note');
       await controller.waitForProcessing();
 
@@ -487,6 +492,7 @@ void main() {
         mediaPicker: _FakePicker(PickedMedia(file: src, mimeType: 'video/mp4')),
         mediaOpener: opener,
       );
+      await controller.initialize();
       addTearDown(controller.dispose);
 
       await controller.addUpload(CaptureType.video);
@@ -518,6 +524,7 @@ void main() {
           ),
           mediaOpener: opener,
         );
+        await controller.initialize();
         addTearDown(controller.dispose);
 
         await controller.addUpload(CaptureType.video);
@@ -551,6 +558,7 @@ void main() {
           ),
           mediaOpener: opener,
         );
+        await controller.initialize();
         addTearDown(controller.dispose);
 
         await controller.addUpload(CaptureType.video);

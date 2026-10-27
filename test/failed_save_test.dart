@@ -46,6 +46,7 @@ void main() {
     // the user needs to hear about it.
     final RecordingsController controller =
         build(_StoppingRecorder(_StopBehaviour.throws));
+    await controller.initialize();
     await controller.startRecording();
     await controller.stopRecording();
     await controller.waitForProcessing();
@@ -69,6 +70,7 @@ void main() {
       _StopBehaviour.emptyFile,
     );
     final RecordingsController controller = build(recorder);
+    await controller.initialize();
     await controller.startRecording();
     final String path = recorder.path!;
     await controller.stopRecording();
@@ -87,6 +89,7 @@ void main() {
     final RecordingsController controller = build(
       _StoppingRecorder(_StopBehaviour.hangs),
     );
+    await controller.initialize();
     await controller.startRecording();
     await controller.stopRecording();
     await controller.waitForProcessing();
@@ -117,6 +120,7 @@ void main() {
     final RecordingsController controller = build(
       _StoppingRecorder(_StopBehaviour.hangs),
     );
+    await controller.initialize();
     await controller.startRecording();
     await controller.stopRecording();
     await controller.waitForProcessing();

@@ -20,6 +20,9 @@ class _FailingRouter implements CaptureRouter {
   bool canRoute(String? projectId) => true;
 
   @override
+  RouteKind? resolvedKind(RoutedCapture capture) => RouteKind.file;
+
+  @override
   Future<RouteRecord> route(RoutedCapture capture) async {
     throw const FileSystemException('repo is gone');
   }
@@ -86,6 +89,33 @@ void main() {
     expect(routed.isProcessedByUser, isTrue);
     expect(routed.processedAt, routed.routes.single.at);
   });
+
+  test(
+    'a symlinked inbox.md refuses the route and leaves its target alone',
+    () async {
+      final Directory outside = Directory.systemTemp.createTempSync('outside-');
+      addTearDown(() => outside.deleteSync(recursive: true));
+      final File victim = File('${outside.path}${Platform.pathSeparator}v.md')
+        ..writeAsStringSync('untouched');
+      Link('${repo.path}${Platform.pathSeparator}inbox.md')
+          .createSync(victim.path);
+      final RecordingsController controller = await buildRecordingsController(
+        appDir,
+        seed: <Recording>[
+          makeRecording(id: 'r1', projectId: 'p1', title: 'Redirected'),
+        ],
+        captureRouter: routerFor(repo),
+      );
+
+      await controller.route('r1');
+
+      expect(controller.error, contains('symbolic link'));
+      expect(victim.readAsStringSync(), 'untouched');
+      expect(controller.recordings.single.routes, isEmpty);
+      expect(controller.recordings.single.isProcessedByUser, isFalse);
+    },
+    skip: Platform.isWindows,
+  );
 
   test('a second delivery appends rather than replacing the first', () async {
     final RecordingsController controller = await buildRecordingsController(

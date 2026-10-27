@@ -5,10 +5,24 @@ import '../../recordings/domain/recording_revision.dart';
 
 /// What the server last acknowledged for one local row.
 class SyncRowState {
-  const SyncRowState({required this.serverVersion, required this.pushedHash});
+  const SyncRowState({
+    required this.serverVersion,
+    required this.pushedHash,
+    this.sealed = false,
+  });
 
   final int serverVersion;
   final String pushedHash;
+
+  /// Whether this device last saw the row end-to-end encrypted, either
+  /// pulled out of an envelope or pushed into one. A sealed row that later
+  /// arrives unsealed is a downgrade and is refused (#377); a row bookkept
+  /// unsealed is a legacy plaintext row and applies as it always did.
+  ///
+  /// The flag is sticky: once true it stays true while the bookkeeping row
+  /// exists. The only way back is the row leaving bookkeeping (a tombstone or
+  /// `remove`).
+  final bool sealed;
 }
 
 /// Device-local sync bookkeeping: the server version and pushed-content hash
@@ -16,7 +30,13 @@ class SyncRowState {
 /// more classes to this file.
 abstract interface class SyncBookkeeping {
   Map<String, SyncRowState> loadTable(String table);
-  void put(String table, String id, int serverVersion, String pushedHash);
+  void put(
+    String table,
+    String id,
+    int serverVersion,
+    String pushedHash, {
+    bool sealed = false,
+  });
   void remove(String table, String id);
   DateTime? cursor(String table);
   void setCursor(String table, DateTime value);
@@ -47,7 +67,9 @@ class SupabaseSyncResult {
     this.conflicts = 0,
     this.conflictDetails = const <SyncConflictDetail>[],
     this.tombstonesApplied = 0,
+    this.tombstonesHeld = 0,
     this.skipped = 0,
+    this.downgraded = 0,
     this.failureReason,
   });
 
@@ -56,7 +78,15 @@ class SupabaseSyncResult {
   final int conflicts;
   final List<SyncConflictDetail> conflictDetails;
   final int tombstonesApplied;
+
+  /// Of [tombstonesApplied], how many were applied under the blast-radius
+  /// cap: their files went to the trash marked held, awaiting confirmation.
+  final int tombstonesHeld;
   final int skipped;
+
+  /// Rows refused because they arrived unencrypted after this device last
+  /// saw them sealed.
+  final int downgraded;
   final String? failureReason;
 
   bool get success => failureReason == null;

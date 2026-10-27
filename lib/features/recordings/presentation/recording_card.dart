@@ -1,15 +1,20 @@
 import 'dart:io';
 
+import 'package:flutter/foundation.dart' show ValueListenable;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import '../../../app/markdown/simple_markdown.dart';
 import '../../../app/ui_kit.dart';
 import '../../gamification/presentation/done_burst_animation.dart';
+import '../../projects/data/native_agent_jobs.dart';
 import '../domain/agent_artifact.dart';
 import '../domain/capture_type.dart';
 import '../domain/recording.dart';
+import '../domain/related_captures.dart';
 import '../domain/route_record.dart';
+import '../domain/suggested_route.dart';
+import 'agent_runs.dart';
 import 'card_parts.dart';
 
 /// One queue item, in the design's "console card" form.
@@ -38,22 +43,33 @@ class RecordingCard extends StatelessWidget {
     this.canRoute = false,
     required this.onHandoff,
     this.canHandoff = false,
+    this.suggestedRoute,
+    this.onConfirmSuggestedRoute,
+    this.onDismissSuggestedRoute,
     this.onSelectArtifact,
     this.onOpenOutcome,
     this.canOpenOutcome,
+    this.onAttachSession,
     this.focused = false,
     this.costUsd,
     this.onOpenFocus,
     this.onConfigureModels,
     this.onCancelProcessing,
-    this.processingElapsed,
+    this.processingTicker,
+    this.relatedCount = 0,
+    this.repeatCount = 0,
+    this.agentJobs,
   });
+
+  /// Null hides the AGENT pill; set when local agent jobs can be read.
+  final NativeAgentJobs? agentJobs;
 
   /// Said in both places the action is offered — the poster and the button —
   /// so a screen reader announces one action, not two different-sounding ones.
   /// It names the *destination* deliberately: unlike audio, this leaves the
   /// app. Public so a test cannot drift from the string it asserts on.
   static const String openVideoLabel = 'Open video externally';
+  static const String openFileLabel = 'Open file externally';
 
   /// Names the four fields the enrichment pass can fill, so the animation says
   /// *what* is being analysed rather than just that something is. Public for
@@ -70,10 +86,16 @@ class RecordingCard extends StatelessWidget {
   static const String routeLabel = "Hand off to the project's inbox";
 
   /// The second destination, and the one that does something rather than
-  /// filing something — so it names the agent, not the gesture. Kept distinct
-  /// from [routeLabel] in wording as well as icon: two controls that both said
-  /// "hand off" would be one control the user has to guess at.
-  static const String handoffLabel = 'Start a coding agent on this capture';
+  /// filing something. It opens the Send to… sheet, which reaches a terminal
+  /// agent (when the project has one) and any assistant, so it names both.
+  /// Kept distinct from [routeLabel] in wording as well as icon: two controls
+  /// that both said "hand off" would be one control the user has to guess at.
+  static const String handoffLabel =
+      'Send this capture to an assistant or agent';
+
+  /// Turns the suggested destination down for good: the model never proposes
+  /// one for this capture again.
+  static const String dismissSuggestionLabel = 'Dismiss suggested destination';
 
   final Recording recording;
   final bool isPlaying;
@@ -126,6 +148,17 @@ class RecordingCard extends StatelessWidget {
   /// the same reason as [canRoute] — an install with no repository configured
   /// would otherwise carry a dead button on every row.
   final bool canHandoff;
+
+  /// The enrichment model's proposed destination, already re-checked against
+  /// the item as it is now (`RecordingsController.suggestedRouteAction`): null
+  /// draws nothing, so the card never shows a control that cannot deliver.
+  final SuggestedRouteAction? suggestedRoute;
+
+  /// Confirms the suggestion. The host maps it onto the existing entry point —
+  /// `route` for a file or Command kind, the handoff sheet for an agent — so
+  /// the card holds no delivery logic of its own.
+  final VoidCallback? onConfirmSuggestedRoute;
+  final VoidCallback? onDismissSuggestedRoute;
   final void Function(AgentArtifact artifact)? onSelectArtifact;
 
   /// Opens the delivery's own page on the control plane. Null where nothing can
@@ -137,6 +170,12 @@ class RecordingCard extends StatelessWidget {
   /// plane whose address is still configured. Asked per outcome rather than
   /// once for the card, because the answer differs row by row.
   final bool Function(RouteOutcome outcome)? canOpenOutcome;
+
+  /// Opens a terminal on the agent session the latest delivery started — the
+  /// way back into a session that ran in the background. Null where no
+  /// launcher exists, which hides the action; the session name on the route
+  /// line still says where it went.
+  final void Function(String sessionName)? onAttachSession;
 
   /// This row is the one the keyboard is on.
   ///
@@ -166,7 +205,15 @@ class RecordingCard extends StatelessWidget {
   final VoidCallback? onOpenFocus;
   final VoidCallback? onConfigureModels;
   final VoidCallback? onCancelProcessing;
-  final Duration? processingElapsed;
+  final ValueListenable<Duration>? processingTicker;
+
+  /// Captures close in meaning to this one (#272). Zero draws nothing, which
+  /// is also what an install without an embedding model always passes.
+  final int relatedCount;
+
+  /// How many times this thought was said within two weeks, itself included.
+  /// Badged from [RelatedLimits.repeatBadgeAt].
+  final int repeatCount;
 
   @override
   Widget build(BuildContext context) {
@@ -190,11 +237,7 @@ class RecordingCard extends StatelessWidget {
     final String baseTranscribing = recording.type == CaptureType.image
         ? 'EXTRACTING'
         : 'TRANSCRIBING';
-    final String? transcribingLabel = isTranscribing
-        ? (processingElapsed != null
-            ? '$baseTranscribing · ${formatDuration(processingElapsed!)}'
-            : baseTranscribing)
-        : null;
+    final String? transcribingLabel = isTranscribing ? baseTranscribing : null;
     final _StatusVisual? visual = isEnriching
         ? _StatusVisual('ANALYZING', Console.accent, pulse: true)
         : isTranscribing
@@ -205,7 +248,8 @@ class RecordingCard extends StatelessWidget {
     // Generic processor output: a transcription, OCR text or a note body.
     final String transcript = recording.transcript ?? '';
     final bool hasTranscript = transcript.trim().isNotEmpty;
-    final bool openable = recording.type == CaptureType.video;
+    final bool openable = recording.type == CaptureType.video ||
+        recording.type == CaptureType.file;
 
     final List<Widget> pillWidgets = <Widget>[
       if (projectName != null)
@@ -220,10 +264,71 @@ class RecordingCard extends StatelessWidget {
           color: categoryColorFor(recording.category),
           outlined: true,
         ),
+      if (recording.priority != null)
+        // The reason is the point of a model-assigned rank — without it a P0
+        // is an assertion — so it rides a tooltip rather than costing a line.
+        Tooltip(
+          message: recording.priorityReason ?? 'Set by hand',
+          child: StatusPill(
+            label: recording.priority!.label,
+            color: priorityColorFor(recording.priority!),
+            outlined: true,
+          ),
+        ),
+      if (suggestedRoute != null && onConfirmSuggestedRoute != null)
+        _SuggestedRouteChip(
+          action: suggestedRoute!,
+          projectName: projectName,
+          onConfirm: onConfirmSuggestedRoute!,
+          onDismiss: onDismissSuggestedRoute,
+        ),
+      if (repeatCount >= RelatedLimits.repeatBadgeAt)
+        // Saying something again is a signal about it, so this one is
+        // coloured; the related count below is only a pointer.
+        Tooltip(
+          message:
+              'Said $repeatCount times within '
+              '${RelatedLimits.repeatWindow.inDays} days',
+          child: StatusPill(
+            label: '×$repeatCount',
+            color: Console.amber,
+            outlined: true,
+          ),
+        ),
+      if (relatedCount > 0)
+        Tooltip(
+          message:
+              '$relatedCount related capture${relatedCount == 1 ? '' : 's'}'
+              ' — open the editor to see them',
+          child: StatusPill(
+            label: '≈ $relatedCount',
+            color: Console.mutedSoft,
+            outlined: true,
+          ),
+        ),
+      if (agentJobs != null && agentJobHandles(recording).isNotEmpty)
+        AgentRunPill(
+          jobs: agentJobs!,
+          handle: agentJobHandles(recording).first,
+        ),
       AnimatedSwitcher(
         duration: const Duration(milliseconds: 260),
         child: visual == null
             ? const SizedBox.shrink()
+            : (isTranscribing && !isEnriching && processingTicker != null)
+            // Only the `· mm:ss` suffix moves, so only this pill repaints; the
+            // key stays on the base label so the switcher does not cross-fade
+            // on every tick.
+            ? ValueListenableBuilder<Duration>(
+                key: ValueKey<String>(visual.label),
+                valueListenable: processingTicker!,
+                builder: (BuildContext _, Duration elapsed, Widget? _) =>
+                    StatusPill(
+                      label: '${visual.label} · ${formatDuration(elapsed)}',
+                      color: visual.color,
+                      pulse: visual.pulse,
+                    ),
+              )
             : StatusPill(
                 key: ValueKey<String>(visual.label),
                 label: visual.label,
@@ -233,6 +338,8 @@ class RecordingCard extends StatelessWidget {
       ),
     ];
     final bool hasPills = pillWidgets.isNotEmpty;
+    final bool hasSuggestionChip =
+        suggestedRoute != null && onConfirmSuggestedRoute != null;
 
     final Widget card = RecordingCardShell(
       borderColor: focused
@@ -244,7 +351,11 @@ class RecordingCard extends StatelessWidget {
           : Console.border,
       child: LayoutBuilder(
         builder: (BuildContext context, BoxConstraints constraints) {
-          final bool isNarrow = constraints.maxWidth < 480;
+          // The pills sit under the title, where they wrap to the card's
+          // width, whenever the suggestion chip is among them: beside the
+          // title a Wrap is laid out on one unbounded line, and the chip names
+          // a project. Every other card keeps its layout.
+          final bool isNarrow = constraints.maxWidth < 480 || hasSuggestionChip;
           final Widget actionButtons = Row(
             mainAxisSize: MainAxisSize.min,
             children: <Widget>[
@@ -302,15 +413,16 @@ class RecordingCard extends StatelessWidget {
                 ),
                 const SizedBox(width: 7),
               ]
-              // A video leaves the app to play: there is no in-process video
-              // widget on the desktop targets, so this hands the file to
-              // whatever the user already has. Nothing to stop afterwards,
-              // hence no `active` state and a fixed icon.
+              // Video and attached files open in the system's chosen app.
               else if (openable) ...<Widget>[
                 ConsoleIconButton(
-                  icon: Icons.play_arrow_rounded,
+                  icon: recording.type == CaptureType.file
+                      ? Icons.open_in_new_rounded
+                      : Icons.play_arrow_rounded,
                   onTap: onOpen,
-                  semanticLabel: RecordingCard.openVideoLabel,
+                  semanticLabel: recording.type == CaptureType.file
+                      ? RecordingCard.openFileLabel
+                      : RecordingCard.openVideoLabel,
                   size: 30,
                   iconSize: 18,
                 ),
@@ -361,7 +473,9 @@ class RecordingCard extends StatelessWidget {
                     recording: recording,
                     failed: failed,
                     onOpen: openable ? onOpen : null,
-                    semanticLabel: RecordingCard.openVideoLabel,
+                    semanticLabel: recording.type == CaptureType.file
+                        ? RecordingCard.openFileLabel
+                        : RecordingCard.openVideoLabel,
                   ),
                   const SizedBox(width: 12),
                   Expanded(
@@ -521,6 +635,32 @@ class RecordingCard extends StatelessWidget {
                     style: ConsoleText.micro.copyWith(color: Console.green),
                   ),
                 ),
+                // Only a session this app started by name can be attached to;
+                // a file or a Command brief has no terminal to open.
+                if (recording.routes.last.session case final String session
+                    when recording.routes.last.kind == RouteKind.agent &&
+                        onAttachSession != null) ...<Widget>[
+                  const SizedBox(width: 8),
+                  InkWell(
+                    key: ValueKey<String>('attach-${recording.id}'),
+                    onTap: () => onAttachSession!(session),
+                    borderRadius: BorderRadius.circular(6),
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 4,
+                        vertical: 2,
+                      ),
+                      child: Text(
+                        'ATTACH',
+                        style: ConsoleText.micro.copyWith(
+                          color: Console.accent,
+                          fontWeight: FontWeight.w700,
+                          letterSpacing: 1.1,
+                        ),
+                      ),
+                    ),
+                  ),
+                ],
               ],
             ),
             // **One line, and a link out — never a fleet view.** Command has a
@@ -746,6 +886,109 @@ class _GhostButton extends StatelessWidget {
   }
 }
 
+/// The model's one-tap proposal for where this capture goes next.
+///
+/// It names the destination and the project, and carries the model's reason as
+/// a tooltip. The label is the same words as the control it stands in for, so
+/// the user knows what the tap will do before doing it. Not `const`: it paints
+/// palette colours.
+class _SuggestedRouteChip extends StatelessWidget {
+  _SuggestedRouteChip({
+    required this.action,
+    required this.projectName,
+    required this.onConfirm,
+    required this.onDismiss,
+  });
+
+  final SuggestedRouteAction action;
+  final String? projectName;
+  final VoidCallback onConfirm;
+  final VoidCallback? onDismiss;
+
+  /// What the tap will do, in the words of the control it stands in for.
+  String get label {
+    final String verb = switch (action.kind) {
+      SuggestedRouteKind.command => 'SEND TO COMMAND',
+      SuggestedRouteKind.file => 'SEND TO INBOX',
+      SuggestedRouteKind.agent =>
+        'HAND OFF TO ${(action.agentLabel ?? 'AGENT').toUpperCase()}',
+      SuggestedRouteKind.none => '',
+    };
+    return projectName == null ? verb : '$verb \u00b7 $projectName';
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final Widget body = Semantics(
+      button: true,
+      label: label,
+      excludeSemantics: true,
+      child: InkWell(
+        onTap: onConfirm,
+        borderRadius: BorderRadius.circular(999),
+        child: Container(
+          padding: EdgeInsets.fromLTRB(10, 5, onDismiss == null ? 10 : 6, 5),
+          decoration: BoxDecoration(
+            color: Console.accent.withValues(alpha: .1),
+            border: Border.all(color: Console.accent.withValues(alpha: .55)),
+            borderRadius: BorderRadius.circular(999),
+          ),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: <Widget>[
+              Icon(Icons.outbound_outlined, size: 12, color: Console.accent),
+              const SizedBox(width: 6),
+              Flexible(
+                child: Text(
+                  label,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: ConsoleText.pill.copyWith(color: Console.accent),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+    final String? reason = action.reason;
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: <Widget>[
+        Flexible(
+          child: reason == null
+              ? body
+              : Tooltip(message: reason, child: body),
+        ),
+        if (onDismiss != null)
+          Semantics(
+            button: true,
+            label: RecordingCard.dismissSuggestionLabel,
+            excludeSemantics: true,
+            child: Tooltip(
+              message: RecordingCard.dismissSuggestionLabel,
+              child: InkWell(
+                onTap: onDismiss,
+                borderRadius: BorderRadius.circular(999),
+                // A 32 px target around a 13 px glyph: small to look at, not
+                // to hit.
+                child: SizedBox(
+                  width: 32,
+                  height: 32,
+                  child: Icon(
+                    Icons.close_rounded,
+                    size: 13,
+                    color: Console.mutedSoft,
+                  ),
+                ),
+              ),
+            ),
+          ),
+      ],
+    );
+  }
+}
+
 /// The done flag. Deliberately the last control on the row and the only one
 /// that is never gated on status: completion is a user-owned axis, independent
 /// of whatever the processing pipeline is doing to the item.
@@ -892,7 +1135,7 @@ class _CardTranscriptSectionState extends State<_CardTranscriptSection> {
 
   @override
   Widget build(BuildContext context) {
-    final String raw = (widget.recording.transcript ?? '').trim();
+    final String raw = widget.recording.displayText.trim();
     // Markers off, markup not rendered: see `markdownPreviewText`. The copy
     // button below still carries the *source*, because what gets pasted into
     // an editor should keep its formatting.

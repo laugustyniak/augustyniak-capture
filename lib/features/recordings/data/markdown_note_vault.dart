@@ -4,6 +4,7 @@ import 'dart:io';
 import 'package:cryptography/cryptography.dart';
 import 'package:path/path.dart' as p;
 
+import '../../../core/security/owner_only_file.dart';
 import '../domain/capture_type.dart';
 import '../domain/note_vault.dart';
 import '../domain/untrusted_markdown.dart';
@@ -33,6 +34,13 @@ import '../domain/untrusted_markdown.dart';
 /// - **An unchanged note is not rewritten at all.** A no-op write would still
 ///   bump the mtime and push the note to the top of the reader's "recent" list
 ///   on every unrelated pipeline tick.
+/// - **Front matter we did not write is kept.** The reader's indexer scores
+///   every note into its front matter (`pagerank`, `cluster`, `maturity`), and
+///   the reader adds `aliases` or extends `related` by hand. Those keys are not
+///   part of the body hash, so the note stays ours — and a rewrite that
+///   rendered the front matter from scratch would wipe them on the next title
+///   change. An update therefore re-emits only the keys in [ownedKeys] and
+///   carries every other line across as it was.
 class MarkdownNoteVault implements NoteVault {
   MarkdownNoteVault({
     required String? Function() vaultPath,
@@ -66,6 +74,25 @@ class MarkdownNoteVault implements NoteVault {
   static const int idSuffixLength = 8;
 
   static const String _hashKey = 'capture-hash';
+
+  /// The keys this class rewrites on every update. Anything else in the front
+  /// matter belongs to the reader or their tools and is carried across as is.
+  /// `related` is deliberately absent: we seed it on creation, but once the
+  /// reader has edited the list it is theirs.
+  static const Set<String> ownedKeys = <String>{
+    'title',
+    'created',
+    'date',
+    'type',
+    'capture-type',
+    'category',
+    'project',
+    'tags',
+    'duration',
+    'source',
+    'capture-id',
+    _hashKey,
+  };
 
   String? get _root {
     final String? raw = _vaultPath();
@@ -102,10 +129,17 @@ class MarkdownNoteVault implements NoteVault {
 
     if (existing != null) {
       final String current = await existing.readAsString();
-      if (!await _isOurs(current)) {
+      final _Parsed? parsed = _Parsed.of(current);
+      if (parsed == null || !await _isOurs(parsed)) {
         return VaultWrite(outcome: VaultOutcome.foreign, path: existing.path);
       }
-      final String next = _render(note, hash, body);
+      final String next = _render(
+        note,
+        hash,
+        body,
+        related: parsed.relatedLines,
+        keep: parsed.foreignLines,
+      );
       if (current == next) {
         return VaultWrite(
           outcome: VaultOutcome.unchanged,
@@ -197,9 +231,14 @@ class MarkdownNoteVault implements NoteVault {
   /// than usual: a torn write leaves a file whose hash no longer matches its
   /// body, which this class would then read back as somebody else's edit and
   /// refuse to touch for good.
+  ///
+  /// Tightened before the rename: the vault is wherever the user pointed it,
+  /// outside the directory the app restricts as a whole, and a note is a
+  /// transcript (#301).
   Future<void> _write(File file, String content) async {
     final File temp = File('${file.path}.tmp');
     await temp.writeAsString(content, flush: true);
+    await restrictToOwner(temp.path);
     await temp.rename(file.path);
   }
 
@@ -214,9 +253,7 @@ class MarkdownNoteVault implements NoteVault {
   }
 
   /// Whether the file on disk is still the one we wrote.
-  Future<bool> _isOurs(String content) async {
-    final _Parsed? parsed = _Parsed.of(content);
-    if (parsed == null) return false;
+  Future<bool> _isOurs(_Parsed parsed) async {
     final String? claimed = parsed.frontMatter[_hashKey];
     if (claimed == null) return false;
     return claimed == await _hash(parsed.body);
@@ -235,24 +272,44 @@ class MarkdownNoteVault implements NoteVault {
 
   // ---------------------------------------------------------------- rendering
 
-  String _render(VaultNote note, String hash, String body) =>
-      '${_renderFrontMatter(note, hash)}$body';
+  /// [related] and [keep] are the front matter an existing note carries beyond
+  /// [ownedKeys], line for line; both empty for a note written the first time.
+  String _render(
+    VaultNote note,
+    String hash,
+    String body, {
+    List<String> related = const <String>[],
+    List<String> keep = const <String>[],
+  }) => '${_renderFrontMatter(note, hash, related, keep)}$body';
 
-  String _renderFrontMatter(VaultNote note, String hash) {
+  String _renderFrontMatter(
+    VaultNote note,
+    String hash,
+    List<String> related,
+    List<String> keep,
+  ) {
     final StringBuffer buffer = StringBuffer()
       ..writeln('---')
       ..writeln('title: ${_yaml(note.title)}')
       ..writeln('created: ${note.capturedAt.toIso8601String()}')
-      ..writeln('type: ${note.type.name}');
+      // The vault's required day-granular key, beside the exact timestamp the
+      // app has always written; readers that sort or lint by `date` need it.
+      ..writeln('date: ${_day(note.capturedAt)}')
+      // `note` for the reader's vault, whose `type` is a closed enum of note
+      // kinds; what was captured — dictation, upload, typed text — is a fact
+      // about the source, so it gets its own key rather than overloading theirs.
+      ..writeln('type: note')
+      ..writeln('capture-type: ${note.type.name}');
 
     if (note.category != null) {
       buffer.writeln('category: ${note.category!.name}');
     }
     final String? project = _projectNameFor(note);
     if (project != null) buffer.writeln('project: ${_yaml(project)}');
-    if (note.tags.isNotEmpty) {
-      buffer.writeln('tags: [${note.tags.map(_yaml).join(', ')}]');
-    }
+    final List<String> tags = note.tags.isEmpty
+        ? const <String>[VaultDefaults.defaultTag]
+        : note.tags;
+    buffer.writeln('tags: [${tags.map(_yaml).join(', ')}]');
     if (note.type.hasDuration && note.durationMs > 0) {
       buffer.writeln('duration: ${_formatDuration(note.durationMs)}');
     }
@@ -263,15 +320,27 @@ class MarkdownNoteVault implements NoteVault {
       buffer.writeln('source: ${_yaml(p.basename(primary))}');
     }
 
+    // Seeded once: a new note is otherwise an orphan in the reader's graph. An
+    // existing list is the reader's to grow and goes back exactly as found.
+    if (related.isEmpty) {
+      buffer.writeln('related: ["[[${VaultDefaults.relatedNote}]]"]');
+    } else {
+      related.forEach(buffer.writeln);
+    }
+
     buffer
-      // Last two, and in this order, so the machinery sits at the bottom of the
-      // property list the reader sees rather than above their own metadata.
+      // Last of ours, and in this order, so the machinery sits at the bottom of
+      // the property list the reader sees rather than above their metadata.
       ..writeln('capture-id: ${note.id}')
-      ..writeln('$_hashKey: $hash')
-      // Ends on the fence itself: the blank line below belongs to the *body*,
-      // because that is the text the hash is taken from and the text `_Parsed`
-      // hands back. Move it up here and every note reads as foreign forever.
-      ..writeln('---');
+      ..writeln('$_hashKey: $hash');
+    // Below the hash, because that is where the reader's indexer appends its
+    // keys: an update that moved them above would differ from the file on disk
+    // and rewrite a note nothing about the capture had changed.
+    keep.forEach(buffer.writeln);
+    // Ends on the fence itself: the blank line below belongs to the *body*,
+    // because that is the text the hash is taken from and the text `_Parsed`
+    // hands back. Move it up here and every note reads as foreign forever.
+    buffer.writeln('---');
     return buffer.toString();
   }
 
@@ -341,6 +410,7 @@ class MarkdownNoteVault implements NoteVault {
       return;
     }
     await source.copy(destination.path);
+    await restrictToOwner(destination.path);
   }
 
   /// `2026-08-05-1432-a-note-about-vaults-3f9a1c2e.md`
@@ -409,6 +479,11 @@ class MarkdownNoteVault implements NoteVault {
     return '"$escaped"';
   }
 
+  static String _day(DateTime at) =>
+      '${at.year.toString().padLeft(4, '0')}-'
+      '${at.month.toString().padLeft(2, '0')}-'
+      '${at.day.toString().padLeft(2, '0')}';
+
   static String _formatDuration(int milliseconds) {
     final Duration duration = Duration(milliseconds: milliseconds);
     final int minutes = duration.inMinutes.remainder(60);
@@ -423,9 +498,26 @@ class MarkdownNoteVault implements NoteVault {
 /// A note split back into its two halves, so the hash can be checked against
 /// exactly the text it was taken from.
 class _Parsed {
-  const _Parsed({required this.frontMatter, required this.body});
+  const _Parsed({
+    required this.frontMatter,
+    required this.relatedLines,
+    required this.foreignLines,
+    required this.body,
+  });
 
   final Map<String, String> frontMatter;
+
+  /// The `related:` key with its continuation lines, verbatim. Kept apart from
+  /// [foreignLines] because it is re-emitted in the slot we seeded it into,
+  /// not at the end with the indexer's keys.
+  final List<String> relatedLines;
+
+  /// Every front matter line that does not belong to a key in
+  /// [MarkdownNoteVault.ownedKeys], in file order and verbatim — including the
+  /// indented continuation lines of a list such as `aliases:`. Verbatim rather
+  /// than parsed and re-emitted, because this class does not speak YAML and
+  /// the one way to be sure a reader's `aliases` round-trips is to not touch it.
+  final List<String> foreignLines;
   final String body;
 
   /// Null when the file carries no front matter at all — a note the reader has
@@ -437,16 +529,40 @@ class _Parsed {
     if (end < 0) return null;
 
     final Map<String, String> fields = <String, String>{};
-    for (final String line in normalized.substring(4, end + 1).split('\n')) {
+    final List<String> related = <String>[];
+    final List<String> foreign = <String>[];
+    // A continuation line (indented, or a bare `- item`) belongs to the key
+    // above it, so it goes wherever that key went.
+    List<String>? keeping;
+    for (final String line in normalized.substring(4, end).split('\n')) {
+      final bool continuation =
+          line.startsWith(' ') || line.startsWith('\t') || line.startsWith('-');
+      if (continuation) {
+        keeping?.add(line);
+        continue;
+      }
       final int colon = line.indexOf(':');
-      if (colon <= 0) continue;
-      fields[line.substring(0, colon).trim()] = line
-          .substring(colon + 1)
-          .trim();
+      if (colon <= 0) {
+        keeping = null;
+        continue;
+      }
+      final String key = line.substring(0, colon).trim();
+      fields[key] = line.substring(colon + 1).trim();
+      keeping = key == 'related'
+          ? related
+          : MarkdownNoteVault.ownedKeys.contains(key)
+          ? null
+          : foreign;
+      keeping?.add(line);
     }
     // `+5` clears the closing fence and its newline; the blank line the writer
     // puts after it belongs to the body, and must, or the hash would not match
     // what was hashed.
-    return _Parsed(frontMatter: fields, body: normalized.substring(end + 5));
+    return _Parsed(
+      frontMatter: fields,
+      relatedLines: related,
+      foreignLines: foreign,
+      body: normalized.substring(end + 5),
+    );
   }
 }

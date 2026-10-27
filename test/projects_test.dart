@@ -2,6 +2,7 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:augustyniak_capture/features/projects/data/projects_repository.dart';
+import 'package:augustyniak_capture/features/projects/domain/agent_session_launcher.dart';
 import 'package:augustyniak_capture/features/projects/domain/project.dart';
 import 'package:flutter_test/flutter_test.dart';
 
@@ -93,6 +94,85 @@ void main() {
       expect(
         restored.settingsFor(AgentKind.antigravity).additionalArgs,
         <String>['--model', 'gemini-2.5-pro'],
+      );
+    });
+
+    test('geminiCli is its own agent and legacy gemini stays Antigravity', () {
+      expect(AgentKind.fromName('gemini'), AgentKind.antigravity);
+      expect(AgentKind.fromName('geminiCli'), AgentKind.geminiCli);
+      expect(AgentKind.fromName('someFutureAgent'), isNull);
+
+      const Project project = Project(
+        id: 'g',
+        name: 'G',
+        repoPath: '/tmp/g',
+        defaultAgent: AgentKind.geminiCli,
+        agentSettings: <AgentKind, AgentSettings>{
+          AgentKind.geminiCli: AgentSettings(skipPermissions: true),
+        },
+      );
+      final Project restored = Project.fromJson(project.toJson());
+      expect(restored.defaultAgent, AgentKind.geminiCli);
+      expect(restored.settingsFor(AgentKind.geminiCli).skipPermissions, isTrue);
+    });
+
+    test('Gemini CLI prompt and skip flag spellings', () {
+      expect(ProjectAgent.gemini.executable, 'gemini');
+      expect(ProjectAgent.gemini.promptArguments('do it'), <String>[
+        '-i',
+        'do it',
+      ]);
+      expect(ProjectAgent.gemini.promptArguments('--yolo'), <String>[
+        '-i',
+        ' --yolo',
+      ]);
+      expect(ProjectAgent.gemini.skipPermissionsArguments, <String>['--yolo']);
+    });
+
+    test('skip permissions round-trips and stays out of JSON when off', () {
+      const AgentSettings on = AgentSettings(skipPermissions: true);
+      expect(AgentSettings.fromJson(on.toJson()).skipPermissions, isTrue);
+
+      const AgentSettings off = AgentSettings(additionalArgs: <String>['-v']);
+      expect(off.toJson().containsKey('skipPermissions'), isFalse);
+      expect(AgentSettings.fromJson(off.toJson()).skipPermissions, isFalse);
+    });
+
+    test('a known permission flag in legacy arguments becomes the switch', () {
+      // Codex was handed Claude Code's spelling, which it rejects, so the
+      // session opened and the agent exited at once. Every known spelling is
+      // lifted out on load so the launcher can pass the right one per agent.
+      final AgentSettings restored = AgentSettings.fromJson(<String, dynamic>{
+        'additionalArgs': <String>[
+          '--search',
+          '--dangerously-skip-permissions',
+          '--dangerously-bypass-approvals-and-sandbox',
+        ],
+      });
+
+      expect(restored.skipPermissions, isTrue);
+      expect(restored.additionalArgs, <String>['--search']);
+    });
+
+    test('a misspelled permission flag is left for the editor to reject', () {
+      final AgentSettings restored = AgentSettings.fromJson(<String, dynamic>{
+        'additionalArgs': <String>['--dangerously-skip-premissions'],
+      });
+
+      expect(restored.skipPermissions, isFalse);
+      expect(restored.additionalArgs, <String>[
+        '--dangerously-skip-premissions',
+      ]);
+      expect(
+        AgentSettings.permissionFlagLookalike(restored.additionalArgs),
+        '--dangerously-skip-premissions',
+      );
+      expect(
+        AgentSettings.permissionFlagLookalike(<String>[
+          '--dangerously-bypass-hook-trust',
+          '--model',
+        ]),
+        isNull,
       );
     });
 
