@@ -116,3 +116,22 @@ enum SmartRouteConfirm {
     return SmartRouteConfirm.auto;
   }
 }
+
+/// What the SMART route did with one tap.
+class SmartRouteOutcome {
+  const SmartRouteOutcome({
+    required this.decision,
+    this.delivered = false,
+    this.awaitingConfirmation = false,
+  });
+
+  final SmartIntentDecision decision;
+
+  /// The capture was delivered. False with [awaitingConfirmation] false means
+  /// delivery failed and `RecordingsController.error` says why.
+  final bool delivered;
+
+  /// `confirmEffects` held an intent with effects for one tap. Nothing was
+  /// delivered and the capture is exactly as it was.
+  final bool awaitingConfirmation;
+}
