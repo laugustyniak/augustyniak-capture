@@ -374,7 +374,10 @@ void main() {
     tester,
   ) async {
     final controller = buildController();
-    await tester.runAsync(controller.startRecording);
+    await tester.runAsync(() async {
+      await controller.initialize();
+      await controller.startRecording();
+    });
     await tester.pumpWidget(
       hostTab(
         () => RecordingView(controller: controller),

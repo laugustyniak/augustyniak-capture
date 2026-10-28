@@ -119,6 +119,10 @@ void main() {
     );
   });
 
+  setUp(() async {
+    await controller.initialize();
+  });
+
   tearDown(() {
     if (!controllerDisposed) controller.dispose();
     appDir.deleteSync(recursive: true);
