@@ -20,16 +20,32 @@ Future<void> runSmartRoute(
   if (outcome == null || !outcome.awaitingConfirmation) return;
   if (!context.mounted) return;
   final SmartIntent intent = outcome.decision.intent;
-  final String? reason = outcome.decision.reason;
+  final String message = smartConfirmMessage(outcome);
   final bool go = await confirmDestructive(
     context,
     title: '${intent.label}?',
-    message: reason == null || reason.isEmpty
-        ? 'This capture reads as a request for ${intent.label.toLowerCase()}.'
-        : reason,
+    message: message,
     confirmLabel: 'RUN',
     destructive: false,
   );
   if (!go) return;
-  await controller.smartRoute(id, confirmed: intent);
+  await controller.smartRoute(
+    id,
+    confirmed: intent,
+    expectedText: outcome.text,
+  );
+}
+
+/// What the confirmation dialog says. The sentence is ours: the intent's fixed
+/// description and the agent that would run. The model's `reason`, when a model
+/// wrote it, is shown after it and labelled — it is context, never the thing
+/// the user is asked to approve.
+String smartConfirmMessage(SmartRouteOutcome outcome) {
+  final String? agent = outcome.agentLabel;
+  final String? reason = outcome.decision.fromModel
+      ? outcome.decision.reason
+      : null;
+  return '${outcome.decision.intent.description}'
+      '${agent == null ? '' : ' with $agent'}.'
+      '${reason == null || reason.isEmpty ? '' : '\n\nModel-suggested reason: $reason'}';
 }

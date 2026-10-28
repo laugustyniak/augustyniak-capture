@@ -2984,9 +2984,9 @@ class RecordingsController extends ChangeNotifier {
   /// the consequence of having done it, which is what lets the queue drain
   /// as a side effect of the work instead of as a separate pass over it.
   Future<void> route(String id) async {
-    final Recording recording = _recordings.firstWhere(
-      (Recording item) => item.id == id,
-    );
+    final Recording? recording = _recordingById(id);
+    // Gone (deleted while something else was awaited): nothing to deliver.
+    if (recording == null) return;
 
     final RouteRecord record;
     try {
@@ -3303,6 +3303,7 @@ class RecordingsController extends ChangeNotifier {
   Future<SmartRouteOutcome?> smartRoute(
     String id, {
     SmartIntent? confirmed,
+    String? expectedText,
   }) async {
     if (_recordings.indexWhere((Recording item) => item.id == id) < 0) {
       return null;
@@ -3314,9 +3315,18 @@ class RecordingsController extends ChangeNotifier {
       Recording? recording = _recordingById(id);
       if (recording == null || !canSmartRoute(recording)) return null;
       Set<SmartIntent> offered = offeredSmartIntents(recording);
+      final String text = _smartText(recording);
 
       SmartIntentDecision decision;
       if (confirmed != null) {
+        if (expectedText != null && expectedText != text) {
+          _error =
+              'This capture changed while you were deciding — nothing was '
+              'sent. Tap again to route it as it is now.';
+          return SmartRouteOutcome(
+            decision: SmartIntentDecision(intent: confirmed),
+          );
+        }
         if (confirmed != SmartIntent.note && !offered.contains(confirmed)) {
           _error = '${confirmed.label} is no longer available for this capture.';
           return SmartRouteOutcome(
@@ -3332,6 +3342,13 @@ class RecordingsController extends ChangeNotifier {
         if (_disposed || recording == null || !canSmartRoute(recording)) {
           return null;
         }
+        if (_smartText(recording) != text) {
+          // The verdict describes words that are no longer there.
+          _error =
+              'This capture changed while it was being read — nothing was '
+              'sent. Tap again to route it as it is now.';
+          return null;
+        }
         offered = offeredSmartIntents(recording);
         if (decision.intent != SmartIntent.note &&
             !offered.contains(decision.intent)) {
@@ -3345,6 +3362,8 @@ class RecordingsController extends ChangeNotifier {
           return SmartRouteOutcome(
             decision: decision,
             awaitingConfirmation: true,
+            agentLabel: _smartAgentLabel(recording),
+            text: text,
           );
         }
       }
@@ -3365,6 +3384,21 @@ class RecordingsController extends ChangeNotifier {
     }
   }
 
+  /// The words the SMART route reads: the transcript, else the summary — the
+  /// same two [canSend] accepts, so a blank transcript does not hide a summary.
+  String _smartText(Recording recording) =>
+      (recording.transcript ?? '').trim().isNotEmpty
+      ? recording.transcript!
+      : (recording.summary ?? '');
+
+  String? _smartAgentLabel(Recording recording) {
+    final String? id = _smartAgentId(recording);
+    return handoffAgents(recording)
+        .where((HandoffAgent agent) => agent.id == id)
+        .firstOrNull
+        ?.label;
+  }
+
   Recording? _recordingById(String id) =>
       _recordings.where((Recording item) => item.id == id).firstOrNull;
 
@@ -3375,7 +3409,7 @@ class RecordingsController extends ChangeNotifier {
     Recording recording,
     Set<SmartIntent> offered,
   ) async {
-    final String text = recording.transcript ?? recording.summary ?? '';
+    final String text = _smartText(recording);
     final void Function() releaseUsageScope = await _acquireUsageScope();
     try {
       _beginUsageJob(recording.id, UsageStage.enrichment);
@@ -3398,6 +3432,31 @@ class RecordingsController extends ChangeNotifier {
 
   /// True when the capture was delivered.
   Future<bool> _deliverSmart(Recording recording, SmartIntent intent) async {
+    try {
+      return await _deliverSmartUnguarded(recording, intent);
+    } catch (exception) {
+      // A capture deleted during the await, or a write that failed: the
+      // button reports it like every other delivery failure.
+      _error = exception.toString();
+      _logSink.log(
+        'Smart route failed: $exception',
+        level: LogLevel.error,
+        recordingId: recording.id,
+      );
+      notifyListeners();
+      return false;
+    }
+  }
+
+  Future<bool> _deliverSmartUnguarded(
+    Recording recording,
+    SmartIntent intent,
+  ) async {
+    if (_recordingById(recording.id) == null) {
+      _error = 'This capture no longer exists.';
+      notifyListeners();
+      return false;
+    }
     if (intent == SmartIntent.note) {
       if (!canRoute(recording)) {
         _error =

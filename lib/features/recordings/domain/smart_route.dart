@@ -37,6 +37,18 @@ enum SmartIntent {
     return null;
   }
 
+  /// A fixed, in-code sentence for the confirmation dialog: what will happen,
+  /// written by us. The model's reason is never a substitute for it.
+  String get description => switch (this) {
+    SmartIntent.note => "File it in the project's inbox",
+    SmartIntent.newSession => 'Start a new agent session on it',
+    SmartIntent.search => 'Search for information relevant to it',
+    SmartIntent.analyze => 'Run an analysis of it',
+    SmartIntent.nextActions => 'Propose the next actions for it',
+    SmartIntent.verify => 'Work out how to verify it',
+    SmartIntent.todoist => 'Create the Todoist task it describes',
+  };
+
   /// Short label for the decision line and the route target.
   String get label => switch (this) {
     SmartIntent.note => 'Inbox',
@@ -123,7 +135,17 @@ class SmartRouteOutcome {
     required this.decision,
     this.delivered = false,
     this.awaitingConfirmation = false,
+    this.agentLabel,
+    this.text = '',
   });
+
+  /// The agent that would run (or ran), for the confirmation line.
+  final String? agentLabel;
+
+  /// The capture text the decision was made on. The confirming call passes it
+  /// back so a capture edited while the dialog was open is not sent on a
+  /// decision about different words.
+  final String text;
 
   final SmartIntentDecision decision;
 
