@@ -71,16 +71,19 @@ AgentCommandParse parseAgentCommand(String input, {String? home}) {
           'them.',
     );
   }
+  final bool isPath = first.contains('/') || first.contains(r'\');
+  if (isPath && !_isAbsolute(_expandTilde(first, home))) {
+    return const AgentCommandParse(
+      problem:
+          'Use a bare program name or an absolute path; a relative path '
+          'depends on where the app was started.',
+    );
+  }
   final List<String> rest = <String>[
     for (final String word in words.skip(1)) _expandTilde(word, home),
   ];
-  final String? control = approvalControlIn(rest);
-  if (control != null) {
-    return AgentCommandParse(
-      problem: '$control controls tool approvals or the sandbox and is not '
-          'allowed here.',
-    );
-  }
+  final String? problem = _checkAllowlist(agent, rest);
+  if (problem != null) return AgentCommandParse(problem: problem);
   return AgentCommandParse(
     command: AgentCommand(
       agent: agent,
@@ -90,33 +93,106 @@ AgentCommandParse parseAgentCommand(String input, {String? home}) {
   );
 }
 
-/// Whether [arguments] contain anything that controls tool approvals or the
-/// sandbox. One predicate, shared by the Config parser and the Jobs list's
-/// APPROVALS OFF pill, so what is refused and what is flagged cannot drift.
-bool argumentsControlApprovals(List<String> arguments) =>
-    approvalControlIn(arguments) != null;
+bool _isAbsolute(String path) =>
+    path.startsWith('/') || RegExp(r'^[A-Za-z]:[\\/]').hasMatch(path);
 
-/// The first offending argument, or null. **A refusal list of whole families,
-/// not of spellings**: a denylist of known bypass flags leaks the next
-/// spelling, so every approval, permission-mode and sandbox control is refused
-/// regardless of its value, and `-c`/`--config` only when the setting it
-/// carries names approvals or the sandbox.
-String? approvalControlIn(List<String> arguments) {
+/// **An allowlist, not a denylist.** Every CLI has more ways to widen its own
+/// permissions than any list of bad flags can name (profiles, settings files,
+/// trust levels, allowed-tool lists, approval modes), so after the program only
+/// a short list of flags is accepted and everything else is refused with the
+/// reason shown in Config. A value is one word that does not start with `-`;
+/// both `--flag value` and `--flag=value` are read. A stray word is refused:
+/// it would be a prompt.
+///
+/// - `claude`: `--mcp-config <path>`, `--model <name>`, `--strict-mcp-config`.
+/// - `codex`: `--model <name>`, and `-c`/`--config key=value` only for the
+///   keys `model` and `mcp_servers.*`.
+/// - `agy`: nothing.
+String? _checkAllowlist(ProjectAgent agent, List<String> args) {
+  final String allowed = switch (agent) {
+    ProjectAgent.claude =>
+      'Allowed after claude: --mcp-config <path>, --model <name>, '
+          '--strict-mcp-config.',
+    ProjectAgent.codex =>
+      'Allowed after codex: --model <name>, -c/--config for model and '
+          'mcp_servers.* only.',
+    _ => 'Nothing is allowed after agy.',
+  };
+  String refuse(String word, String why) =>
+      '$word is $why. $allowed Approval, sandbox, profile and settings '
+      'controls are never accepted.';
+  for (int i = 0; i < args.length; i++) {
+    final String word = args[i];
+    final int eq = word.startsWith('--') ? word.indexOf('=') : -1;
+    final String name = eq > 0 ? word.substring(0, eq) : word;
+    final String? inline = eq > 0 ? word.substring(eq + 1) : null;
+    final bool takesValue = switch (agent) {
+      ProjectAgent.claude => name == '--mcp-config' || name == '--model',
+      ProjectAgent.codex =>
+        name == '--model' || name == '-c' || name == '--config',
+      _ => false,
+    };
+    final bool flag =
+        agent == ProjectAgent.claude && name == '--strict-mcp-config';
+    if (flag) {
+      if (inline != null) return refuse(word, 'a switch and takes no value');
+      continue;
+    }
+    if (!takesValue) return refuse(word, 'not an accepted option');
+    final String? value = inline ?? (i + 1 < args.length ? args[++i] : null);
+    if (value == null || value.isEmpty || value.startsWith('-')) {
+      return refuse(word, 'missing its value');
+    }
+    if (agent == ProjectAgent.codex && name != '--model') {
+      final String key = value.split('=').first.trim();
+      final bool ok =
+          key == 'model' ||
+          RegExp(r'^mcp_servers\.[A-Za-z0-9_.\-"]+$').hasMatch(key);
+      if (!ok || !value.contains('=')) {
+        return refuse(word, 'a setting that is not model or mcp_servers.*');
+      }
+    }
+  }
+  return null;
+}
+
+/// Whether [arguments] contain anything that controls tool approvals, the
+/// sandbox, a profile or the settings the CLI trusts. Used for **display** (the
+/// Jobs list's APPROVALS OFF pill) and to refuse the SMART route on a project
+/// whose own arguments do. It is deliberately wider than what the Todoist
+/// command could ever contain, because that field is an allowlist and these
+/// arguments are not. [agent] sharpens `-p`, which means `--profile` for codex
+/// and `--print` for claude.
+bool argumentsControlApprovals(List<String> arguments, {ProjectAgent? agent}) =>
+    approvalControlIn(arguments, agent: agent) != null;
+
+/// The first offending argument, or null.
+String? approvalControlIn(List<String> arguments, {ProjectAgent? agent}) {
   for (int i = 0; i < arguments.length; i++) {
     final String argument = arguments[i];
-    final String name = argument.split('=').first;
-    final String lower = name.toLowerCase();
+    final String lower = argument.split('=').first.toLowerCase();
     if (lower.startsWith('--dangerously') ||
         lower.startsWith('--allow-dangerously') ||
-        lower == '--yolo' ||
-        lower == '--full-auto' ||
+        lower.startsWith('--approval') ||
         lower.startsWith('--permission') ||
         lower.startsWith('--sandbox') ||
-        lower == '--ask-for-approval') {
+        lower.startsWith('--auto') ||
+        lower == '--ask-for-approval' ||
+        lower == '--yolo' ||
+        lower == '--yes' ||
+        lower == '--full-auto' ||
+        lower == '--profile' ||
+        lower == '--settings' ||
+        lower == '--setting-sources' ||
+        lower == '--allowedtools' ||
+        lower == '--allowed-tools') {
       return argument;
     }
     // Short options, with the value attached or not: `-s x`, `-sx`, `-a never`.
-    if (RegExp(r'^-[sa]').hasMatch(argument)) return argument;
+    if (RegExp(r'^-[say]').hasMatch(argument)) return argument;
+    if (agent == ProjectAgent.codex && RegExp(r'^-p').hasMatch(argument)) {
+      return argument;
+    }
     final String? configValue = argument == '-c' || argument == '--config'
         ? (i + 1 < arguments.length ? arguments[i + 1] : '')
         : argument.startsWith('--config=')
@@ -125,7 +201,10 @@ String? approvalControlIn(List<String> arguments) {
         ? argument.substring(2)
         : null;
     if (configValue != null &&
-        RegExp(r'approval|sandbox', caseSensitive: false).hasMatch(configValue)) {
+        RegExp(
+          r'approval|sandbox|profile|trust|^projects\.',
+          caseSensitive: false,
+        ).hasMatch(configValue)) {
       return argument;
     }
   }

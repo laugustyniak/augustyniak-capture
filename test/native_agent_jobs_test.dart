@@ -138,7 +138,10 @@ printf '%s\n' '{"type":"turn.completed"}'
       (<String>['--full-auto'], true),
       (<String>['-c', 'sandbox_mode=x'], true),
       (<String>['--dangerously-bypass-approvals-and-sandbox'], true),
-      (<String>['--profile', 'todoist'], false),
+      (<String>['--profile', 'todoist'], true),
+      (<String>['-p', 'yolo'], true),
+      (<String>['--approval-mode=yolo'], true),
+      (<String>['--model', 'x'], false),
     ]) {
       final NativeAgentJobs jobs = manager(executable);
       final NativeAgentJobHandle handle = await jobs.launch(

@@ -406,6 +406,7 @@ class NativeAgentJobs {
           configuredArguments is List &&
           argumentsControlApprovals(
             configuredArguments.whereType<String>().toList(growable: false),
+            agent: _agent(metadata['agent']),
           ),
       promptAccepted: parsed.promptAccepted,
       errorBeforePromptAccepted: parsed.errorBeforePromptAccepted,
