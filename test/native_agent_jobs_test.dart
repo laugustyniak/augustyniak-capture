@@ -126,6 +126,41 @@ printf '%s\n' "stderr: $prompt" >&2
     );
   });
 
+  test('approvalsOff follows the shared approval-control predicate', () async {
+    final File executable = await _fixtureExecutable(temp, r'''
+read prompt
+printf '%s\n' '{"type":"thread.started","thread_id":"thread-7"}'
+printf '%s\n' '{"type":"turn.started"}'
+printf '%s\n' '{"type":"turn.completed"}'
+''');
+    for (final (List<String> args, bool off) in <(List<String>, bool)>[
+      (<String>['--permission-mode', 'bypassPermissions'], true),
+      (<String>['--full-auto'], true),
+      (<String>['-c', 'sandbox_mode=x'], true),
+      (<String>['--dangerously-bypass-approvals-and-sandbox'], true),
+      (<String>['--profile', 'todoist'], false),
+    ]) {
+      final NativeAgentJobs jobs = manager(executable);
+      final NativeAgentJobHandle handle = await jobs.launch(
+        AgentSessionLaunchRequest(
+          projectId: 'project',
+          projectName: 'Project',
+          repoPath: workspace.path,
+          agent: ProjectAgent.codex,
+          arguments: args,
+          prompt: 'p',
+          detached: true,
+        ),
+      );
+      final NativeAgentJob job = await _pollJob(
+        jobs,
+        handle.id,
+        (NativeAgentJob v) => v.isTerminal,
+      );
+      expect(job.approvalsOff, off, reason: args.join(' '));
+    }
+  });
+
   test('an absolute executable override runs instead of the resolver', () async {
     final File argsFile = File(p.join(temp.path, 'args.txt'));
     final File executable = await _fixtureExecutable(temp, '''

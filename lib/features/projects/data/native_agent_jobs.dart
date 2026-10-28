@@ -10,6 +10,7 @@ import '../../../core/security/symlink_guard.dart';
 import '../domain/agent_session_launcher.dart';
 import '../domain/native_agent_job.dart';
 import '../domain/native_agent_types.dart';
+import '../domain/agent_command.dart';
 import 'executable_resolver.dart';
 import 'process_runner.dart';
 
@@ -403,10 +404,8 @@ class NativeAgentJobs {
           : null,
       approvalsOff:
           configuredArguments is List &&
-          configuredArguments.whereType<String>().any(
-            (String argument) =>
-                argument == '--dangerously-bypass-approvals-and-sandbox' ||
-                argument == '--dangerously-skip-permissions',
+          argumentsControlApprovals(
+            configuredArguments.whereType<String>().toList(growable: false),
           ),
       promptAccepted: parsed.promptAccepted,
       errorBeforePromptAccepted: parsed.errorBeforePromptAccepted,

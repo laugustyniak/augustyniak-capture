@@ -52,7 +52,11 @@ AgentCommandParse parseAgentCommand(String input, {String? home}) {
   }
   if (words.isEmpty) return const AgentCommandParse();
   final String first = words.first;
-  final String name = first.split('/').last;
+  final String name = first
+      .split(RegExp(r'[/\\]'))
+      .last
+      .toLowerCase()
+      .replaceFirst(RegExp(r'\.exe$'), '');
   final ProjectAgent? agent = switch (name) {
     'claude' => ProjectAgent.claude,
     'codex' => ProjectAgent.codex,
@@ -63,19 +67,19 @@ AgentCommandParse parseAgentCommand(String input, {String? home}) {
     return const AgentCommandParse(
       problem:
           'The command must start with claude, codex or agy — only those run '
-          'in the background. Put wrappers behind one of them.',
+          'in the background (macOS and Linux). Put wrappers behind one of '
+          'them.',
     );
   }
   final List<String> rest = <String>[
     for (final String word in words.skip(1)) _expandTilde(word, home),
   ];
-  for (final String word in rest) {
-    if (_bypassFlags.contains(word.split('=').first) ||
-        word.startsWith('--dangerously')) {
-      return AgentCommandParse(
-        problem: '$word turns tool approvals off and is not allowed here.',
-      );
-    }
+  final String? control = approvalControlIn(rest);
+  if (control != null) {
+    return AgentCommandParse(
+      problem: '$control controls tool approvals or the sandbox and is not '
+          'allowed here.',
+    );
   }
   return AgentCommandParse(
     command: AgentCommand(
@@ -86,11 +90,47 @@ AgentCommandParse parseAgentCommand(String input, {String? home}) {
   );
 }
 
-final Set<String> _bypassFlags = <String>{
-  for (final ProjectAgent agent in ProjectAgent.values)
-    ...agent.skipPermissionsArguments,
-  '--yolo',
-};
+/// Whether [arguments] contain anything that controls tool approvals or the
+/// sandbox. One predicate, shared by the Config parser and the Jobs list's
+/// APPROVALS OFF pill, so what is refused and what is flagged cannot drift.
+bool argumentsControlApprovals(List<String> arguments) =>
+    approvalControlIn(arguments) != null;
+
+/// The first offending argument, or null. **A refusal list of whole families,
+/// not of spellings**: a denylist of known bypass flags leaks the next
+/// spelling, so every approval, permission-mode and sandbox control is refused
+/// regardless of its value, and `-c`/`--config` only when the setting it
+/// carries names approvals or the sandbox.
+String? approvalControlIn(List<String> arguments) {
+  for (int i = 0; i < arguments.length; i++) {
+    final String argument = arguments[i];
+    final String name = argument.split('=').first;
+    final String lower = name.toLowerCase();
+    if (lower.startsWith('--dangerously') ||
+        lower.startsWith('--allow-dangerously') ||
+        lower == '--yolo' ||
+        lower == '--full-auto' ||
+        lower.startsWith('--permission') ||
+        lower.startsWith('--sandbox') ||
+        lower == '--ask-for-approval') {
+      return argument;
+    }
+    // Short options, with the value attached or not: `-s x`, `-sx`, `-a never`.
+    if (RegExp(r'^-[sa]').hasMatch(argument)) return argument;
+    final String? configValue = argument == '-c' || argument == '--config'
+        ? (i + 1 < arguments.length ? arguments[i + 1] : '')
+        : argument.startsWith('--config=')
+        ? argument.substring('--config='.length)
+        : RegExp(r'^-c.').hasMatch(argument)
+        ? argument.substring(2)
+        : null;
+    if (configValue != null &&
+        RegExp(r'approval|sandbox', caseSensitive: false).hasMatch(configValue)) {
+      return argument;
+    }
+  }
+  return null;
+}
 
 String _expandTilde(String word, String? home) {
   if (home == null || home.isEmpty) return word;

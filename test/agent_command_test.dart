@@ -77,5 +77,61 @@ void main() {
         expect(parse.problem, isNotNull, reason: flag);
       }
     });
+
+    const List<List<String>> approvalControls = <List<String>>[
+      <String>['--allow-dangerously-skip-permissions'],
+      <String>['--allow-dangerously-anything'],
+      <String>['--permission-mode', 'bypassPermissions'],
+      <String>['--permission-mode=acceptEdits'],
+      <String>['--permission-mode', 'default'],
+      <String>['--full-auto'],
+      <String>['-s', 'danger-full-access'],
+      <String>['-sdanger-full-access'],
+      <String>['--sandbox', 'read-only'],
+      <String>['--sandbox=workspace-write'],
+      <String>['-a', 'never'],
+      <String>['--ask-for-approval', 'never'],
+      <String>['--ask-for-approval=never'],
+      <String>['-c', 'approval_policy="never"'],
+      <String>['-c', 'sandbox_mode=danger-full-access'],
+      <String>['--config', 'approval_policy=never'],
+      <String>['--config=sandbox_mode=x'],
+      <String>['-capproval_policy=never'],
+      <String>['-c', 'SANDBOX_MODE=x'],
+    ];
+
+    for (final List<String> flags in approvalControls) {
+      test('refuses the approval or sandbox control ${flags.join(' ')}', () {
+        for (final String exe in <String>['claude', 'codex']) {
+          final AgentCommandParse parse = parseAgentCommand(
+            '$exe ${flags.join(' ')}',
+          );
+          expect(parse.command, isNull, reason: flags.join(' '));
+          expect(parse.problem, isNotNull);
+        }
+        expect(argumentsControlApprovals(flags), isTrue);
+      });
+    }
+
+    test('an unrelated -c value and ordinary options are allowed', () {
+      for (final String line in <String>[
+        'codex -c model="o3"',
+        'codex --config model=o3',
+        'claude --mcp-config /t.json --allowedTools mcp__todoist',
+        'claude --model sonnet --append-system-prompt "be brief"',
+      ]) {
+        expect(parseAgentCommand(line).problem, isNull, reason: line);
+        expect(parseAgentCommand(line).command, isNotNull, reason: line);
+      }
+      expect(argumentsControlApprovals(<String>['--model', 'x']), isFalse);
+    });
+
+    test('Windows-style paths and .exe map by basename', () {
+      expect(
+        parseAgentCommand(r'C:\tools\Claude.EXE --x').command?.agent,
+        ProjectAgent.claude,
+      );
+      expect(parseAgentCommand('codex.exe').command?.agent, ProjectAgent.codex);
+    });
   });
 }
