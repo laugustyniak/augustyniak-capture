@@ -1,6 +1,9 @@
+import '../../settings/domain/queue_sort.dart';
 import '../domain/capture_priority.dart';
 import '../domain/recording.dart';
 import 'queue_list_row.dart';
+
+export '../../settings/domain/queue_sort.dart';
 
 /// The priority axis of the queue's filters.
 ///
@@ -24,10 +27,6 @@ enum PriorityFilter {
   };
 }
 
-/// The list order. [newest] is the controller's order and the default, so a
-/// user who never touches the toggle sees nothing move.
-enum QueueSort { newest, priority }
-
 /// Single definition of the priority axis, used for both the list and the
 /// menu's counts so the two cannot disagree.
 bool matchesPriority(PriorityFilter filter, Recording item) => switch (filter) {
@@ -41,9 +40,10 @@ bool matchesPriority(PriorityFilter filter, Recording item) => switch (filter) {
 
 /// [items] in the order [sort] asks for, as a new list.
 ///
-/// The priority order is P0 → P3, then unranked. Ties keep the incoming order,
-/// which is the controller's newest-first, and that is made explicit rather
-/// than left to `List.sort` — which promises no stability.
+/// The priority order is P0 → P3, then unranked, and within a rank the oldest
+/// capture first: what has waited longest is what the desk should show next.
+/// Equal ages keep the incoming order, made explicit rather than left to
+/// `List.sort` — which promises no stability.
 List<Recording> sortForQueue(List<Recording> items, QueueSort sort) {
   if (sort == QueueSort.newest) return List<Recording>.of(items);
   final List<(int, Recording)> indexed = <(int, Recording)>[
@@ -53,9 +53,23 @@ List<Recording> sortForQueue(List<Recording> items, QueueSort sort) {
       item.priority?.index ?? CapturePriority.values.length;
   indexed.sort(((int, Recording) a, (int, Recording) b) {
     final int byRank = rank(a.$2).compareTo(rank(b.$2));
-    return byRank != 0 ? byRank : a.$1.compareTo(b.$1);
+    if (byRank != 0) return byRank;
+    final int byAge = a.$2.createdAt.compareTo(b.$2.createdAt);
+    return byAge != 0 ? byAge : a.$1.compareTo(b.$1);
   });
   return <Recording>[for (final (int, Recording) entry in indexed) entry.$2];
+}
+
+/// Whether [item] has waited longer than its rank allows: a P0 for more than a
+/// day, a P1 for more than a week. Lower ranks and unranked are never overdue —
+/// nothing promised them a deadline.
+bool isOverdue(Recording item, DateTime now) {
+  final Duration? limit = switch (item.priority) {
+    CapturePriority.p0 => const Duration(days: 1),
+    CapturePriority.p1 => const Duration(days: 7),
+    _ => null,
+  };
+  return limit != null && now.difference(item.createdAt) > limit;
 }
 
 /// The list's pinned section headers: one per day under [QueueSort.newest],

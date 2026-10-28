@@ -1853,7 +1853,7 @@ void main() {
       expect(find.text('Low item'), findsNothing);
     });
 
-    testWidgets('sorting by priority reorders the list, newest stays default', (
+    testWidgets('the list opens in priority order, and the toggle turns it off', (
       WidgetTester tester,
     ) async {
       final RecordingsController controller = await buildRecordingsController(
@@ -1862,21 +1862,15 @@ void main() {
       );
       await pumpQueue(tester, controller);
 
-      // Default: the controller's order, untouched.
-      expect(top(tester, 'Low item'), lessThan(top(tester, 'Urgent item')));
-
-      await openPriorityMenu(tester);
-      await tester.tap(find.text(QueuePriorityMenu.sortLabel));
-      await tester.pumpAndSettle();
-
+      // Default: focus order (#384).
       expect(top(tester, 'Urgent item'), lessThan(top(tester, 'Low item')));
       expect(top(tester, 'Low item'), lessThan(top(tester, 'Unranked item')));
 
-      // The same entry turns it back off.
       await openPriorityMenu(tester);
       await tester.tap(find.text(QueuePriorityMenu.sortLabel));
       await tester.pumpAndSettle();
 
+      // Off: the controller's order.
       expect(top(tester, 'Low item'), lessThan(top(tester, 'Urgent item')));
     });
 
@@ -1894,10 +1888,11 @@ void main() {
       await pumpQueue(tester, controller);
 
       expect(tester.takeException(), isNull);
+      // The sort is on by default, and the glyph says so.
       expect(
         find.descendant(
           of: find.byType(QueuePriorityMenu),
-          matching: find.byIcon(Icons.flag_outlined),
+          matching: find.byIcon(Icons.sort_rounded),
         ),
         findsOneWidget,
       );
