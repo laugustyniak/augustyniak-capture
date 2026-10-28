@@ -1,5 +1,13 @@
 # Changelog
 
+## Unreleased
+
+- Add a SMART route button to a capture (#386): it reads what the note asks for
+  (search, analysis, next actions, verification, a new agent session, a Todoist
+  task, or a plain note for the project inbox) and routes it in one tap. Fully
+  automatic by default; Config > SMART ROUTE can ask first before an agent
+  starts, and holds the agent command the Todoist intent runs.
+
 ## 0.2.0 — 2026-09-07
 
 - Show the installed application version and build number in the desktop footer.
