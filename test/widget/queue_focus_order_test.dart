@@ -152,4 +152,67 @@ void main() {
 
     expect(find.textContaining('OVERDUE'), findsNothing);
   });
+
+  testWidgets('a sort that loads after the first build still applies', (
+    WidgetTester tester,
+  ) async {
+    final RecordingsController controller = await buildRecordingsController(
+      appDir,
+      seed: seed(),
+    );
+    QueueSort sort = QueueSort.priority;
+    await tester.pumpWidget(
+      hostTab(
+        () => QueueTab(controller: controller, now: () => now, sort: sort),
+        listenable: controller,
+      ),
+    );
+    await tester.pump();
+    expect(top(tester, 'old-p0'), lessThan(top(tester, 'fresh-p0')));
+
+    // Settings finish loading after the tab was built.
+    sort = QueueSort.newest;
+    controller.notifyListeners();
+    await tester.pump();
+
+    expect(top(tester, 'fresh-p0'), lessThan(top(tester, 'late-p1')));
+    expect(top(tester, 'late-p1'), lessThan(top(tester, 'old-p0')));
+  });
+
+  testWidgets('the overdue pill is DESK-only and its filter ends with it', (
+    WidgetTester tester,
+  ) async {
+    final RecordingsController controller = await buildRecordingsController(
+      appDir,
+      seed: <Recording>[
+        ...seed(),
+        capture(
+          'handed-p2',
+          CapturePriority.p2,
+          const Duration(days: 2),
+        ).copyWith(isProcessedByUser: true),
+      ],
+    );
+    await tester.pumpWidget(
+      hostTab(
+        () => QueueTab(controller: controller, now: () => now),
+        listenable: controller,
+      ),
+    );
+    await tester.pump();
+
+    await tester.tap(find.text('OVERDUE 2'));
+    await tester.pumpAndSettle();
+    expect(find.text('fresh-p0'), findsNothing);
+
+    await tester.tap(find.textContaining('OFF DESK'));
+    await tester.pumpAndSettle();
+    expect(find.textContaining('OVERDUE'), findsNothing);
+    expect(find.text('handed-p2'), findsOneWidget);
+
+    await tester.tap(find.textContaining('DESK').first);
+    await tester.pumpAndSettle();
+    expect(find.text('OVERDUE 2'), findsOneWidget);
+    expect(find.text('fresh-p0'), findsOneWidget);
+  });
 }

@@ -110,6 +110,13 @@ void main() {
           isFalse);
     });
 
+    test('exactly one day (p0) or seven (p1) old is not overdue', () {
+      expect(isOverdue(aged(CapturePriority.p0, const Duration(days: 1)), now),
+          isFalse);
+      expect(isOverdue(aged(CapturePriority.p1, const Duration(days: 7)), now),
+          isFalse);
+    });
+
     test('p2, p3 and unranked are never overdue', () {
       for (final CapturePriority? priority in <CapturePriority?>[
         CapturePriority.p2,

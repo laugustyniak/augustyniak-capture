@@ -222,21 +222,31 @@ class _QueueTabState extends State<QueueTab> {
   /// the selection onto whatever item slid into that slot.
   String? focusedId;
 
-  /// Bring [capture] into view the way the layout opens one: selected beside
-  /// the list on a wide screen (every filter cleared, so it cannot be hidden),
-  /// its own page on a phone, the focus view in between. [edit] opens it in
-  /// the editor where the layout allows, for a jump that started in one.
   void _setSort(QueueSort value) {
     setState(() => queueSort = value);
     widget.onSortChanged?.call(value);
   }
 
+  /// The overdue filter counts desk captures only, so leaving the desk ends it
+  /// rather than leaving a hidden filter narrowing another view.
+  void _setReview(ReviewFilter value) {
+    setState(() {
+      reviewFilter = value;
+      if (value != ReviewFilter.desk) overdueOnly = false;
+    });
+  }
+
+  /// Bring [capture] into view the way the layout opens one: selected beside
+  /// the list on a wide screen (every filter cleared, so it cannot be hidden),
+  /// its own page on a phone, the focus view in between. [edit] opens it in
+  /// the editor where the layout allows, for a jump that started in one.
   void _revealCapture(Recording capture, {bool edit = false}) {
     final double width =
         context.size?.width ?? MediaQuery.sizeOf(context).width;
     if (width >= Console.masterDetailBreakpoint) {
       setState(() {
         reviewFilter = ReviewFilter.all;
+        overdueOnly = false;
         selectedFilter = RecordingFilter.all;
         selectedTypeFilter = CaptureTypeFilter.all;
         projectFilterId = null;
@@ -374,6 +384,9 @@ class _QueueTabState extends State<QueueTab> {
   @override
   void didUpdateWidget(QueueTab oldWidget) {
     super.didUpdateWidget(oldWidget);
+    if (widget.sort != oldWidget.sort) {
+      setState(() => queueSort = widget.sort);
+    }
     if (widget.initialProjectId != oldWidget.initialProjectId) {
       setState(() {
         projectFilterId = widget.initialProjectId;
@@ -471,7 +484,8 @@ class _QueueTabState extends State<QueueTab> {
         .length;
     // Hidden at zero, but a filter left on after the last item cleared would
     // strand the user on an empty list with no control to end it.
-    final Widget? overdue = overdueCount == 0 && !overdueOnly
+    final Widget? overdue =
+        reviewFilter != ReviewFilter.desk || (overdueCount == 0 && !overdueOnly)
         ? null
         : QueueOverduePill(
             count: overdueCount,
@@ -628,9 +642,7 @@ class _QueueTabState extends State<QueueTab> {
                         total: all.length,
                         reviewed: reviewedCount,
                         filter: reviewFilter,
-                        onFilterChanged: (ReviewFilter value) {
-                          setState(() => reviewFilter = value);
-                        },
+                        onFilterChanged: _setReview,
                         onSync: () => _handleSync(context, controller),
                         searchOpen: searchOpen,
                         // Toggles the user's own flag, never the resolved one: a
@@ -706,9 +718,7 @@ class _QueueTabState extends State<QueueTab> {
                           total: all.length,
                           reviewed: reviewedCount,
                           reviewFilter: reviewFilter,
-                          onReviewChanged: (ReviewFilter value) {
-                            setState(() => reviewFilter = value);
-                          },
+                          onReviewChanged: _setReview,
                           searchController: searchController,
                           searchFocusNode: searchFocus,
                           searchQuery: searchQuery,
