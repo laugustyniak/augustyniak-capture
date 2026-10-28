@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:io';
 
+import 'package:flutter/foundation.dart' show ValueListenable;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
@@ -183,7 +184,10 @@ class _FocusBody extends StatelessWidget {
             failed: failed,
             projectName: projectName,
             compact: compact,
-            elapsed: controller.processingElapsedFor(recording.id),
+            processingTicker:
+                controller.processingElapsedFor(recording.id) != null
+                ? controller.processingTicker
+                : null,
             isEnriching: controller.isEnriching(recording.id),
           ),
           const SizedBox(height: 14),
@@ -545,7 +549,7 @@ class _Header extends StatelessWidget {
     required this.failed,
     required this.projectName,
     required this.compact,
-    this.elapsed,
+    this.processingTicker,
     this.isEnriching = false,
   });
 
@@ -555,7 +559,7 @@ class _Header extends StatelessWidget {
   final bool failed;
   final String? projectName;
   final bool compact;
-  final Duration? elapsed;
+  final ValueListenable<Duration>? processingTicker;
   final bool isEnriching;
 
   @override
@@ -613,13 +617,23 @@ class _Header extends StatelessWidget {
                         pulse: true,
                       )
                     else if (recording.status == RecordingStatus.transcribing)
-                      StatusPill(
-                        label: elapsed != null
-                            ? 'TRANSCRIBING · ${formatDuration(elapsed!)}'
-                            : 'TRANSCRIBING',
-                        color: Console.accent,
-                        pulse: true,
-                      )
+                      (processingTicker == null
+                          ? StatusPill(
+                              label: 'TRANSCRIBING',
+                              color: Console.accent,
+                              pulse: true,
+                            )
+                          : ValueListenableBuilder<Duration>(
+                              valueListenable: processingTicker!,
+                              builder:
+                                  (BuildContext _, Duration elapsed, Widget? _) =>
+                                      StatusPill(
+                                        label:
+                                            'TRANSCRIBING · ${formatDuration(elapsed)}',
+                                        color: Console.accent,
+                                        pulse: true,
+                                      ),
+                            ))
                     else if (recording.status ==
                         RecordingStatus.pendingTranscription)
                       StatusPill(
@@ -1227,7 +1241,10 @@ class CaptureDetailPanel extends StatelessWidget {
             ProcessingStrip(
               enriching: false,
               type: recording.type,
-              elapsed: controller.processingElapsedFor(recording.id),
+              processingTicker:
+                  controller.processingElapsedFor(recording.id) != null
+                  ? controller.processingTicker
+                  : null,
             ),
             const SizedBox(height: 22),
           ],

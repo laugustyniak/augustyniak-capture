@@ -129,6 +129,9 @@ void main() {
     await e2ee.followIdentity(ownerId);
     await tester.pump();
 
+    expect(find.text('NOT SET UP, SYNC PAUSED'), findsOneWidget);
+    await e2ee.confirmPlaintext();
+    await tester.pump();
     expect(find.text('NOT SET UP'), findsOneWidget);
     await tester.tap(find.text('SET UP ENCRYPTION'));
     await tester.pump();

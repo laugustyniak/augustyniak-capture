@@ -1,5 +1,7 @@
+import '../../../core/security/record_id.dart';
 import 'capture_router.dart';
 import 'route_record.dart';
+import '../../projects/domain/native_agent_types.dart';
 
 /// One agent a capture can be handed to, as the queue sees it.
 ///
@@ -35,6 +37,7 @@ class AgentHandoffRequest {
     required this.capture,
     required this.agentId,
     required this.instruction,
+    this.detached = false,
   });
 
   /// Names the brief this capture owns, so a second handoff appends to the same
@@ -56,6 +59,10 @@ class AgentHandoffRequest {
   /// The opening prompt, carrying the capture's own text — see
   /// [AgentHandoff.promptFor].
   final String instruction;
+
+  /// Start the session in the background rather than in a terminal window.
+  /// See `AgentSessionLaunchRequest.detached`.
+  final bool detached;
 }
 
 class AgentHandoffResult {
@@ -64,6 +71,8 @@ class AgentHandoffResult {
     required this.taskPath,
     required this.sessionName,
     required this.attachedToExistingSession,
+    this.detached = false,
+    this.job,
   });
 
   final RouteRecord record;
@@ -82,6 +91,12 @@ class AgentHandoffResult {
   /// user has to be told to point the running agent at it, or they will wait
   /// for work that was never requested.
   final bool attachedToExistingSession;
+
+  /// The session runs in the background and no window was opened. The caller
+  /// has to say where it is and offer a way in — [AgentHandoff.attach], or the
+  /// command to type — or the launch looks like nothing happened.
+  final bool detached;
+  final NativeAgentJobHandle? job;
 }
 
 /// Starts a coding agent on a capture, in its project's repository.
@@ -140,6 +155,13 @@ abstract interface class AgentHandoff {
   /// Throws on failure, under the same contract as [CaptureRouter.route]: the
   /// caller must record nothing when it does.
   Future<AgentHandoffResult> handoff(AgentHandoffRequest request);
+
+  /// Opens a terminal on the running session [sessionName].
+  ///
+  /// The way back into a session started detached, and into one that was
+  /// already running when a second handoff found it. Throws when the session
+  /// is not running or no terminal can open; nothing is written either way.
+  Future<void> attach(String sessionName);
 }
 
 /// The default: no agent can be started, so the queue offers no such control.
@@ -162,17 +184,16 @@ class DisabledAgentHandoff implements AgentHandoff {
   Future<AgentHandoffResult> handoff(AgentHandoffRequest request) async {
     throw const AgentHandoffUnavailableException();
   }
+
+  @override
+  Future<void> attach(String sessionName) async {
+    throw const AgentHandoffUnavailableException();
+  }
 }
 
-/// Whether [id] can be used as a single path segment.
-///
-/// Capture ids arrive from sync and from backup import, which check only that
-/// they are strings, and a handoff turns one into a directory name and a file
-/// name. `..`, a separator or an absolute path would make that a write outside
-/// the folder it was meant for.
-bool isSafeCaptureId(String id) => _safeCaptureId.hasMatch(id);
-
-final RegExp _safeCaptureId = RegExp(r'^[A-Za-z0-9_-]{1,64}$');
+/// Whether [id] can be used as a single path segment: the shared rule in
+/// `core/security/record_id.dart`, which sync and backup import also apply.
+bool isSafeCaptureId(String id) => isSafeRecordId(id);
 
 /// A handoff was refused because the capture's id is not a safe path segment.
 class UnsafeCaptureIdException implements Exception {

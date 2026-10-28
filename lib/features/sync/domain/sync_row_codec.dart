@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'package:crypto/crypto.dart';
 import 'package:path/path.dart' as p;
 
+import '../../../core/security/record_id.dart';
 import '../../../core/sync/sync_path_policy.dart';
 import '../../clipboard/domain/clipboard_item.dart';
 import '../../projects/domain/project.dart';
@@ -87,6 +88,9 @@ class SyncRowCodec {
     // sends `repoPath` as a real column by schema design. None of it is a
     // secret; a path is not device-specific in the sense a bearer token is,
     // it is just local filesystem layout another device cannot use.
+    // On arrival the rule differs: `recordingFromRow` drops `artifacts` (the
+    // viewer reads whatever path one names), and `routes[].target` is only
+    // displayed, never opened.
     final Map<String, Object?> payload = <String, Object?>{
       'thumbPath': json['thumbPath'] is String
           ? p.basename(json['thumbPath'] as String)
@@ -162,6 +166,8 @@ class SyncRowCodec {
     final Object? id = row['id'];
     final DateTime? createdAt = _date(row['created_at']);
     if (id is! String || createdAt == null) return null;
+    // An unsafe id is dropped here so nothing downstream builds a path from it (#292).
+    if (!isSafeRecordId(id)) return null;
     final Object? payloadRaw = row['payload'];
     final Map<String, dynamic> payload = payloadRaw is Map
         ? Map<String, dynamic>.from(payloadRaw)
@@ -206,7 +212,11 @@ class SyncRowCodec {
       'cleanup': payload['cleanup'],
       'instruction': payload['instruction'],
       'routes': payload['routes'] ?? <Object?>[],
-      'artifacts': payload['artifacts'] ?? <Object?>[],
+      // Artifacts name files on the machine that ran the agent, and the viewer
+      // reads and opens whatever path one carries. A remote row therefore never
+      // contributes any: this device's own list is kept, a fresh row gets none,
+      // and `AgentArtifactScanner` rediscovers them from `.agent-tasks/` here.
+      'artifacts': local?.toJson()['artifacts'] ?? <Object?>[],
       if (payload.containsKey('segments'))
         'segments': _restoreSegmentPaths(payload['segments'], localSegmentPaths)
       else if (local != null && local.hasStoredSegments)
@@ -234,7 +244,7 @@ class SyncRowCodec {
               ? localPathsByIndex[segment['index'] as int]
               : null) ??
           SyncPathPolicy.localFileName(segment['filePath']);
-      // No usable name: dropped, as `SyncPathPolicy.sanitizePayload` does.
+      // No usable name: dropped, like an artifact or a poster with no usable name.
       if (path == null) continue;
       restored.add(<String, dynamic>{...segment, 'filePath': path});
     }
@@ -272,14 +282,22 @@ class SyncRowCodec {
     'id': pr.id,
     'name': pr.name,
     'repository_path': pr.repoPath,
+    // Launch settings (extra arguments, an initial prompt, the skip-permissions
+    // switch) are device-local by decision: a row another device or a hostile
+    // server wrote must not decide how an agent is started here. Leaving them
+    // out of the payload also keeps the row's hash stable when they are edited,
+    // so a local-only change never dirties the outbox.
     'payload': pr.toJson()
       ..remove('id')
       ..remove('name')
-      ..remove('repoPath'),
+      ..remove('repoPath')
+      ..remove('agentSettings'),
   };
 
   static Project? projectFromRow(Map<String, Object?> row) {
     if (_stillSealed(row) || row['id'] is! String) return null;
+    // An unsafe id is dropped here so nothing downstream builds a path from it (#292).
+    if (!isSafeRecordId(row['id'] as String)) return null;
     final Object? payloadRaw = row['payload'];
     final Map<String, dynamic> json = <String, dynamic>{
       if (payloadRaw is Map) ...Map<String, dynamic>.from(payloadRaw),
@@ -287,6 +305,8 @@ class SyncRowCodec {
       'name': row['name'],
       'repoPath': row['repository_path'] ?? '',
     };
+    // Rows pushed by older builds still carry launch settings; never read them.
+    json.remove('agentSettings');
     try {
       return Project.fromJson(json);
     } catch (_) {
@@ -311,6 +331,8 @@ class SyncRowCodec {
     if (_stillSealed(row)) return null;
     final DateTime? copiedAt = _date(row['copied_at']);
     if (row['id'] is! String || copiedAt == null) return null;
+    // An unsafe id is dropped here so nothing downstream builds a path from it (#292).
+    if (!isSafeRecordId(row['id'] as String)) return null;
     try {
       return ClipboardItem.fromJson(<String, dynamic>{
         'id': row['id'],

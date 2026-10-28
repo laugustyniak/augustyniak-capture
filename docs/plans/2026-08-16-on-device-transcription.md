@@ -1,6 +1,6 @@
 # Plan: transcribe on the device, with no network at all
 
-Status: **proposed** · Owner: laugustyniak · Scope: a capture can be transcribed
+Status: **shipped (slices 0-3; slice 4 engine built on Linux, Android, macOS and Windows)** · remaining: no iOS engine build found; slice 4's network-off acceptance check unverified (CI transcribes a real clip on macOS and Windows) · Owner: laugustyniak · Scope: a capture can be transcribed
 by a model on this machine, chosen and managed from the Models tab, with the
 remote providers untouched beside it.
 

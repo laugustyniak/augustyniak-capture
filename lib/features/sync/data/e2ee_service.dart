@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
@@ -49,11 +50,15 @@ class E2eeNotSetUpException implements Exception {
 /// Whether the account is encrypted is a server fact ([E2eeSettingsStore]):
 /// with a row there and no key here the device is *locked* and every run is
 /// refused, because a plaintext push from a new device would sit next to
-/// sealed rows under the same owner. Only an account with no row syncs in
-/// plaintext, and then the Queue says so.
+/// sealed rows under the same owner. An account the server says has no row
+/// is *plaintext unconfirmed* and also refused, until the user confirms once
+/// ([confirmPlaintext]); only then does it sync in plaintext, and the Queue
+/// keeps saying so. The confirmation exists because "no row" is an answer a
+/// server can give falsely to hide an encrypted account (#379).
 ///
-/// A [ChangeNotifier] so the Queue can say which of the three it is:
-/// notifies whenever [cipher], [hasIdentity] or [keyOnServer] changes.
+/// A [ChangeNotifier] so the Queue can say which of the four it is (unlocked,
+/// locked, plaintext unconfirmed, confirmed plaintext): notifies whenever
+/// [cipher], [hasIdentity], [keyOnServer] or the confirmation changes.
 class E2eeService extends ChangeNotifier {
   E2eeService({
     SecureValueStore? secureStore,
@@ -81,6 +86,12 @@ class E2eeService extends ChangeNotifier {
   E2eeCipher? _cipher;
   String? _userId;
   bool? _keyOnServer;
+
+  /// The user confirmed syncing this account without encryption (this
+  /// session, or a keyring flag from an earlier one). Only meaningful while
+  /// [_keyOnServer] is false; cleared the moment the account turns out
+  /// encrypted.
+  bool _plaintextConfirmed = false;
   int _generation = 0;
   Future<void>? _restoring;
   bool _disposed = false;
@@ -100,10 +111,27 @@ class E2eeService extends ChangeNotifier {
   bool get isLocked =>
       hasIdentity && !isRestoring && !isUnlocked && _keyOnServer != false;
 
-  /// Signed in, settled, no key anywhere: runs leave in plaintext, and the
-  /// Queue keeps saying so until [enroll].
+  /// Signed in, settled, no key anywhere, and the user confirmed syncing
+  /// without encryption: runs leave in plaintext, and the Queue keeps saying
+  /// so until [enroll].
   bool get isPlaintext =>
-      hasIdentity && !isRestoring && !isUnlocked && _keyOnServer == false;
+      hasIdentity &&
+      !isRestoring &&
+      !isUnlocked &&
+      _keyOnServer == false &&
+      _plaintextConfirmed;
+
+  /// The fourth state: the server answered "no row" but nobody has confirmed
+  /// plaintext yet, so runs are refused like in [isLocked]. A row hidden by
+  /// the server must not flip a device to plaintext without a human seeing
+  /// the banner (#379). Without a settings store there is no server that
+  /// could lie, so the account counts as confirmed (see [followIdentity]).
+  bool get isPlaintextUnconfirmed =>
+      hasIdentity &&
+      !isRestoring &&
+      !isUnlocked &&
+      _keyOnServer == false &&
+      !_plaintextConfirmed;
 
   /// Whether [followIdentity] last saw a signed-in user. With an identity
   /// and no key, every sync run leaves in plaintext — the state the Queue
@@ -125,6 +153,8 @@ class E2eeService extends ChangeNotifier {
   void _setKeyOnServer(bool? value) {
     if (_disposed || value == _keyOnServer) return;
     _keyOnServer = value;
+    // An encrypted account has nothing left to confirm.
+    if (value == true && _userId != null) _clearPlaintextConfirmation(_userId!);
     notifyListeners();
   }
 
@@ -144,6 +174,7 @@ class E2eeService extends ChangeNotifier {
     _userId = userId;
     _cipher = null;
     _keyOnServer = null;
+    _plaintextConfirmed = false;
     _restoring = null;
     if (!_disposed) notifyListeners();
     if (userId == null) return Future<void>.value();
@@ -153,7 +184,14 @@ class E2eeService extends ChangeNotifier {
       // which saw the row; only a device without one has to ask.
       final bool? onServer = restored != null ? true : await _readServerKey(userId);
       if (generation != _generation) return;
+      // Only a real server's "no row" needs a human; with no settings store
+      // nothing can lie, so there is nothing to confirm.
+      final bool confirmed = onServer == false &&
+          (_settings == null || await _readPlaintextConfirmed(userId));
+      if (generation != _generation) return;
+      if (restored != null) _clearPlaintextConfirmation(userId);
       _keyOnServer = onServer;
+      _plaintextConfirmed = confirmed;
       _restoring = null;
       if (!_disposed) notifyListeners(); // `isRestoring`, `keyOnServer` changed
       _setCipher(restored);
@@ -173,6 +211,58 @@ class E2eeService extends ChangeNotifier {
     } catch (_) {
       return null;
     }
+  }
+
+  /// Whether the keyring holds the user's earlier confirmation. A keyring
+  /// that errors or never answers reads as "not confirmed": it asks again
+  /// rather than silently allowing plaintext.
+  Future<bool> _readPlaintextConfirmed(String userId) async {
+    try {
+      final String? stored = await _secureStore
+          .read(_plaintextOkKey(userId))
+          .timeout(keyringTimeout, onTimeout: () => null);
+      return stored == '1';
+    } catch (_) {
+      return false;
+    }
+  }
+
+  /// The user's one-time answer to the [isPlaintextUnconfirmed] banner: sync
+  /// this account without encryption. Refused when there is nothing to
+  /// confirm — while the state is still being read, with a key held, or when
+  /// the account is (or may be) encrypted. Flips in memory first so the
+  /// Queue follows at once; the keyring write is best effort, because a
+  /// failed one only means the next launch asks again.
+  Future<void> confirmPlaintext() async {
+    final String userId = _requireIdentity();
+    if (isRestoring || isUnlocked || _keyOnServer != false) {
+      throw StateError('nothing to confirm: this account is not known to be unencrypted');
+    }
+    if (_plaintextConfirmed) return;
+    _plaintextConfirmed = true;
+    if (!_disposed) notifyListeners();
+    try {
+      await _secureStore.write(_plaintextOkKey(userId), '1');
+    } catch (_) {}
+    // The account may have turned encrypted while the write was in flight:
+    // its clear ran first, so this late write would bring the key back.
+    if (!_plaintextConfirmed || _keyOnServer != false || _userId != userId) {
+      unawaited(
+        Future<void>.sync(() => _secureStore.delete(_plaintextOkKey(userId)))
+            .catchError((Object _) {}),
+      );
+    }
+  }
+
+  /// The account turned out encrypted: forget the plaintext confirmation, in
+  /// memory and in the keyring, so it cannot outlive the state it answered.
+  /// Best effort and unawaited, like every sink here.
+  void _clearPlaintextConfirmation(String userId) {
+    _plaintextConfirmed = false;
+    unawaited(
+      Future<void>.sync(() => _secureStore.delete(_plaintextOkKey(userId)))
+          .catchError((Object _) {}),
+    );
   }
 
   /// The signed-in user the passphrase flow acts for: [enroll] and [unlock]
@@ -322,11 +412,17 @@ class E2eeService extends ChangeNotifier {
   }
 
   /// With no key here, a run may leave in plaintext only once the server
-  /// confirmed the account was never set up. A row there means this device
+  /// confirmed the account was never set up *and* the user confirmed syncing
+  /// without encryption. A row there means this device
   /// is locked; an unanswered lookup means nobody knows, and the run waits.
   void _checkPlaintextAllowed() {
     switch (_keyOnServer) {
       case false:
+        if (!_plaintextConfirmed) {
+          throw StateError(
+            'sync skipped: this device has no encryption key; confirm SYNC WITHOUT ENCRYPTION in the Queue or set up a passphrase',
+          );
+        }
         return;
       case true:
         throw StateError(
@@ -347,10 +443,12 @@ class E2eeService extends ChangeNotifier {
   }
 
   /// The transport the engine runs over: [inner] sealed under the current
-  /// key, or [inner] itself while no key is held. Called by the resolver on
-  /// every run, so a key that arrives later applies to the next run and
-  /// never redirects one in flight. Without a key rows leave in plaintext —
-  /// the Queue's sync status says so (`NOT ENCRYPTED`); nothing here hides it.
+  /// key, or [inner] itself while no key is held and the user confirmed
+  /// plaintext (an unconfirmed or locked device is refused). Called by the
+  /// resolver on every run, so a key that arrives later applies to the next
+  /// run and never redirects one in flight. Confirmed plaintext rows leave
+  /// plain — the Queue's sync status says so (`NOT ENCRYPTED`); nothing here
+  /// hides it.
   SyncTransport wrapTransport(
     SyncTransport inner, {
     required String ownerId,
@@ -392,6 +490,11 @@ class E2eeService extends ChangeNotifier {
 
   static String _keyStoreKey(String userId) =>
       'ai.augustyniak.capture.e2ee.mek.$userId';
+
+  /// Holds `'1'` once the user confirmed syncing [userId]'s account without
+  /// encryption. Per user and in the keyring, so a reinstall asks again.
+  static String _plaintextOkKey(String userId) =>
+      'ai.augustyniak.capture.e2ee.plaintext-ok.$userId';
 
   /// Sets up a new passphrase, generates a fresh salt, derives the 256-bit MEK,
   /// persists the MEK in the local OS keyring, and returns the public KDF parameters.
@@ -456,6 +559,7 @@ class E2eeService extends ChangeNotifier {
     _generation++;
     _restoring = null;
     _keyOnServer = true;
+    _clearPlaintextConfirmation(userId);
     _setCipher(cipher);
   }
 

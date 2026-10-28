@@ -18,7 +18,9 @@ No hook at any mutation site and no new field on `Recording`. `sync_rows`
 (`app_database.dart`) holds one row per synced id: `table_name`, `id`
 (composite ids joined with `/`), `server_version` (the last version the
 server acknowledged), `pushed_hash` (sha256 of the canonical row last
-pushed). It is per install, not part of the backup archive, and never
+pushed), `sealed` (whether this device last saw the row inside an E2EE
+envelope; absent or 0 means a legacy plaintext row — see "A sealed row never
+comes back unsealed"). It is per install, not part of the backup archive, and never
 appears in `recordings.json`.
 
 At sync time each local row is canonicalised to the exact JSON the server
@@ -123,6 +125,12 @@ decode it comes along (the lag-window re-read above is what makes that
 repeat pull safe). Stored locally under `settings['sync.cursor.<table>']`
 and mirrored to the server's `sync_state` row for this device, so a
 reinstall can see where its predecessor stopped.
+
+In every pulled table (recordings, projects, clipboard items), a row whose id
+is not a safe path segment (`isSafeRecordId`, `core/security/record_id.dart`),
+live or tombstone, is dropped and counted as skipped **without** holding the
+cursor: no build will ever decode it, so holding the cursor on it would stall
+every later row of the table (#292).
 
 **Paging is keyset, not offset (#195).** Each page continues strictly
 after the previous page's last `(updated_at, key…)` tuple
@@ -351,6 +359,19 @@ or one this device never had, leaves the active id untouched — the same
 tombstone for the active project cannot leave `_activeProjectId` pointing
 at a project that no longer exists.
 
+### Projects: launch settings are device-local
+
+A project row carries `name`, `repository_path`, the description, session
+name, default agent and Command binding. It does **not** carry
+`agentSettings` (extra arguments, initial prompt, skip-permissions).
+`SyncRowCodec.project` strips them, `projectFromRow` ignores them when an
+older build's row still has them, and `applySyncedProjects` keeps this
+device's own settings for an id it already has (a new id gets none). A
+backup archive is imported the same way. Two reasons: a row another device
+or a hostile server wrote must not decide how an agent is started here, and
+leaving them out keeps the row hash stable when they are edited, so a
+local-only change never dirties the outbox. `repository_path` still syncs.
+
 ### A known staleness gap
 
 `CaptureHistory.loadRevisions()` only runs from `RecordingsController.
@@ -396,6 +417,10 @@ segment's `filePath`) unless a local row already supplies this device's own
 path. So an absolute path in `_recordings` was always written by this
 device, and a row can never make it download to — or upload from — a
 location of the row's choosing.
+`artifacts` never arrive from a remote row at all: the codec keeps the local
+row's list (empty for a new row), because the viewer reads whatever path an
+artifact names and `AgentArtifactScanner` rediscovers them on the device that
+ran the agent.
 
 **Step 1 — re-root.** `RecordingsController._rerootSyncedPaths` points every
 bare-name path a pull left behind (`SyncRowCodec.recordingFromRow` with no
@@ -527,15 +552,43 @@ fact: one `user_e2ee_settings` row per owner (`kdf_salt`, `kdf_algorithm`,
 `key_check_hash`, `kdf_iterations`), read and inserted through
 `E2eeSettingsStore` (`domain/e2ee_settings_store.dart`;
 `SupabaseE2eeSettingsStore` in `data/`, insert-only, no client-side delete
-because the table grants none). `followIdentity` reads the keyring first
+because the table grants none). The row is insert-once at the database
+level: `authenticated` has no UPDATE grant and no update policy (migration
+`20261023011253_e2ee_settings_insert_once.sql`); a re-key would be a new
+migration. `followIdentity` reads the keyring first
 and, only when it holds nothing, asks the store — the answer is
 `E2eeService.keyOnServer`: true, false, or null when the lookup failed or
 timed out (`keyringTimeout` boxes it too). That splits "no key here" into
-two states the Queue and the resolvers treat differently:
+three states the Queue and the resolvers treat differently (plus the
+unlocked one, with a key):
 
-- **Plaintext** (`isPlaintext`: `keyOnServer == false`) — the account was
-  never set up. Runs leave plain, with the `warn` line, under the red
-  `QueueTab.notEncryptedBanner` and its `SET UP ENCRYPTION` button.
+- **Plaintext unconfirmed** (`isPlaintextUnconfirmed`: `keyOnServer == false`
+  and no confirmation) — the server answered "no row" on a device with no
+  key. Runs are **refused** (`sync skipped: this device has no encryption
+  key; confirm SYNC WITHOUT ENCRYPTION…`) under
+  `QueueTab.unconfirmedBanner`, which offers `SET UP ENCRYPTION` and `SYNC
+  WITHOUT ENCRYPTION`. "No row" is an answer a server can give falsely to
+  hide an encrypted account, and the device has nothing local to contradict
+  it, so a human has to see the banner once before plaintext leaves (#379).
+  `E2eeService.confirmPlaintext()` is the opt-out; it is refused while the
+  state is still being read, with a key held, or when the account is (or may
+  be) encrypted.
+- **Plaintext** (`isPlaintext`: `keyOnServer == false` and confirmed) — the
+  account was never set up and the user said to sync anyway. Runs leave
+  plain, with the `warn` line, under the red `QueueTab.notEncryptedBanner`
+  and its `SET UP ENCRYPTION` button. The confirmation is a `'1'` under
+  `ai.augustyniak.capture.e2ee.plaintext-ok.<userId>` in the OS keyring,
+  read once by `followIdentity` (an error or timeout reads as "not
+  confirmed", so a keyring that never answers asks again), so a relaunch
+  keeps it and a reinstall asks again. It is cleared, in memory and in the
+  keyring, whenever the account turns out encrypted: set-up or unlock here,
+  a keyring key at sign-in, or the per-run re-check below finding a row
+  another device wrote. The keyring write in `confirmPlaintext` is best
+  effort and follows the in-memory flip: a failed write only means the next
+  launch asks again. **No server, no confirmation:** with no settings store
+  (tests, a build without Supabase) nothing can lie about the row, so the
+  account counts as confirmed and runs go out as before; the shipped app
+  always wires a `SupabaseE2eeSettingsStore` when Supabase is configured.
 - **Locked** (`isLocked`: `keyOnServer != false`) — the account has a key
   this device lacks: a second device, a device after `LOCK` or `FORGET
   KEY`, or a device that could not reach the server to ask. Runs are
@@ -659,6 +712,37 @@ Four rules, each with a test that fails when it is broken
   here would re-fetch it forever. A transport that *opened* a row removes
   the envelope, which is how the codec tells the two apart — and why an
   install without the key applies nothing rather than blanks.
+- **A sealed row never comes back unsealed (#377).** The envelope-less
+  branch of `_unsealRow` exists for legacy plaintext rows, but on its own it
+  would let a hostile server strip the envelope from a sealed row and write
+  plaintext of its choosing. So `sync_rows.sealed` records what this device
+  last saw: the transport sets the private `syncRowSealedMarker` key
+  (`__sealed`) on every row it actually opened, and `SyncPushResult.sealed`
+  reports that a push sealed its rows; the engine bookkeeps both. On apply
+  (`_applyRecordings`, `_applySimple`, and so push-conflict rows too) a row
+  whose bookkept state is `sealed` but which carries no marker is refused
+  per row, **after** the codec has decoded it: no apply, no bookkeeping
+  change, counted as `SupabaseSyncResult.downgraded`, and one `warn` line per
+  run through the engine's `LogSink`. The cursor is not held, so the row is
+  seen again only when it changes on the server. A row that still carries its
+  envelope (decrypt failed, key rotated, device locked) never reaches that
+  check: the codec refuses it, so it is skipped with the cursor held exactly
+  as before, and only a row that opened in plaintext is a downgrade. Legacy rows (bookkept `sealed =
+  0`) apply exactly as before, and the first sealed apply or push flips the
+  flag. `revisions` has no refusal because a known id is skipped before it is
+  decoded. The migration adds the column to existing databases with default 0.
+  The flag is **sticky**: a plain push or a conflict adoption never clears it,
+  and the only way back is the bookkeeping row going away. A refused
+  push-conflict row leaves the local row dirty, so it re-conflicts and
+  re-logs every run until the server row arrives sealed; that is accepted,
+  nothing is corrupted. Tombstones carry no envelope by design, so an
+  unmarked tombstone for a sealed id still deletes: a server can always
+  withhold or delete rows, and this rule guards content, not presence. A
+  plaintext *push* of a sealed-bookkept row is not refused here; that is the
+  fresh-device decision in plan 007 Part B.
+  **Maintenance:** every new synced table must set `sealed` on push and check
+  it on pull; a table that forgets is a table the server can downgrade. A new
+  codec decode in the engine without the check beside it is a regression.
 - **The master key never meets AES, and the verifier is not the key.**
   `E2eeKeyDerivation` derives the master key from the passphrase with
   PBKDF2-HMAC-SHA256; `E2eeCipher.forMasterKey` HKDFs a data key from it

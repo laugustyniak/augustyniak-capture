@@ -179,14 +179,15 @@ class ProjectAgentHandoff implements AgentHandoff {
           ...settings.additionalArgs,
           if (settings.skipPermissions)
             ...launcherAgent.skipPermissionsArguments,
-          // The project's own `initialPrompt` is deliberately not appended. It
-          // is the opening line for a session started *from the project card*,
-          // with no particular task in hand; here there is a task, and two
-          // prompts would leave the agent to guess which one it was started for.
-          ...launcherAgent.promptArguments(
-            frameCapturePrompt(request.instruction, capture: request.capture),
-          ),
         ],
+        // Kept separate from argv so native background adapters can feed the
+        // capture through a private stdin file. Zellij adds its own positional
+        // spelling when it builds the layout.
+        prompt: frameCapturePrompt(
+          request.instruction,
+          capture: request.capture,
+        ),
+        detached: request.detached,
       ),
     );
 
@@ -197,12 +198,19 @@ class ProjectAgentHandoff implements AgentHandoff {
         at: DateTime.now(),
         kind: RouteKind.agent,
         target: '${agentLabel(agent)} · ${session.sessionName}',
+        session: session.job == null ? session.sessionName : null,
+        agentJob: session.job,
       ),
       taskPath: taskPathFor(request.captureId),
       sessionName: session.sessionName,
       attachedToExistingSession: session.attachedToExistingSession,
+      detached: session.detached,
+      job: session.job,
     );
   }
+
+  @override
+  Future<void> attach(String sessionName) => _launcher.attach(sessionName);
 
   File _taskFile(String repoPath, String captureId) {
     final String path = p.join(repoPath, directoryName, '$captureId.md');

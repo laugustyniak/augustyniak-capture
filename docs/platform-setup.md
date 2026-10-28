@@ -37,6 +37,26 @@ mic is the whole app) and the `UIApplicationSceneManifest` that wires up
 `SceneDelegate.swift` — drop the latter and Flutter warns about the UIScene
 migration on every build.
 
+**The iOS keyboard extension is not shipped.** The `CaptureKeyboard` target
+stays in `ios/Runner.xcodeproj`, but the Runner neither depends on it nor embeds
+it, pinned by `test/ios_keyboard_full_access_test.dart` (#343). Its one feature,
+a strip of recent clipboard entries inserted with `textDocumentProxy.insertText`,
+reads `clipboard_history.json` from the `group.ai.augustyniak.capture`
+container. The host stopped writing that file when the history moved to SQLite
+in Application Support (`SqliteClipboardRepository`; `LocalJsonClipboardRepository`
+is the only writer and nothing wires it). A keyboard that is installed and
+shows nothing is worse than none. `RequestsOpenAccess` in
+`ios/CaptureKeyboard/Info.plist` is `false` (#312), pinned by the same test.
+Full Access is what lets a keyboard reach the network and the App Group, and it
+is the permission iOS warns about as "could transmit anything you type".
+
+To bring the keyboard back, the host must first publish its newest text clips
+into the group on every clipboard write. Then restore the embed phase and the
+target dependency (revert the #343 change to `project.pbxproj`), flip
+`RequestsOpenAccess` to `true`, name the reason here and update the test. The
+keyboard must still never touch `URLSession` or `UIPasteboard`, which the same
+test guards.
+
 **Recording in the background is a platform declaration on both phones, and
 neither failure says anything.** This is not an optimisation: without them a
 locked screen ends a capture mid-sentence, with no exception, no status change

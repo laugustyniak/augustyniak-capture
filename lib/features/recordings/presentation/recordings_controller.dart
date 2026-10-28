@@ -43,6 +43,9 @@ import '../data/media_picker.dart';
 import '../data/recordings_repository.dart';
 import '../data/revisions_repository.dart';
 import '../../projects/data/projects_repository.dart';
+import '../../projects/data/native_agent_jobs.dart';
+import '../../projects/domain/agent_session_launcher.dart'
+    show attachCommandFor;
 import '../../projects/domain/project.dart';
 import '../data/agent_artifact_scanner.dart';
 import '../data/vault_connection_analyzer.dart';
@@ -97,6 +100,7 @@ class RecordingsController extends ChangeNotifier {
     MediaOpener mediaOpener = const NoopMediaOpener(),
     CaptureRouter captureRouter = const DisabledCaptureRouter(),
     AgentHandoff agentHandoff = const DisabledAgentHandoff(),
+    this.agentJobs,
     CaptureSender captureSender = const DisabledCaptureSender(),
     NoteVault noteVault = const DisabledNoteVault(),
     ConnectionReasoner connectionReasoner = const ReviewConnectionReasoner(),
@@ -223,6 +227,9 @@ class RecordingsController extends ChangeNotifier {
       });
     } catch (_) {}
   }
+
+  /// Shared native job store used by the handoff result and Projects tab.
+  final NativeAgentJobs? agentJobs;
 
   final RecordingsRepository _repository;
 
@@ -352,6 +359,9 @@ class RecordingsController extends ChangeNotifier {
 
   final Stopwatch _stopwatch = Stopwatch();
   final ValueNotifier<Duration> _elapsedTicker = ValueNotifier<Duration>(
+    Duration.zero,
+  );
+  final ValueNotifier<Duration> _processingTicker = ValueNotifier<Duration>(
     Duration.zero,
   );
   final ValueNotifier<double> _levelTicker = ValueNotifier<double>(0);
@@ -539,6 +549,11 @@ class RecordingsController extends ChangeNotifier {
   /// controller when all you render is the running time — it repaints one label
   /// rather than the whole page.
   ValueListenable<Duration> get elapsedTicker => _elapsedTicker;
+
+  /// Ticks every 500 ms while a processing job is in flight. Listen to this
+  /// instead of the controller when all you render is the running time — it
+  /// repaints one label rather than the whole page.
+  ValueListenable<Duration> get processingTicker => _processingTicker;
 
   /// Input level, `0`–`1`, while recording. Same reasoning as [elapsedTicker]:
   /// the waveform is the only thing that repaints at this rate, so it listens
@@ -1314,8 +1329,11 @@ class RecordingsController extends ChangeNotifier {
     // empty snapshot would read as "everything was deleted locally" to the
     // push-side sweep — see the engine's own refusal for an empty outbox,
     // which this gate backs up rather than relies on alone.
+    // A snapshot taken before initialize() is [] for the same reason an
+    // unreadable index is, and the engine's fuse covers `recordings` only.
     final String? ownerId = _authGateway?.currentIdentity?.id;
     final bool hasSupabase =
+        _initialized &&
         !_indexUnreadable &&
         ownerId != null &&
         _syncTransportResolver != null &&
@@ -1394,6 +1412,7 @@ class RecordingsController extends ChangeNotifier {
                   applySyncedRecordingDelete: applySyncedRecordingDelete,
                   recordingExists: _hasRecording,
                 ),
+                log: _logSink,
                 syncClipboard: _syncClipboard?.call() ?? false,
               ).run(snapshot);
             }
@@ -1760,6 +1779,15 @@ class RecordingsController extends ChangeNotifier {
   }
 
   Future<void> startRecording({String? appendTo}) async {
+    // Before the first load the list is empty, not right: persisting now would
+    // overwrite recordings.json with just this capture (see addTextNote).
+    if (!_initialized) {
+      if (!_indexUnreadable) {
+        _error = 'Captures are still loading — try again.';
+        notifyListeners();
+      }
+      return;
+    }
     if (_isRecording || _isBusy) return;
     _error = null;
 
@@ -2623,12 +2651,57 @@ class RecordingsController extends ChangeNotifier {
     }
   }
 
+  Future<void> _admitNewImportedFile({
+    required File source,
+    required CaptureType type,
+    String? mimeType,
+    required bool hashImmediately,
+  }) async {
+    final String id = const Uuid().v4();
+    final Recording imported = await _importer.importFile(
+      id: id,
+      type: type,
+      source: source,
+      mimeType: mimeType,
+      createdAt: DateTime.now(),
+    );
+    final Recording saved = imported.copyWith(
+      projectId: activeProjectId,
+      projectAuto: activeProjectId != null,
+    );
+
+    // Critical invariant: index only after the source is copied and verified.
+    _recordings = <Recording>[saved, ..._recordings];
+    await _persistAll();
+    if (hashImmediately) {
+      unawaited(_computeContentHash(saved.id));
+    }
+    unawaited(_gamificationController?.onCaptureCreated(_recordings.length));
+    _logSink.log(
+      'File imported · ${type.name} · ${await File(saved.filePath).length()} B',
+      recordingId: saved.id,
+    );
+
+    // Enqueue for background processing and return; the drain loop runs the
+    // job off the capture lock so it never blocks the next capture.
+    await _enqueueProcessing(saved.id);
+  }
+
   /// Import an existing file (audio, image or video) as a new item. Mirrors the
   /// ordering of [stopRecording]: pick, copy the source into the app directory
   /// and verify it (via [MediaImporter]), index with status `saved`, and only
   /// then process. A cancelled pick is a no-op; a copy or processing failure
   /// never deletes the source.
   Future<void> addUpload(CaptureType type, {String? appendTo}) async {
+    // Before the first load the list is empty, not right: persisting now would
+    // overwrite recordings.json with just this capture (see addTextNote).
+    if (!_initialized) {
+      if (!_indexUnreadable) {
+        _error = 'Captures are still loading — try again.';
+        notifyListeners();
+      }
+      return;
+    }
     if (_isRecording || _isBusy) return;
     _isBusy = true;
     _error = null;
@@ -2657,32 +2730,12 @@ class RecordingsController extends ChangeNotifier {
         return;
       }
 
-      final String id = const Uuid().v4();
-      final Recording imported = await _importer.importFile(
-        id: id,
-        type: type,
+      await _admitNewImportedFile(
         source: picked.file,
+        type: type,
         mimeType: picked.mimeType,
-        createdAt: DateTime.now(),
+        hashImmediately: true,
       );
-      final Recording saved = imported.copyWith(
-        projectId: activeProjectId,
-        projectAuto: activeProjectId != null,
-      );
-
-      // Critical invariant: index only after the source is copied and verified.
-      _recordings = <Recording>[saved, ..._recordings];
-      await _persistAll();
-      unawaited(_computeContentHash(saved.id));
-      unawaited(_gamificationController?.onCaptureCreated(_recordings.length));
-      _logSink.log(
-        'File imported · ${type.name} · ${await File(saved.filePath).length()} B',
-        recordingId: saved.id,
-      );
-
-      // Enqueue for background processing and return; the drain loop runs the
-      // job off the capture lock so it never blocks the next capture.
-      await _enqueueProcessing(saved.id);
     } catch (exception) {
       _error = exception.toString();
       _logSink.log('Failed to import file: $exception', level: LogLevel.error);
@@ -2699,6 +2752,15 @@ class RecordingsController extends ChangeNotifier {
     String? appendTo,
     String? mimeType,
   }) async {
+    // Before the first load the list is empty, not right: persisting now would
+    // overwrite recordings.json with just this capture (see addTextNote).
+    if (!_initialized) {
+      if (!_indexUnreadable) {
+        _error = 'Captures are still loading — try again.';
+        notifyListeners();
+      }
+      return;
+    }
     if (_isRecording || _isBusy) return;
     _isBusy = true;
     _error = null;
@@ -2724,28 +2786,12 @@ class RecordingsController extends ChangeNotifier {
         return;
       }
 
-      final String id = const Uuid().v4();
-      final Recording imported = await _importer.importFile(
-        id: id,
-        type: type,
+      await _admitNewImportedFile(
         source: file,
+        type: type,
         mimeType: mimeType,
-        createdAt: DateTime.now(),
+        hashImmediately: false,
       );
-      final Recording saved = imported.copyWith(
-        projectId: activeProjectId,
-        projectAuto: activeProjectId != null,
-      );
-
-      _recordings = <Recording>[saved, ..._recordings];
-      await _persistAll();
-      unawaited(_gamificationController?.onCaptureCreated(_recordings.length));
-      _logSink.log(
-        'File imported · ${type.name} · ${await File(saved.filePath).length()} B',
-        recordingId: saved.id,
-      );
-
-      await _enqueueProcessing(saved.id);
     } catch (exception) {
       _error = exception.toString();
       _logSink.log('Failed to import file: $exception', level: LogLevel.error);
@@ -3166,6 +3212,7 @@ class RecordingsController extends ChangeNotifier {
     String id, {
     required String agentId,
     String? instruction,
+    bool detached = false,
   }) async {
     final int index = _recordings.indexWhere((Recording item) => item.id == id);
     if (index < 0) return null;
@@ -3183,6 +3230,7 @@ class RecordingsController extends ChangeNotifier {
           instruction: instruction?.trim().isNotEmpty == true
               ? instruction!.trim()
               : _agentHandoff.promptFor(capture),
+          detached: detached,
         ),
       );
     } catch (exception) {
@@ -3210,12 +3258,38 @@ class RecordingsController extends ChangeNotifier {
     );
     _logSink.log(
       result.attachedToExistingSession
-          ? 'Attached to ${result.record.target} · brief at ${result.taskPath}'
+          ? '${result.detached ? 'Found running' : 'Attached to'} '
+                '${result.record.target} · brief at ${result.taskPath}'
+          : result.detached
+          ? 'Started ${result.record.target} in the background · '
+                '${attachCommandFor(result.sessionName)} · '
+                'brief at ${result.taskPath}'
           : 'Handed off to ${result.record.target} · brief at ${result.taskPath}',
       recordingId: id,
     );
     unawaited(refreshArtifacts(id));
     return result;
+  }
+
+  /// Open a terminal on the agent session [sessionName] — the way back into a
+  /// session [handoff] started detached, or found already running.
+  ///
+  /// Nothing about the capture changes: the route was recorded when the
+  /// session started, and looking at it is not a second delivery. Returns
+  /// false with [error] set when the session is not running or no terminal
+  /// can open.
+  Future<bool> attachSession(String sessionName) async {
+    try {
+      await _agentHandoff.attach(sessionName);
+    } catch (exception) {
+      _error = exception.toString();
+      _logSink.log('Attach failed: $exception', level: LogLevel.error);
+      notifyListeners();
+      return false;
+    }
+    _error = null;
+    notifyListeners();
+    return true;
   }
 
   /// Send a capture's text to an assistant, the share sheet or the clipboard —
@@ -4000,12 +4074,21 @@ class RecordingsController extends ChangeNotifier {
     // otherwise queue it a second time and process it twice.
     _processingId = id; // marks this id in-flight so it can't be re-enqueued
     _processingStartTime = DateTime.now();
+    _processingTicker.value = Duration.zero;
     _processingTickerTimer?.cancel();
+    // Ticks into `processingTicker` rather than a controller-wide
+    // notification: the elapsed time repaints one label, while notifying the
+    // controller rebuilds the whole page. The status transitions above and
+    // below still notify.
     _processingTickerTimer = Timer.periodic(
       const Duration(milliseconds: 500),
       (_) {
-        if (!_disposed && _processingId != null) {
-          notifyListeners();
+        if (!_disposed &&
+            _processingId != null &&
+            _processingStartTime != null) {
+          _processingTicker.value = DateTime.now().difference(
+            _processingStartTime!,
+          );
         }
       },
     );
@@ -5098,6 +5181,7 @@ class RecordingsController extends ChangeNotifier {
     _processingTickerTimer = null;
     unawaited(_amplitudeSub?.cancel());
     _elapsedTicker.dispose();
+    _processingTicker.dispose();
     _levelTicker.dispose();
     _playerCompleteSub?.cancel();
     _playerPositionSub?.cancel();

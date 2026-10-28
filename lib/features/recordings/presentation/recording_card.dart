@@ -1,17 +1,20 @@
 import 'dart:io';
 
+import 'package:flutter/foundation.dart' show ValueListenable;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import '../../../app/markdown/simple_markdown.dart';
 import '../../../app/ui_kit.dart';
 import '../../gamification/presentation/done_burst_animation.dart';
+import '../../projects/data/native_agent_jobs.dart';
 import '../domain/agent_artifact.dart';
 import '../domain/capture_type.dart';
 import '../domain/recording.dart';
 import '../domain/related_captures.dart';
 import '../domain/route_record.dart';
 import '../domain/suggested_route.dart';
+import 'agent_runs.dart';
 import 'card_parts.dart';
 
 /// One queue item, in the design's "console card" form.
@@ -46,15 +49,20 @@ class RecordingCard extends StatelessWidget {
     this.onSelectArtifact,
     this.onOpenOutcome,
     this.canOpenOutcome,
+    this.onAttachSession,
     this.focused = false,
     this.costUsd,
     this.onOpenFocus,
     this.onConfigureModels,
     this.onCancelProcessing,
-    this.processingElapsed,
+    this.processingTicker,
     this.relatedCount = 0,
     this.repeatCount = 0,
+    this.agentJobs,
   });
+
+  /// Null hides the AGENT pill; set when local agent jobs can be read.
+  final NativeAgentJobs? agentJobs;
 
   /// Said in both places the action is offered — the poster and the button —
   /// so a screen reader announces one action, not two different-sounding ones.
@@ -163,6 +171,12 @@ class RecordingCard extends StatelessWidget {
   /// once for the card, because the answer differs row by row.
   final bool Function(RouteOutcome outcome)? canOpenOutcome;
 
+  /// Opens a terminal on the agent session the latest delivery started — the
+  /// way back into a session that ran in the background. Null where no
+  /// launcher exists, which hides the action; the session name on the route
+  /// line still says where it went.
+  final void Function(String sessionName)? onAttachSession;
+
   /// This row is the one the keyboard is on.
   ///
   /// Drawn on the shell's border, which is the card's single state channel, and
@@ -191,7 +205,7 @@ class RecordingCard extends StatelessWidget {
   final VoidCallback? onOpenFocus;
   final VoidCallback? onConfigureModels;
   final VoidCallback? onCancelProcessing;
-  final Duration? processingElapsed;
+  final ValueListenable<Duration>? processingTicker;
 
   /// Captures close in meaning to this one (#272). Zero draws nothing, which
   /// is also what an install without an embedding model always passes.
@@ -223,11 +237,7 @@ class RecordingCard extends StatelessWidget {
     final String baseTranscribing = recording.type == CaptureType.image
         ? 'EXTRACTING'
         : 'TRANSCRIBING';
-    final String? transcribingLabel = isTranscribing
-        ? (processingElapsed != null
-            ? '$baseTranscribing · ${formatDuration(processingElapsed!)}'
-            : baseTranscribing)
-        : null;
+    final String? transcribingLabel = isTranscribing ? baseTranscribing : null;
     final _StatusVisual? visual = isEnriching
         ? _StatusVisual('ANALYZING', Console.accent, pulse: true)
         : isTranscribing
@@ -296,10 +306,29 @@ class RecordingCard extends StatelessWidget {
             outlined: true,
           ),
         ),
+      if (agentJobs != null && agentJobHandles(recording).isNotEmpty)
+        AgentRunPill(
+          jobs: agentJobs!,
+          handle: agentJobHandles(recording).first,
+        ),
       AnimatedSwitcher(
         duration: const Duration(milliseconds: 260),
         child: visual == null
             ? const SizedBox.shrink()
+            : (isTranscribing && !isEnriching && processingTicker != null)
+            // Only the `· mm:ss` suffix moves, so only this pill repaints; the
+            // key stays on the base label so the switcher does not cross-fade
+            // on every tick.
+            ? ValueListenableBuilder<Duration>(
+                key: ValueKey<String>(visual.label),
+                valueListenable: processingTicker!,
+                builder: (BuildContext _, Duration elapsed, Widget? _) =>
+                    StatusPill(
+                      label: '${visual.label} · ${formatDuration(elapsed)}',
+                      color: visual.color,
+                      pulse: visual.pulse,
+                    ),
+              )
             : StatusPill(
                 key: ValueKey<String>(visual.label),
                 label: visual.label,
@@ -606,6 +635,32 @@ class RecordingCard extends StatelessWidget {
                     style: ConsoleText.micro.copyWith(color: Console.green),
                   ),
                 ),
+                // Only a session this app started by name can be attached to;
+                // a file or a Command brief has no terminal to open.
+                if (recording.routes.last.session case final String session
+                    when recording.routes.last.kind == RouteKind.agent &&
+                        onAttachSession != null) ...<Widget>[
+                  const SizedBox(width: 8),
+                  InkWell(
+                    key: ValueKey<String>('attach-${recording.id}'),
+                    onTap: () => onAttachSession!(session),
+                    borderRadius: BorderRadius.circular(6),
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 4,
+                        vertical: 2,
+                      ),
+                      child: Text(
+                        'ATTACH',
+                        style: ConsoleText.micro.copyWith(
+                          color: Console.accent,
+                          fontWeight: FontWeight.w700,
+                          letterSpacing: 1.1,
+                        ),
+                      ),
+                    ),
+                  ),
+                ],
               ],
             ),
             // **One line, and a link out — never a fleet view.** Command has a

@@ -22,6 +22,10 @@ class FakeSyncTransport implements SyncTransport {
   final List<(SyncTable, List<Map<String, Object?>>)> pushes = [];
   Object? failWith;
 
+  /// Makes `push` report `sealed: true`, standing in for the encrypted
+  /// transport sealing every row it pushed.
+  bool sealsPushes = false;
+
   /// Runs at the top of every `pull`, before the window is read — a test's
   /// stand-in for another device writing between two pages.
   Future<void> Function(SyncTable table)? beforePull;
@@ -67,7 +71,11 @@ class FakeSyncTransport implements SyncTransport {
         conflicts.add(_asPulledRow(current));
       }
     }
-    return SyncPushResult(applied: applied, conflicts: conflicts);
+    return SyncPushResult(
+      applied: applied,
+      conflicts: conflicts,
+      sealed: sealsPushes,
+    );
   }
 
   @override

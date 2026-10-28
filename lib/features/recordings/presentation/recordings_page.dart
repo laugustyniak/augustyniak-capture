@@ -26,6 +26,7 @@ import '../../clipboard/domain/auto_paste.dart';
 import '../../clipboard/domain/clipboard_watcher_service.dart';
 import '../../clipboard/presentation/clipboard_history_sheet.dart';
 import '../../clipboard/presentation/clipboard_tab.dart';
+import '../../costs/data/litellm_price_service.dart';
 import '../../costs/data/recording_usage_sink.dart';
 import '../../costs/data/usage_repository.dart';
 import '../../costs/domain/model_price.dart';
@@ -44,6 +45,8 @@ import '../../processing/data/native_media_processor.dart';
 import '../../processing/data/video_audio_extractor.dart';
 import '../../processing/data/video_poster_extractor.dart';
 import '../../projects/data/terminal_launcher.dart';
+import '../../projects/data/hybrid_agent_session_launcher.dart';
+import '../../projects/data/native_agent_jobs.dart';
 import '../../projects/data/zellij_agent_session_launcher.dart';
 import '../../projects/data/projects_repository.dart';
 import '../../projects/domain/agent_session_launcher.dart';
@@ -219,6 +222,7 @@ class _RecordingsPageState extends State<RecordingsPage>
   late final RecordingUsageSink usageSink;
   late final SettingsController settings;
   late final HttpDailyConnectionsService dailyConnectionsService;
+  final LiteLlmPriceService priceService = LiteLlmPriceService();
   late final LogStore logs;
   late final GamificationController gamification;
   late final RecordingsController controller;
@@ -228,6 +232,7 @@ class _RecordingsPageState extends State<RecordingsPage>
   InboxDrainer? _inboxDrainer;
   Future<void>? _drainFuture;
   late final ProjectsController projects;
+  late final NativeAgentJobs agentJobs;
   late final FocusTimerController timer;
 
   /// How much has been finished lately. The counterpart to
@@ -365,8 +370,17 @@ class _RecordingsPageState extends State<RecordingsPage>
     // only in how a window is opened. A null launcher hides the queue's agent
     // button entirely, so this predicate and the one picking an implementation
     // must not be able to disagree.
+    agentJobs = NativeAgentJobs(
+      jobsRoot: () async {
+        final Directory support = await getApplicationSupportDirectory();
+        return Directory(p.join(support.path, 'agent-jobs'));
+      },
+    );
     final AgentSessionLauncher? launcher = TerminalLauncher.isSupportedPlatform
-        ? ZellijAgentSessionLauncher()
+        ? HybridAgentSessionLauncher(
+            windowed: ZellijAgentSessionLauncher(),
+            jobs: agentJobs,
+          )
         : null;
     if (launcher != null) unawaited(_resolveSessionsRoot());
     projects = ProjectsController(
@@ -459,6 +473,7 @@ class _RecordingsPageState extends State<RecordingsPage>
               launcher: launcher,
               sessionsRoot: () => _sessionsRoot,
             ),
+      agentJobs: launcher == null ? null : agentJobs,
       // The fourth way out, and the only one that needs no project: a
       // capture's text goes to a web assistant, the share sheet or the
       // clipboard. Never disabled — Web and Copy exist on every platform.
@@ -884,6 +899,37 @@ class _RecordingsPageState extends State<RecordingsPage>
     }());
   }
 
+  Future<ModelPrice> _onRefreshPriceRate(
+    String key,
+    bool isTranscription,
+  ) async {
+    final ModelPrice price = await priceService.fetch(
+      key,
+      isTranscription: isTranscription,
+    );
+    if (!mounted) throw StateError('Pricing screen is no longer available.');
+    await settings.setPriceOverride(key, price);
+    final String? saveError = settings.error;
+    if (saveError != null) throw Exception('Could not save price: $saveError');
+    if (!mounted) return price;
+    final UsageRepository? usageRepository = _usageRepository;
+    if (usageRepository != null) {
+      try {
+        final int filled = usageRepository.backfill(
+          key,
+          PriceBook(overrides: settings.settings.priceOverrides),
+        );
+        if (filled > 0 && mounted) setState(() {});
+      } catch (error) {
+        logs.log(
+          'Price saved, but usage backfill failed: $error',
+          level: LogLevel.warn,
+        );
+      }
+    }
+    return price;
+  }
+
   /// Push provider + audio changes into the recordings controller. Only affects
   /// work started after the swap.
   void _applySettings() {
@@ -1125,6 +1171,7 @@ class _RecordingsPageState extends State<RecordingsPage>
     timer.dispose();
     momentum.dispose();
     dailyConnectionsService.close();
+    priceService.close();
     settings.dispose();
     logs.dispose();
     super.dispose();
@@ -1302,6 +1349,10 @@ class _RecordingsPageState extends State<RecordingsPage>
                                 ConsolePageWidth(
                                   child: ProjectsTab(
                                     controller: projects,
+                                      agentJobs:
+                                          TerminalLauncher.isSupportedPlatform
+                                          ? agentJobs
+                                          : null,
                                     recordingsController: controller,
                                     // Read off the settings controller rather
                                     // than held, on the same rule as the
@@ -1396,6 +1447,7 @@ class _RecordingsPageState extends State<RecordingsPage>
                                             ?.unknownQuantityCount() ??
                                         0,
                                     onRateChanged: _onPriceRateChanged,
+                                    onRefreshRate: _onRefreshPriceRate,
                                     onBackfillClosures:
                                         controller.backfillClosures,
                                     onExportArchive: backup.export,

@@ -1,3 +1,5 @@
+import 'native_agent_types.dart';
+
 /// Agent CLIs that Augustyniak Capture may start inside a project session.
 enum ProjectAgent {
   codex('codex'),
@@ -70,6 +72,8 @@ class AgentSessionLaunchRequest {
     required this.agent,
     this.sessionName,
     this.arguments = const <String>[],
+    this.prompt,
+    this.detached = false,
   });
 
   final String projectId;
@@ -80,21 +84,61 @@ class AgentSessionLaunchRequest {
   /// Optional stable base configured by the project. The agent is appended.
   final String? sessionName;
   final List<String> arguments;
+
+  /// Text sent through stdin by a native background adapter.
+  ///
+  /// Null keeps old callers source-compatible. The Zellij launcher adds this
+  /// to its own positional prompt arguments, while a native launcher keeps it
+  /// out of the process list entirely.
+  final String? prompt;
+
+  /// Start the session in the background, with no terminal window.
+  ///
+  /// The agent runs inside the multiplexer's server from the first moment, and
+  /// the user joins it later — through [AgentSessionLauncher.attach], or from
+  /// any terminal already open with [attachCommandFor]. A launch that needs no
+  /// window also needs no terminal, which is what makes it work on a host
+  /// whose terminal cannot open one (#291) and what keeps a capture from
+  /// stealing the screen every time it is handed off.
+  final bool detached;
 }
 
 class AgentSessionLaunchResult {
   const AgentSessionLaunchResult({
     required this.sessionName,
     required this.attachedToExistingSession,
+    this.detached = false,
+    this.job,
   });
 
   final String sessionName;
   final bool attachedToExistingSession;
+
+  /// No window was opened: the session is running in the background and the
+  /// user has to attach to see it.
+  final bool detached;
+
+  /// Native background job, absent for every legacy Zellij/window launch.
+  final NativeAgentJobHandle? job;
 }
+
+/// What to type in any terminal to join [sessionName].
+///
+/// One definition, shared by the sheet's copy button, the card and the logs,
+/// so the command the user is shown is the one the launcher would run.
+String attachCommandFor(String sessionName) => 'zellij attach $sessionName';
 
 /// Starts (or reattaches to) an agent only when [launch] is explicitly called.
 abstract interface class AgentSessionLauncher {
   Future<AgentSessionLaunchResult> launch(AgentSessionLaunchRequest request);
+
+  /// Opens a terminal window attached to the running session [sessionName].
+  ///
+  /// Throws [AgentSessionLaunchException] when the session is not running —
+  /// by name, so the message says which one — or when no terminal can open.
+  /// Nothing is started and nothing is written: a session that has ended is
+  /// gone, and restarting it is a new launch with a new prompt.
+  Future<void> attach(String sessionName);
 }
 
 class AgentSessionLaunchException implements Exception {

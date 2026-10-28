@@ -141,9 +141,25 @@ class AppDatabase {
         id TEXT NOT NULL,
         server_version INTEGER NOT NULL,
         pushed_hash TEXT NOT NULL,
+        sealed INTEGER NOT NULL DEFAULT 0,
         PRIMARY KEY (table_name, id)
       )
     ''');
+
+    // `sealed` was added after the table shipped (#377); older databases
+    // gain the column here. Existing rows default to 0, the truthful
+    // pre-E2EE state.
+    final bool hasSealed = _db
+        .select(
+          "SELECT 1 FROM pragma_table_info('sync_rows') "
+          "WHERE name = 'sealed'",
+        )
+        .isNotEmpty;
+    if (!hasSealed) {
+      _db.execute(
+        'ALTER TABLE sync_rows ADD COLUMN sealed INTEGER NOT NULL DEFAULT 0',
+      );
+    }
 
     _db.execute('''
       CREATE TABLE IF NOT EXISTS encrypted_secrets (

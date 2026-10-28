@@ -10,6 +10,7 @@ import 'package:augustyniak_capture/features/sync/domain/sync_engine.dart';
 import 'package:augustyniak_capture/features/sync/domain/sync_row_codec.dart';
 import 'package:augustyniak_capture/features/sync/domain/sync_snapshot.dart';
 import 'package:augustyniak_capture/features/sync/domain/sync_table.dart';
+import 'package:augustyniak_capture/features/sync/domain/sync_transport.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 import 'fake_sync_transport.dart';
@@ -348,6 +349,85 @@ void main() {
     expect(applier.revisions, isEmpty);
     expect(bookkeeping.cursor('revisions'), t0);
   });
+
+  test(
+    'a row whose id is not a safe path segment is dropped, counted, never '
+    'applied, and does not hold the cursor (#292)',
+    () async {
+      // Oldest on the page, so a cursor held at it would sit at t0.
+      transport.tables.putIfAbsent(SyncTable.recordings, () => {})['..'] = {
+        ...SyncRowCodec.recording(recording(id: '..')),
+        'updated_at': t0.toIso8601String(),
+        'version': 1,
+      };
+      // A tombstone with an unsafe id must not reach the applier's delete.
+      transport.tables[SyncTable.recordings]!['../x'] = {
+        'id': '../x',
+        'updated_at': t0.toIso8601String(),
+        'version': 2,
+        'deleted_at': t0.toIso8601String(),
+      };
+      advance(const Duration(seconds: 10));
+      await seedServer(recording(id: 'good'));
+
+      advance(const Duration(minutes: 1));
+      final r = await engine.run(const SyncSnapshot());
+      expect(r.skipped, 2);
+      expect(r.pulled, 1);
+      expect(applier.recordings.keys, ['good']);
+      expect(applier.deleted, isEmpty);
+      expect(
+        bookkeeping.cursor('recordings'),
+        t0.add(const Duration(seconds: 10)),
+        reason: 'no build can ever decode the row, so it must not pin the cursor',
+      );
+    },
+  );
+
+  for (final SyncTable table in <SyncTable>[SyncTable.projects, SyncTable.clipboardItems]) {
+    test(
+      '${table.serverName}: unsafe ids are dropped, live or tombstone, and do '
+      'not hold the cursor (#292)',
+      () async {
+        final bool isProject = table == SyncTable.projects;
+        Map<String, Object?> encoded(String id) => isProject
+            ? SyncRowCodec.project(project(id: id))
+            : SyncRowCodec.clipboardItem(clipboardItem(id: id));
+        final Map<String, Map<String, Object?>> rows =
+            transport.tables.putIfAbsent(table, () => {});
+        rows['..'] = {
+          ...encoded('..'),
+          'updated_at': t0.toIso8601String(),
+          'version': 1,
+        };
+        rows['../x'] = {
+          'id': '../x',
+          'updated_at': t0.toIso8601String(),
+          'version': 2,
+          'deleted_at': t0.toIso8601String(),
+        };
+        advance(const Duration(seconds: 10));
+        await transport.push(table, [
+          {...encoded('good'), 'version': 1},
+        ]);
+
+        advance(const Duration(minutes: 1));
+        final r = await engine.run(const SyncSnapshot());
+        expect(r.skipped, 2);
+        expect(r.pulled, 1);
+        expect(
+          isProject ? applier.projects.keys : applier.clipboardItems.keys,
+          ['good'],
+        );
+        expect(applier.deletedProjects, isEmpty);
+        expect(applier.deletedClipboardItems, isEmpty);
+        expect(
+          bookkeeping.cursor(table.serverName),
+          t0.add(const Duration(seconds: 10)),
+        );
+      },
+    );
+  }
 
   test('the cursor advances to the newest updated_at seen', () async {
     await seedServer(recording(id: 'a'));
@@ -744,5 +824,152 @@ void main() {
     await engine.run(const SyncSnapshot());
 
     expect(applier.recordings.keys, containsAll(<String>['a', 'b', 'c']));
+  });
+
+  group('a row last seen sealed is refused when it arrives unsealed (#377)', () {
+    final Recording local = recording(id: 'a', transcript: 'sealed text');
+    final String localHash = SyncRowCodec.hash(SyncRowCodec.recording(local));
+
+    Future<void> seedNewer({required bool marker}) => transport.push(
+      SyncTable.recordings,
+      [
+        {
+          ...SyncRowCodec.recording(
+            recording(id: 'a', transcript: 'sealed text, edited by the server'),
+          ),
+          'version': 2,
+          if (marker) syncRowSealedMarker: true,
+        },
+      ],
+    );
+
+    test('an unmarked row for a sealed id is counted, not applied or bookkept', () async {
+      bookkeeping.put('recordings', 'a', 1, localHash, sealed: true);
+      await seedNewer(marker: false);
+      advance(const Duration(minutes: 1));
+
+      final r = await engine.run(SyncSnapshot(recordings: [local]));
+
+      expect(r.downgraded, 1);
+      expect(r.pulled, 0);
+      expect(applier.recordings, isEmpty);
+      final SyncRowState state = bookkeeping.loadTable('recordings')['a']!;
+      expect(state.serverVersion, 1);
+      expect(state.pushedHash, localHash);
+      expect(state.sealed, isTrue);
+    });
+
+    test('the same row carrying the marker applies and stays sealed', () async {
+      bookkeeping.put('recordings', 'a', 1, localHash, sealed: true);
+      await seedNewer(marker: true);
+      advance(const Duration(minutes: 1));
+
+      final r = await engine.run(SyncSnapshot(recordings: [local]));
+
+      expect(r.downgraded, 0);
+      expect(r.pulled, 1);
+      expect(applier.recordings['a']!.transcript, 'sealed text, edited by the server');
+      final SyncRowState state = bookkeeping.loadTable('recordings')['a']!;
+      expect(state.serverVersion, 2);
+      expect(state.sealed, isTrue);
+    });
+
+    test('a legacy row (bookkept unsealed) still applies unmarked', () async {
+      bookkeeping.put('recordings', 'a', 1, localHash);
+      await seedNewer(marker: false);
+      advance(const Duration(minutes: 1));
+
+      final r = await engine.run(SyncSnapshot(recordings: [local]));
+
+      expect(r.downgraded, 0);
+      expect(r.pulled, 1);
+      expect(applier.recordings['a']!.transcript, 'sealed text, edited by the server');
+      expect(bookkeeping.loadTable('recordings')['a']!.sealed, isFalse);
+    });
+
+    test('a still-sealed row for a sealed id is skipped and holds the cursor, not counted as downgraded', () async {
+      bookkeeping.put('recordings', 'a', 1, localHash, sealed: true);
+      transport.tables.putIfAbsent(SyncTable.recordings, () => {})['a'] = {
+        ...SyncRowCodec.recording(local),
+        'title': null,
+        'transcript': null,
+        'encrypted_payload': 'enc:v2:AAAA',
+        'updated_at': t0.toIso8601String(),
+        'version': 2,
+      };
+      advance(const Duration(minutes: 1));
+
+      final r = await engine.run(SyncSnapshot(recordings: [local]));
+
+      expect(r.skipped, 1);
+      expect(r.downgraded, 0);
+      expect(applier.recordings, isEmpty);
+      expect(bookkeeping.cursor('recordings'), t0, reason: 'held at the sealed row');
+      final SyncRowState state = bookkeeping.loadTable('recordings')['a']!;
+      expect(state.serverVersion, 1);
+      expect(state.sealed, isTrue);
+    });
+
+    test('an unmarked push-conflict row for a sealed id is refused, the local row stays dirty', () async {
+      final Recording v1 = recording(id: 'a', transcript: 'v1');
+      bookkeeping.put(
+        'recordings',
+        'a',
+        1,
+        SyncRowCodec.hash(SyncRowCodec.recording(v1)),
+        sealed: true,
+      );
+      await transport.push(SyncTable.recordings, [
+        {
+          ...SyncRowCodec.recording(recording(id: 'a', transcript: 'server edit')),
+          'version': 2,
+        },
+      ]);
+
+      final r = await engine.run(
+        SyncSnapshot(recordings: [recording(id: 'a', transcript: 'local edit')]),
+      );
+
+      expect(r.conflicts, 1);
+      expect(r.downgraded, 1);
+      expect(applier.recordings, isEmpty);
+      final SyncRowState state = bookkeeping.loadTable('recordings')['a']!;
+      expect(state.serverVersion, 1);
+      expect(state.sealed, isTrue);
+    });
+
+    test('adopting a segments push conflict keeps the sealed flag', () async {
+      final rec = recordingWithSegments(id: 'a', segmentCount: 1);
+      final seg = SyncRowCodec.segments(rec).single;
+      await transport.push(SyncTable.segments, [{...seg, 'version': 1}]);
+      bookkeeping.put('segments', 'a/0', 0, 'stale', sealed: true);
+
+      final r = await engine.run(SyncSnapshot(recordings: [rec]));
+
+      expect(r.conflicts, greaterThanOrEqualTo(1));
+      final SyncRowState state = bookkeeping.loadTable('segments')['a/0']!;
+      expect(state.serverVersion, 1);
+      expect(state.sealed, isTrue);
+    });
+
+    test('a project last seen sealed is refused when it arrives unmarked', () async {
+      final Project mine = project(id: 'p');
+      final String hash = SyncRowCodec.hash(SyncRowCodec.project(mine));
+      bookkeeping.put('projects', 'p', 1, hash, sealed: true);
+      await transport.push(SyncTable.projects, [
+        {
+          ...SyncRowCodec.project(Project(id: 'p', name: 'Renamed by server', repoPath: '/evil')),
+          'version': 2,
+        },
+      ]);
+      advance(const Duration(minutes: 1));
+
+      final r = await engine.run(SyncSnapshot(projects: [mine]));
+
+      expect(r.downgraded, 1);
+      expect(r.pulled, 0);
+      expect(applier.projects, isEmpty);
+      expect(bookkeeping.loadTable('projects')['p']!.serverVersion, 1);
+    });
   });
 }

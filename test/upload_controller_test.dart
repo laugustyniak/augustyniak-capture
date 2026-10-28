@@ -7,6 +7,7 @@ import 'package:path/path.dart' as p;
 import 'package:record/record.dart';
 import 'package:augustyniak_capture/features/recordings/data/media_picker.dart';
 import 'package:augustyniak_capture/features/recordings/data/recordings_repository.dart';
+import 'package:augustyniak_capture/features/recordings/data/source_content_hasher.dart';
 import 'package:augustyniak_capture/features/recordings/domain/capture_type.dart';
 import 'package:augustyniak_capture/features/recordings/domain/recording.dart';
 import 'package:augustyniak_capture/features/recordings/presentation/recordings_controller.dart';
@@ -15,16 +16,24 @@ import 'package:augustyniak_capture/features/transcription/data/transcription_se
 /// Repository that keeps the index in memory and points source files at a temp
 /// dir — no path_provider, no real recordings.json.
 class _FakeRepository extends RecordingsRepository {
-  _FakeRepository(this.directory);
+  _FakeRepository(this.directory, {this.throwOnSaveCall});
 
   final Directory directory;
+  final int? throwOnSaveCall;
   List<Recording> saved = <Recording>[];
+  int saveCalls = 0;
+  final List<List<Recording>> saves = <List<Recording>>[];
+
+  /// Status of the newest item at each `saveAll` — pins that the first write
+  /// is `saved`, not already queued for processing.
+  final List<RecordingStatus> statusAtSave = <RecordingStatus>[];
 
   /// One entry per `saveAll`: was the newest item's source file already on disk
   /// when the index was written? This is what pins the ordering invariant —
   /// asserting the end state alone cannot tell copy-then-index apart from
   /// index-then-copy.
   final List<bool> sourcePresentAtSave = <bool>[];
+  final List<int> sourceBytesAtSave = <int>[];
 
   @override
   Future<File> createSourceFile(String id, String extension) async =>
@@ -35,10 +44,29 @@ class _FakeRepository extends RecordingsRepository {
 
   @override
   Future<void> saveAll(List<Recording> recordings) async {
+    saveCalls++;
+    final List<Recording> snapshot = List<Recording>.unmodifiable(recordings);
+    saves.add(snapshot);
     if (recordings.isNotEmpty) {
-      sourcePresentAtSave.add(File(recordings.first.filePath).existsSync());
+      statusAtSave.add(recordings.first.status);
+      final File source = File(recordings.first.filePath);
+      sourcePresentAtSave.add(source.existsSync());
+      sourceBytesAtSave.add(source.existsSync() ? source.lengthSync() : 0);
     }
-    saved = List<Recording>.from(recordings);
+    if (saveCalls == throwOnSaveCall) {
+      throw StateError('forced save failure');
+    }
+    saved = snapshot;
+  }
+}
+
+class _RecordingHasher extends SourceContentHasher {
+  final List<String> paths = <String>[];
+
+  @override
+  Future<String> hash(File source) async {
+    paths.add(source.path);
+    return 'a' * 64;
   }
 }
 
@@ -91,10 +119,12 @@ RecordingsController buildController(
   RecordingsRepository repo, {
   PickedMedia? picked,
   TranscriptionService service = const DisabledTranscriptionService(),
+  SourceContentHasher contentHasher = const SourceContentHasher(),
 }) {
   return RecordingsController(
     repository: repo,
     transcriptionService: service,
+    contentHasher: contentHasher,
     mediaPicker: _FakePicker(picked),
     recorder: _FakeRecorder(),
     player: _FakePlayer(),
@@ -119,9 +149,50 @@ void main() {
     pickDir.deleteSync(recursive: true);
   });
 
+  test(
+    'addUpload before initialize writes nothing and sets the loading error',
+    () async {
+      final File source = File(p.join(pickDir.path, 'original.mp3'))
+        ..writeAsStringSync('SOUND');
+      final _FakeRepository repo = _FakeRepository(appDir);
+      final RecordingsController controller = buildController(
+        repo,
+        picked: PickedMedia(file: source, mimeType: 'audio/mpeg'),
+      );
+      int notified = 0;
+      controller.addListener(() => notified++);
+
+      await controller.addUpload(CaptureType.audioUpload);
+
+      expect(repo.saveCalls, 0);
+      expect(controller.recordings, isEmpty);
+      expect(controller.error, contains('still loading'));
+      expect(notified, 1);
+      controller.dispose();
+    },
+  );
+
+  test(
+    'addImportedFile before initialize writes nothing and sets the loading error',
+    () async {
+      final File source = File(p.join(pickDir.path, 'dropped.txt'))
+        ..writeAsStringSync('TEXT');
+      final _FakeRepository repo = _FakeRepository(appDir);
+      final RecordingsController controller = buildController(repo);
+
+      await controller.addImportedFile(source, CaptureType.text);
+
+      expect(repo.saveCalls, 0);
+      expect(controller.recordings, isEmpty);
+      expect(controller.error, contains('still loading'));
+      controller.dispose();
+    },
+  );
+
   test('cancelled pick indexes nothing and releases the busy lock', () async {
     final _FakeRepository repo = _FakeRepository(appDir);
     final RecordingsController controller = buildController(repo, picked: null);
+    await controller.initialize();
 
     await controller.addUpload(CaptureType.image);
     await controller.waitForProcessing();
@@ -139,6 +210,7 @@ void main() {
       repo,
       picked: PickedMedia(file: source, mimeType: 'image/png'),
     );
+    await controller.initialize();
 
     await controller.addUpload(CaptureType.image);
     await controller.waitForProcessing();
@@ -161,6 +233,7 @@ void main() {
       ..writeAsStringSync('PNGDATA');
     final _FakeRepository repo = _FakeRepository(appDir);
     final RecordingsController controller = buildController(repo);
+    await controller.initialize();
 
     await controller.addImportedFile(source, CaptureType.image,
         mimeType: 'image/png');
@@ -180,6 +253,7 @@ void main() {
       ..writeAsStringSync('%PDF-1.7');
     final _FakeRepository repo = _FakeRepository(appDir);
     final RecordingsController controller = buildController(repo);
+    await controller.initialize();
 
     await controller.addImportedFile(source, CaptureType.file);
     await controller.waitForProcessing();
@@ -219,6 +293,7 @@ void main() {
         repo,
         picked: PickedMedia(file: source, mimeType: 'audio/mpeg'),
       );
+      await controller.initialize();
 
       await controller.addUpload(CaptureType.audioUpload);
       await controller.waitForProcessing();
@@ -242,6 +317,7 @@ void main() {
         picked: PickedMedia(file: source, mimeType: 'audio/mpeg'),
         service: gated,
       );
+      await controller.initialize();
 
       // Processing is enqueued and drained unawaited, so the job is parked inside
       // the processor when the page tears the controller down.
@@ -267,6 +343,7 @@ void main() {
       picked: PickedMedia(file: source, mimeType: 'audio/mpeg'),
       service: const _StubTranscriptionService('UPLOADED TRANSCRIPT'),
     );
+    await controller.initialize();
 
     await controller.addUpload(CaptureType.audioUpload);
     // Processing is queued, so `addUpload` returns before the drain finishes;
@@ -277,7 +354,126 @@ void main() {
     // disk. Without this, copy-then-index and index-then-copy look identical.
     expect(repo.sourcePresentAtSave, isNotEmpty);
     expect(repo.sourcePresentAtSave.first, isTrue);
+    expect(repo.statusAtSave.first, RecordingStatus.saved);
     controller.dispose();
+  });
+
+  test('direct import first save follows verified copy as saved', () async {
+    final File source = File(p.join(pickDir.path, 'direct.pdf'))
+      ..writeAsStringSync('%PDF-1.7');
+    final _FakeRepository repo = _FakeRepository(appDir);
+    final RecordingsController controller = buildController(repo);
+    await controller.initialize();
+
+    await controller.addImportedFile(source, CaptureType.file);
+    await controller.waitForProcessing();
+
+    final Recording firstSaved = repo.saves.first.single;
+    expect(firstSaved.status, RecordingStatus.saved);
+    expect(repo.sourcePresentAtSave.first, isTrue);
+    expect(repo.sourceBytesAtSave.first, greaterThan(0));
+    controller.dispose();
+  });
+
+  test(
+    'both non-append import paths stamp the active project before first save',
+    () async {
+      final File source = File(p.join(pickDir.path, 'project.pdf'))
+        ..writeAsStringSync('%PDF-1.7');
+
+      for (final bool pickedUpload in <bool>[true, false]) {
+        final _FakeRepository repo = _FakeRepository(appDir);
+        final RecordingsController controller = buildController(
+          repo,
+          picked: PickedMedia(file: source, mimeType: 'application/pdf'),
+        )..activeProjectId = 'project-362';
+        await controller.initialize();
+
+        if (pickedUpload) {
+          await controller.addUpload(CaptureType.file);
+        } else {
+          await controller.addImportedFile(source, CaptureType.file);
+        }
+        await controller.waitForProcessing();
+
+        expect(repo.saves.first.single.projectId, 'project-362');
+        expect(repo.saves.first.single.projectAuto, isTrue);
+        controller.dispose();
+      }
+    },
+  );
+
+  test(
+    'persist failure keeps the saved row in memory and skips processing',
+    () async {
+      final File source = File(p.join(pickDir.path, 'persist-failure.pdf'))
+        ..writeAsStringSync('%PDF-1.7');
+
+      for (final bool pickedUpload in <bool>[true, false]) {
+        final _FakeRepository repo = _FakeRepository(
+          appDir,
+          throwOnSaveCall: 1,
+        );
+        final RecordingsController controller = buildController(
+          repo,
+          picked: PickedMedia(file: source, mimeType: 'application/pdf'),
+        );
+        await controller.initialize();
+
+        if (pickedUpload) {
+          await controller.addUpload(CaptureType.file);
+        } else {
+          await controller.addImportedFile(source, CaptureType.file);
+        }
+        await controller.waitForProcessing();
+
+        final Recording admitted = controller.recordings.single;
+        expect(repo.saveCalls, 1);
+        expect(admitted.status, RecordingStatus.saved);
+        expect(
+          controller.recordings.map((Recording item) => item.status),
+          isNot(contains(RecordingStatus.pendingTranscription)),
+        );
+        expect(File(admitted.filePath).existsSync(), isTrue);
+        expect(File(admitted.filePath).lengthSync(), greaterThan(0));
+        expect(source.existsSync(), isTrue);
+        expect(controller.error, contains('forced save failure'));
+        expect(controller.isBusy, isFalse);
+        controller.dispose();
+      }
+    },
+  );
+
+  test('only picked upload schedules immediate content hashing', () async {
+    final File source = File(p.join(pickDir.path, 'hash.pdf'))
+      ..writeAsStringSync('%PDF-1.7');
+    final _RecordingHasher uploadHasher = _RecordingHasher();
+    final _FakeRepository uploadRepo = _FakeRepository(appDir);
+    final RecordingsController uploadController = buildController(
+      uploadRepo,
+      picked: PickedMedia(file: source, mimeType: 'application/pdf'),
+      contentHasher: uploadHasher,
+    );
+    await uploadController.initialize();
+
+    await uploadController.addUpload(CaptureType.file);
+    await uploadController.waitForProcessing();
+
+    final _RecordingHasher directHasher = _RecordingHasher();
+    final _FakeRepository directRepo = _FakeRepository(appDir);
+    final RecordingsController directController = buildController(
+      directRepo,
+      contentHasher: directHasher,
+    );
+    await directController.initialize();
+
+    await directController.addImportedFile(source, CaptureType.file);
+    await directController.waitForProcessing();
+
+    expect(uploadHasher.paths, hasLength(1));
+    expect(directHasher.paths, isEmpty);
+    uploadController.dispose();
+    directController.dispose();
   });
 
   test('successful audio upload completes with a transcript', () async {
@@ -289,6 +485,7 @@ void main() {
       picked: PickedMedia(file: source, mimeType: 'audio/mpeg'),
       service: const _StubTranscriptionService('UPLOADED TRANSCRIPT'),
     );
+    await controller.initialize();
 
     await controller.addUpload(CaptureType.audioUpload);
     await controller.waitForProcessing();

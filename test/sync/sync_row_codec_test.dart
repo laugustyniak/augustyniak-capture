@@ -1,5 +1,6 @@
 import 'package:augustyniak_capture/features/clipboard/domain/clipboard_item.dart';
 import 'package:augustyniak_capture/features/projects/domain/project.dart';
+import 'package:augustyniak_capture/features/recordings/domain/agent_artifact.dart';
 import 'package:augustyniak_capture/features/recordings/domain/capture_category.dart';
 import 'package:augustyniak_capture/features/recordings/domain/capture_segment.dart';
 import 'package:augustyniak_capture/features/recordings/domain/capture_type.dart';
@@ -14,6 +15,7 @@ Recording _recording({
   String? transcript,
   String? thumbPath,
   List<CaptureSegment>? segments,
+  List<AgentArtifact> artifacts = const <AgentArtifact>[],
 }) => Recording(
   id: 'rec-1',
   filePath: '/tmp/rec-1.m4a',
@@ -27,6 +29,7 @@ Recording _recording({
   category: CaptureCategory.idea,
   tags: const <String>['a', 'b'],
   segments: segments,
+  artifacts: artifacts,
 );
 
 /// Walks a decoded JSON-shaped value (maps, lists, scalars — the same shape
@@ -111,6 +114,65 @@ void main() {
     );
   });
 
+  test('a pulled row never contributes artifact paths — local ones are kept', () {
+    final Recording mine = _recording(
+      artifacts: <AgentArtifact>[
+        AgentArtifact(
+          id: 'mine',
+          captureId: 'rec-1',
+          title: 'result',
+          path: '/home/me/repo/.agent-tasks/x-result.md',
+          updatedAt: DateTime.utc(2026, 10, 20),
+        ),
+      ],
+    );
+    final Map<String, Object?> row = SyncRowCodec.recording(mine);
+    final Map<String, Object?> payload = Map<String, Object?>.from(
+      row['payload'] as Map,
+    );
+    payload['artifacts'] = <Object?>[
+      <String, Object?>{
+        'id': 'evil',
+        'captureId': mine.id,
+        'title': 'id_ed25519',
+        'path': '/home/me/.ssh/id_ed25519',
+        'updatedAt': '2026-10-21T00:00:00Z',
+        'kind': 'resultNote',
+      },
+    ];
+    final Map<String, Object?> hostile = <String, Object?>{
+      ...row,
+      'payload': payload,
+    };
+
+    final Recording? withLocal = SyncRowCodec.recordingFromRow(
+      hostile,
+      local: mine,
+    );
+    expect(
+      withLocal!.artifacts.map((AgentArtifact a) => a.path).toList(),
+      <String>['/home/me/repo/.agent-tasks/x-result.md'],
+    );
+
+    final Recording? fresh = SyncRowCodec.recordingFromRow(hostile);
+    expect(fresh!.artifacts, isEmpty);
+  });
+
+  test('a payload with malformed artifacts still decodes', () {
+    for (final Object? bad in <Object?>['not a list', null, 7]) {
+      final Map<String, Object?> row = SyncRowCodec.recording(_recording());
+      final Map<String, Object?> payload = Map<String, Object?>.from(
+        row['payload'] as Map,
+      )..['artifacts'] = bad;
+      final Recording? back = SyncRowCodec.recordingFromRow(<String, Object?>{
+        ...row,
+        'payload': payload,
+      });
+      expect(back, isNotNull);
+      expect(back!.artifacts, isEmpty);
+    }
+  });
+
   test('a pulled row never chooses a location on this device', () {
     final Recording? back = SyncRowCodec.recordingFromRow(<String, Object?>{
       'id': 'rec-9',
@@ -170,6 +232,39 @@ void main() {
     expect(SyncRowCodec.recordingFromRow(<String, Object?>{'title': 'x'}), isNull);
   });
 
+  group('a row whose id is not a safe path segment decodes to null (#292)', () {
+    final List<String> unsafe = <String>['..', 'a/b', '/abs', '', 'a' * 65];
+    final Map<String, Object?> recordingRow = SyncRowCodec.recording(_recording())
+      ..['version'] = 1
+      ..['updated_at'] = '2026-09-21T09:00:00Z';
+    final Map<String, Object?> projectRow = SyncRowCodec.project(
+      Project(id: 'proj-1', name: 'Capture', repoPath: '/home/me/capture'),
+    )..['version'] = 1;
+    final Map<String, Object?> clipRow = SyncRowCodec.clipboardItem(
+      ClipboardItem(
+        id: 'clip-1',
+        type: ClipboardItemType.text,
+        copiedAt: DateTime.utc(2026, 3, 1, 12),
+        text: 'hello',
+        preview: 'hello',
+      ),
+    )..['version'] = 1;
+
+    test('the unmodified rows decode, so only the id differs below', () {
+      expect(SyncRowCodec.recordingFromRow(recordingRow), isNotNull);
+      expect(SyncRowCodec.projectFromRow(projectRow), isNotNull);
+      expect(SyncRowCodec.clipboardItemFromRow(clipRow), isNotNull);
+    });
+
+    for (final String id in unsafe) {
+      test('id "${id.length > 8 ? '${id.length} chars' : id}"', () {
+        expect(SyncRowCodec.recordingFromRow({...recordingRow, 'id': id}), isNull);
+        expect(SyncRowCodec.projectFromRow({...projectRow, 'id': id}), isNull);
+        expect(SyncRowCodec.clipboardItemFromRow({...clipRow, 'id': id}), isNull);
+      });
+    }
+  });
+
   test('composite row ids join key columns with /', () {
     final RecordingRevision revision = RecordingRevision(
       recordingId: 'rec-1', at: DateTime.utc(2026, 1, 1), field: 'title',
@@ -221,14 +316,56 @@ void main() {
       commandHost: 'fleet-1',
       commandWorkspace: 'ws-1',
       commandBoundAt: DateTime.utc(2026, 2, 1),
+      agentSettings: const <AgentKind, AgentSettings>{
+        AgentKind.codex: AgentSettings(
+          additionalArgs: <String>['--search'],
+          initialPrompt: 'Read AGENTS.md first.',
+          skipPermissions: true,
+        ),
+      },
     );
     final Map<String, Object?> row = SyncRowCodec.project(original)
       ..['version'] = 2
       ..['updated_at'] = '2026-09-21T09:00:00Z'
       ..['deleted_at'] = null;
+    expect((row['payload'] as Map).containsKey('agentSettings'), isFalse);
     final Project? back = SyncRowCodec.projectFromRow(row);
     expect(back, isNotNull);
-    expect(back!.toJson(), original.toJson());
+    expect(back!.agentSettings, isEmpty, reason: 'launch settings are device-local');
+    expect(
+      back.toJson(),
+      original.copyWith(agentSettings: const <AgentKind, AgentSettings>{}).toJson(),
+    );
+  });
+
+  test('a pulled project row\'s launch settings are ignored even when present', () {
+    final Map<String, Object?> row = SyncRowCodec.project(
+      const Project(id: 'proj-1', name: 'Capture', repoPath: '/home/me/capture'),
+    )..['version'] = 1;
+    (row['payload'] as Map<String, Object?>)['agentSettings'] = <String, Object?>{
+      'claudeCode': <String, Object?>{
+        'skipPermissions': true,
+        'additionalArgs': <String>['--x'],
+      },
+    };
+    final Project? back = SyncRowCodec.projectFromRow(row);
+    expect(back, isNotNull);
+    final AgentSettings settings = back!.settingsFor(AgentKind.claudeCode);
+    expect(settings.skipPermissions, isFalse);
+    expect(settings.additionalArgs, isEmpty);
+  });
+
+  test('editing launch settings does not change the project row hash', () {
+    const Project a = Project(id: 'proj-1', name: 'Capture', repoPath: '/r');
+    final Project b = a.copyWith(
+      agentSettings: const <AgentKind, AgentSettings>{
+        AgentKind.codex: AgentSettings(skipPermissions: true),
+      },
+    );
+    expect(
+      SyncRowCodec.hash(SyncRowCodec.project(b)),
+      SyncRowCodec.hash(SyncRowCodec.project(a)),
+    );
   });
 
   test('a project row missing its id decodes to null, not a throw', () {

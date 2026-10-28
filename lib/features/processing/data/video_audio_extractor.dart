@@ -3,6 +3,7 @@ import 'dart:io';
 import 'package:path/path.dart' as p;
 
 import '../domain/processor.dart';
+import '../../../core/process/resolved_executable.dart';
 
 /// Extracts a video's audio track to a standalone audio file so the existing
 /// transcription pipeline can handle it. The returned file is a **derived**
@@ -73,7 +74,7 @@ class FfmpegVideoAudioExtractor implements VideoAudioExtractor {
     // leaves a temp directory behind.
     try {
       final ProcessResult result = await Process.run(
-        executable,
+        await resolveExecutable(executable),
         args,
         stderrEncoding: SystemEncoding(),
       );

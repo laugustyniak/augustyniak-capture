@@ -91,10 +91,17 @@ class MemoryBookkeeping implements SyncBookkeeping {
       Map<String, SyncRowState>.from(_tables[table] ?? <String, SyncRowState>{});
 
   @override
-  void put(String table, String id, int serverVersion, String pushedHash) {
+  void put(
+    String table,
+    String id,
+    int serverVersion,
+    String pushedHash, {
+    bool sealed = false,
+  }) {
     (_tables[table] ??= <String, SyncRowState>{})[id] = SyncRowState(
       serverVersion: serverVersion,
       pushedHash: pushedHash,
+      sealed: sealed,
     );
   }
 

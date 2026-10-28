@@ -104,6 +104,15 @@ class QueueTab extends StatefulWidget {
       'NOT ENCRYPTED · cloud sync sends notes and files in plaintext; '
       'no encryption key on this device';
 
+  /// Shown while signed in, the server says the account was never set up,
+  /// and the user has not yet confirmed syncing without encryption. Runs are
+  /// refused, not let out in plaintext, until SET UP ENCRYPTION or SYNC
+  /// WITHOUT ENCRYPTION ends the state (#379): "no row" is an answer a
+  /// server can give falsely, so a human has to see it once.
+  static const String unconfirmedBanner =
+      'NOT ENCRYPTED · cloud sync is paused until you set up encryption or '
+      'confirm syncing without it';
+
   /// Shown while signed in to an encrypted account on a device without its
   /// key (a new install, or after LOCK). Runs are refused, not let out in
   /// plaintext, until the passphrase unlocks the device (#317).
@@ -560,7 +569,9 @@ class _QueueTabState extends State<QueueTab> {
                       ListenableBuilder(
                         listenable: e2ee,
                         builder: (BuildContext context, Widget? _) =>
-                            e2ee.isPlaintext || e2ee.isLocked
+                            e2ee.isPlaintext ||
+                                e2ee.isLocked ||
+                                e2ee.isPlaintextUnconfirmed
                                 ? _EncryptionBanner(e2ee: e2ee)
                                 : const SizedBox.shrink(),
                       ),
@@ -973,6 +984,7 @@ class _QueueTabState extends State<QueueTab> {
     final RecordingsController controller = widget.controller;
     return RecordingCard(
       recording: recording,
+      agentJobs: controller.agentJobs,
       isPlaying: controller.playingId == recording.id,
       // View-only: the enrichment stage has no persisted status, so this comes
       // off the controller's in-flight set rather than off the item.
@@ -994,6 +1006,11 @@ class _QueueTabState extends State<QueueTab> {
       onOpenOutcome: controller.openCommandOutcome,
       canOpenOutcome: (RouteOutcome outcome) =>
           controller.commandOutcomeUrl(outcome) != null,
+      // Offered wherever a session can be launched at all; a session that has
+      // since ended is refused by name, through the controller's error.
+      onAttachSession: controller.canHandoff(recording)
+          ? controller.attachSession
+          : null,
       onSelectArtifact: (AgentArtifact artifact) {
         showAgentArtifactViewer(
           context,
@@ -1007,7 +1024,9 @@ class _QueueTabState extends State<QueueTab> {
       onRetry: () => controller.retryTranscription(recording.id),
       onEnrich: () => controller.retryEnrichment(recording.id),
       onCancelProcessing: () => controller.cancelProcessing(recording.id),
-      processingElapsed: controller.processingElapsedFor(recording.id),
+      processingTicker: controller.processingElapsedFor(recording.id) != null
+          ? controller.processingTicker
+          : null,
       onEdit: () => setState(() => editingId = recording.id),
       onToggleProcessed: () => _toggleProcessed(recording),
       onOpenFocus: () => _openFocus(recording),
@@ -1059,6 +1078,7 @@ class _QueueTabState extends State<QueueTab> {
                         ? _selectedRowKey
                         : ValueKey<String>(item.id),
                     recording: item,
+                    agentJobs: controller.agentJobs,
                     selected: isSelected,
                     isEnriching: controller.isEnriching(item.id),
                     density: widget.density,
@@ -1165,6 +1185,7 @@ class _QueueTabState extends State<QueueTab> {
                     return QueueListRow(
                       key: ValueKey<String>(item.id),
                       recording: item,
+                      agentJobs: controller.agentJobs,
                       selected: item.id == focusedId,
                       isEnriching: controller.isEnriching(item.id),
                       density: widget.density,
@@ -1401,6 +1422,7 @@ class _QueueTabState extends State<QueueTab> {
     return RecordingEditor(
       key: ValueKey<String>('editor-${recording.id}'),
       recording: recording,
+      agentJobs: controller.agentJobs,
       revisions: controller.revisionsFor(recording.id),
       tagSuggestions: _tagSuggestions(recording),
       projects: widget.projects?.projects ?? const <Project>[],
@@ -1839,10 +1861,12 @@ class _DensityToggle extends StatelessWidget {
   }
 }
 
-/// The red line plus the one button that ends the state: SET UP ENCRYPTION
+/// The red line plus the button that ends the state: SET UP ENCRYPTION
 /// for an account that was never set up, UNLOCK for one this device holds
-/// no key to. The dialog reports back through the service the banner
-/// already listens to, so there is nothing to return.
+/// no key to. While plaintext is still unconfirmed, SYNC WITHOUT
+/// ENCRYPTION sits beside SET UP as the one-time opt-out. The dialog reports
+/// back through the service the banner already listens to, so there is
+/// nothing to return.
 class _EncryptionBanner extends StatelessWidget {
   _EncryptionBanner({required this.e2ee});
 
@@ -1851,25 +1875,38 @@ class _EncryptionBanner extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final bool locked = e2ee.isLocked;
+    final bool unconfirmed = e2ee.isPlaintextUnconfirmed;
     return Padding(
       padding: const EdgeInsets.only(top: 10),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: <Widget>[
           ErrorBanner(
-            message: locked ? QueueTab.lockedBanner : QueueTab.notEncryptedBanner,
+            message: locked
+                ? QueueTab.lockedBanner
+                : unconfirmed
+                ? QueueTab.unconfirmedBanner
+                : QueueTab.notEncryptedBanner,
           ),
-          Align(
-            alignment: Alignment.centerRight,
-            child: TextButton.icon(
-              onPressed: () => showE2eePassphraseDialog(context, e2ee),
-              icon: Icon(
-                locked ? Icons.lock_open_rounded : Icons.enhanced_encryption_rounded,
-                size: 16,
+          Wrap(
+            alignment: WrapAlignment.end,
+            children: <Widget>[
+              if (unconfirmed)
+                TextButton(
+                  onPressed: () => unawaited(e2ee.confirmPlaintext().catchError((Object _) {})),
+                  style: TextButton.styleFrom(foregroundColor: Console.red),
+                  child: const Text('SYNC WITHOUT ENCRYPTION'),
+                ),
+              TextButton.icon(
+                onPressed: () => showE2eePassphraseDialog(context, e2ee),
+                icon: Icon(
+                  locked ? Icons.lock_open_rounded : Icons.enhanced_encryption_rounded,
+                  size: 16,
+                ),
+                label: Text(locked ? 'UNLOCK' : 'SET UP ENCRYPTION'),
+                style: TextButton.styleFrom(foregroundColor: Console.red),
               ),
-              label: Text(locked ? 'UNLOCK' : 'SET UP ENCRYPTION'),
-              style: TextButton.styleFrom(foregroundColor: Console.red),
-            ),
+            ],
           ),
         ],
       ),
@@ -1923,6 +1960,9 @@ class _CloudSyncStatus extends StatelessWidget {
   /// opened this panel was refused.
   static String encryptionStatus(E2eeService e2ee) {
     if (e2ee.isUnlocked) return 'ENCRYPTION · end-to-end, sealed on this device';
+    if (e2ee.isPlaintextUnconfirmed) {
+      return 'ENCRYPTION · NOT CONFIRMED, sync paused until you choose';
+    }
     if (e2ee.keyOnServer == false) {
       return 'ENCRYPTION · NOT ENCRYPTED, notes and files leave in plaintext';
     }
