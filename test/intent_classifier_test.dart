@@ -105,6 +105,38 @@ void main() {
       );
     });
 
+    test('a keyword inside a longer word is not a keyword', () {
+      for (final String text in <String>[
+        'We should research for a better vendor',
+        'The unverified claim needs a source',
+        'Reanalyzed the data last week',
+        'analizator logów padł',
+        'The todoists in the team like it',
+        'My brand new sessions are great',
+        'Wyszukajmy to później',
+      ]) {
+        expect(classifyByKeywords(text, all).intent, SmartIntent.note, reason: text);
+      }
+    });
+
+    test('a keyword at a word edge still matches, with punctuation', () {
+      expect(classifyByKeywords('(verify) the total', all).intent, SmartIntent.verify);
+      expect(classifyByKeywords('Analiza: churn', all).intent, SmartIntent.analyze);
+      expect(classifyByKeywords('SEARCH   FOR flights', all).intent, SmartIntent.search);
+    });
+
+    test('a long reason is cut without splitting a surrogate pair', () {
+      final String reason = '${'a' * (SmartIntentDecision.maxReasonChars - 1)}😀tail';
+      final SmartIntentDecision d = parseIntentReply(
+        jsonEncode(<String, String>{'intent': 'search', 'reason': reason}),
+        all,
+      );
+      final int last = d.reason!.codeUnitAt(d.reason!.length - 1);
+      expect(last >= 0xD800 && last <= 0xDBFF, isFalse);
+      expect(() => d.reason!.runes.toList(), returnsNormally);
+      expect(d.reason, 'a' * (SmartIntentDecision.maxReasonChars - 1));
+    });
+
     test('only the opening of a long note counts', () {
       expect(
         classifyByKeywords('${'word ' * 80}please analyze this', all).intent,

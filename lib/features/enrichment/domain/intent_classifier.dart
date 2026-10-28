@@ -94,6 +94,17 @@ final List<(SmartIntent, List<String>)> _keywords = <(SmartIntent, List<String>)
   ]),
 ];
 
+/// [phrase] as whole words: a letter or digit on either side disqualifies the
+/// match, so `research for` is not `search for` and `unverified` is not
+/// `verify`. Unicode-aware, because the Polish letters are not `\w`.
+bool _containsWord(String text, String phrase) {
+  final String pattern = RegExp.escape(phrase).replaceAll(RegExp(r'\\? '), r'\s+');
+  return RegExp(
+    '(?<![\\p{L}\\p{N}])$pattern(?![\\p{L}\\p{N}])',
+    unicode: true,
+  ).hasMatch(text);
+}
+
 /// Deterministic, offline, and conservative: anything it does not recognise is
 /// a [SmartIntent.note], and a recognised intent that was not offered is too.
 SmartIntentDecision classifyByKeywords(String text, Set<SmartIntent> offered) {
@@ -103,7 +114,7 @@ SmartIntentDecision classifyByKeywords(String text, Set<SmartIntent> offered) {
       : head;
   for (final (SmartIntent intent, List<String> words) in _keywords) {
     if (!offered.contains(intent)) continue;
-    if (words.any(window.contains)) {
+    if (words.any((String word) => _containsWord(window, word))) {
       return SmartIntentDecision(
         intent: intent,
         reason: 'The note opens with a request for ${intent.label.toLowerCase()}.',
@@ -214,7 +225,10 @@ String? _cleanReason(Object? value) {
   if (value is! String) return null;
   final String clean = sanitizeUntrustedMarkdown(value).trim();
   if (clean.isEmpty) return null;
-  return clean.length <= SmartIntentDecision.maxReasonChars
-      ? clean
-      : clean.substring(0, SmartIntentDecision.maxReasonChars);
+  if (clean.length <= SmartIntentDecision.maxReasonChars) return clean;
+  int end = SmartIntentDecision.maxReasonChars;
+  // Never between the halves of a surrogate pair.
+  final int last = clean.codeUnitAt(end - 1);
+  if (last >= 0xD800 && last <= 0xDBFF) end--;
+  return clean.substring(0, end);
 }
