@@ -1039,7 +1039,7 @@ class _ReviewToggle extends StatelessWidget {
             child: busy
                 ? SizedBox.square(
                     key: const ValueKey<String>('marking-done'),
-                    dimension: 19,
+                    dimension: 28,
                     child: CircularProgressIndicator(
                       strokeWidth: 2,
                       color: Console.green,
@@ -1052,7 +1052,7 @@ class _ReviewToggle extends StatelessWidget {
                         : Icons.radio_button_unchecked_rounded,
                     key: ValueKey<bool>(reviewed),
                     color: reviewed ? Console.green : Console.dimText,
-                    size: 26,
+                    size: 39,
                   ),
           ),
         ),

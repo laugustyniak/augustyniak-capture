@@ -1073,7 +1073,9 @@ class _QueueTabState extends State<QueueTab> {
                 itemBuilder: (BuildContext context, int index) {
                   final Recording item = group.items[index];
                   final bool isSelected = item.id == selectedId;
-                  return QueueListRow(
+                  return _swipeToDone(
+                    item,
+                    QueueListRow(
                     key: isSelected
                         ? _selectedRowKey
                         : ValueKey<String>(item.id),
@@ -1092,6 +1094,7 @@ class _QueueTabState extends State<QueueTab> {
                       // keep working after a mouse pick.
                       listFocus.requestFocus();
                     },
+                ),
                   );
                 },
               ),
@@ -1182,7 +1185,9 @@ class _QueueTabState extends State<QueueTab> {
                   itemCount: group.items.length,
                   itemBuilder: (BuildContext context, int index) {
                     final Recording item = group.items[index];
-                    return QueueListRow(
+                    return _swipeToDone(
+                      item,
+                      QueueListRow(
                       key: ValueKey<String>(item.id),
                       recording: item,
                       agentJobs: controller.agentJobs,
@@ -1194,6 +1199,7 @@ class _QueueTabState extends State<QueueTab> {
                       onToggleDone: () => _toggleProcessed(item),
                       isMarkingDone: markingDoneIds.contains(item.id),
                       onTap: () => _openDetailPage(item),
+                    ),
                     );
                   },
                 ),
@@ -1301,6 +1307,29 @@ class _QueueTabState extends State<QueueTab> {
       focusedId = recording.id;
       editingId = recording.id;
     });
+  }
+
+  /// Left-to-right swipe marks an open capture done, through the same
+  /// [_toggleProcessed] the check uses. The dismiss is always refused: the
+  /// active filter removes the row once the write lands, and a failed write
+  /// leaves it where it was. Right-to-left does nothing.
+  Widget _swipeToDone(Recording item, Widget row) {
+    if (item.isProcessedByUser || markingDoneIds.contains(item.id)) return row;
+    return Dismissible(
+      key: ValueKey<String>('swipe-${item.id}'),
+      direction: DismissDirection.startToEnd,
+      confirmDismiss: (DismissDirection _) async {
+        unawaited(_toggleProcessed(item));
+        return false;
+      },
+      background: Container(
+        color: Console.green.withValues(alpha: .22),
+        alignment: Alignment.centerLeft,
+        padding: const EdgeInsets.only(left: 24),
+        child: Icon(Icons.check_circle_rounded, color: Console.green, size: 30),
+      ),
+      child: row,
+    );
   }
 
   Future<void> _toggleProcessed(Recording recording) async {

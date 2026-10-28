@@ -2052,6 +2052,14 @@ void main() {
   testWidgets('filtering by capture type isolates audio, images, notes, and video', (
     WidgetTester tester,
   ) async {
+    // Taller than the default surface: the larger done icon makes each row
+    // taller, and the fourth no longer fits at 600 px.
+    tester.view.physicalSize = const Size(800, 900);
+    tester.view.devicePixelRatio = 1.0;
+    addTearDown(() {
+      tester.view.resetPhysicalSize();
+      tester.view.resetDevicePixelRatio();
+    });
     final RecordingsController controller = await buildRecordingsController(
       appDir,
       seed: <Recording>[
@@ -2254,6 +2262,54 @@ void main() {
       find.descendant(of: panel, matching: find.text('First transcript')),
       findsOneWidget,
     );
+  });
+
+  testWidgets('swiping a row left to right marks it done, right to left does not', (
+    WidgetTester tester,
+  ) async {
+    tester.view.physicalSize = const Size(1800, 1000);
+    tester.view.devicePixelRatio = 1.0;
+    addTearDown(() {
+      tester.view.resetPhysicalSize();
+      tester.view.resetDevicePixelRatio();
+    });
+
+    final RecordingsController controller = await buildRecordingsController(
+      appDir,
+      seed: <Recording>[
+        makeRecording(
+          id: 'c-1',
+          title: 'First capture',
+          transcript: 'First transcript',
+          type: CaptureType.text,
+        ),
+        makeRecording(
+          id: 'c-2',
+          title: 'Second capture',
+          transcript: 'Second transcript',
+          type: CaptureType.text,
+        ),
+      ],
+    );
+    await pumpQueue(tester, controller);
+    bool done(String id) => controller.recordings
+        .firstWhere((Recording r) => r.id == id)
+        .isProcessedByUser;
+
+    await tester.drag(find.byType(QueueListRow).at(0), const Offset(-600, 0));
+    await tester.pumpAndSettle();
+    expect(done('c-1'), isFalse);
+
+    await tester.drag(find.byType(QueueListRow).at(1), const Offset(600, 0));
+    await tester.runAsync(
+      () => Future<void>.delayed(const Duration(milliseconds: 50)),
+    );
+    await tester.pump();
+    await tester.pump(const Duration(seconds: 2));
+
+    expect(done('c-2'), isTrue);
+    expect(done('c-1'), isFalse);
+    expect(find.byType(QueueListRow), findsOneWidget);
   });
 
   testWidgets("a row's check marks it done without selecting it", (

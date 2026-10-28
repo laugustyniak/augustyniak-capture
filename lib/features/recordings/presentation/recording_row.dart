@@ -280,7 +280,7 @@ class _ReviewToggle extends StatelessWidget {
                       : Icons.radio_button_unchecked_rounded,
                   key: ValueKey<bool>(reviewed),
                   color: reviewed ? Console.green : Console.dimText,
-                  size: 22,
+                  size: 33,
                 ),
               ),
             ),
