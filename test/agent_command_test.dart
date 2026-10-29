@@ -114,12 +114,8 @@ void main() {
 
     test('an unrelated -c value and ordinary options are allowed', () {
       for (final String line in <String>[
-        'codex -c model="o3"',
-        'codex --config model=o3',
         'claude --mcp-config /t.json --model sonnet --strict-mcp-config',
         'claude --mcp-config=/t.json',
-        'codex -c mcp_servers.todoist.command="npx"',
-        'codex --config=mcp_servers.todoist.url=https://x.example',
         'codex --model o3',
       ]) {
         expect(parseAgentCommand(line).problem, isNull, reason: line);
@@ -138,6 +134,12 @@ void main() {
 
     group('allowlist', () {
       const List<String> bypasses = <String>[
+        'codex -c model=o3',
+        'codex --config model=o3',
+        'codex --config=model=o3',
+        'codex -c mcp_servers.todoist.command="sh"',
+        'codex -c mcp_servers.todoist.approval_policy=never',
+        'codex --config=mcp_servers.todoist.url=https://x.example',
         'codex -p yolo',
         'codex --profile yolo',
         'codex -c profile=yolo',
@@ -236,6 +238,24 @@ void main() {
           isFalse,
         );
         expect(argumentsControlApprovals(<String>['--model', 'x']), isFalse);
+        // An unknown agent is treated conservatively.
+        expect(argumentsControlApprovals(<String>['-p', 'x']), isTrue);
+        for (final List<String> args in <List<String>>[
+          <String>['--add-dir', '/'],
+          <String>['-C', '/'],
+          <String>['--cd', '/'],
+          <String>['--tools', 'Bash'],
+          <String>['--plugin-dir', '/p'],
+          <String>['-c', 'shell_environment_policy.inherit=all'],
+          <String>['-c', 'default_permissions=x'],
+          <String>['--config=features.web_search=true'],
+        ]) {
+          expect(
+            argumentsControlApprovals(args),
+            isTrue,
+            reason: args.join(' '),
+          );
+        }
       },
     );
   });

@@ -174,6 +174,7 @@ void main() {
       <String>['--settings', '/tmp/s.json'],
       <String>['--allowedTools', 'Bash'],
       <String>['--approval-mode=yolo'],
+      <String>['--add-dir', '/'],
     ]) {
       test('a smart launch is refused when project args are ${args.join(' ')}', () async {
         final _Launcher launcher = _Launcher();

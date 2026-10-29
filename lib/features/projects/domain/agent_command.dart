@@ -105,17 +105,18 @@ bool _isAbsolute(String path) =>
 /// it would be a prompt.
 ///
 /// - `claude`: `--mcp-config <path>`, `--model <name>`, `--strict-mcp-config`.
-/// - `codex`: `--model <name>`, and `-c`/`--config key=value` only for the
-///   keys `model` and `mcp_servers.*`.
+///   The config file is the user's own choice, and what it contains is as
+///   trusted as the user's other Claude configuration.
+/// - `codex`: `--model <name>` only. `-c`/`--config` is not accepted: a
+///   `mcp_servers.*` entry can start any program, so no key of it is safe to
+///   allow.
 /// - `agy`: nothing.
 String? _checkAllowlist(ProjectAgent agent, List<String> args) {
   final String allowed = switch (agent) {
     ProjectAgent.claude =>
       'Allowed after claude: --mcp-config <path>, --model <name>, '
           '--strict-mcp-config.',
-    ProjectAgent.codex =>
-      'Allowed after codex: --model <name>, -c/--config for model and '
-          'mcp_servers.* only.',
+    ProjectAgent.codex => 'Allowed after codex: --model <name> only.',
     _ => 'Nothing is allowed after agy.',
   };
   String refuse(String word, String why) =>
@@ -128,8 +129,7 @@ String? _checkAllowlist(ProjectAgent agent, List<String> args) {
     final String? inline = eq > 0 ? word.substring(eq + 1) : null;
     final bool takesValue = switch (agent) {
       ProjectAgent.claude => name == '--mcp-config' || name == '--model',
-      ProjectAgent.codex =>
-        name == '--model' || name == '-c' || name == '--config',
+      ProjectAgent.codex => name == '--model',
       _ => false,
     };
     final bool flag =
@@ -143,26 +143,18 @@ String? _checkAllowlist(ProjectAgent agent, List<String> args) {
     if (value == null || value.isEmpty || value.startsWith('-')) {
       return refuse(word, 'missing its value');
     }
-    if (agent == ProjectAgent.codex && name != '--model') {
-      final String key = value.split('=').first.trim();
-      final bool ok =
-          key == 'model' ||
-          RegExp(r'^mcp_servers\.[A-Za-z0-9_.\-"]+$').hasMatch(key);
-      if (!ok || !value.contains('=')) {
-        return refuse(word, 'a setting that is not model or mcp_servers.*');
-      }
-    }
   }
   return null;
 }
 
-/// Whether [arguments] contain anything that controls tool approvals, the
-/// sandbox, a profile or the settings the CLI trusts. Used for **display** (the
-/// Jobs list's APPROVALS OFF pill) and to refuse the SMART route on a project
-/// whose own arguments do. It is deliberately wider than what the Todoist
-/// command could ever contain, because that field is an allowlist and these
-/// arguments are not. [agent] sharpens `-p`, which means `--profile` for codex
-/// and `--print` for claude.
+/// Whether [arguments] contain something known to widen what an agent may do:
+/// approvals, the sandbox, profiles, trusted settings, extra directories or
+/// tools. A **best-effort denylist**, not a proof: it is used for display (the
+/// Jobs list's APPROVALS OFF pill) and as a guard on the unattended SMART path
+/// over a project's own arguments, which are the user's configuration. The
+/// Todoist command does not rely on it — that field is an allowlist. [agent]
+/// only exempts `-p` for claude, where it means `--print`; for codex and any
+/// unknown agent it is read as `--profile`.
 bool argumentsControlApprovals(List<String> arguments, {ProjectAgent? agent}) =>
     approvalControlIn(arguments, agent: agent) != null;
 
@@ -185,12 +177,16 @@ String? approvalControlIn(List<String> arguments, {ProjectAgent? agent}) {
         lower == '--settings' ||
         lower == '--setting-sources' ||
         lower == '--allowedtools' ||
-        lower == '--allowed-tools') {
+        lower == '--allowed-tools' ||
+        lower == '--add-dir' ||
+        lower == '--cd' ||
+        lower == '--tools' ||
+        lower == '--plugin-dir') {
       return argument;
     }
     // Short options, with the value attached or not: `-s x`, `-sx`, `-a never`.
-    if (RegExp(r'^-[say]').hasMatch(argument)) return argument;
-    if (agent == ProjectAgent.codex && RegExp(r'^-p').hasMatch(argument)) {
+    if (RegExp(r'^-[sayC]').hasMatch(argument)) return argument;
+    if (agent != ProjectAgent.claude && RegExp(r'^-p').hasMatch(argument)) {
       return argument;
     }
     final String? configValue = argument == '-c' || argument == '--config'
@@ -202,7 +198,8 @@ String? approvalControlIn(List<String> arguments, {ProjectAgent? agent}) {
         : null;
     if (configValue != null &&
         RegExp(
-          r'approval|sandbox|profile|trust|^projects\.',
+          r'approval|sandbox|profile|trust|^projects\.|shell_environment_policy|'
+          r'default_permissions|^features\.',
           caseSensitive: false,
         ).hasMatch(configValue)) {
       return argument;

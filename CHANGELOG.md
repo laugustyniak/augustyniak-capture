@@ -7,6 +7,9 @@
   task, or a plain note for the project inbox) and routes it in one tap. Fully
   automatic by default; Config > SMART ROUTE can ask first before an agent
   starts, and holds the agent command the Todoist intent runs.
+- `RecordingsController.route` now does nothing for an id that was deleted
+  meanwhile instead of throwing, and `confirmDestructive` gained a
+  `destructive` flag (default true) for a non-destructive confirmation.
 
 ## 0.2.0 — 2026-09-07
 

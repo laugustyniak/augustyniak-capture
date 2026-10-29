@@ -155,8 +155,8 @@ class _SmartRouteSectionState extends State<SmartRouteSection> {
                 'an app, so spell out what the alias expands to. Use a bare '
                 'name or an absolute path; ~/ is expanded. Only a short list '
                 'of options is accepted — claude: --mcp-config <path>, '
-                '--model <name>, --strict-mcp-config; codex: --model <name>, '
-                '-c for model and mcp_servers.*; agy: none. Anything that '
+                '--model <name>, --strict-mcp-config; codex: --model <name> '
+                'only; agy: none. Anything that '
                 'could widen permissions is refused. '
                 'Empty turns the Todoist intent off, and such captures go to '
                 'the inbox.',
