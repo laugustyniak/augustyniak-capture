@@ -369,6 +369,7 @@ class RecordingsController extends ChangeNotifier {
   Timer? _timer;
   List<Recording> _recordings = <Recording>[];
   bool _isRecording = false;
+  bool _isRecordingPaused = false;
   bool _isBusy = false;
   String? _activeFilePath;
   String? _activeId;
@@ -516,6 +517,7 @@ class RecordingsController extends ChangeNotifier {
   /// overwrite the history with it, so [addTextNote] refuses to run.
   bool get isInitialized => _initialized;
   bool get isRecording => _isRecording;
+  bool get isRecordingPaused => _isRecordingPaused;
   bool get isBusy => _isBusy;
 
   /// Whether the background processing loop is currently running a job.
@@ -1903,6 +1905,7 @@ class RecordingsController extends ChangeNotifier {
     // buffer four times a second while nobody is looking at it.
     _timer = Timer.periodic(const Duration(milliseconds: 250), _onTick);
     _listenToLevel();
+    _isRecordingPaused = false;
     _isRecording = true;
     notifyListeners();
   }
@@ -1920,6 +1923,7 @@ class RecordingsController extends ChangeNotifier {
   /// `_isRecording && !_isBusy`, so the ticks that land while the save is in
   /// flight are no-ops, and the timer is cancelled inside it.
   void _onTick(Timer _) {
+    if (_isRecordingPaused) return;
     _elapsedTicker.value = _stopwatch.elapsed;
 
     final TranscriptionCeiling? limit = recordingLimit;
@@ -1944,8 +1948,9 @@ class RecordingsController extends ChangeNotifier {
       _amplitudeSub = _recorder
           .onAmplitudeChanged(const Duration(milliseconds: 120))
           .listen(
-            (Amplitude amplitude) =>
-                _levelTicker.value = _normalizeLevel(amplitude.current),
+            (Amplitude amplitude) => _levelTicker.value = _isRecordingPaused
+                ? 0
+                : _normalizeLevel(amplitude.current),
             onError: (Object _) => _levelTicker.value = 0,
           );
     } catch (_) {
@@ -1959,6 +1964,60 @@ class RecordingsController extends ChangeNotifier {
   static double _normalizeLevel(double dbfs) {
     if (dbfs.isNaN || dbfs.isInfinite) return 0;
     return ((dbfs + 45) / 45).clamp(0, 1).toDouble();
+  }
+
+  /// Pause the native recorder without finalising or indexing its source.
+  Future<void> toggleRecordingPause() async {
+    if (!_isRecording || _isBusy) return;
+    final bool wasPaused = _isRecordingPaused;
+    _isBusy = true;
+    _error = null;
+    notifyListeners();
+    try {
+      if (wasPaused) {
+        await _recorder.resume().timeout(_recorderTimeout);
+        if (_disposed) return;
+        _stopwatch.start();
+      } else {
+        await _recorder.pause().timeout(_recorderTimeout);
+        if (_disposed) return;
+        _stopwatch.stop();
+        _elapsedTicker.value = _stopwatch.elapsed;
+        _levelTicker.value = 0;
+      }
+      _isRecordingPaused = !wasPaused;
+      _logSink.log(
+        wasPaused ? 'Recording resumed.' : 'Recording paused.',
+        recordingId: _activeId,
+      );
+    } catch (exception) {
+      if (_disposed) return;
+      _error =
+          'Could not ${wasPaused ? 'resume' : 'pause'} recording: $exception';
+      _logSink.log(_error!, level: LogLevel.error, recordingId: _activeId);
+    } finally {
+      _isBusy = false;
+      if (!_disposed) notifyListeners();
+    }
+  }
+
+  Future<void> _resumeLinuxRecorder() async {
+    // Linux pauses parecord with SIGSTOP. It must receive SIGCONT before the
+    // backend's SIGTERM can finish it and finalise the encoder's output.
+    try {
+      await _recorder.resume().timeout(_recorderTimeout);
+    } catch (exception) {
+      _logSink.log(
+        'Could not release paused recorder before stopping: $exception',
+        level: LogLevel.warn,
+        recordingId: _activeId,
+      );
+    }
+  }
+
+  Future<String?> _stopCaptureRecorder() async {
+    if (_isRecordingPaused && Platform.isLinux) await _resumeLinuxRecorder();
+    return _recorder.stop().timeout(_recorderTimeout);
   }
 
   Future<void> stopRecording() async {
@@ -1998,7 +2057,7 @@ class RecordingsController extends ChangeNotifier {
       // have adopted anyway. The emptiness check below is what separates this
       // from the case where nothing was written at all.
       try {
-        stoppedPath = await _recorder.stop().timeout(_recorderTimeout);
+        stoppedPath = await _stopCaptureRecorder();
       } catch (exception) {
         stopFailure = exception;
         _logSink.log(
@@ -2139,6 +2198,7 @@ class RecordingsController extends ChangeNotifier {
       _levelTicker.value = 0;
       if (_stopwatch.isRunning) _stopwatch.stop();
       _isRecording = false;
+      _isRecordingPaused = false;
       _isBusy = false;
       _activeFilePath = null;
       _activeId = null;
@@ -2192,14 +2252,9 @@ class RecordingsController extends ChangeNotifier {
 
     final String? id = _activeId;
     try {
-      final String? stoppedPath = await _recorder.stop();
-      _timer?.cancel();
-      _timer = null;
-      unawaited(_amplitudeSub?.cancel());
-      _amplitudeSub = null;
-      _levelTicker.value = 0;
-      if (_stopwatch.isRunning) _stopwatch.stop();
+      final String? stoppedPath = await _stopCaptureRecorder();
       _isRecording = false;
+      _isRecordingPaused = false;
 
       final String? path = stoppedPath ?? _activeFilePath;
       if (path != null) {
@@ -2221,7 +2276,14 @@ class RecordingsController extends ChangeNotifier {
         recordingId: id,
       );
     } finally {
+      _timer?.cancel();
+      _timer = null;
+      unawaited(_amplitudeSub?.cancel());
+      _amplitudeSub = null;
+      _levelTicker.value = 0;
+      if (_stopwatch.isRunning) _stopwatch.stop();
       _isRecording = false;
+      _isRecordingPaused = false;
       _isBusy = false;
       _activeFilePath = null;
       _activeId = null;
@@ -5125,7 +5187,22 @@ class RecordingsController extends ChangeNotifier {
     _playerPositionSub?.cancel();
     _playerDurationSub?.cancel();
     _player.dispose();
-    _recorder.dispose();
+    if (_isRecording && Platform.isLinux) {
+      // Also queue resume when pause is still in flight: record serialises its
+      // native calls, so disposal must follow that resume rather than pause.
+      unawaited(
+        _resumeLinuxRecorder()
+            .then((_) => _recorder.dispose())
+            .catchError((Object exception) {
+              _logSink.log(
+                'Could not dispose recorder: $exception',
+                level: LogLevel.warn,
+              );
+            }),
+      );
+    } else {
+      _recorder.dispose();
+    }
     // A controller disposed mid-capture — a hot restart, the activity being
     // torn down — leaves the service running with no one to stop it, and the
     // notification outlives the app that posted it.

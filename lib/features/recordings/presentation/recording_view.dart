@@ -70,6 +70,7 @@ class RecordingView extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final AudioConfig audio = controller.audioConfig;
+    final bool paused = controller.isRecordingPaused;
     // Read once: a getter cannot be promoted, and this is used twice below.
     final Recording? target = appendTarget;
 
@@ -102,23 +103,34 @@ class RecordingView extends StatelessWidget {
                     vertical: 6,
                   ),
                   decoration: BoxDecoration(
-                    color: Console.red.withValues(alpha: .1),
+                    color: (paused ? Console.amber : Console.red).withValues(
+                      alpha: .1,
+                    ),
                     borderRadius: BorderRadius.circular(999),
                     border: Border.all(
-                      color: Console.red.withValues(alpha: .35),
+                      color: (paused ? Console.amber : Console.red).withValues(
+                        alpha: .35,
+                      ),
                     ),
                   ),
                   child: Row(
                     mainAxisSize: MainAxisSize.min,
                     children: <Widget>[
-                      PulseDot(color: Console.red, size: 7),
+                      if (paused)
+                        Icon(
+                          Icons.pause_rounded,
+                          color: Console.amber,
+                          size: 12,
+                        )
+                      else
+                        PulseDot(color: Console.red, size: 7),
                       const SizedBox(width: 7),
                       Text(
-                        'REC',
+                        paused ? 'PAUSED' : 'REC',
                         style: ConsoleText.pill.copyWith(
                           fontSize: 10.5,
                           fontWeight: FontWeight.w700,
-                          color: Console.red,
+                          color: paused ? Console.amber : Console.red,
                         ),
                       ),
                     ],
@@ -127,17 +139,40 @@ class RecordingView extends StatelessWidget {
               ],
             ),
             Expanded(
-              child: Column(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: <Widget>[
-                  _ElapsedReadout(controller: controller, audio: audio),
-                  const SizedBox(height: 26),
-                  _LevelMeter(level: controller.levelTicker),
-                  const SizedBox(height: 26),
-                  _PipelineChecklist(),
-                ],
+              child: Center(
+                child: SingleChildScrollView(
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: <Widget>[
+                      _ElapsedReadout(controller: controller, audio: audio),
+                      const SizedBox(height: 26),
+                      _LevelMeter(level: controller.levelTicker),
+                      const SizedBox(height: 26),
+                      _PipelineChecklist(paused: paused),
+                    ],
+                  ),
+                ),
               ),
             ),
+            if (controller.error != null) ...<Widget>[
+              ErrorBanner(message: controller.error!),
+              const SizedBox(height: 14),
+            ],
+            OutlinedButton.icon(
+              onPressed: controller.isBusy
+                  ? null
+                  : controller.toggleRecordingPause,
+              icon: Icon(
+                paused ? Icons.play_arrow_rounded : Icons.pause_rounded,
+              ),
+              label: Text(paused ? 'RESUME' : 'PAUSE'),
+              style: OutlinedButton.styleFrom(
+                minimumSize: const Size.fromHeight(48),
+                foregroundColor: Console.text,
+                side: BorderSide(color: Console.borderStrong),
+              ),
+            ),
+            const SizedBox(height: 14),
             if (projects.isNotEmpty) ...<Widget>[
               _ProjectPicker(controller: controller, projects: projects),
               const SizedBox(height: 14),
@@ -400,7 +435,9 @@ class _LevelMeterState extends State<_LevelMeter> {
 /// The four ordered steps of a capture, with the one in progress lit. Stating
 /// the order on screen is the point: persist happens before processing, always.
 class _PipelineChecklist extends StatelessWidget {
-  const _PipelineChecklist();
+  _PipelineChecklist({required this.paused});
+
+  final bool paused;
 
   static const List<String> _steps = <String>[
     'recording → .m4a',
@@ -420,7 +457,7 @@ class _PipelineChecklist extends StatelessWidget {
               padding: EdgeInsets.only(top: index == 0 ? 0 : 10),
               child: Row(
                 children: <Widget>[
-                  if (index == 0)
+                  if (index == 0 && !paused)
                     PulseDot(color: Console.accent, size: 7)
                   else
                     Container(
@@ -433,7 +470,7 @@ class _PipelineChecklist extends StatelessWidget {
                     ),
                   const SizedBox(width: 10),
                   Text(
-                    _steps[index],
+                    index == 0 && paused ? 'paused → .m4a' : _steps[index],
                     style: index == 0
                         ? ConsoleText.cardMeta.copyWith(
                             fontWeight: FontWeight.w500,
@@ -566,7 +603,7 @@ class _SaveButton extends StatelessWidget {
             ],
           ),
           child: Text(
-            busy ? 'SAVING' : 'SAVE',
+            busy ? 'WAIT' : 'SAVE',
             style: TextStyle(
               fontFamily: ConsoleFont.display,
               fontSize: 15,

@@ -370,6 +370,33 @@ void main() {
     });
   });
 
+  testWidgets('pause and resume controls keep the capture open', (
+    tester,
+  ) async {
+    final controller = buildController();
+    await tester.runAsync(() async {
+      await controller.initialize();
+      await controller.startRecording();
+    });
+    await tester.pumpWidget(
+      hostTab(
+        () => RecordingView(controller: controller),
+        listenable: controller,
+      ),
+    );
+    await tester.pump();
+    await tester.tap(find.text('PAUSE'));
+    await tester.pump();
+    expect(find.text('PAUSED'), findsOneWidget);
+    expect(find.text('RESUME'), findsOneWidget);
+    expect(controller.isRecording, isTrue);
+    await tester.tap(find.text('RESUME'));
+    await tester.pump();
+    expect(find.text('REC'), findsOneWidget);
+    expect(find.text('PAUSE'), findsOneWidget);
+    await tester.runAsync(controller.stopRecording);
+  });
+
   group('TextNoteSheet', () {
     /// Opens the sheet on a real route so `Navigator.pop` has somewhere to go,
     /// and hands whatever it popped to [onResult].
