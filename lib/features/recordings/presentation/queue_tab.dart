@@ -216,20 +216,45 @@ class _QueueTabState extends State<QueueTab> {
     final double width =
         context.size?.width ?? MediaQuery.sizeOf(context).width;
     if (width >= Console.masterDetailBreakpoint) {
-      setState(() {
-        reviewFilter = ReviewFilter.all;
-        selectedFilter = RecordingFilter.all;
-        selectedTypeFilter = CaptureTypeFilter.all;
-        projectFilterId = null;
-        searchQuery = '';
-        searchController.clear();
-        focusedId = capture.id;
-        if (edit) editingId = capture.id;
-      });
+      _selectUnfiltered(capture.id, edit: edit);
     } else if (width < Console.compactBreakpoint) {
       _openDetailPage(capture);
     } else {
       _openFocus(capture);
+    }
+  }
+
+  /// Clears every filter so [id] cannot be hidden, then selects it.
+  void _selectUnfiltered(String id, {bool edit = false}) {
+    setState(() {
+      reviewFilter = ReviewFilter.all;
+      selectedFilter = RecordingFilter.all;
+      selectedTypeFilter = CaptureTypeFilter.all;
+      projectFilterId = null;
+      searchQuery = '';
+      searchController.clear();
+      focusedId = id;
+      if (edit) editingId = id;
+    });
+  }
+
+  /// Moves focus to a voice note the moment it is saved, wherever the user was
+  /// looking, so the processing animation and then the transcript appear
+  /// without a click. Unlike [_revealCapture] it never opens the editor: that
+  /// would hide the animation behind a form.
+  void _focusAddedCapture() {
+    final added = widget.controller.addedCapture.value;
+    if (added == null || !mounted) return;
+    final Recording? capture = widget.controller.recordings
+        .where((Recording item) => item.id == added.id)
+        .firstOrNull;
+    if (capture == null) return;
+    final double width =
+        context.size?.width ?? MediaQuery.sizeOf(context).width;
+    if (width < Console.compactBreakpoint) {
+      _openDetailPage(capture);
+    } else {
+      _selectUnfiltered(capture.id);
     }
   }
 
@@ -350,11 +375,16 @@ class _QueueTabState extends State<QueueTab> {
   void initState() {
     super.initState();
     projectFilterId = widget.initialProjectId;
+    widget.controller.addedCapture.addListener(_focusAddedCapture);
   }
 
   @override
   void didUpdateWidget(QueueTab oldWidget) {
     super.didUpdateWidget(oldWidget);
+    if (widget.controller != oldWidget.controller) {
+      oldWidget.controller.addedCapture.removeListener(_focusAddedCapture);
+      widget.controller.addedCapture.addListener(_focusAddedCapture);
+    }
     if (widget.initialProjectId != oldWidget.initialProjectId) {
       setState(() {
         projectFilterId = widget.initialProjectId;
@@ -364,6 +394,7 @@ class _QueueTabState extends State<QueueTab> {
 
   @override
   void dispose() {
+    widget.controller.addedCapture.removeListener(_focusAddedCapture);
     _syncStatusTimer?.cancel();
     _doneFeedbackTimer?.cancel();
     searchController.dispose();
