@@ -152,10 +152,12 @@ class _SmartRouteSectionState extends State<SmartRouteSection> {
               Text(
                 'Runs in the background for "add a task" captures. Typed as '
                 'arguments, not a shell line: a shell alias is not visible to '
-                'an app, so spell out what the alias expands to. The first '
-                'word must be claude, codex or agy; ~/ is expanded; '
-                'permission-bypass flags are refused. Include whatever gives '
-                'that agent Todoist access (an MCP config, allowed tools). '
+                'an app, so spell out what the alias expands to. Use a bare '
+                'name or an absolute path; ~/ is expanded. Only a short list '
+                'of options is accepted — claude: --mcp-config <path>, '
+                '--model <name>, --strict-mcp-config; codex: --model <name>, '
+                '-c for model and mcp_servers.*; agy: none. Anything that '
+                'could widen permissions is refused. '
                 'Empty turns the Todoist intent off, and such captures go to '
                 'the inbox.',
                 style: TextStyle(

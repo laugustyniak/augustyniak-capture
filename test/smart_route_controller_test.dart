@@ -233,9 +233,10 @@ void main() {
     expect(c.recordings.single.routes, isEmpty);
     expect(c.recordings.single.isProcessedByUser, isFalse);
 
-    final SmartRouteOutcome? done = await c.smartRoute(
+    final SmartRouteOutcome? done = await c.confirmSmartRoute(
       'r1',
-      confirmed: SmartIntent.analyze,
+      SmartIntent.analyze,
+      expectedText: asked.text,
     );
     expect(done!.delivered, isTrue);
     expect(handoff.requests, hasLength(1));
@@ -260,9 +261,10 @@ void main() {
       handoff: handoff,
       classifier: _Classifier(SmartIntent.note),
     );
-    final SmartRouteOutcome? outcome = await c.smartRoute(
+    final SmartRouteOutcome? outcome = await c.confirmSmartRoute(
       'r1',
-      confirmed: SmartIntent.todoist,
+      SmartIntent.todoist,
+      expectedText: 'Look into how other apps do offline sync',
     );
     expect(outcome!.delivered, isFalse);
     expect(handoff.requests, isEmpty);
@@ -408,9 +410,9 @@ void main() {
     expect(asked.text, isNotEmpty);
     expect(asked.agentLabel, 'Claude Code');
     await c.editTranscript('r1', 'different words now');
-    final SmartRouteOutcome? stale = await c.smartRoute(
+    final SmartRouteOutcome? stale = await c.confirmSmartRoute(
       'r1',
-      confirmed: SmartIntent.analyze,
+      SmartIntent.analyze,
       expectedText: asked.text,
     );
     expect(stale!.delivered, isFalse);

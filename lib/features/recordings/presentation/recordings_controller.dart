@@ -3297,10 +3297,22 @@ class RecordingsController extends ChangeNotifier {
   ///
   /// With [SmartRouteConfirm.confirmEffects] an intent with effects returns
   /// `awaitingConfirmation` and delivers nothing; calling again with
-  /// [confirmed] delivers that intent without classifying again. Returns null
+  /// [confirmSmartRoute] delivers that intent without classifying again. Returns null
   /// when the capture is gone, a run is already in flight, or it cannot be
   /// smart-routed.
-  Future<SmartRouteOutcome?> smartRoute(
+  Future<SmartRouteOutcome?> smartRoute(String id) => _smartRoute(id);
+
+  /// The second tap of `confirmEffects`: delivers [intent] without classifying
+  /// again. [expectedText] is required, not optional — it is the words the
+  /// user was shown a decision about, and a capture that no longer reads the
+  /// same is refused rather than sent on that decision.
+  Future<SmartRouteOutcome?> confirmSmartRoute(
+    String id,
+    SmartIntent intent, {
+    required String expectedText,
+  }) => _smartRoute(id, confirmed: intent, expectedText: expectedText);
+
+  Future<SmartRouteOutcome?> _smartRoute(
     String id, {
     SmartIntent? confirmed,
     String? expectedText,
@@ -3319,7 +3331,7 @@ class RecordingsController extends ChangeNotifier {
 
       SmartIntentDecision decision;
       if (confirmed != null) {
-        if (expectedText != null && expectedText != text) {
+        if (expectedText != text) {
           _error =
               'This capture changed while you were deciding — nothing was '
               'sent. Tap again to route it as it is now.';

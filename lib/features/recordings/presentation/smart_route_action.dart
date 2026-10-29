@@ -29,11 +29,7 @@ Future<void> runSmartRoute(
     destructive: false,
   );
   if (!go) return;
-  await controller.smartRoute(
-    id,
-    confirmed: intent,
-    expectedText: outcome.text,
-  );
+  await controller.confirmSmartRoute(id, intent, expectedText: outcome.text);
 }
 
 /// What the confirmation dialog says. The sentence is ours: the intent's fixed

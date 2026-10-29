@@ -160,6 +160,62 @@ void main() {
       );
     });
 
+    Project withArgs(List<String> args) => Project(
+      id: 'p1',
+      name: 'Acme',
+      repoPath: repo.path,
+      agentSettings: <AgentKind, AgentSettings>{
+        AgentKind.claudeCode: AgentSettings(additionalArgs: args),
+      },
+    );
+
+    for (final List<String> args in <List<String>>[
+      <String>['--permission-mode', 'bypassPermissions'],
+      <String>['--settings', '/tmp/s.json'],
+      <String>['--allowedTools', 'Bash'],
+      <String>['--approval-mode=yolo'],
+    ]) {
+      test('a smart launch is refused when project args are ${args.join(' ')}', () async {
+        final _Launcher launcher = _Launcher();
+        final ProjectAgentHandoff handoff = ProjectAgentHandoff(
+          projectById: (String id) => withArgs(args),
+          launcher: launcher,
+        );
+        await expectLater(
+          handoff.handoff(
+            AgentHandoffRequest(
+              capture: capture('x'),
+              agentId: AgentKind.claudeCode.name,
+              instruction: 'x',
+              detached: true,
+              honorSkipPermissions: false,
+            ),
+          ),
+          throwsA(
+            isA<AgentHandoffFailure>().having(
+              (AgentHandoffFailure e) => e.message,
+              'message',
+              contains('Send to'),
+            ),
+          ),
+        );
+        expect(launcher.requests, isEmpty);
+        expect(File('${repo.path}/.agent-tasks/r1.md').existsSync(), isFalse);
+
+        // The same arguments through the manual path, where a human reads the
+        // prompt, are the project's own business and still launch.
+        await handoff.handoff(
+          AgentHandoffRequest(
+            capture: capture('x'),
+            agentId: AgentKind.claudeCode.name,
+            instruction: 'x',
+            detached: true,
+          ),
+        );
+        expect(launcher.requests, hasLength(1));
+      });
+    }
+
     test('a configured command replaces the agent and its settings', () async {
       final _Launcher launcher = _Launcher();
       final AgentCommand command = parseAgentCommand(

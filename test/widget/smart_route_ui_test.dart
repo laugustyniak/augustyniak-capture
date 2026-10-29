@@ -114,7 +114,7 @@ void main() {
       'claude --yolo',
     );
     await tester.pump();
-    expect(find.textContaining('not allowed here'), findsOneWidget);
+    expect(find.textContaining('not an accepted option'), findsOneWidget);
     expect(find.textContaining('TODOIST INTENT ON'), findsNothing);
   });
 }

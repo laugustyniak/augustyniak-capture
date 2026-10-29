@@ -146,6 +146,24 @@ class ProjectAgentHandoff implements AgentHandoff {
       throw AgentHandoffFailure('Unknown agent: ${request.agentId}');
     }
 
+    // The SMART route launches with no human reading the prompt, so project
+    // arguments that control approvals, the sandbox, a profile or trusted
+    // settings must not ride along. Refused before anything is written; the
+    // manual sheet, where a person reads the prompt, is unaffected.
+    if (!request.honorSkipPermissions && command == null) {
+      final String? control = approvalControlIn(
+        project?.settingsFor(agent).additionalArgs ?? const <String>[],
+        agent: _launcherAgent(agent),
+      );
+      if (control != null) {
+        throw AgentHandoffFailure(
+          "This project's ${agentLabel(agent)} arguments include $control, "
+          'which controls tool approvals. The smart route will not start an '
+          'agent unattended with it — use Send to… so you can read the prompt.',
+        );
+      }
+    }
+
     // A scratch folder is ours to create, on first send, and never to delete:
     // the agent's results live in it after the session is gone.
     if (workspace != null) await Directory(workspace).create(recursive: true);
