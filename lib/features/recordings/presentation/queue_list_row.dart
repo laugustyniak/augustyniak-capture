@@ -203,9 +203,8 @@ class QueueListRow extends StatelessWidget {
                 _DoneCheck(
                   done: recording.isProcessedByUser,
                   busy: isMarkingDone,
-                  // 44 px on a phone, the touch-target floor; a pointer
-                  // needs less and the desktop row is denser.
-                  size: narrow ? 44 : 32,
+                  // 44 px on a phone, the touch-target floor; the desktop row is denser.
+                  size: narrow ? 44 : 34,
                   onTap: onToggleDone!,
                 ),
               ],
@@ -285,7 +284,7 @@ class _DoneCheck extends StatelessWidget {
             child: Center(
               child: busy
                   ? SizedBox.square(
-                      dimension: 16,
+                      dimension: 24,
                       child: CircularProgressIndicator(
                         strokeWidth: 2,
                         color: Console.green,
@@ -295,7 +294,7 @@ class _DoneCheck extends StatelessWidget {
                       done
                           ? Icons.check_circle_rounded
                           : Icons.radio_button_unchecked_rounded,
-                      size: 20,
+                      size: 30,
                       // dimText, not dim: an empty circle is the control, and
                       // it has to be findable at rest.
                       color: done ? Console.green : Console.dimText,
