@@ -1443,6 +1443,11 @@ class RecordingsController extends ChangeNotifier {
     );
 
     _lastCloudSyncReport = await coordinator.sync(onProgress: onProgress);
+    if (_revisionsRepository != null &&
+        ((_lastCloudSyncReport!.supabase?.pulled ?? 0) > 0 ||
+            (_lastCloudSyncReport!.supabase?.tombstonesApplied ?? 0) > 0)) {
+      await _history.loadRevisions();
+    }
     // Only a run that reached the metadata slot can have pulled a tombstone.
     if (_lastCloudSyncReport!.supabase != null) await _housekeepTrash();
     // A pulled row that was mid-pipeline on the device that made it can now
