@@ -17,7 +17,15 @@ class HybridAgentSessionLauncher implements AgentSessionLauncher {
   Future<AgentSessionLaunchResult> launch(
     AgentSessionLaunchRequest request,
   ) async {
-    if (!request.detached) return _windowed.launch(request);
+    if (!request.detached) {
+      // A configured command is only understood by the native adapter.
+      if (request.executable != null) {
+        throw const AgentSessionLaunchException(
+          'A configured agent command can only run in the background.',
+        );
+      }
+      return _windowed.launch(request);
+    }
     final NativeAgentJobHandle job = await _jobs.launch(request);
     return AgentSessionLaunchResult(
       sessionName: job.id,

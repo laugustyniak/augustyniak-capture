@@ -36,6 +36,7 @@ import '../../costs/domain/usage_model_keys.dart';
 import '../../connections/data/http_daily_connections_service.dart';
 import '../../enrichment/domain/transcript_cleaner.dart';
 import '../../enrichment/domain/instruction_writer.dart';
+import '../../enrichment/domain/intent_classifier.dart';
 import '../../enrichment/data/composed_enrichment_context_source.dart';
 import '../domain/connection_reasoner.dart';
 import '../../logs/data/log_store.dart';
@@ -968,6 +969,13 @@ class _RecordingsPageState extends State<RecordingsPage>
         ? settings.enrichmentService as InstructionWriter
         : const DisabledInstructionWriter();
     controller.autoInstruction = settings.autoInstruction;
+    // The SMART route rides the same chat endpoint; with no model it keeps
+    // working on the offline keyword fallback.
+    controller.intentClassifier = settings.enrichmentService is IntentClassifier
+        ? settings.enrichmentService as IntentClassifier
+        : const DisabledIntentClassifier();
+    controller.smartRouteConfirm = settings.smartRouteConfirm;
+    controller.todoistAgentCommand = settings.todoistAgentCommand;
     controller.asrGlossary = settings.asrGlossary;
     controller.embeddingService = settings.embeddingService;
     // OCR rides the enrichment profile (vision-capable chat endpoint) and has

@@ -3,6 +3,7 @@ import 'dart:io';
 import 'package:path/path.dart' as p;
 
 import '../../../core/security/symlink_guard.dart';
+import '../../projects/domain/agent_command.dart';
 import '../../projects/domain/agent_session_launcher.dart';
 import '../../projects/domain/project.dart';
 import '../domain/agent_handoff.dart';
@@ -132,9 +133,35 @@ class ProjectAgentHandoff implements AgentHandoff {
     );
     final String repoPath = workspace ?? project!.repoPath;
 
-    final AgentKind? agent = AgentKind.fromName(request.agentId);
+    final AgentCommand? command = request.command;
+    if (command != null && !request.detached) {
+      throw const AgentHandoffFailure(
+        'A configured agent command can only run in the background.',
+      );
+    }
+    final AgentKind? agent = command == null
+        ? AgentKind.fromName(request.agentId)
+        : _kindFor(command.agent);
     if (agent == null) {
       throw AgentHandoffFailure('Unknown agent: ${request.agentId}');
+    }
+
+    // The SMART route launches with no human reading the prompt, so project
+    // arguments that control approvals, the sandbox, a profile or trusted
+    // settings must not ride along. Refused before anything is written; the
+    // manual sheet, where a person reads the prompt, is unaffected.
+    if (!request.honorSkipPermissions && command == null) {
+      final String? control = approvalControlIn(
+        project?.settingsFor(agent).additionalArgs ?? const <String>[],
+        agent: _launcherAgent(agent),
+      );
+      if (control != null) {
+        throw AgentHandoffFailure(
+          "This project's ${agentLabel(agent)} arguments include $control, "
+          'which controls tool approvals. The smart route will not start an '
+          'agent unattended with it — use Send to… so you can read the prompt.',
+        );
+      }
     }
 
     // A scratch folder is ours to create, on first send, and never to delete:
@@ -161,8 +188,11 @@ class ProjectAgentHandoff implements AgentHandoff {
     );
 
     final ProjectAgent launcherAgent = _launcherAgent(agent);
-    final AgentSettings settings =
-        project?.settingsFor(agent) ?? const AgentSettings();
+    // A configured command brings its own arguments; the project's settings
+    // belong to the project's agent and are not applied to it.
+    final AgentSettings settings = command != null
+        ? const AgentSettings()
+        : project?.settingsFor(agent) ?? const AgentSettings();
     final AgentSessionLaunchResult session = await _launcher.launch(
       AgentSessionLaunchRequest(
         projectId: project?.id ?? 'capture-${request.captureId}',
@@ -176,16 +206,19 @@ class ProjectAgentHandoff implements AgentHandoff {
             ? project!.sessionName
             : _scratchSessionName(request.captureId),
         arguments: <String>[
+          ...?command?.arguments,
           ...settings.additionalArgs,
-          if (settings.skipPermissions)
+          if (settings.skipPermissions && request.honorSkipPermissions)
             ...launcherAgent.skipPermissionsArguments,
         ],
+        executable: command?.executable,
         // Kept separate from argv so native background adapters can feed the
         // capture through a private stdin file. Zellij adds its own positional
         // spelling when it builds the layout.
         prompt: frameCapturePrompt(
           request.instruction,
           capture: request.capture,
+          directive: request.directive,
         ),
         detached: request.detached,
       ),
@@ -197,7 +230,11 @@ class ProjectAgentHandoff implements AgentHandoff {
         // earlier than the session that produced it.
         at: DateTime.now(),
         kind: RouteKind.agent,
-        target: '${agentLabel(agent)} · ${session.sessionName}',
+        target: <String>[
+          agentLabel(agent),
+          if (request.purpose != null) request.purpose!,
+          session.sessionName,
+        ].join(' · '),
         session: session.job == null ? session.sessionName : null,
         agentJob: session.job,
       ),
@@ -252,6 +289,13 @@ class ProjectAgentHandoff implements AgentHandoff {
     AgentKind.claudeCode => 'Claude Code',
     AgentKind.antigravity => 'Antigravity',
     AgentKind.geminiCli => 'Gemini CLI',
+  };
+
+  static AgentKind _kindFor(ProjectAgent agent) => switch (agent) {
+    ProjectAgent.codex => AgentKind.codex,
+    ProjectAgent.claude => AgentKind.claudeCode,
+    ProjectAgent.antigravity => AgentKind.antigravity,
+    ProjectAgent.gemini => AgentKind.geminiCli,
   };
 
   static ProjectAgent _launcherAgent(AgentKind agent) => switch (agent) {

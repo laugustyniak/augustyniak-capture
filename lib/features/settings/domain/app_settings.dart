@@ -2,6 +2,7 @@ import '../../costs/domain/model_price.dart';
 import '../../costs/domain/price_book.dart';
 import '../../enrichment/domain/enrichment_defaults.dart';
 import '../../recordings/domain/note_vault.dart';
+import '../../recordings/domain/smart_route.dart';
 import '../../shortcuts/domain/hotkey_binding.dart';
 import '../../shortcuts/domain/shortcut_action.dart';
 import '../../timer/domain/alarm_sound.dart';
@@ -22,6 +23,8 @@ class AppSettings {
     this.autoCleanup = false,
     this.autoInstruction = true,
     this.asrGlossary = '',
+    this.smartRouteConfirm = SmartRouteConfirm.auto,
+    this.todoistAgentCommand = '',
     this.embeddingModel,
     this.audio = AudioConfig.defaults,
     this.themeMode = AppThemeMode.system,
@@ -113,6 +116,18 @@ class AppSettings {
   /// (heard as "cloud code")`. Sent with the instruction pass as reference
   /// material. Absent from the JSON while blank.
   final String asrGlossary;
+
+  /// Whether the SMART route button asks before an intent with effects (#386).
+  /// Written only when it is not `auto`.
+  final SmartRouteConfirm smartRouteConfirm;
+
+  /// The agent command the Todoist intent launches, as one argv string — for
+  /// example `claude --mcp-config ~/.claude/todoist.json`. Not a shell line: it
+  /// is split into arguments and never interpreted, because a shell alias is
+  /// not visible to a process this app spawns. Blank means the intent is
+  /// unavailable. Device-local like [soulPath]; `settings.json` is neither
+  /// synced nor archived, so a command never arrives from another machine.
+  final String todoistAgentCommand;
 
   /// The model asked for embeddings on the enrichment profile's endpoint, or
   /// null when related captures are off (#272). Absent from the JSON while
@@ -243,6 +258,8 @@ class AppSettings {
     bool? autoCleanup,
     bool? autoInstruction,
     String? asrGlossary,
+    SmartRouteConfirm? smartRouteConfirm,
+    String? todoistAgentCommand,
     String? embeddingModel,
     bool clearEmbeddingModel = false,
     AudioConfig? audio,
@@ -297,6 +314,8 @@ class AppSettings {
       autoCleanup: autoCleanup ?? this.autoCleanup,
       autoInstruction: autoInstruction ?? this.autoInstruction,
       asrGlossary: asrGlossary ?? this.asrGlossary,
+      smartRouteConfirm: smartRouteConfirm ?? this.smartRouteConfirm,
+      todoistAgentCommand: todoistAgentCommand ?? this.todoistAgentCommand,
       embeddingModel: clearEmbeddingModel
           ? null
           : (embeddingModel ?? this.embeddingModel),
@@ -374,6 +393,10 @@ class AppSettings {
       if (autoCleanup) 'autoCleanup': true,
       if (!autoInstruction) 'autoInstruction': false,
       if (asrGlossary.trim().isNotEmpty) 'asrGlossary': asrGlossary,
+      if (smartRouteConfirm != SmartRouteConfirm.auto)
+        'smartRouteConfirm': smartRouteConfirm.name,
+      if (todoistAgentCommand.trim().isNotEmpty)
+        'todoistAgentCommand': todoistAgentCommand,
       if (embeddingModel != null) 'embeddingModel': embeddingModel,
       if (priceOverrides.isNotEmpty)
         'priceOverrides': <String, dynamic>{
@@ -464,6 +487,10 @@ class AppSettings {
       autoInstruction: json['autoInstruction'] != false,
       asrGlossary: json['asrGlossary'] is String
           ? json['asrGlossary'] as String
+          : '',
+      smartRouteConfirm: SmartRouteConfirm.fromName(json['smartRouteConfirm']),
+      todoistAgentCommand: json['todoistAgentCommand'] is String
+          ? json['todoistAgentCommand'] as String
           : '',
       embeddingModel:
           json['embeddingModel'] is String &&

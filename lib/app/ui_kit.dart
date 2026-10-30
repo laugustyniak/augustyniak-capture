@@ -1355,6 +1355,7 @@ Future<bool> confirmDestructive(
   required String title,
   required String message,
   required String confirmLabel,
+  bool destructive = true,
 }) async {
   final bool? confirmed = await showDialog<bool>(
     context: context,
@@ -1376,7 +1377,9 @@ Future<bool> confirmDestructive(
         ),
         TextButton(
           onPressed: () => Navigator.of(dialogContext).pop(true),
-          style: TextButton.styleFrom(foregroundColor: Console.red),
+          style: TextButton.styleFrom(
+            foregroundColor: destructive ? Console.red : Console.accent,
+          ),
           child: Text(confirmLabel),
         ),
       ],
