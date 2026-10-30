@@ -555,6 +555,16 @@ class RecordingsController extends ChangeNotifier {
   /// repaints one label rather than the whole page.
   ValueListenable<Duration> get processingTicker => _processingTicker;
 
+  final ValueNotifier<({int seq, String id})?> _addedCapture =
+      ValueNotifier<({int seq, String id})?>(null);
+  int _addedCaptureSeq = 0;
+
+  /// Announces a voice note the moment it is durably saved, before processing
+  /// starts, so the queue can move its focus onto it and show the processing
+  /// animation there. `seq` makes two announcements of the same id distinct.
+  /// Display-only: a listener that throws or does nothing changes no capture.
+  ValueListenable<({int seq, String id})?> get addedCapture => _addedCapture;
+
   /// Input level, `0`–`1`, while recording. Same reasoning as [elapsedTicker]:
   /// the waveform is the only thing that repaints at this rate, so it listens
   /// on its own rather than dragging the whole page along.
@@ -2172,6 +2182,8 @@ class RecordingsController extends ChangeNotifier {
         'File verified and saved · $sizeBytes B',
         recordingId: saved.id,
       );
+
+      _addedCapture.value = (seq: ++_addedCaptureSeq, id: saved.id);
 
       // Processing is a separate step and starts only after durable save.
       // Enqueue for background processing and return; the drain loop runs the
@@ -5182,6 +5194,7 @@ class RecordingsController extends ChangeNotifier {
     unawaited(_amplitudeSub?.cancel());
     _elapsedTicker.dispose();
     _processingTicker.dispose();
+    _addedCapture.dispose();
     _levelTicker.dispose();
     _playerCompleteSub?.cancel();
     _playerPositionSub?.cancel();
