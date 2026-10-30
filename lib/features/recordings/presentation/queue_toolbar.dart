@@ -90,6 +90,7 @@ class QueueToolbar extends StatelessWidget {
     this.onPriorityChanged,
     this.sort = QueueSort.newest,
     this.onSortChanged,
+    this.overdue,
     this.leading,
     this.trailing = const <Widget>[],
   });
@@ -140,6 +141,9 @@ class QueueToolbar extends StatelessWidget {
   final ValueChanged<PriorityFilter>? onPriorityChanged;
   final QueueSort sort;
   final ValueChanged<QueueSort>? onSortChanged;
+
+  /// The [QueueOverduePill], or null while nothing is overdue.
+  final Widget? overdue;
 
   /// The master–detail Queue's page title, drawn on the bar instead of above
   /// it. Null keeps the bar as it was.
@@ -239,6 +243,10 @@ class QueueToolbar extends StatelessWidget {
                         const SizedBox(width: 8),
                         priority,
                       ],
+                      if (overdue != null) ...<Widget>[
+                        const SizedBox(width: 8),
+                        overdue!,
+                      ],
                       if (project != null) ...<Widget>[
                         const SizedBox(width: 8),
                         SizedBox(width: _projectWidth, child: project),
@@ -269,6 +277,10 @@ class QueueToolbar extends StatelessWidget {
                       if (hasPriority) ...<Widget>[
                         const SizedBox(width: 8),
                         priorityMenu(compact: true),
+                      ],
+                      if (overdue != null) ...<Widget>[
+                        const SizedBox(width: 8),
+                        overdue!,
                       ],
                       if (project != null) ...<Widget>[
                         const SizedBox(width: 8),
@@ -306,6 +318,10 @@ class QueueToolbar extends StatelessWidget {
                         if (priority != null) ...<Widget>[
                           const SizedBox(width: 8),
                           priority,
+                        ],
+                        if (overdue != null) ...<Widget>[
+                          const SizedBox(width: 8),
+                          overdue!,
                         ],
                         if (project != null) ...<Widget>[
                           const SizedBox(width: 8),
@@ -431,6 +447,50 @@ class QueueTypeMenu extends StatelessWidget {
             const SizedBox(width: 4),
             Icon(Icons.arrow_drop_down_rounded, size: 18, color: foreground),
           ],
+        ),
+      ),
+    );
+  }
+}
+
+/// Desk captures past their rank's allowance (see `isOverdue`). Tapping it
+/// narrows the list to exactly those; tapping again clears.
+class QueueOverduePill extends StatelessWidget {
+  QueueOverduePill({
+    super.key,
+    required this.count,
+    required this.active,
+    required this.onTap,
+  });
+
+  final int count;
+  final bool active;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return Tooltip(
+      message: active
+          ? 'Showing overdue captures · tap to show all'
+          : 'P0 older than a day, P1 older than a week',
+      child: InkWell(
+        borderRadius: BorderRadius.circular(10),
+        onTap: onTap,
+        child: Container(
+          constraints: const BoxConstraints(minHeight: 36),
+          padding: const EdgeInsets.symmetric(horizontal: 10),
+          alignment: Alignment.center,
+          decoration: BoxDecoration(
+            color: Console.red.withValues(alpha: active ? .22 : .12),
+            borderRadius: BorderRadius.circular(10),
+            border: Border.all(
+              color: Console.red.withValues(alpha: active ? .7 : .4),
+            ),
+          ),
+          child: Text(
+            'OVERDUE $count',
+            style: ConsoleText.chip.copyWith(color: Console.red),
+          ),
         ),
       ),
     );

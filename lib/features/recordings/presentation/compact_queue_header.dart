@@ -43,6 +43,7 @@ class CompactQueueHeader extends StatelessWidget {
     required this.filtersOpen,
     required this.onToggleFilters,
     required this.filters,
+    this.overdue,
     this.onSync,
     this.isSyncing = false,
   });
@@ -59,6 +60,10 @@ class CompactQueueHeader extends StatelessWidget {
   final bool filtersOpen;
   final VoidCallback onToggleFilters;
   final Widget filters;
+
+  /// The `QueueOverduePill`, kept in the strip rather than behind the filters
+  /// button: it is a call to act, not a refinement.
+  final Widget? overdue;
 
   final Future<void> Function()? onSync;
   final bool isSyncing;
@@ -92,6 +97,10 @@ class CompactQueueHeader extends StatelessWidget {
                 ),
               ),
               const SizedBox(width: 6),
+              if (overdue != null) ...<Widget>[
+                overdue!,
+                const SizedBox(width: 6),
+              ],
               if (onSync != null) ...<Widget>[
                 _HeaderToggle(
                   active: isSyncing,

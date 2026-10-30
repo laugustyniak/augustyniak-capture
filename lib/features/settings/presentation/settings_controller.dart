@@ -24,6 +24,7 @@ import '../domain/app_theme_mode.dart';
 import '../domain/audio_config.dart';
 import '../domain/provider_profile.dart';
 import '../domain/queue_density.dart';
+import '../domain/queue_sort.dart';
 import '../domain/token_cipher.dart';
 
 /// [SettingsController.setCommandConfig] refused a plain `http://` address to
@@ -124,6 +125,7 @@ class SettingsController extends ChangeNotifier {
 
   /// Row height in the Queue's master list.
   QueueDensity get queueDensity => _settings.queueDensity;
+  QueueSort get queueSort => _settings.queueSort;
 
   /// Whether the wide shell's rail is expanded to show labels.
   bool get navRailExpanded => _settings.navRailExpanded;
@@ -826,6 +828,12 @@ class SettingsController extends ChangeNotifier {
   Future<void> setQueueDensity(QueueDensity value) async {
     if (value == _settings.queueDensity) return;
     await _persist(_settings.copyWith(queueDensity: value));
+  }
+
+  /// Set from the Queue's priority menu; the tab opens in this order.
+  Future<void> setQueueSort(QueueSort value) async {
+    if (value == _settings.queueSort) return;
+    await _persist(_settings.copyWith(queueSort: value));
   }
 
   /// Change the font and UI text scale across the app.

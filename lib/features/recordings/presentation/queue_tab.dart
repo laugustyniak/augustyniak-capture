@@ -86,6 +86,9 @@ class QueueTab extends StatefulWidget {
     this.onAppendUpload,
     this.density = QueueDensity.compact,
     this.onDensityChanged,
+    this.sort = QueueSort.priority,
+    this.onSortChanged,
+    this.now = DateTime.now,
     this.dailyConnectionsService,
     this.e2ee,
   });
@@ -125,6 +128,14 @@ class QueueTab extends StatefulWidget {
   /// draws no toggle.
   final QueueDensity density;
   final ValueChanged<QueueDensity>? onDensityChanged;
+
+  /// The list order the tab opens in. Owned by settings so it survives a
+  /// restart; a change writes back through [onSortChanged].
+  final QueueSort sort;
+  final ValueChanged<QueueSort>? onSortChanged;
+
+  /// The clock the overdue count and the day headers read.
+  final DateTime Function() now;
 
   final RecordingsController controller;
   final DailyConnectionsService? dailyConnectionsService;
@@ -179,9 +190,12 @@ class _QueueTabState extends State<QueueTab> {
   CaptureTypeFilter selectedTypeFilter = CaptureTypeFilter.all;
   PriorityFilter priorityFilter = PriorityFilter.all;
 
-  /// In memory only, like every other queue filter: a restart opens the queue
-  /// newest first again.
-  QueueSort queueSort = QueueSort.newest;
+  /// Seeded from [QueueTab.sort] and written back on change: unlike the
+  /// filters, the order outlives a restart.
+  late QueueSort queueSort = widget.sort;
+
+  /// Narrows the desk to the captures [isOverdue] flags. Not persisted.
+  bool overdueOnly = false;
   ReviewFilter reviewFilter = ReviewFilter.desk;
   String searchQuery = '';
   String? projectFilterId;
@@ -208,6 +222,20 @@ class _QueueTabState extends State<QueueTab> {
   /// the selection onto whatever item slid into that slot.
   String? focusedId;
 
+  void _setSort(QueueSort value) {
+    setState(() => queueSort = value);
+    widget.onSortChanged?.call(value);
+  }
+
+  /// The overdue filter counts desk captures only, so leaving the desk ends it
+  /// rather than leaving a hidden filter narrowing another view.
+  void _setReview(ReviewFilter value) {
+    setState(() {
+      reviewFilter = value;
+      if (value != ReviewFilter.desk) overdueOnly = false;
+    });
+  }
+
   /// Bring [capture] into view the way the layout opens one: selected beside
   /// the list on a wide screen (every filter cleared, so it cannot be hidden),
   /// its own page on a phone, the focus view in between. [edit] opens it in
@@ -218,6 +246,7 @@ class _QueueTabState extends State<QueueTab> {
     if (width >= Console.masterDetailBreakpoint) {
       setState(() {
         reviewFilter = ReviewFilter.all;
+        overdueOnly = false;
         selectedFilter = RecordingFilter.all;
         selectedTypeFilter = CaptureTypeFilter.all;
         projectFilterId = null;
@@ -355,6 +384,9 @@ class _QueueTabState extends State<QueueTab> {
   @override
   void didUpdateWidget(QueueTab oldWidget) {
     super.didUpdateWidget(oldWidget);
+    if (widget.sort != oldWidget.sort) {
+      setState(() => queueSort = widget.sort);
+    }
     if (widget.initialProjectId != oldWidget.initialProjectId) {
       setState(() {
         projectFilterId = widget.initialProjectId;
@@ -443,6 +475,23 @@ class _QueueTabState extends State<QueueTab> {
       queueSort,
     );
     _visible = visible;
+    final DateTime now = widget.now();
+    final int overdueCount = all
+        .where(
+          (Recording item) =>
+              _matchesReview(ReviewFilter.desk, item) && isOverdue(item, now),
+        )
+        .length;
+    // Hidden at zero, but a filter left on after the last item cleared would
+    // strand the user on an empty list with no control to end it.
+    final Widget? overdue =
+        reviewFilter != ReviewFilter.desk || (overdueCount == 0 && !overdueOnly)
+        ? null
+        : QueueOverduePill(
+            count: overdueCount,
+            active: overdueOnly,
+            onTap: () => setState(() => overdueOnly = !overdueOnly),
+          );
     final int reviewedCount = all
         .where((Recording item) => item.isProcessedByUser)
         .length;
@@ -497,7 +546,7 @@ class _QueueTabState extends State<QueueTab> {
             selectedFilter != RecordingFilter.all ||
             selectedTypeFilter != CaptureTypeFilter.all ||
             priorityFilter != PriorityFilter.all ||
-            queueSort != QueueSort.newest ||
+            queueSort != QueueSort.priority ||
             effectiveProjectFilterId != null;
         return _QueueShortcuts(
           focusNode: listFocus,
@@ -593,9 +642,7 @@ class _QueueTabState extends State<QueueTab> {
                         total: all.length,
                         reviewed: reviewedCount,
                         filter: reviewFilter,
-                        onFilterChanged: (ReviewFilter value) {
-                          setState(() => reviewFilter = value);
-                        },
+                        onFilterChanged: _setReview,
                         onSync: () => _handleSync(context, controller),
                         searchOpen: searchOpen,
                         // Toggles the user's own flag, never the resolved one: a
@@ -615,6 +662,7 @@ class _QueueTabState extends State<QueueTab> {
                             setState(() => searchQuery = value);
                           },
                         ),
+                        overdue: overdue,
                         filtersOpen: filtersOpen,
                         onToggleFilters: () {
                           setState(() => filterPanelOpen = !filterPanelOpen);
@@ -657,9 +705,7 @@ class _QueueTabState extends State<QueueTab> {
                                   setState(() => priorityFilter = value);
                                 },
                                 sort: queueSort,
-                                onSortChanged: (QueueSort value) {
-                                  setState(() => queueSort = value);
-                                },
+                                onSortChanged: _setSort,
                               ),
                             ),
                           ],
@@ -672,9 +718,7 @@ class _QueueTabState extends State<QueueTab> {
                           total: all.length,
                           reviewed: reviewedCount,
                           reviewFilter: reviewFilter,
-                          onReviewChanged: (ReviewFilter value) {
-                            setState(() => reviewFilter = value);
-                          },
+                          onReviewChanged: _setReview,
                           searchController: searchController,
                           searchFocusNode: searchFocus,
                           searchQuery: searchQuery,
@@ -702,9 +746,8 @@ class _QueueTabState extends State<QueueTab> {
                             setState(() => priorityFilter = value);
                           },
                           sort: queueSort,
-                          onSortChanged: (QueueSort value) {
-                            setState(() => queueSort = value);
-                          },
+                          onSortChanged: _setSort,
+                          overdue: overdue,
                           leading: masterDetail
                               ? _ToolbarTitle(
                                   total: all.length,
@@ -959,6 +1002,7 @@ class _QueueTabState extends State<QueueTab> {
       if (!_matches(selectedFilter, item)) return false;
       if (!_matchesType(selectedTypeFilter, item)) return false;
       if (!matchesPriority(priorityFilter, item)) return false;
+      if (overdueOnly && !isOverdue(item, widget.now())) return false;
       if (effectiveProjectFilterId != null &&
           item.projectId != effectiveProjectFilterId) {
         return false;
@@ -1056,7 +1100,7 @@ class _QueueTabState extends State<QueueTab> {
     final Recording selected = visible.firstWhere(
       (Recording item) => item.id == selectedId,
     );
-    final List<QueueDayGroup> groups = groupForQueue(visible, queueSort, DateTime.now());
+    final List<QueueDayGroup> groups = groupForQueue(visible, queueSort, widget.now());
 
     final Widget list = CustomScrollView(
       controller: _masterScroll,
@@ -1165,7 +1209,7 @@ class _QueueTabState extends State<QueueTab> {
   /// Pull-to-refresh still syncs, as it did over the cards.
   Widget _buildPhoneList(List<Recording> visible) {
     final RecordingsController controller = widget.controller;
-    final List<QueueDayGroup> groups = groupForQueue(visible, queueSort, DateTime.now());
+    final List<QueueDayGroup> groups = groupForQueue(visible, queueSort, widget.now());
     return RefreshIndicator(
       onRefresh: () => _handleSync(context, controller),
       color: Console.accent,

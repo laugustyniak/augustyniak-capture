@@ -1307,6 +1307,8 @@ class _RecordingsPageState extends State<RecordingsPage>
                                   ),
                                     density: settings.queueDensity,
                                     onDensityChanged: settings.setQueueDensity,
+                                    sort: settings.queueSort,
+                                    onSortChanged: settings.setQueueSort,
                                   onAppendRecording: (String id) =>
                                       _startRecording(appendTo: id),
                                   onAppendNote: (String id) =>

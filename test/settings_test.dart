@@ -5,6 +5,7 @@ import 'package:augustyniak_capture/features/settings/domain/app_theme_mode.dart
 import 'package:augustyniak_capture/features/settings/domain/audio_config.dart';
 import 'package:augustyniak_capture/features/settings/domain/provider_profile.dart';
 import 'package:augustyniak_capture/features/settings/domain/queue_density.dart';
+import 'package:augustyniak_capture/features/settings/domain/queue_sort.dart';
 import 'package:augustyniak_capture/features/settings/presentation/settings_controller.dart';
 import 'package:augustyniak_capture/features/enrichment/data/http_chat_enrichment_service.dart';
 import 'package:augustyniak_capture/features/enrichment/domain/enrichment_defaults.dart';
@@ -422,6 +423,36 @@ void main() {
       expect(
         original.copyWith(themeMode: AppThemeMode.dark).queueDensity,
         QueueDensity.comfortable,
+      );
+    });
+
+    test('queue sort survives a round-trip and defaults to priority', () {
+      const AppSettings original = AppSettings(queueSort: QueueSort.newest);
+
+      expect(
+        AppSettings.fromJson(original.toJson()).queueSort,
+        QueueSort.newest,
+      );
+      // The default is not written, so an untouched file serialises as before.
+      expect(const AppSettings().toJson().containsKey('queueSort'), isFalse);
+      expect(const AppSettings().queueSort, QueueSort.priority);
+      expect(
+        AppSettings.fromJson(<String, dynamic>{}).queueSort,
+        QueueSort.priority,
+      );
+      expect(
+        AppSettings.fromJson(<String, dynamic>{'queueSort': 7}).queueSort,
+        QueueSort.priority,
+      );
+      expect(
+        AppSettings.fromJson(<String, dynamic>{
+          'queueSort': 'sideways',
+        }).queueSort,
+        QueueSort.priority,
+      );
+      expect(
+        original.copyWith(themeMode: AppThemeMode.dark).queueSort,
+        QueueSort.newest,
       );
     });
 

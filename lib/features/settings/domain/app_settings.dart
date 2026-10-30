@@ -10,6 +10,7 @@ import 'app_theme_mode.dart';
 import 'audio_config.dart';
 import 'provider_profile.dart';
 import 'queue_density.dart';
+import 'queue_sort.dart';
 import 'token_cipher.dart';
 
 class AppSettings {
@@ -27,6 +28,7 @@ class AppSettings {
     this.themeMode = AppThemeMode.system,
     this.textScale = defaultTextScale,
     this.queueDensity = QueueDensity.compact,
+    this.queueSort = QueueSort.priority,
     this.navRailExpanded = false,
     this.vaultPath,
     this.vaultFolder = VaultDefaults.folder,
@@ -126,6 +128,10 @@ class AppSettings {
   /// Row height in the Queue's master list. Written only when it is not the
   /// default, so a file that never touched it serialises exactly as before.
   final QueueDensity queueDensity;
+
+  /// The Queue's list order, kept across restarts. Written only when it is not
+  /// the default (focus order), like [queueDensity].
+  final QueueSort queueSort;
 
   /// Whether the wide shell's rail shows labels (220 px) or icons only
   /// (64 px, the default). Written only when expanded.
@@ -250,6 +256,7 @@ class AppSettings {
     double? textScale,
     bool resetTextScale = false,
     QueueDensity? queueDensity,
+    QueueSort? queueSort,
     bool? navRailExpanded,
     String? vaultPath,
     bool clearVaultPath = false,
@@ -306,6 +313,7 @@ class AppSettings {
           ? defaultTextScale
           : (textScale != null ? clampTextScale(textScale) : this.textScale),
       queueDensity: queueDensity ?? this.queueDensity,
+      queueSort: queueSort ?? this.queueSort,
       navRailExpanded: navRailExpanded ?? this.navRailExpanded,
       vaultPath: clearVaultPath ? null : (vaultPath ?? this.vaultPath),
       vaultFolder: vaultFolder ?? this.vaultFolder,
@@ -349,6 +357,7 @@ class AppSettings {
       if (textScale != defaultTextScale) 'textScale': textScale,
       if (queueDensity != QueueDensity.compact)
         'queueDensity': queueDensity.name,
+      if (queueSort != QueueSort.priority) 'queueSort': queueSort.name,
       if (navRailExpanded) 'navRailExpanded': true,
       'timerMinutes': timerMinutes,
       'timerAlarm': timerAlarm.name,
@@ -458,6 +467,9 @@ class AppSettings {
           : AppSettings.defaultTextScale,
       queueDensity: QueueDensity.fromName(
         json['queueDensity'] is String ? json['queueDensity'] as String : null,
+      ),
+      queueSort: QueueSort.fromName(
+        json['queueSort'] is String ? json['queueSort'] as String : null,
       ),
       navRailExpanded: json['navRailExpanded'] == true,
       autoCleanup: json['autoCleanup'] == true,

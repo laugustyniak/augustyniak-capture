@@ -67,13 +67,13 @@ void main() {
     });
 
     test(
-      'priority orders p0 to p3, unranked last, newest first within a rank',
+      'priority orders p0 to p3, unranked last, oldest first within a rank',
       () {
         expect(ids(sortForQueue(queue, QueueSort.priority)), <String>[
-          'c',
           'f',
-          'a',
+          'c',
           'd',
+          'a',
           'e',
           'b',
         ]);
@@ -84,6 +84,47 @@ void main() {
       final List<Recording> copy = List<Recording>.of(queue);
       sortForQueue(copy, QueueSort.priority);
       expect(ids(copy), ids(queue));
+    });
+  });
+
+  group('isOverdue', () {
+    final DateTime now = DateTime(2026, 10, 20, 12);
+    Recording aged(CapturePriority? priority, Duration age) =>
+        Recording(
+          id: 'x',
+          filePath: '/tmp/x.m4a',
+          createdAt: now.subtract(age),
+          durationMs: 1000,
+          status: RecordingStatus.completed,
+          priority: priority,
+        );
+
+    test('p0 is overdue past one day, p1 past seven', () {
+      expect(isOverdue(aged(CapturePriority.p0, const Duration(hours: 25)), now),
+          isTrue);
+      expect(isOverdue(aged(CapturePriority.p0, const Duration(hours: 23)), now),
+          isFalse);
+      expect(isOverdue(aged(CapturePriority.p1, const Duration(days: 8)), now),
+          isTrue);
+      expect(isOverdue(aged(CapturePriority.p1, const Duration(days: 6)), now),
+          isFalse);
+    });
+
+    test('exactly one day (p0) or seven (p1) old is not overdue', () {
+      expect(isOverdue(aged(CapturePriority.p0, const Duration(days: 1)), now),
+          isFalse);
+      expect(isOverdue(aged(CapturePriority.p1, const Duration(days: 7)), now),
+          isFalse);
+    });
+
+    test('p2, p3 and unranked are never overdue', () {
+      for (final CapturePriority? priority in <CapturePriority?>[
+        CapturePriority.p2,
+        CapturePriority.p3,
+        null,
+      ]) {
+        expect(isOverdue(aged(priority, const Duration(days: 90)), now), isFalse);
+      }
     });
   });
 
@@ -109,7 +150,7 @@ void main() {
         'P3',
         'Unranked',
       ]);
-      expect(ids(groups.first.items), <String>['c', 'f']);
+      expect(ids(groups.first.items), <String>['f', 'c']);
     });
   });
 }
