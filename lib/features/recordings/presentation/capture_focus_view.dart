@@ -18,6 +18,7 @@ import 'audio_waveform_visualizer.dart';
 import 'agent_artifact_viewer_modal.dart';
 import 'capture_text_tabs.dart';
 import 'card_parts.dart';
+import 'processing_hero.dart';
 import 'handoff_sheet.dart';
 import 'inline_edit.dart';
 import 'inline_video_player.dart';
@@ -1158,6 +1159,12 @@ class CaptureDetailPanel extends StatelessWidget {
               .where((String s) => s.isNotEmpty)
               .length;
 
+    final bool enriching = controller.isEnriching(recording.id);
+    final bool showsHero = ProcessingHero.appliesTo(
+      recording,
+      enriching: enriching,
+    );
+
     final Widget article = ConstrainedBox(
       constraints: const BoxConstraints(maxWidth: readingWidth),
       child: Column(
@@ -1233,7 +1240,9 @@ class CaptureDetailPanel extends StatelessWidget {
             ),
             const SizedBox(height: 22),
           ],
-          if (controller.isEnriching(recording.id)) ...<Widget>[
+          if (showsHero)
+            const SizedBox.shrink()
+          else if (controller.isEnriching(recording.id)) ...<Widget>[
             ProcessingStrip(enriching: true, type: recording.type),
             const SizedBox(height: 22),
           ] else if (recording.status ==
@@ -1422,6 +1431,18 @@ class CaptureDetailPanel extends StatelessWidget {
             ? const EdgeInsets.fromLTRB(16, 16, 16, 32)
             : const EdgeInsets.fromLTRB(48, 36, 48, 48),
         children: <Widget>[
+          if (showsHero) ...<Widget>[
+            ProcessingHero(
+              enriching: enriching,
+              type: recording.type,
+              processingTicker:
+                  !enriching &&
+                      controller.processingElapsedFor(recording.id) != null
+                  ? controller.processingTicker
+                  : null,
+            ),
+            const SizedBox(height: 24),
+          ],
           if (showMetaColumn)
             Row(
               crossAxisAlignment: CrossAxisAlignment.start,
