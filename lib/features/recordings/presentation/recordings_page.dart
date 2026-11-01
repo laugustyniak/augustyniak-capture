@@ -56,6 +56,7 @@ import '../../settings/data/file_master_key_store.dart';
 import '../../settings/data/migrating_master_key_store.dart';
 import '../../settings/data/secure_storage_master_key_store.dart';
 import '../../settings/data/settings_repository.dart';
+import '../../settings/domain/app_settings.dart';
 import '../../settings/domain/app_theme_mode.dart';
 import '../../projects/presentation/projects_controller.dart';
 import '../../projects/presentation/projects_tab.dart';
@@ -1324,8 +1325,24 @@ class _RecordingsPageState extends State<RecordingsPage>
                                   usageRepository: _usageRepository,
                                   storagePrice: settings.storagePrice,
                                   e2ee: widget.e2eeService,
+                                  splitRatio: settings.queueSplitRatio,
+                                  onSplitRatioChanged:
+                                      settings.setQueueSplitRatio,
+                                  detailReadingWidth:
+                                      settings.detailReadingWidth,
+                                  onDetailReadingWidthChanged:
+                                      settings.setDetailReadingWidth,
+                                  detailMetaWidth: settings.detailMetaWidth,
+                                  onDetailMetaWidthChanged:
+                                      settings.setDetailMetaWidth,
+                                  pageMaxWidth: settings.pageMaxWidth,
                                 ),
                                 ConsolePageWidth(
+                                  maxWidth: settings.pageMaxWidth,
+                                  onMaxWidthChanged: settings.setPageMaxWidth,
+                                  onResetMaxWidth: () => settings.setPageMaxWidth(
+                                    AppSettings.defaultPageMaxWidth,
+                                  ),
                                   child: TimerTab(
                                     controller: timer,
                                     settings: settings,
@@ -1333,6 +1350,11 @@ class _RecordingsPageState extends State<RecordingsPage>
                                   ),
                                 ),
                                 ConsolePageWidth(
+                                  maxWidth: settings.pageMaxWidth,
+                                  onMaxWidthChanged: settings.setPageMaxWidth,
+                                  onResetMaxWidth: () => settings.setPageMaxWidth(
+                                    AppSettings.defaultPageMaxWidth,
+                                  ),
                                   child: WorkDashboardTab(
                                     projects: projects,
                                     recordings: controller,
@@ -1347,6 +1369,11 @@ class _RecordingsPageState extends State<RecordingsPage>
                                   ),
                                 ),
                                 ConsolePageWidth(
+                                  maxWidth: settings.pageMaxWidth,
+                                  onMaxWidthChanged: settings.setPageMaxWidth,
+                                  onResetMaxWidth: () => settings.setPageMaxWidth(
+                                    AppSettings.defaultPageMaxWidth,
+                                  ),
                                   child: ProjectsTab(
                                     controller: projects,
                                       agentJobs:
@@ -1369,18 +1396,38 @@ class _RecordingsPageState extends State<RecordingsPage>
                                   ),
                                 ),
                                 ConsolePageWidth(
+                                  maxWidth: settings.pageMaxWidth,
+                                  onMaxWidthChanged: settings.setPageMaxWidth,
+                                  onResetMaxWidth: () => settings.setPageMaxWidth(
+                                    AppSettings.defaultPageMaxWidth,
+                                  ),
                                   child: ClipboardTab(
                                     watcherService: clipboardWatcher,
                                     recordingsController: controller,
                                   ),
                                 ),
                                 ConsolePageWidth(
+                                  maxWidth: settings.pageMaxWidth,
+                                  onMaxWidthChanged: settings.setPageMaxWidth,
+                                  onResetMaxWidth: () => settings.setPageMaxWidth(
+                                    AppSettings.defaultPageMaxWidth,
+                                  ),
                                   child: ModelsTab(controller: settings),
                                 ),
                                 ConsolePageWidth(
+                                  maxWidth: settings.pageMaxWidth,
+                                  onMaxWidthChanged: settings.setPageMaxWidth,
+                                  onResetMaxWidth: () => settings.setPageMaxWidth(
+                                    AppSettings.defaultPageMaxWidth,
+                                  ),
                                   child: LogsTab(store: logs),
                                 ),
                                 ConsolePageWidth(
+                                  maxWidth: settings.pageMaxWidth,
+                                  onMaxWidthChanged: settings.setPageMaxWidth,
+                                  onResetMaxWidth: () => settings.setPageMaxWidth(
+                                    AppSettings.defaultPageMaxWidth,
+                                  ),
                                   child: ConfigTab(
                                     controller: settings,
                                     authController: widget.authController,
@@ -1595,6 +1642,9 @@ class _RecordingsPageState extends State<RecordingsPage>
       reviewed: reviewed,
       total: total,
       expanded: settings.navRailExpanded,
+      expandedWidth: settings.navRailWidth,
+      onResizeWidth: settings.setNavRailWidth,
+      onResetWidth: () => settings.setNavRailWidth(AppSettings.defaultNavRailWidth),
       onToggleExpanded: () =>
           settings.setNavRailExpanded(!settings.navRailExpanded),
       busy: controller.isBusy,

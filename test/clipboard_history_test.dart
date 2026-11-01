@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:io';
 
+import 'package:augustyniak_capture/app/ui_kit.dart';
 import 'package:augustyniak_capture/features/clipboard/data/clipboard_repository.dart';
 import 'package:augustyniak_capture/features/clipboard/domain/auto_paste.dart';
 import 'package:augustyniak_capture/features/clipboard/domain/clipboard_item.dart';
@@ -1333,6 +1334,106 @@ void main() {
       await tester.pump(const Duration(milliseconds: 200));
 
       expect(gateway.copiedText, 'Older entry');
+
+      service.dispose();
+    });
+
+    testWidgets('wide clipboard history allows resizing list width', (
+      WidgetTester tester,
+    ) async {
+      tester.view.physicalSize = const Size(1000, 800);
+      tester.view.devicePixelRatio = 1.0;
+      addTearDown(() {
+        tester.view.resetPhysicalSize();
+        tester.view.resetDevicePixelRatio();
+      });
+
+      final ClipboardRepository repository = _MemoryClipboardRepository();
+      await repository.initialize();
+      await repository.addItem(_textItem('item-1', 'Sample text'));
+      final ClipboardWatcherService service = ClipboardWatcherService(
+        repository: repository,
+      );
+
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: ClipboardHistorySheet(watcherService: service),
+          ),
+        ),
+      );
+      await tester.pump(const Duration(milliseconds: 100));
+
+      final Finder handle = find.byWidgetPredicate(
+        (Widget w) =>
+            w is PaneResizeHandle && w.semanticLabel == 'Resize clipboard list',
+      );
+      expect(handle, findsOneWidget);
+
+      final double initialDx = tester.getTopLeft(handle).dx;
+
+      await tester.drag(handle, const Offset(60, 0));
+      await tester.pump();
+      final double draggedDx = tester.getTopLeft(handle).dx;
+      expect(draggedDx, greaterThan(initialDx));
+
+      // Double tap resets
+      await tester.tap(handle);
+      await tester.pump(const Duration(milliseconds: 50));
+      await tester.tap(handle);
+      await tester.pumpAndSettle();
+      expect(tester.getTopLeft(handle).dx, closeTo(initialDx, 0.001));
+
+      service.dispose();
+    });
+
+    testWidgets('narrow clipboard history allows resizing preview pane', (
+      WidgetTester tester,
+    ) async {
+      // Narrow viewport (below _twoPaneWidth = 720)
+      tester.view.physicalSize = const Size(500, 800);
+      tester.view.devicePixelRatio = 1.0;
+      addTearDown(() {
+        tester.view.resetPhysicalSize();
+        tester.view.resetDevicePixelRatio();
+      });
+
+      final ClipboardRepository repository = _MemoryClipboardRepository();
+      await repository.initialize();
+      await repository.addItem(_textItem('item-1', 'Sample text'));
+      final ClipboardWatcherService service = ClipboardWatcherService(
+        repository: repository,
+      );
+
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: ClipboardHistorySheet(watcherService: service),
+          ),
+        ),
+      );
+      await tester.pump(const Duration(milliseconds: 100));
+
+      final Finder handle = find.byWidgetPredicate(
+        (Widget w) =>
+            w is PaneResizeHandle &&
+            w.semanticLabel == 'Resize clipboard preview',
+      );
+      expect(handle, findsOneWidget);
+
+      final double initialDy = tester.getTopLeft(handle).dy;
+
+      await tester.drag(handle, const Offset(0, -60));
+      await tester.pump();
+      final double draggedDy = tester.getTopLeft(handle).dy;
+      expect(draggedDy, lessThan(initialDy));
+
+      // Double tap resets
+      await tester.tap(handle);
+      await tester.pump(const Duration(milliseconds: 50));
+      await tester.tap(handle);
+      await tester.pumpAndSettle();
+      expect(tester.getTopLeft(handle).dy, closeTo(initialDy, 0.001));
 
       service.dispose();
     });

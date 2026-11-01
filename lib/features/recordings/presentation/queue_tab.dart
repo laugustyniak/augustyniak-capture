@@ -1,11 +1,13 @@
 import 'dart:async';
 import 'dart:io';
+import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import '../../../app/ui_kit.dart';
 import '../../../core/sync/cloud_sync_coordinator.dart';
+import '../../settings/domain/app_settings.dart';
 import '../../connections/domain/daily_connections.dart';
 import '../../connections/presentation/daily_connections_dialog.dart';
 import '../../costs/data/usage_repository.dart';
@@ -88,6 +90,13 @@ class QueueTab extends StatefulWidget {
     this.onDensityChanged,
     this.dailyConnectionsService,
     this.e2ee,
+    this.splitRatio = AppSettings.defaultQueueSplitRatio,
+    this.onSplitRatioChanged,
+    this.detailReadingWidth = AppSettings.defaultDetailReadingWidth,
+    this.onDetailReadingWidthChanged,
+    this.detailMetaWidth = AppSettings.defaultDetailMetaWidth,
+    this.onDetailMetaWidthChanged,
+    this.pageMaxWidth = AppSettings.defaultPageMaxWidth,
   });
 
   /// Whether cloud sync seals rows and files before they leave. Null where
@@ -170,6 +179,21 @@ class QueueTab extends StatefulWidget {
   /// a rate.
   final StoragePrice storagePrice;
 
+  /// Ratio of screen width allocated to the capture list in master-detail mode.
+  final double splitRatio;
+  final ValueChanged<double>? onSplitRatioChanged;
+
+  /// Maximum reading measure for the detail panel.
+  final double detailReadingWidth;
+  final ValueChanged<double>? onDetailReadingWidthChanged;
+
+  /// Width of metadata column in the detail panel on wide viewports.
+  final double detailMetaWidth;
+  final ValueChanged<double>? onDetailMetaWidthChanged;
+
+  /// Maximum page content width.
+  final double pageMaxWidth;
+
   @override
   State<QueueTab> createState() => _QueueTabState();
 }
@@ -178,6 +202,34 @@ class _QueueTabState extends State<QueueTab> {
   RecordingFilter selectedFilter = RecordingFilter.all;
   CaptureTypeFilter selectedTypeFilter = CaptureTypeFilter.all;
   PriorityFilter priorityFilter = PriorityFilter.all;
+
+  double? _localSplitRatio;
+
+  double get effectiveSplitRatio => _localSplitRatio ?? widget.splitRatio;
+
+  void _handleSplitRatioDelta(double delta, double width) {
+    if (width <= 0) return;
+    final double currentWidth = (width * effectiveSplitRatio).clamp(
+      360.0,
+      math.max(360.0, width - 380.0),
+    );
+    final double targetRatio = AppSettings.clampQueueSplitRatio(
+      (currentWidth + delta) / width,
+    );
+    if (widget.onSplitRatioChanged != null) {
+      widget.onSplitRatioChanged!(targetRatio);
+    } else {
+      setState(() => _localSplitRatio = targetRatio);
+    }
+  }
+
+  void _handleSplitRatioReset() {
+    if (widget.onSplitRatioChanged != null) {
+      widget.onSplitRatioChanged!(AppSettings.defaultQueueSplitRatio);
+    } else {
+      setState(() => _localSplitRatio = null);
+    }
+  }
 
   /// In memory only, like every other queue filter: a restart opens the queue
   /// newest first again.
@@ -389,6 +441,9 @@ class _QueueTabState extends State<QueueTab> {
       setState(() {
         projectFilterId = widget.initialProjectId;
       });
+    }
+    if (widget.splitRatio != oldWidget.splitRatio) {
+      _localSplitRatio = null;
     }
   }
 
@@ -1080,9 +1135,10 @@ class _QueueTabState extends State<QueueTab> {
     double width,
   ) {
     final RecordingsController controller = widget.controller;
-    final double listWidth = (width * .52).clamp(
-      Console.masterListMinWidth,
-      Console.masterListMaxWidth,
+    final double effectiveRatio = effectiveSplitRatio;
+    final double listWidth = (width * effectiveRatio).clamp(
+      360.0,
+      math.max(360.0, width - 380.0),
     );
     final Recording selected = visible.firstWhere(
       (Recording item) => item.id == selectedId,
@@ -1141,7 +1197,7 @@ class _QueueTabState extends State<QueueTab> {
             child: Align(
               alignment: Alignment.topLeft,
               child: ConstrainedBox(
-                constraints: const BoxConstraints(maxWidth: 960),
+                constraints: BoxConstraints(maxWidth: widget.pageMaxWidth),
                 child: _buildEditor(selected),
               ),
             ),
@@ -1171,6 +1227,10 @@ class _QueueTabState extends State<QueueTab> {
             costUsd: _costTotals[selected.id],
             projects: widget.projects?.projects ?? const <Project>[],
             tagSuggestions: _tagSuggestions(selected),
+            readingMaxWidth: widget.detailReadingWidth,
+            onReadingMaxWidthChanged: widget.onDetailReadingWidthChanged,
+            detailMetaWidth: widget.detailMetaWidth,
+            onDetailMetaWidthChanged: widget.onDetailMetaWidthChanged,
           );
 
     return Padding(
@@ -1183,7 +1243,11 @@ class _QueueTabState extends State<QueueTab> {
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: <Widget>[
             SizedBox(width: listWidth, child: list),
-            VerticalDivider(width: 1, thickness: 1, color: Console.border),
+            PaneResizeHandle(
+              semanticLabel: 'Resize capture list',
+              onDragDelta: (double delta) => _handleSplitRatioDelta(delta, width),
+              onReset: _handleSplitRatioReset,
+            ),
             Expanded(child: detail),
           ],
         ),

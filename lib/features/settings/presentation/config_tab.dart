@@ -366,6 +366,243 @@ class _ConfigTabState extends State<ConfigTab> {
               'summary line. Also on the Queue toolbar.',
               style: ConsoleText.hint,
             ),
+            Divider(color: Console.border, height: 22),
+            _ChoiceRow<double>(
+              label: 'SIDEBAR WIDTH',
+              value: widget.controller.navRailWidth,
+              options: const <double>[180.0, 216.0, 260.0, 300.0, 340.0],
+              labelFor: (double w) => w == AppSettings.defaultNavRailWidth
+                  ? '${w.round()} px (Default)'
+                  : '${w.round()} px',
+              onChanged: widget.controller.setNavRailWidth,
+            ),
+            const SizedBox(height: 8),
+            Row(
+              children: <Widget>[
+                ConsoleIconButton(
+                  icon: Icons.remove,
+                  semanticLabel: 'Narrower Sidebar',
+                  onTap: () => widget.controller.setNavRailWidth(
+                    widget.controller.navRailWidth - 16,
+                  ),
+                ),
+                const SizedBox(width: 8),
+                ConsoleIconButton(
+                  icon: Icons.add,
+                  semanticLabel: 'Wider Sidebar',
+                  onTap: () => widget.controller.setNavRailWidth(
+                    widget.controller.navRailWidth + 16,
+                  ),
+                ),
+                const SizedBox(width: 8),
+                if (widget.controller.navRailWidth !=
+                    AppSettings.defaultNavRailWidth)
+                  ConsoleChip(
+                    label:
+                        'RESET (${AppSettings.defaultNavRailWidth.round()} px)',
+                    selected: false,
+                    onSelected: () => widget.controller.setNavRailWidth(
+                      AppSettings.defaultNavRailWidth,
+                    ),
+                  ),
+              ],
+            ),
+            const SizedBox(height: 6),
+            Text(
+              'Width of the expanded sidebar. Drag the right edge of the rail to resize.',
+              style: ConsoleText.hint,
+            ),
+            Divider(color: Console.border, height: 22),
+            _ChoiceRow<double>(
+              label: 'CAPTURE LIST WIDTH',
+              value: widget.controller.queueSplitRatio,
+              options: const <double>[0.35, 0.45, 0.52, 0.60, 0.70],
+              labelFor: (double r) =>
+                  '${(r * 100).round()}%${r == AppSettings.defaultQueueSplitRatio ? ' (Default)' : ''}',
+              onChanged: widget.controller.setQueueSplitRatio,
+            ),
+            const SizedBox(height: 8),
+            Row(
+              children: <Widget>[
+                ConsoleIconButton(
+                  icon: Icons.remove,
+                  semanticLabel: 'Narrower Capture List',
+                  onTap: () => widget.controller.setQueueSplitRatio(
+                    widget.controller.queueSplitRatio - 0.05,
+                  ),
+                ),
+                const SizedBox(width: 8),
+                ConsoleIconButton(
+                  icon: Icons.add,
+                  semanticLabel: 'Wider Capture List',
+                  onTap: () => widget.controller.setQueueSplitRatio(
+                    widget.controller.queueSplitRatio + 0.05,
+                  ),
+                ),
+                const SizedBox(width: 8),
+                if (widget.controller.queueSplitRatio !=
+                    AppSettings.defaultQueueSplitRatio)
+                  ConsoleChip(
+                    label:
+                        'RESET (${(AppSettings.defaultQueueSplitRatio * 100).round()}%)',
+                    selected: false,
+                    onSelected: () => widget.controller.setQueueSplitRatio(
+                      AppSettings.defaultQueueSplitRatio,
+                    ),
+                  ),
+              ],
+            ),
+            const SizedBox(height: 6),
+            Text(
+              'Proportion of width allocated to the capture list in master-detail mode. Drag the vertical divider in Queue to resize.',
+              style: ConsoleText.hint,
+            ),
+            Divider(color: Console.border, height: 22),
+            _ChoiceRow<double>(
+              label: 'DETAIL READING WIDTH',
+              value: widget.controller.detailReadingWidth,
+              options: const <double>[560.0, 680.0, 820.0, 960.0, 1100.0],
+              labelFor: (double w) => w == AppSettings.defaultDetailReadingWidth
+                  ? '${w.round()} px (Default)'
+                  : '${w.round()} px',
+              onChanged: widget.controller.setDetailReadingWidth,
+            ),
+            const SizedBox(height: 8),
+            Row(
+              children: <Widget>[
+                ConsoleIconButton(
+                  icon: Icons.remove,
+                  semanticLabel: 'Narrower Reading Pane',
+                  onTap: () => widget.controller.setDetailReadingWidth(
+                    widget.controller.detailReadingWidth - 40,
+                  ),
+                ),
+                const SizedBox(width: 8),
+                ConsoleIconButton(
+                  icon: Icons.add,
+                  semanticLabel: 'Wider Reading Pane',
+                  onTap: () => widget.controller.setDetailReadingWidth(
+                    widget.controller.detailReadingWidth + 40,
+                  ),
+                ),
+                const SizedBox(width: 8),
+                if (widget.controller.detailReadingWidth !=
+                    AppSettings.defaultDetailReadingWidth)
+                  ConsoleChip(
+                    label:
+                        'RESET (${AppSettings.defaultDetailReadingWidth.round()} px)',
+                    selected: false,
+                    onSelected: () => widget.controller.setDetailReadingWidth(
+                      AppSettings.defaultDetailReadingWidth,
+                    ),
+                  ),
+              ],
+            ),
+            const SizedBox(height: 6),
+            Text(
+              'Maximum width of the reading column in detail view. Drag the handle beside the text to resize.',
+              style: ConsoleText.hint,
+            ),
+            Divider(color: Console.border, height: 22),
+            _ChoiceRow<double>(
+              label: 'DETAIL METADATA WIDTH',
+              value: widget.controller.detailMetaWidth,
+              options: const <double>[220.0, 260.0, 300.0, 360.0, 440.0],
+              labelFor: (double w) => w == AppSettings.defaultDetailMetaWidth
+                  ? '${w.round()} px (Default)'
+                  : '${w.round()} px',
+              onChanged: widget.controller.setDetailMetaWidth,
+            ),
+            const SizedBox(height: 8),
+            Row(
+              children: <Widget>[
+                ConsoleIconButton(
+                  icon: Icons.remove,
+                  semanticLabel: 'Narrower Metadata Pane',
+                  onTap: () => widget.controller.setDetailMetaWidth(
+                    widget.controller.detailMetaWidth - 20,
+                  ),
+                ),
+                const SizedBox(width: 8),
+                ConsoleIconButton(
+                  icon: Icons.add,
+                  semanticLabel: 'Wider Metadata Pane',
+                  onTap: () => widget.controller.setDetailMetaWidth(
+                    widget.controller.detailMetaWidth + 20,
+                  ),
+                ),
+                const SizedBox(width: 8),
+                if (widget.controller.detailMetaWidth !=
+                    AppSettings.defaultDetailMetaWidth)
+                  ConsoleChip(
+                    label:
+                        'RESET (${AppSettings.defaultDetailMetaWidth.round()} px)',
+                    selected: false,
+                    onSelected: () => widget.controller.setDetailMetaWidth(
+                      AppSettings.defaultDetailMetaWidth,
+                    ),
+                  ),
+              ],
+            ),
+            const SizedBox(height: 6),
+            Text(
+              'Width of the metadata column in detail view on wide displays (>= 2200 px). Drag the handle beside metadata to resize.',
+              style: ConsoleText.hint,
+            ),
+            Divider(color: Console.border, height: 22),
+            _ChoiceRow<double>(
+              label: 'PAGE CONTENT WIDTH',
+              value: widget.controller.pageMaxWidth,
+              options: const <double>[760.0, 960.0, 1120.0, 1280.0, 1440.0],
+              labelFor: (double w) => w == AppSettings.defaultPageMaxWidth
+                  ? '${w.round()} px (Default)'
+                  : '${w.round()} px',
+              onChanged: widget.controller.setPageMaxWidth,
+            ),
+            const SizedBox(height: 8),
+            Row(
+              children: <Widget>[
+                ConsoleIconButton(
+                  icon: Icons.remove,
+                  semanticLabel: 'Narrower Page Content',
+                  onTap: () => widget.controller.setPageMaxWidth(
+                    widget.controller.pageMaxWidth - 80,
+                  ),
+                ),
+                const SizedBox(width: 8),
+                ConsoleIconButton(
+                  icon: Icons.add,
+                  semanticLabel: 'Wider Page Content',
+                  onTap: () => widget.controller.setPageMaxWidth(
+                    widget.controller.pageMaxWidth + 80,
+                  ),
+                ),
+                const SizedBox(width: 8),
+                if (widget.controller.pageMaxWidth !=
+                    AppSettings.defaultPageMaxWidth)
+                  ConsoleChip(
+                    label:
+                        'RESET (${AppSettings.defaultPageMaxWidth.round()} px)',
+                    selected: false,
+                    onSelected: () => widget.controller.setPageMaxWidth(
+                      AppSettings.defaultPageMaxWidth,
+                    ),
+                  ),
+              ],
+            ),
+            const SizedBox(height: 6),
+            Text(
+              'Maximum width of single-column tabs (Config, Models, Logs, Timer, etc.). Drag the outer edge handles to resize.',
+              style: ConsoleText.hint,
+            ),
+            if (widget.controller.hasCustomLayoutSizes) ...<Widget>[
+              Divider(color: Console.border, height: 22),
+              ConsoleChip(
+                label: 'RESET LAYOUT SIZES',
+                selected: false,
+                onSelected: widget.controller.resetLayoutSizes,
+              ),
+            ],
           ],
         ),
       ),

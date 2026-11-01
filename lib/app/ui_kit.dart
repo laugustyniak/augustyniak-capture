@@ -255,6 +255,8 @@ class Console {
   /// The rail's column width. Read by the rail itself and by the shell that
   /// insets the page beside it, so the two cannot drift apart.
   static const double railWidth = 216;
+  static const double railWidthMin = 168;
+  static const double railWidthMax = 340;
 
   /// The rail's icon-only width, its default on desktop.
   static const double railCollapsedWidth = 64;
@@ -505,23 +507,247 @@ class ConsoleText {
 /// over a thousand pixels from the title they act on. This is the one place
 /// that number lives; the shell wraps the whole `IndexedStack` in it, so the
 /// cap cannot drift between tabs the way five separate paddings would.
+/// A draggable divider bar for resizing layout panes horizontally or vertically.
+///
+/// Features a hover/drag highlight, mouse cursor, double-tap to reset,
+/// accessibility semantics, and a subtle pill indicator.
+class PaneResizeHandle extends StatefulWidget {
+  PaneResizeHandle({
+    super.key,
+    this.axis = Axis.vertical,
+    required this.onDragDelta,
+    this.onReset,
+    this.semanticLabel,
+    this.tooltip,
+    this.hitExtent = 9.0,
+    this.showDividerLine = true,
+  });
+
+  final Axis axis;
+  final ValueChanged<double> onDragDelta;
+  final VoidCallback? onReset;
+  final String? semanticLabel;
+  final String? tooltip;
+  final double hitExtent;
+  final bool showDividerLine;
+
+  @override
+  State<PaneResizeHandle> createState() => _PaneResizeHandleState();
+}
+
+class _PaneResizeHandleState extends State<PaneResizeHandle> {
+  bool _hovered = false;
+  bool _dragging = false;
+
+  bool get _isActive => _hovered || _dragging;
+
+  @override
+  Widget build(BuildContext context) {
+    final bool isVertical = widget.axis == Axis.vertical;
+    final MouseCursor cursor = isVertical
+        ? SystemMouseCursors.resizeColumn
+        : SystemMouseCursors.resizeRow;
+
+    final Color lineColor = _isActive ? Console.accent : Console.border;
+    final Color pillColor = _isActive ? Console.accent : Console.dim;
+
+    final Widget visual;
+    if (isVertical) {
+      visual = SizedBox(
+        width: widget.hitExtent,
+        child: Stack(
+          alignment: Alignment.center,
+          fit: StackFit.passthrough,
+          children: <Widget>[
+            if (widget.showDividerLine || _isActive)
+              Positioned.fill(
+                child: Center(
+                  child: Container(
+                    width: 1,
+                    color: lineColor,
+                  ),
+                ),
+              ),
+            Center(
+              child: Container(
+                width: 2,
+                height: 24,
+                decoration: BoxDecoration(
+                  color: pillColor,
+                  borderRadius: BorderRadius.circular(1),
+                ),
+              ),
+            ),
+          ],
+        ),
+      );
+    } else {
+      visual = SizedBox(
+        height: widget.hitExtent,
+        child: Stack(
+          alignment: Alignment.center,
+          fit: StackFit.passthrough,
+          children: <Widget>[
+            if (widget.showDividerLine || _isActive)
+              Positioned.fill(
+                child: Center(
+                  child: Container(
+                    height: 1,
+                    color: lineColor,
+                  ),
+                ),
+              ),
+            Center(
+              child: Container(
+                width: 24,
+                height: 2,
+                decoration: BoxDecoration(
+                  color: pillColor,
+                  borderRadius: BorderRadius.circular(1),
+                ),
+              ),
+            ),
+          ],
+        ),
+      );
+    }
+
+    Widget handle = MouseRegion(
+      cursor: cursor,
+      onEnter: (_) => setState(() => _hovered = true),
+      onExit: (_) => setState(() => _hovered = false),
+      child: GestureDetector(
+        behavior: HitTestBehavior.opaque,
+        onHorizontalDragStart:
+            isVertical ? (_) => setState(() => _dragging = true) : null,
+        onHorizontalDragUpdate: isVertical
+            ? (DragUpdateDetails details) {
+                widget.onDragDelta(details.primaryDelta ?? details.delta.dx);
+              }
+            : null,
+        onHorizontalDragEnd:
+            isVertical ? (_) => setState(() => _dragging = false) : null,
+        onHorizontalDragCancel:
+            isVertical ? () => setState(() => _dragging = false) : null,
+        onVerticalDragStart:
+            !isVertical ? (_) => setState(() => _dragging = true) : null,
+        onVerticalDragUpdate: !isVertical
+            ? (DragUpdateDetails details) {
+                widget.onDragDelta(details.primaryDelta ?? details.delta.dy);
+              }
+            : null,
+        onVerticalDragEnd:
+            !isVertical ? (_) => setState(() => _dragging = false) : null,
+        onVerticalDragCancel:
+            !isVertical ? () => setState(() => _dragging = false) : null,
+        onDoubleTap: widget.onReset,
+        child: visual,
+      ),
+    );
+
+    if (widget.tooltip != null) {
+      handle = Tooltip(message: widget.tooltip!, child: handle);
+    }
+
+    if (widget.semanticLabel != null) {
+      handle = Semantics(
+        label: widget.semanticLabel,
+        button: false,
+        child: handle,
+      );
+    }
+
+    return handle;
+  }
+}
+
+/// Caps how wide a tab's content grows, and centres it in whatever is left.
+///
+/// The design is a single column, and every tab draws one `ListView` with a
+/// symmetric padding and no ceiling — which is invisible on a phone and wrong
+/// on a desktop window. At 2000 px a card's three-line excerpt runs to roughly
+/// 200 characters per line against a 45–75 optimum, and the action buttons sit
+/// over a thousand pixels from the title they act on. This is the one place
+/// that number lives; the shell wraps the whole `IndexedStack` in it, so the
+/// cap cannot drift between tabs the way five separate paddings would.
 class ConsolePageWidth extends StatelessWidget {
-  const ConsolePageWidth({super.key, required this.child});
+  ConsolePageWidth({
+    super.key,
+    required this.child,
+    this.maxWidth = defaultMaxWidth,
+    this.onMaxWidthChanged,
+    this.onResetMaxWidth,
+  });
 
   /// About 90 characters of `ConsoleText.body`. Comfortably above the editor's
   /// own `_wideEnough = 460` breakpoint, so the two-column field layout still
   /// resolves to its wide form inside the cap.
-  static const double maxWidth = 960;
+  static const double defaultMaxWidth = 960;
 
   final Widget child;
+  final double maxWidth;
+  final ValueChanged<double>? onMaxWidthChanged;
+  final VoidCallback? onResetMaxWidth;
 
   @override
   Widget build(BuildContext context) {
-    return Center(
-      child: ConstrainedBox(
-        constraints: const BoxConstraints(maxWidth: maxWidth),
-        child: child,
-      ),
+    if (onMaxWidthChanged == null) {
+      return Center(
+        child: ConstrainedBox(
+          constraints: BoxConstraints(maxWidth: maxWidth),
+          child: child,
+        ),
+      );
+    }
+    return LayoutBuilder(
+      builder: (BuildContext context, BoxConstraints constraints) {
+        final bool canResize =
+            constraints.hasBoundedWidth && constraints.maxWidth > maxWidth + 32;
+        final Widget content = Center(
+          child: ConstrainedBox(
+            constraints: BoxConstraints(maxWidth: maxWidth),
+            child: child,
+          ),
+        );
+        if (!canResize) return content;
+        final double inset = (constraints.maxWidth - maxWidth) / 2;
+        return Stack(
+          alignment: Alignment.center,
+          children: <Widget>[
+            content,
+            Positioned(
+              top: 0,
+              bottom: 0,
+              left: math.max(0.0, inset - 4.5),
+              child: PaneResizeHandle(
+                semanticLabel: 'Resize page width',
+                showDividerLine: false,
+                onDragDelta: (double delta) {
+                  final double next =
+                      (maxWidth - (2 * delta)).clamp(680.0, 1600.0).roundToDouble();
+                  onMaxWidthChanged?.call(next);
+                },
+                onReset: onResetMaxWidth,
+              ),
+            ),
+            Positioned(
+              top: 0,
+              bottom: 0,
+              right: math.max(0.0, inset - 4.5),
+              child: PaneResizeHandle(
+                semanticLabel: 'Resize page width',
+                showDividerLine: false,
+                onDragDelta: (double delta) {
+                  final double next =
+                      (maxWidth + (2 * delta)).clamp(680.0, 1600.0).roundToDouble();
+                  onMaxWidthChanged?.call(next);
+                },
+                onReset: onResetMaxWidth,
+              ),
+            ),
+          ],
+        );
+      },
     );
   }
 }

@@ -35,37 +35,36 @@ class AudioWaveformVisualizer extends StatelessWidget {
   final ValueChanged<double>? onSeek;
   final double height;
 
-  void _handleSeek(Offset localPosition, double width) {
-    if (width <= 0 || onSeek == null) return;
-    final double ratio = (localPosition.dx / width).clamp(0.0, 1.0);
+  void _handleSeek(Offset localPosition, BuildContext context) {
+    final RenderBox? box = context.findRenderObject() as RenderBox?;
+    if (box == null || !box.hasSize || box.size.width <= 0 || onSeek == null) {
+      return;
+    }
+    final double ratio = (localPosition.dx / box.size.width).clamp(0.0, 1.0);
     onSeek!(ratio);
   }
 
   @override
   Widget build(BuildContext context) {
-    return LayoutBuilder(
-      builder: (BuildContext context, BoxConstraints constraints) {
-        return GestureDetector(
-          behavior: HitTestBehavior.opaque,
-          onTapDown: (TapDownDetails details) =>
-              _handleSeek(details.localPosition, constraints.maxWidth),
-          onHorizontalDragUpdate: (DragUpdateDetails details) =>
-              _handleSeek(details.localPosition, constraints.maxWidth),
-          child: SizedBox(
-            height: height,
-            width: constraints.maxWidth,
-            child: CustomPaint(
-              size: Size(constraints.maxWidth, height),
-              painter: WaveformPainter(
-                samples: samples,
-                progress: progress.clamp(0.0, 1.0),
-                activeColor: Console.accent,
-                inactiveColor: Console.track,
-              ),
-            ),
+    return SizedBox(
+      height: height,
+      width: double.infinity,
+      child: GestureDetector(
+        behavior: HitTestBehavior.opaque,
+        onTapDown: (TapDownDetails details) =>
+            _handleSeek(details.localPosition, context),
+        onHorizontalDragUpdate: (DragUpdateDetails details) =>
+            _handleSeek(details.localPosition, context),
+        child: CustomPaint(
+          size: Size(double.infinity, height),
+          painter: WaveformPainter(
+            samples: samples,
+            progress: progress.clamp(0.0, 1.0),
+            activeColor: Console.accent,
+            inactiveColor: Console.track,
           ),
-        );
-      },
+        ),
+      ),
     );
   }
 }

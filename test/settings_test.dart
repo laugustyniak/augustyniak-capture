@@ -465,6 +465,94 @@ void main() {
       );
     });
 
+    test('layout sizes survive a round-trip, omit defaults, and clamp bounds', () {
+      expect(const AppSettings().hasCustomLayoutSizes, isFalse);
+      expect(const AppSettings().navRailWidth, AppSettings.defaultNavRailWidth);
+      expect(const AppSettings().queueSplitRatio, AppSettings.defaultQueueSplitRatio);
+      expect(const AppSettings().detailReadingWidth, AppSettings.defaultDetailReadingWidth);
+      expect(const AppSettings().detailMetaWidth, AppSettings.defaultDetailMetaWidth);
+      expect(const AppSettings().pageMaxWidth, AppSettings.defaultPageMaxWidth);
+
+      // Defaults omitted from JSON
+      final Map<String, dynamic> defaultJson = const AppSettings().toJson();
+      expect(defaultJson.containsKey('navRailWidth'), isFalse);
+      expect(defaultJson.containsKey('queueSplitRatio'), isFalse);
+      expect(defaultJson.containsKey('detailReadingWidth'), isFalse);
+      expect(defaultJson.containsKey('detailMetaWidth'), isFalse);
+      expect(defaultJson.containsKey('pageMaxWidth'), isFalse);
+
+      // Custom values survive round trip
+      const AppSettings custom = AppSettings(
+        navRailWidth: 260.0,
+        queueSplitRatio: 0.40,
+        detailReadingWidth: 820.0,
+        detailMetaWidth: 360.0,
+        pageMaxWidth: 1280.0,
+      );
+      expect(custom.hasCustomLayoutSizes, isTrue);
+
+      final AppSettings restored = AppSettings.fromJson(custom.toJson());
+      expect(restored.navRailWidth, 260.0);
+      expect(restored.queueSplitRatio, 0.40);
+      expect(restored.detailReadingWidth, 820.0);
+      expect(restored.detailMetaWidth, 360.0);
+      expect(restored.pageMaxWidth, 1280.0);
+      expect(restored.hasCustomLayoutSizes, isTrue);
+
+      final Map<String, dynamic> customJson = custom.toJson();
+      expect(customJson['navRailWidth'], 260.0);
+      expect(customJson['queueSplitRatio'], 0.40);
+      expect(customJson['detailReadingWidth'], 820.0);
+      expect(customJson['detailMetaWidth'], 360.0);
+      expect(customJson['pageMaxWidth'], 1280.0);
+
+      // Clamping out-of-range values and non-numeric fallback
+      final AppSettings clampedHigh = AppSettings.fromJson(<String, dynamic>{
+        'navRailWidth': 999.0,
+        'queueSplitRatio': 0.99,
+        'detailReadingWidth': 2500.0,
+        'detailMetaWidth': 999.0,
+        'pageMaxWidth': 3000.0,
+      });
+      expect(clampedHigh.navRailWidth, AppSettings.maxNavRailWidth);
+      expect(clampedHigh.queueSplitRatio, AppSettings.maxQueueSplitRatio);
+      expect(clampedHigh.detailReadingWidth, AppSettings.maxDetailReadingWidth);
+      expect(clampedHigh.detailMetaWidth, AppSettings.maxDetailMetaWidth);
+      expect(clampedHigh.pageMaxWidth, AppSettings.maxPageMaxWidth);
+
+      final AppSettings clampedLow = AppSettings.fromJson(<String, dynamic>{
+        'navRailWidth': 10.0,
+        'queueSplitRatio': 0.05,
+        'detailReadingWidth': 100.0,
+        'detailMetaWidth': 10.0,
+        'pageMaxWidth': 200.0,
+      });
+      expect(clampedLow.navRailWidth, AppSettings.minNavRailWidth);
+      expect(clampedLow.queueSplitRatio, AppSettings.minQueueSplitRatio);
+      expect(clampedLow.detailReadingWidth, AppSettings.minDetailReadingWidth);
+      expect(clampedLow.detailMetaWidth, AppSettings.minDetailMetaWidth);
+      expect(clampedLow.pageMaxWidth, AppSettings.minPageMaxWidth);
+
+      final AppSettings fallback = AppSettings.fromJson(<String, dynamic>{
+        'navRailWidth': 'invalid',
+        'queueSplitRatio': null,
+        'detailReadingWidth': true,
+        'detailMetaWidth': 'bad',
+        'pageMaxWidth': <String>[],
+      });
+      expect(fallback.navRailWidth, AppSettings.defaultNavRailWidth);
+      expect(fallback.queueSplitRatio, AppSettings.defaultQueueSplitRatio);
+      expect(fallback.detailReadingWidth, AppSettings.defaultDetailReadingWidth);
+      expect(fallback.detailMetaWidth, AppSettings.defaultDetailMetaWidth);
+      expect(fallback.pageMaxWidth, AppSettings.defaultPageMaxWidth);
+
+      // copyWith modifications and resets
+      final AppSettings copied = custom.copyWith(detailMetaWidth: 260.0);
+      expect(copied.detailMetaWidth, 260.0);
+      final AppSettings resetMeta = custom.copyWith(resetDetailMetaWidth: true);
+      expect(resetMeta.detailMetaWidth, AppSettings.defaultDetailMetaWidth);
+    });
+
     test('vault settings survive a round-trip', () {
       const AppSettings original = AppSettings(
         vaultPath: '/Users/me/Vault',
@@ -1304,6 +1392,81 @@ void main() {
 
       await controller.resetZoom();
       expect(controller.textScale, 1.0);
+    });
+
+    test('SettingsController layout sizes getters, setters, and reset', () async {
+      final _FakeSettingsRepository repository = _FakeSettingsRepository();
+      final SettingsController controller = SettingsController(repository: repository);
+      await controller.initialize();
+
+      expect(controller.navRailWidth, AppSettings.defaultNavRailWidth);
+      expect(controller.queueSplitRatio, AppSettings.defaultQueueSplitRatio);
+      expect(controller.detailReadingWidth, AppSettings.defaultDetailReadingWidth);
+      expect(controller.detailMetaWidth, AppSettings.defaultDetailMetaWidth);
+      expect(controller.pageMaxWidth, AppSettings.defaultPageMaxWidth);
+      expect(controller.hasCustomLayoutSizes, isFalse);
+
+      final int savesBefore = repository.saveCount;
+
+      // Update navRailWidth
+      await controller.setNavRailWidth(250.0);
+      expect(controller.navRailWidth, 250.0);
+      expect(controller.hasCustomLayoutSizes, isTrue);
+      expect(repository.saveCount, savesBefore + 1);
+
+      // Dead-zone check: no-op does not persist
+      await controller.setNavRailWidth(250.2);
+      expect(repository.saveCount, savesBefore + 1);
+
+      // Update queueSplitRatio
+      await controller.setQueueSplitRatio(0.45);
+      expect(controller.queueSplitRatio, 0.45);
+      expect(repository.saveCount, savesBefore + 2);
+
+      // Dead-zone check for queueSplitRatio
+      await controller.setQueueSplitRatio(0.452);
+      expect(repository.saveCount, savesBefore + 2);
+
+      // Update detailReadingWidth
+      await controller.setDetailReadingWidth(800.0);
+      expect(controller.detailReadingWidth, 800.0);
+      expect(repository.saveCount, savesBefore + 3);
+
+      // Dead-zone check for detailReadingWidth
+      await controller.setDetailReadingWidth(800.1);
+      expect(repository.saveCount, savesBefore + 3);
+
+      // Update detailMetaWidth
+      await controller.setDetailMetaWidth(360.0);
+      expect(controller.detailMetaWidth, 360.0);
+      expect(repository.saveCount, savesBefore + 4);
+
+      // Dead-zone check for detailMetaWidth
+      await controller.setDetailMetaWidth(360.2);
+      expect(repository.saveCount, savesBefore + 4);
+
+      // Update pageMaxWidth
+      await controller.setPageMaxWidth(1200.0);
+      expect(controller.pageMaxWidth, 1200.0);
+      expect(repository.saveCount, savesBefore + 5);
+
+      // Dead-zone check for pageMaxWidth
+      await controller.setPageMaxWidth(1200.4);
+      expect(repository.saveCount, savesBefore + 5);
+
+      // resetLayoutSizes resets all 5 in a single persist
+      await controller.resetLayoutSizes();
+      expect(controller.navRailWidth, AppSettings.defaultNavRailWidth);
+      expect(controller.queueSplitRatio, AppSettings.defaultQueueSplitRatio);
+      expect(controller.detailReadingWidth, AppSettings.defaultDetailReadingWidth);
+      expect(controller.detailMetaWidth, AppSettings.defaultDetailMetaWidth);
+      expect(controller.pageMaxWidth, AppSettings.defaultPageMaxWidth);
+      expect(controller.hasCustomLayoutSizes, isFalse);
+      expect(repository.saveCount, savesBefore + 6);
+
+      // Calling reset again when already default does not persist
+      await controller.resetLayoutSizes();
+      expect(repository.saveCount, savesBefore + 6);
     });
 
     group('ByocS3Storage Settings', () {
