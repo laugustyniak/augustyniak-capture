@@ -5,6 +5,8 @@ import '../domain/recording.dart';
 import '../domain/recording_revision.dart';
 import 'revisions_repository.dart';
 
+typedef _RevisionKey = (DateTime, String, String?, String?, RevisionSource);
+
 /// What a capture *overwrote*, and the moment it left the desk.
 ///
 /// Two append-only histories with one thing in common: neither can be
@@ -76,9 +78,47 @@ class CaptureHistory {
   /// costs the edit sheet's HISTORY section, not the queue.
   Future<void> loadRevisions() async {
     try {
-      _revisions =
+      final Map<String, List<RecordingRevision>> loaded =
           await _revisionsRepository?.load() ??
           <String, List<RecordingRevision>>{};
+      final Map<String, Map<_RevisionKey, RecordingRevision>> merged =
+          <String, Map<_RevisionKey, RecordingRevision>>{};
+      void add(RecordingRevision revision) {
+        merged
+            .putIfAbsent(
+              revision.recordingId,
+              () => <_RevisionKey, RecordingRevision>{},
+            )
+            .putIfAbsent(
+              (
+                revision.at,
+                revision.field,
+                revision.from,
+                revision.to,
+                revision.source,
+              ),
+              () => revision,
+            );
+      }
+
+      for (final List<RecordingRevision> rows in _revisions.values) {
+        for (final RecordingRevision revision in rows) {
+          add(revision);
+        }
+      }
+      for (final List<RecordingRevision> rows in loaded.values) {
+        for (final RecordingRevision revision in rows) {
+          add(revision);
+        }
+      }
+      _revisions = <String, List<RecordingRevision>>{
+        for (final MapEntry<String, Map<_RevisionKey, RecordingRevision>> entry
+            in merged.entries)
+          entry.key: entry.value.values.toList()
+            ..sort(
+              (RecordingRevision a, RecordingRevision b) => b.at.compareTo(a.at),
+            ),
+      };
     } catch (exception) {
       _logSink.log(
         'Change history could not be read: $exception',
