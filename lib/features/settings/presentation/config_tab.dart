@@ -26,6 +26,7 @@ import 'byoc_storage_section.dart';
 import 'command_section.dart';
 import 'enrichment_context_section.dart';
 import 'settings_controller.dart';
+import 'smart_route_section.dart';
 import 'vault_section.dart';
 import '../../momentum/domain/closure_event.dart';
 import '../../momentum/presentation/momentum_section.dart';
@@ -629,6 +630,8 @@ class _ConfigTabState extends State<ConfigTab> {
         projects: widget.projects,
         recordings: widget.recordingsController,
       ),
+      const SizedBox(height: 22),
+      SmartRouteSection(controller: widget.controller),
       const SizedBox(height: 22),
       VaultSection(
         controller: widget.controller,

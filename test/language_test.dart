@@ -38,6 +38,9 @@ void main() {
     'lib/features/enrichment/domain/enrichment_defaults.dart':
         'Polish examples inside an English LLM prompt, teaching the model to '
         'recognise Polish imperatives. Removing them degrades classification.',
+    'lib/features/enrichment/domain/intent_classifier.dart':
+        'Polish trigger phrases for the offline keyword fallback, matched '
+        'against dictated notes — data, not display text',
     'lib/features/clipboard/domain/clipboard_item.dart':
         'legacy Polish preview string [Obrazek] normalization map — data migration, not display text',
   };

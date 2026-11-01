@@ -5,6 +5,7 @@ import 'package:flutter/services.dart';
 import '../../../app/ui_kit.dart';
 import '../../recordings/domain/recording.dart';
 import '../../recordings/presentation/handoff_sheet.dart';
+import '../../recordings/presentation/smart_route_action.dart';
 import '../../recordings/presentation/recording_card.dart';
 import '../../recordings/presentation/recording_editor.dart';
 import '../../recordings/presentation/recordings_controller.dart';
@@ -262,6 +263,15 @@ class _ProjectCapturesSheetState extends State<ProjectCapturesSheet> {
                                             .canHandoff(recording) ||
                                         widget.recordingsController
                                             .canSend(recording),
+                                    canSmartRoute: widget.recordingsController
+                                        .canSmartRoute(recording),
+                                    smartRouting: widget.recordingsController
+                                        .isSmartRouting(recording.id),
+                                    onSmartRoute: () => runSmartRoute(
+                                      context,
+                                      widget.recordingsController,
+                                      recording.id,
+                                    ),
                                     onHandoff: () => showHandoffSheet(
                                       context,
                                       controller: widget.recordingsController,

@@ -11,6 +11,7 @@ import '../../command/domain/command_client.dart';
 import '../../enrichment/domain/embedding_service.dart';
 import '../../enrichment/domain/enrichment_service.dart';
 import '../../processing/data/ocr_service.dart';
+import '../../recordings/domain/smart_route.dart';
 import '../../shortcuts/domain/hotkey_binding.dart';
 import '../../shortcuts/domain/shortcut_action.dart';
 import '../../timer/domain/alarm_sound.dart';
@@ -649,6 +650,21 @@ class SettingsController extends ChangeNotifier {
   Future<void> setAutoInstruction(bool value) async {
     if (value == _settings.autoInstruction) return;
     await _persist(_settings.copyWith(autoInstruction: value));
+  }
+
+  SmartRouteConfirm get smartRouteConfirm => _settings.smartRouteConfirm;
+
+  Future<void> setSmartRouteConfirm(SmartRouteConfirm value) async {
+    if (value == _settings.smartRouteConfirm) return;
+    await _persist(_settings.copyWith(smartRouteConfirm: value));
+  }
+
+  String get todoistAgentCommand => _settings.todoistAgentCommand;
+
+  Future<void> setTodoistAgentCommand(String value) async {
+    final String trimmed = value.trim();
+    if (trimmed == _settings.todoistAgentCommand.trim()) return;
+    await _persist(_settings.copyWith(todoistAgentCommand: trimmed));
   }
 
   String get asrGlossary => _settings.asrGlossary;

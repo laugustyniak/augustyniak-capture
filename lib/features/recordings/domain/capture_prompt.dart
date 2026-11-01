@@ -37,7 +37,22 @@ String capturePrompt(RoutedCapture capture) {
 /// session. The frame says so, and fences the text with the same markers the
 /// brief uses; a line shaped like a marker is rewritten so the text cannot
 /// close its own fence. It is advice to the model, not a sandbox.
-String frameCapturePrompt(String instruction, {required RoutedCapture capture}) {
+///
+/// [directive] is the one thing that is **not** the capture's: a trusted task
+/// line from a fixed table in code (the SMART route), written above the
+/// provenance paragraph and outside the fence. Putting it in [instruction]
+/// would fence our own words as untrusted material.
+String frameCapturePrompt(
+  String instruction, {
+  required RoutedCapture capture,
+  String? directive,
+}) {
+  final String framed = _frame(instruction, capture: capture);
+  final String task = directive?.trim() ?? '';
+  return task.isEmpty ? framed : '$task\n\n$framed';
+}
+
+String _frame(String instruction, {required RoutedCapture capture}) {
   final String text = instruction.trim();
   final bool titleOnly =
       capture.body.trim().isEmpty && (capture.summary?.trim() ?? '').isEmpty;

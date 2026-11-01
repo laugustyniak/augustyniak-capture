@@ -17,6 +17,7 @@ import '../../enrichment/domain/enrichment_result.dart';
 import '../../enrichment/domain/enrichment_service.dart';
 import '../../enrichment/domain/transcript_cleaner.dart';
 import '../../enrichment/domain/instruction_writer.dart';
+import '../../enrichment/domain/intent_classifier.dart';
 import '../../logs/domain/log_event.dart';
 import '../../processing/data/ocr_service.dart';
 import '../../processing/data/video_audio_extractor.dart';
@@ -44,6 +45,7 @@ import '../data/recordings_repository.dart';
 import '../data/revisions_repository.dart';
 import '../../projects/data/projects_repository.dart';
 import '../../projects/data/native_agent_jobs.dart';
+import '../../projects/domain/agent_command.dart';
 import '../../projects/domain/agent_session_launcher.dart'
     show attachCommandFor;
 import '../../projects/domain/project.dart';
@@ -73,6 +75,7 @@ import '../domain/recording.dart';
 import '../domain/recording_revision.dart';
 import '../domain/recording_tag.dart';
 import '../domain/route_record.dart';
+import '../domain/smart_route.dart';
 import '../domain/suggested_route.dart';
 // Same layer, not a widget import: `displayNameFor` is the one definition of
 // what an untitled capture is called, and a destination heading must not be
@@ -3055,9 +3058,9 @@ class RecordingsController extends ChangeNotifier {
   /// the consequence of having done it, which is what lets the queue drain
   /// as a side effect of the work instead of as a separate pass over it.
   Future<void> route(String id) async {
-    final Recording recording = _recordings.firstWhere(
-      (Recording item) => item.id == id,
-    );
+    final Recording? recording = _recordingById(id);
+    // Gone (deleted while something else was awaited): nothing to deliver.
+    if (recording == null) return;
 
     final RouteRecord record;
     try {
@@ -3225,6 +3228,10 @@ class RecordingsController extends ChangeNotifier {
     required String agentId,
     String? instruction,
     bool detached = false,
+    String? directive,
+    String? purpose,
+    AgentCommand? command,
+    bool honorSkipPermissions = true,
   }) async {
     final int index = _recordings.indexWhere((Recording item) => item.id == id);
     if (index < 0) return null;
@@ -3243,6 +3250,10 @@ class RecordingsController extends ChangeNotifier {
               ? instruction!.trim()
               : _agentHandoff.promptFor(capture),
           detached: detached,
+          directive: directive,
+          purpose: purpose,
+          command: command,
+          honorSkipPermissions: honorSkipPermissions,
         ),
       );
     } catch (exception) {
@@ -3281,6 +3292,284 @@ class RecordingsController extends ChangeNotifier {
     );
     unawaited(refreshArtifacts(id));
     return result;
+  }
+
+  /// Applied to the next SMART route, like [instructionWriter]. The default is
+  /// the offline keyword fallback, so the button works with no model at all.
+  set intentClassifier(IntentClassifier value) => _intentClassifier = value;
+  IntentClassifier _intentClassifier = const DisabledIntentClassifier();
+
+  /// Whether an intent with effects waits for one tap (#386).
+  SmartRouteConfirm smartRouteConfirm = SmartRouteConfirm.auto;
+
+  /// The Todoist agent command as typed in Config. Parsed on assignment;
+  /// blank or invalid leaves the Todoist intent unavailable.
+  set todoistAgentCommand(String value) {
+    _todoistCommand = parseAgentCommand(
+      value,
+      home: Platform.environment['HOME'],
+    );
+  }
+
+  AgentCommandParse _todoistCommand = const AgentCommandParse();
+
+  /// Why the configured Todoist command is unusable, or null.
+  String? get todoistCommandProblem => _todoistCommand.problem;
+
+  /// In memory only, like [_handoffsInProgress], and kept apart from it:
+  /// delivery goes through [handoff] and [route], which take their own guards.
+  final Set<String> _smartRoutingIds = <String>{};
+  bool isSmartRouting(String id) => _smartRoutingIds.contains(id);
+
+  /// The agent the SMART route launches for [recording]: the project's default
+  /// unless it is Gemini (no background mode), else Claude Code, else the
+  /// first agent that can run in the background.
+  String? _smartAgentId(Recording recording) {
+    final List<HandoffAgent> usable = handoffAgents(
+      recording,
+    ).where((HandoffAgent agent) => agent.id != AgentKind.geminiCli.name).toList();
+    if (usable.isEmpty) return null;
+    return (usable.where((HandoffAgent a) => a.isDefault).firstOrNull ??
+            usable
+                .where((HandoffAgent a) => a.id == AgentKind.claudeCode.name)
+                .firstOrNull ??
+            usable.first)
+        .id;
+  }
+
+  /// What the SMART route can deliver for [recording] right now. Synchronous
+  /// and read from configuration, like [canRoute].
+  Set<SmartIntent> offeredSmartIntents(Recording recording) => <SmartIntent>{
+    if (canRoute(recording)) SmartIntent.note,
+    if (_smartAgentId(recording) != null) ...<SmartIntent>[
+      SmartIntent.newSession,
+      SmartIntent.search,
+      SmartIntent.analyze,
+      SmartIntent.nextActions,
+      SmartIntent.verify,
+      if (_todoistCommand.command != null) SmartIntent.todoist,
+    ],
+  };
+
+  /// Whether the SMART route button is drawn: the capture is open, has text of
+  /// its own and something can deliver it. Hidden rather than disabled.
+  bool canSmartRoute(Recording recording) =>
+      !recording.isProcessedByUser &&
+      canSend(recording) &&
+      offeredSmartIntents(recording).isNotEmpty;
+
+  /// One tap: read what the capture asks for and deliver it through the
+  /// existing entry points (#386).
+  ///
+  /// **Best-effort classification, delivery first.** A classifier failure
+  /// falls back to [classifyByKeywords]; a model's answer outside the offered
+  /// set is a note. The classifier selects an intent and nothing else — the
+  /// prompt, the program and the arguments come from code and settings. The
+  /// capture's `status` is never touched, and a delivery that throws leaves
+  /// the item open and retryable with only [error] set, exactly as [route]
+  /// and [handoff] do.
+  ///
+  /// With [SmartRouteConfirm.confirmEffects] an intent with effects returns
+  /// `awaitingConfirmation` and delivers nothing; calling again with
+  /// [confirmSmartRoute] delivers that intent without classifying again. Returns null
+  /// when the capture is gone, a run is already in flight, or it cannot be
+  /// smart-routed.
+  Future<SmartRouteOutcome?> smartRoute(String id) => _smartRoute(id);
+
+  /// The second tap of `confirmEffects`: delivers [intent] without classifying
+  /// again. [expectedText] is required, not optional — it is the words the
+  /// user was shown a decision about, and a capture that no longer reads the
+  /// same is refused rather than sent on that decision.
+  Future<SmartRouteOutcome?> confirmSmartRoute(
+    String id,
+    SmartIntent intent, {
+    required String expectedText,
+  }) => _smartRoute(id, confirmed: intent, expectedText: expectedText);
+
+  Future<SmartRouteOutcome?> _smartRoute(
+    String id, {
+    SmartIntent? confirmed,
+    String? expectedText,
+  }) async {
+    if (_recordings.indexWhere((Recording item) => item.id == id) < 0) {
+      return null;
+    }
+    if (!_smartRoutingIds.add(id)) return null;
+    _error = null;
+    notifyListeners();
+    try {
+      Recording? recording = _recordingById(id);
+      if (recording == null || !canSmartRoute(recording)) return null;
+      Set<SmartIntent> offered = offeredSmartIntents(recording);
+      final String text = _smartText(recording);
+
+      SmartIntentDecision decision;
+      if (confirmed != null) {
+        if (expectedText != text) {
+          _error =
+              'This capture changed while you were deciding — nothing was '
+              'sent. Tap again to route it as it is now.';
+          return SmartRouteOutcome(
+            decision: SmartIntentDecision(intent: confirmed),
+          );
+        }
+        if (confirmed != SmartIntent.note && !offered.contains(confirmed)) {
+          _error = '${confirmed.label} is no longer available for this capture.';
+          return SmartRouteOutcome(
+            decision: SmartIntentDecision(intent: confirmed),
+          );
+        }
+        decision = SmartIntentDecision(intent: confirmed);
+      } else {
+        decision = await _classifyIntent(recording, offered);
+        // The item may have been routed, edited or deleted while the model
+        // answered; decide against it as it is now.
+        recording = _recordingById(id);
+        if (_disposed || recording == null || !canSmartRoute(recording)) {
+          return null;
+        }
+        if (_smartText(recording) != text) {
+          // The verdict describes words that are no longer there.
+          _error =
+              'This capture changed while it was being read — nothing was '
+              'sent. Tap again to route it as it is now.';
+          return null;
+        }
+        offered = offeredSmartIntents(recording);
+        if (decision.intent != SmartIntent.note &&
+            !offered.contains(decision.intent)) {
+          decision = SmartIntentDecision(
+            intent: SmartIntent.note,
+            fromModel: decision.fromModel,
+          );
+        }
+        if (smartRouteConfirm == SmartRouteConfirm.confirmEffects &&
+            decision.intent.hasEffects) {
+          return SmartRouteOutcome(
+            decision: decision,
+            awaitingConfirmation: true,
+            agentLabel: _smartAgentLabel(recording),
+            text: text,
+          );
+        }
+      }
+
+      final bool delivered = await _deliverSmart(recording, decision.intent);
+      if (delivered) {
+        _logSink.log(
+          'Smart route: ${decision.intent.label}'
+          '${decision.reason == null ? '' : ' — ${decision.reason}'}'
+          '${decision.fromModel ? '' : ' (keywords)'}.',
+          recordingId: id,
+        );
+      }
+      return SmartRouteOutcome(decision: decision, delivered: delivered);
+    } finally {
+      _smartRoutingIds.remove(id);
+      if (!_disposed) notifyListeners();
+    }
+  }
+
+  /// The words the SMART route reads: the transcript, else the summary — the
+  /// same two [canSend] accepts, so a blank transcript does not hide a summary.
+  String _smartText(Recording recording) =>
+      (recording.transcript ?? '').trim().isNotEmpty
+      ? recording.transcript!
+      : (recording.summary ?? '');
+
+  String? _smartAgentLabel(Recording recording) {
+    final String? id = _smartAgentId(recording);
+    return handoffAgents(recording)
+        .where((HandoffAgent agent) => agent.id == id)
+        .firstOrNull
+        ?.label;
+  }
+
+  Recording? _recordingById(String id) =>
+      _recordings.where((Recording item) => item.id == id).firstOrNull;
+
+  /// The model's answer, or the keyword fallback when there is none. The usage
+  /// scope is held for the request only, never across the delivery: a native
+  /// launch can wait on the agent for seconds and would stall the drain.
+  Future<SmartIntentDecision> _classifyIntent(
+    Recording recording,
+    Set<SmartIntent> offered,
+  ) async {
+    final String text = _smartText(recording);
+    final void Function() releaseUsageScope = await _acquireUsageScope();
+    try {
+      _beginUsageJob(recording.id, UsageStage.enrichment);
+      try {
+        return await _intentClassifier.classify(text, offered: offered);
+      } finally {
+        _endUsageJob();
+      }
+    } catch (exception) {
+      _logSink.log(
+        'Intent classification failed, using keywords: $exception',
+        level: LogLevel.warn,
+        recordingId: recording.id,
+      );
+      return classifyByKeywords(text, offered);
+    } finally {
+      releaseUsageScope();
+    }
+  }
+
+  /// True when the capture was delivered.
+  Future<bool> _deliverSmart(Recording recording, SmartIntent intent) async {
+    try {
+      return await _deliverSmartUnguarded(recording, intent);
+    } catch (exception) {
+      // A capture deleted during the await, or a write that failed: the
+      // button reports it like every other delivery failure.
+      _error = exception.toString();
+      _logSink.log(
+        'Smart route failed: $exception',
+        level: LogLevel.error,
+        recordingId: recording.id,
+      );
+      notifyListeners();
+      return false;
+    }
+  }
+
+  Future<bool> _deliverSmartUnguarded(
+    Recording recording,
+    SmartIntent intent,
+  ) async {
+    if (_recordingById(recording.id) == null) {
+      _error = 'This capture no longer exists.';
+      notifyListeners();
+      return false;
+    }
+    if (intent == SmartIntent.note) {
+      if (!canRoute(recording)) {
+        _error =
+            'This looks like a loose note, but it has no project inbox — '
+            'assign it to a project first.';
+        notifyListeners();
+        return false;
+      }
+      await route(recording.id);
+      return _error == null;
+    }
+    final String? agentId = _smartAgentId(recording);
+    if (agentId == null) {
+      _error = 'No agent can run in the background for this capture.';
+      notifyListeners();
+      return false;
+    }
+    final AgentHandoffResult? result = await handoff(
+      recording.id,
+      agentId: agentId,
+      detached: true,
+      directive: intent.directive,
+      purpose: intent.label,
+      command: intent == SmartIntent.todoist ? _todoistCommand.command : null,
+      honorSkipPermissions: false,
+    );
+    return result != null;
   }
 
   /// Open a terminal on the agent session [sessionName] — the way back into a
