@@ -20,7 +20,7 @@ import 'card_parts.dart';
 /// The animation repeats forever: a test pumping a screen with one of these on
 /// it must pump explicit frames, never `pumpAndSettle`. It stands still when
 /// the platform asks for reduced motion.
-class ProcessingHero extends StatefulWidget {
+class ProcessingHero extends StatelessWidget {
   ProcessingHero({
     super.key,
     required this.enriching,
@@ -50,11 +50,85 @@ class ProcessingHero extends StatefulWidget {
 
   static const String queuedLabel = 'QUEUED';
 
+  String get _stage {
+    if (enriching) return ProcessingStrip.analyzingLabel;
+    return type == CaptureType.image
+        ? ProcessingStrip.ocrLabel
+        : ProcessingStrip.transcribingLabel;
+  }
+
+  String get _caption {
+    if (enriching) return 'title · summary · tags';
+    return type == CaptureType.image ? 'image → text' : 'speech → text';
+  }
+
   @override
-  State<ProcessingHero> createState() => _ProcessingHeroState();
+  Widget build(BuildContext context) {
+    final double height = math.max(
+      360,
+      MediaQuery.sizeOf(context).height * ProcessingHero.minScreenFraction,
+    );
+    final ValueListenable<Duration>? ticker = processingTicker;
+    final TextStyle stageStyle = ConsoleText.micro.copyWith(
+      color: Console.accent,
+      fontSize: 15,
+      letterSpacing: 4,
+    );
+    return ProcessingScene(
+      height: height,
+      semanticsLabel: '$_stage in progress',
+      child: Positioned(
+        left: 0,
+        right: 0,
+        bottom: 28,
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: <Widget>[
+            Text(_stage, style: stageStyle),
+            const SizedBox(height: 8),
+            if (ticker == null)
+              Text(
+                _caption,
+                style: ConsoleText.micro.copyWith(color: Console.muted),
+              )
+            else
+              ValueListenableBuilder<Duration>(
+                valueListenable: ticker,
+                builder: (BuildContext _, Duration elapsed, Widget? _) => Text(
+                  '$_caption · ${formatDuration(elapsed)}',
+                  style: ConsoleText.micro.copyWith(color: Console.muted),
+                ),
+              ),
+          ],
+        ),
+      ),
+    );
+  }
 }
 
-class _ProcessingHeroState extends State<ProcessingHero>
+/// The animated visual shared by live recording and post-capture processing.
+///
+/// [paused] freezes the current frame so pausing a recording also pauses its
+/// motion. The platform reduced-motion setting uses a deliberate still frame.
+class ProcessingScene extends StatefulWidget {
+  ProcessingScene({
+    super.key,
+    required this.height,
+    required this.semanticsLabel,
+    this.paused = false,
+    this.child,
+  });
+
+  final double height;
+  final String semanticsLabel;
+  final bool paused;
+  final Widget? child;
+
+  @override
+  State<ProcessingScene> createState() => _ProcessingSceneState();
+}
+
+class _ProcessingSceneState extends State<ProcessingScene>
     with SingleTickerProviderStateMixin {
   late final AnimationController _clock = AnimationController(
     vsync: this,
@@ -62,15 +136,29 @@ class _ProcessingHeroState extends State<ProcessingHero>
   );
   bool? _reduceMotion;
 
+  double get debugClockValue => _clock.value;
+
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
     final bool reduce = MediaQuery.disableAnimationsOf(context);
     if (reduce == _reduceMotion) return;
     _reduceMotion = reduce;
-    if (reduce) {
+    _syncClock(setReducedFrame: reduce);
+  }
+
+  @override
+  void didUpdateWidget(ProcessingScene oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.paused != widget.paused) _syncClock();
+  }
+
+  void _syncClock({bool setReducedFrame = false}) {
+    if (_reduceMotion == true) {
       _clock.stop();
-      _clock.value = 0.18;
+      if (setReducedFrame) _clock.value = 0.18;
+    } else if (widget.paused) {
+      _clock.stop();
     } else {
       _clock.repeat();
     }
@@ -82,33 +170,11 @@ class _ProcessingHeroState extends State<ProcessingHero>
     super.dispose();
   }
 
-  String get _stage {
-    if (widget.enriching) return ProcessingStrip.analyzingLabel;
-    return widget.type == CaptureType.image
-        ? ProcessingStrip.ocrLabel
-        : ProcessingStrip.transcribingLabel;
-  }
-
-  String get _caption {
-    if (widget.enriching) return 'title · summary · tags';
-    return widget.type == CaptureType.image ? 'image → text' : 'speech → text';
-  }
-
   @override
   Widget build(BuildContext context) {
-    final double height = math.max(
-      360,
-      MediaQuery.sizeOf(context).height * ProcessingHero.minScreenFraction,
-    );
-    final ValueListenable<Duration>? ticker = widget.processingTicker;
-    final TextStyle stageStyle = ConsoleText.micro.copyWith(
-      color: Console.accent,
-      fontSize: 15,
-      letterSpacing: 4,
-    );
     return Semantics(
       liveRegion: true,
-      label: '$_stage in progress',
+      label: widget.semanticsLabel,
       child: ExcludeSemantics(
         child: ClipRRect(
           borderRadius: BorderRadius.circular(18),
@@ -119,7 +185,7 @@ class _ProcessingHeroState extends State<ProcessingHero>
               borderRadius: BorderRadius.circular(18),
             ),
             child: SizedBox(
-              height: height,
+              height: widget.height,
               width: double.infinity,
               child: Stack(
                 fit: StackFit.expand,
@@ -136,37 +202,7 @@ class _ProcessingHeroState extends State<ProcessingHero>
                       ),
                     ),
                   ),
-                  Positioned(
-                    left: 0,
-                    right: 0,
-                    bottom: 28,
-                    child: Column(
-                      mainAxisSize: MainAxisSize.min,
-                      children: <Widget>[
-                        Text(_stage, style: stageStyle),
-                        const SizedBox(height: 8),
-                        if (ticker == null)
-                          Text(
-                            _caption,
-                            style: ConsoleText.micro.copyWith(
-                              color: Console.muted,
-                            ),
-                          )
-                        else
-                          ValueListenableBuilder<Duration>(
-                            valueListenable: ticker,
-                            builder:
-                                (BuildContext _, Duration elapsed, Widget? _) =>
-                                    Text(
-                                      '$_caption · ${formatDuration(elapsed)}',
-                                      style: ConsoleText.micro.copyWith(
-                                        color: Console.muted,
-                                      ),
-                                    ),
-                          ),
-                      ],
-                    ),
-                  ),
+                  if (widget.child case final Widget child) child,
                 ],
               ),
             ),

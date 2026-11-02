@@ -8,6 +8,7 @@ import 'package:record/record.dart';
 import 'package:augustyniak_capture/features/projects/domain/project.dart';
 import 'package:augustyniak_capture/features/recordings/presentation/capture_dock.dart';
 import 'package:augustyniak_capture/features/recordings/presentation/recording_view.dart';
+import 'package:augustyniak_capture/features/recordings/presentation/processing_hero.dart';
 import 'package:augustyniak_capture/features/recordings/presentation/recordings_controller.dart';
 import 'package:augustyniak_capture/features/recordings/presentation/text_note_sheet.dart';
 import 'package:augustyniak_capture/features/settings/domain/audio_config.dart';
@@ -174,6 +175,12 @@ void main() {
       await tester.pump();
 
       expect(find.text('REC'), findsOneWidget);
+      expect(find.byType(ProcessingScene), findsOneWidget);
+      expect(find.bySemanticsLabel('Recording in progress'), findsOneWidget);
+      expect(
+        tester.getSize(find.byType(ProcessingScene)).height,
+        inInclusiveRange(220, 320),
+      );
       expect(find.text('AAC-LC · 16 kHz · mono · 64 kbps'), findsOneWidget);
       expect(find.text('recording → .m4a'), findsOneWidget);
       expect(find.text('persist recordings.json (atomic)'), findsOneWidget);
@@ -368,6 +375,31 @@ void main() {
       await tester.runAsync(controller.stopRecording);
       await settleIo(tester);
     });
+
+    testWidgets('the recording scene fits a phone viewport', (
+      WidgetTester tester,
+    ) async {
+      tester.view.physicalSize = const Size(390, 844);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.reset);
+      final RecordingsController controller = buildController();
+      await controller.initialize();
+      await tester.runAsync(controller.startRecording);
+
+      await tester.pumpWidget(
+        hostTab(
+          () => RecordingView(controller: controller),
+          listenable: controller,
+        ),
+      );
+      await tester.pump(const Duration(milliseconds: 180));
+
+      expect(tester.takeException(), isNull);
+      expect(find.byType(ProcessingScene), findsOneWidget);
+
+      await tester.runAsync(controller.stopRecording);
+      await settleIo(tester);
+    });
   });
 
   testWidgets('pause and resume controls keep the capture open', (
@@ -389,11 +421,20 @@ void main() {
     await tester.pump();
     expect(find.text('PAUSED'), findsOneWidget);
     expect(find.text('RESUME'), findsOneWidget);
+    expect(find.bySemanticsLabel('Recording paused'), findsOneWidget);
+    expect(
+      tester.widget<ProcessingScene>(find.byType(ProcessingScene)).paused,
+      isTrue,
+    );
     expect(controller.isRecording, isTrue);
     await tester.tap(find.text('RESUME'));
     await tester.pump();
     expect(find.text('REC'), findsOneWidget);
     expect(find.text('PAUSE'), findsOneWidget);
+    expect(
+      tester.widget<ProcessingScene>(find.byType(ProcessingScene)).paused,
+      isFalse,
+    );
     await tester.runAsync(controller.stopRecording);
   });
 
