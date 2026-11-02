@@ -35,7 +35,8 @@ class _FakePicker implements MediaPicker {
   _FakePicker(this._result);
   final PickedMedia? _result;
   @override
-  Future<PickedMedia?> pick(CaptureType type) async => _result;
+  Future<List<PickedMedia>> pick(CaptureType type) async =>
+      <PickedMedia>[?_result];
 }
 
 class _FakePlayer implements AudioPlayer {

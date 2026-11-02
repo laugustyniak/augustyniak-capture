@@ -42,9 +42,10 @@ class _FakePicker implements MediaPicker {
   CaptureType? requested;
 
   @override
-  Future<PickedMedia?> pick(CaptureType type) async {
+  Future<List<PickedMedia>> pick(CaptureType type) async {
     requested = type;
-    return null; // Cancelled — the capture path itself is covered elsewhere.
+    // Cancelled — the capture path itself is covered elsewhere.
+    return const <PickedMedia>[];
   }
 }
 

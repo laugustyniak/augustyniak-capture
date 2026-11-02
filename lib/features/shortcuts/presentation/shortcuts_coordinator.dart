@@ -2,6 +2,7 @@ import 'package:flutter/foundation.dart';
 
 import '../../logs/domain/log_event.dart';
 import '../../recordings/domain/capture_type.dart';
+import '../../recordings/domain/upload_grouping.dart';
 import '../../recordings/presentation/recordings_controller.dart';
 import '../../timer/presentation/focus_timer_controller.dart';
 import '../domain/hotkey_binding.dart';
@@ -20,6 +21,7 @@ class ShortcutsCoordinator {
   ShortcutsCoordinator({
     required RecordingsController recordings,
     required Future<void> Function() composeTextNote,
+    UploadGroupingChooser? chooseUploadGrouping,
     Future<void> Function()? onToggleClipboardHistory,
     FocusTimerController? focusTimer,
     Future<void> Function()? revealQueue,
@@ -29,6 +31,7 @@ class ShortcutsCoordinator {
     LogSink logSink = const NoopLogSink(),
   }) : _recordings = recordings,
        _composeTextNote = composeTextNote,
+       _chooseUploadGrouping = chooseUploadGrouping,
        _onToggleClipboardHistory = onToggleClipboardHistory,
        _focusTimer = focusTimer,
        _revealQueue = revealQueue,
@@ -39,6 +42,10 @@ class ShortcutsCoordinator {
 
   final RecordingsController _recordings;
   final Future<void> Function() _composeTextNote;
+
+  /// Null in a host without a sheet to ask with; several picked files then
+  /// import as separate captures.
+  final UploadGroupingChooser? _chooseUploadGrouping;
   final Future<void> Function()? _onToggleClipboardHistory;
 
   /// Null in a host with no timer — every pure-Dart shortcut test, and any
@@ -216,11 +223,20 @@ class ShortcutsCoordinator {
         case ShortcutAction.newTextNote:
           await _composeTextNote();
         case ShortcutAction.uploadAudio:
-          await _recordings.addUpload(CaptureType.audioUpload);
+          await _recordings.addUpload(
+            CaptureType.audioUpload,
+            chooseGrouping: _chooseUploadGrouping,
+          );
         case ShortcutAction.uploadImage:
-          await _recordings.addUpload(CaptureType.image);
+          await _recordings.addUpload(
+            CaptureType.image,
+            chooseGrouping: _chooseUploadGrouping,
+          );
         case ShortcutAction.uploadVideo:
-          await _recordings.addUpload(CaptureType.video);
+          await _recordings.addUpload(
+            CaptureType.video,
+            chooseGrouping: _chooseUploadGrouping,
+          );
         case ShortcutAction.toggleTimer:
           final FocusTimerController? timer = _focusTimer;
           if (timer == null) break;

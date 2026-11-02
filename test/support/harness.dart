@@ -108,7 +108,8 @@ class FakePicker implements MediaPicker {
   FakePicker([this.result]);
   final PickedMedia? result;
   @override
-  Future<PickedMedia?> pick(CaptureType type) async => result;
+  Future<List<PickedMedia>> pick(CaptureType type) async =>
+      <PickedMedia>[?result];
 }
 
 /// Records what the card asked the platform to open instead of shelling out.

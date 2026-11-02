@@ -70,6 +70,7 @@ import '../domain/media_opener.dart';
 import '../domain/capture_session.dart';
 import '../domain/note_vault.dart';
 import '../domain/recording.dart';
+import '../domain/upload_grouping.dart';
 import '../domain/recording_revision.dart';
 import '../domain/recording_tag.dart';
 import '../domain/route_record.dart';
@@ -2663,7 +2664,7 @@ class RecordingsController extends ChangeNotifier {
     }
   }
 
-  Future<void> _admitNewImportedFile({
+  Future<String> _admitNewImportedFile({
     required File source,
     required CaptureType type,
     String? mimeType,
@@ -2697,14 +2698,101 @@ class RecordingsController extends ChangeNotifier {
     // Enqueue for background processing and return; the drain loop runs the
     // job off the capture lock so it never blocks the next capture.
     await _enqueueProcessing(saved.id);
+    return id;
   }
 
-  /// Import an existing file (audio, image or video) as a new item. Mirrors the
+  /// One capture from several picked files: the first is the source, every
+  /// other one a fragment. All files are copied and verified before the row is
+  /// indexed, so the processor sees every fragment in its first pass — an
+  /// append after the job started would wait for a retry — and a copy that
+  /// fails part-way indexes nothing.
+  Future<void> _admitNewImportedFilesAsOne({
+    required List<PickedMedia> files,
+    required CaptureType type,
+  }) async {
+    final String id = const Uuid().v4();
+    final PickedMedia first = files.first;
+    final Recording imported = await _importer.importFile(
+      id: id,
+      type: type,
+      source: first.file,
+      mimeType: first.mimeType,
+      createdAt: DateTime.now(),
+    );
+    final List<CaptureSegment> segments = <CaptureSegment>[
+      ...imported.segments,
+    ];
+    for (final PickedMedia media in files.skip(1)) {
+      segments.add(
+        await _importer.importSegment(
+          parentId: id,
+          index: segments.length,
+          type: type,
+          source: media.file,
+          mimeType: media.mimeType,
+          createdAt: DateTime.now(),
+        ),
+      );
+    }
+    final Recording saved = imported.copyWith(
+      segments: segments,
+      projectId: activeProjectId,
+      projectAuto: activeProjectId != null,
+    );
+
+    // Critical invariant: index only after every source is copied and verified.
+    _recordings = <Recording>[saved, ..._recordings];
+    await _persistAll();
+    for (final CaptureSegment segment in segments) {
+      unawaited(_computeContentHash(saved.id, segmentIndex: segment.index));
+    }
+    unawaited(_gamificationController?.onCaptureCreated(_recordings.length));
+    _logSink.log(
+      'Files imported as one capture · ${type.name} · '
+      '${segments.length} fragments · ${saved.totalSizeBytes} B',
+      recordingId: saved.id,
+    );
+
+    await _enqueueProcessing(saved.id);
+  }
+
+  /// Copy one picked file in as the next fragment of [parentId].
+  Future<void> _appendImportedFile(
+    String parentId,
+    CaptureType type,
+    PickedMedia media,
+  ) async {
+    final int? next = _nextSegmentIndexFor(parentId);
+    if (next == null) {
+      throw StateError('The capture this file belongs to is gone.');
+    }
+    await _attachSegment(
+      parentId,
+      await _importer.importSegment(
+        parentId: parentId,
+        index: next,
+        type: type,
+        source: media.file,
+        mimeType: media.mimeType,
+        createdAt: DateTime.now(),
+      ),
+    );
+  }
+
+  /// Import existing files (audio, image or video) as new items. Mirrors the
   /// ordering of [stopRecording]: pick, copy the source into the app directory
   /// and verify it (via [MediaImporter]), index with status `saved`, and only
   /// then process. A cancelled pick is a no-op; a copy or processing failure
   /// never deletes the source.
-  Future<void> addUpload(CaptureType type, {String? appendTo}) async {
+  ///
+  /// With [appendTo] every picked file becomes a fragment of that capture.
+  /// Otherwise more than one file is grouped as [chooseGrouping] answers;
+  /// without a chooser, or for a single file, each file is its own capture.
+  Future<void> addUpload(
+    CaptureType type, {
+    String? appendTo,
+    UploadGroupingChooser? chooseGrouping,
+  }) async {
     // Before the first load the list is empty, not right: persisting now would
     // overwrite recordings.json with just this capture (see addTextNote).
     if (!_initialized) {
@@ -2720,34 +2808,36 @@ class RecordingsController extends ChangeNotifier {
     notifyListeners();
 
     try {
-      final PickedMedia? picked = await _mediaPicker.pick(type);
-      if (picked == null) return; // user cancelled
+      final List<PickedMedia> picked = await _mediaPicker.pick(type);
+      if (picked.isEmpty) return; // user cancelled
 
       if (appendTo != null) {
-        final int? next = _nextSegmentIndexFor(appendTo);
-        if (next == null) {
-          throw StateError('The capture this file belongs to is gone.');
+        for (final PickedMedia media in picked) {
+          await _appendImportedFile(appendTo, type, media);
         }
-        await _attachSegment(
-          appendTo,
-          await _importer.importSegment(
-            parentId: appendTo,
-            index: next,
-            type: type,
-            source: picked.file,
-            mimeType: picked.mimeType,
-            createdAt: DateTime.now(),
-          ),
-        );
         return;
       }
 
-      await _admitNewImportedFile(
-        source: picked.file,
-        type: type,
-        mimeType: picked.mimeType,
-        hashImmediately: true,
-      );
+      UploadGrouping grouping = UploadGrouping.separate;
+      if (picked.length > 1 && chooseGrouping != null) {
+        final UploadGrouping? chosen = await chooseGrouping(picked.length);
+        if (chosen == null) return; // question dismissed: nothing imported
+        grouping = chosen;
+      }
+
+      switch (grouping) {
+        case UploadGrouping.separate:
+          for (final PickedMedia media in picked) {
+            await _admitNewImportedFile(
+              source: media.file,
+              type: type,
+              mimeType: media.mimeType,
+              hashImmediately: true,
+            );
+          }
+        case UploadGrouping.single:
+          await _admitNewImportedFilesAsOne(files: picked, type: type);
+      }
     } catch (exception) {
       _error = exception.toString();
       _logSink.log('Failed to import file: $exception', level: LogLevel.error);

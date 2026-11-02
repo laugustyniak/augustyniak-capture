@@ -38,6 +38,7 @@ import '../../enrichment/domain/transcript_cleaner.dart';
 import '../../enrichment/domain/instruction_writer.dart';
 import '../../enrichment/data/composed_enrichment_context_source.dart';
 import '../domain/connection_reasoner.dart';
+import '../domain/upload_grouping.dart';
 import '../../logs/data/log_store.dart';
 import '../../logs/domain/log_event.dart';
 import '../../logs/presentation/logs_tab.dart';
@@ -586,6 +587,7 @@ class _RecordingsPageState extends State<RecordingsPage>
         if (!mounted) return;
         await _composeTextNote(context);
       },
+      chooseUploadGrouping: _chooseUploadGrouping,
       onToggleClipboardHistory: () async {
         if (!mounted) return;
         await _showClipboardHistory(context);
@@ -1099,12 +1101,35 @@ class _RecordingsPageState extends State<RecordingsPage>
       case _CaptureAction.textNote:
         await _composeTextNote(context);
       case _CaptureAction.audioUpload:
-        await controller.addUpload(CaptureType.audioUpload);
+        await controller.addUpload(
+          CaptureType.audioUpload,
+          chooseGrouping: _chooseUploadGrouping,
+        );
       case _CaptureAction.imageUpload:
-        await controller.addUpload(CaptureType.image);
+        await controller.addUpload(
+          CaptureType.image,
+          chooseGrouping: _chooseUploadGrouping,
+        );
       case _CaptureAction.videoUpload:
-        await controller.addUpload(CaptureType.video);
+        await controller.addUpload(
+          CaptureType.video,
+          chooseGrouping: _chooseUploadGrouping,
+        );
     }
+  }
+
+  /// Asked by the controller once the picker returned more than one file.
+  /// Reads the live element, not a captured context: the file dialog can
+  /// stay open for a long time.
+  Future<UploadGrouping?> _chooseUploadGrouping(int fileCount) async {
+    if (!mounted) return null;
+    return showModalBottomSheet<UploadGrouping>(
+      context: context,
+      builder: (BuildContext context) => ConsolePaletteScope(
+        builder: (BuildContext context) =>
+            _UploadGroupingSheet(fileCount: fileCount),
+      ),
+    );
   }
 
   Future<void> _pasteCapture() async {
@@ -1659,6 +1684,72 @@ enum _CaptureAction { textNote, audioUpload, imageUpload, videoUpload }
 
 /// Menu of non-recording capture options, opened from the note button on the
 /// capture dock. Recording audio stays on its own dedicated button.
+/// Separate captures or one capture, for an import of [fileCount] files.
+/// Same shell as [_CaptureMenuSheet]; the two rows state what each choice
+/// produces so the queue afterwards holds no surprise.
+class _UploadGroupingSheet extends StatelessWidget {
+  const _UploadGroupingSheet({required this.fileCount});
+
+  final int fileCount;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      decoration: BoxDecoration(
+        color: Console.surface,
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+        border: Border(
+          top: BorderSide(color: Console.borderStrong),
+          left: BorderSide(color: Console.borderStrong),
+          right: BorderSide(color: Console.borderStrong),
+        ),
+      ),
+      child: SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: <Widget>[
+            const SizedBox(height: 12),
+            Container(
+              width: 40,
+              height: 4,
+              decoration: BoxDecoration(
+                color: Console.borderStrong,
+                borderRadius: BorderRadius.circular(2),
+              ),
+            ),
+            const SizedBox(height: 8),
+            ListTile(
+              leading: ConsoleIconTile(
+                icon: Icons.view_agenda_outlined,
+                size: 36,
+              ),
+              title: Text(
+                '$fileCount separate captures',
+                style: ConsoleText.cardTitle,
+              ),
+              subtitle: Text(
+                'one card and one transcript each',
+                style: ConsoleText.micro,
+              ),
+              onTap: () => Navigator.pop(context, UploadGrouping.separate),
+            ),
+            ListTile(
+              leading: ConsoleIconTile(icon: Icons.merge_outlined, size: 36),
+              title: Text('One capture', style: ConsoleText.cardTitle),
+              subtitle: Text(
+                'first file plus ${fileCount - 1} fragments · one transcript',
+                style: ConsoleText.micro,
+              ),
+              onTap: () => Navigator.pop(context, UploadGrouping.single),
+            ),
+            const SizedBox(height: 8),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
 class _CaptureMenuSheet extends StatelessWidget {
   const _CaptureMenuSheet();
 

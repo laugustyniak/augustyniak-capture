@@ -47,7 +47,8 @@ class _FakeRepository extends RecordingsRepository {
 
 class _FakePicker implements MediaPicker {
   @override
-  Future<PickedMedia?> pick(CaptureType type) async => null;
+  Future<List<PickedMedia>> pick(CaptureType type) async =>
+      const <PickedMedia>[];
 }
 
 class _FakePlayer implements AudioPlayer {
