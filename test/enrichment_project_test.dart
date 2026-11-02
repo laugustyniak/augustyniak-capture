@@ -96,7 +96,8 @@ class _Picker implements MediaPicker {
   _Picker(this._result);
   final PickedMedia? _result;
   @override
-  Future<PickedMedia?> pick(CaptureType type) async => _result;
+  Future<List<PickedMedia>> pick(CaptureType type) async =>
+      <PickedMedia>[?_result];
 }
 
 class _Reasoner implements ConnectionReasoner {

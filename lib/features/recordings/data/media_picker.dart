@@ -14,12 +14,13 @@ class PickedMedia {
   final String? mimeType;
 }
 
-/// Chooses a file to import for a given [CaptureType]. Abstracted so the
+/// Chooses files to import for a given [CaptureType]. Abstracted so the
 /// controller depends on this seam, not on `file_picker` directly — tests inject
 /// a fake and never touch the plugin.
 abstract interface class MediaPicker {
-  /// Returns the picked file, or null when the user cancels.
-  Future<PickedMedia?> pick(CaptureType type);
+  /// Returns the picked files in the order the dialog reported them, empty
+  /// when the user cancels.
+  Future<List<PickedMedia>> pick(CaptureType type);
 }
 
 /// `file_picker`-backed implementation. Filters the native dialog by type and
@@ -28,18 +29,21 @@ class FilePickerMediaPicker implements MediaPicker {
   const FilePickerMediaPicker();
 
   @override
-  Future<PickedMedia?> pick(CaptureType type) async {
+  Future<List<PickedMedia>> pick(CaptureType type) async {
     final FilePickerResult? result = await FilePicker.pickFiles(
       type: _filterFor(type),
       allowedExtensions: type == CaptureType.audioUpload
           ? audioExtensions
           : null,
+      allowMultiple: true,
     );
     final List<PlatformFile>? files = result?.files;
-    if (files == null || files.isEmpty) return null;
-    final String? path = files.first.path;
-    if (path == null) return null;
-    return PickedMedia(file: File(path), mimeType: mimeForPath(path));
+    if (files == null) return const <PickedMedia>[];
+    return <PickedMedia>[
+      for (final PlatformFile file in files)
+        if (file.path case final String path)
+          PickedMedia(file: File(path), mimeType: mimeForPath(path)),
+    ];
   }
 
   /// Audio is filtered by an explicit list rather than `FileType.audio`: the

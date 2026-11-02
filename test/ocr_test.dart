@@ -28,7 +28,8 @@ class _FakePicker implements MediaPicker {
   const _FakePicker(this.media);
   final PickedMedia? media;
   @override
-  Future<PickedMedia?> pick(CaptureType type) async => media;
+  Future<List<PickedMedia>> pick(CaptureType type) async =>
+      <PickedMedia>[?media];
 }
 
 class _StubOcr implements OcrService {

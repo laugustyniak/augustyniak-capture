@@ -8,8 +8,10 @@ import 'package:record/record.dart';
 import 'package:augustyniak_capture/features/recordings/data/media_picker.dart';
 import 'package:augustyniak_capture/features/recordings/data/recordings_repository.dart';
 import 'package:augustyniak_capture/features/recordings/data/source_content_hasher.dart';
+import 'package:augustyniak_capture/features/recordings/domain/capture_segment.dart';
 import 'package:augustyniak_capture/features/recordings/domain/capture_type.dart';
 import 'package:augustyniak_capture/features/recordings/domain/recording.dart';
+import 'package:augustyniak_capture/features/recordings/domain/upload_grouping.dart';
 import 'package:augustyniak_capture/features/recordings/presentation/recordings_controller.dart';
 import 'package:augustyniak_capture/features/transcription/data/transcription_service.dart';
 
@@ -94,10 +96,10 @@ class _GatedTranscriptionService implements TranscriptionService {
 }
 
 class _FakePicker implements MediaPicker {
-  _FakePicker(this._result);
-  final PickedMedia? _result;
+  _FakePicker(this.results);
+  List<PickedMedia> results;
   @override
-  Future<PickedMedia?> pick(CaptureType type) async => _result;
+  Future<List<PickedMedia>> pick(CaptureType type) async => results;
 }
 
 /// The controller instantiates an AudioPlayer/AudioRecorder unless injected;
@@ -118,6 +120,7 @@ class _FakeRecorder implements AudioRecorder {
 RecordingsController buildController(
   RecordingsRepository repo, {
   PickedMedia? picked,
+  MediaPicker? picker,
   TranscriptionService service = const DisabledTranscriptionService(),
   SourceContentHasher contentHasher = const SourceContentHasher(),
 }) {
@@ -125,7 +128,7 @@ RecordingsController buildController(
     repository: repo,
     transcriptionService: service,
     contentHasher: contentHasher,
-    mediaPicker: _FakePicker(picked),
+    mediaPicker: picker ?? _FakePicker(<PickedMedia>[?picked]),
     recorder: _FakeRecorder(),
     player: _FakePlayer(),
   );
@@ -474,6 +477,260 @@ void main() {
     expect(directHasher.paths, isEmpty);
     uploadController.dispose();
     directController.dispose();
+  });
+
+  group('several picked files', () {
+    late File first;
+    late File second;
+    late _FakePicker picker;
+
+    setUp(() {
+      first = File(p.join(pickDir.path, 'one.mp3'))..writeAsStringSync('ONE');
+      second = File(p.join(pickDir.path, 'two.mp3'))..writeAsStringSync('TWO!');
+      picker = _FakePicker(<PickedMedia>[
+        PickedMedia(file: first, mimeType: 'audio/mpeg'),
+        PickedMedia(file: second, mimeType: 'audio/mpeg'),
+      ]);
+    });
+
+    test('become separate captures without a chooser', () async {
+      final _FakeRepository repo = _FakeRepository(appDir);
+      final RecordingsController controller = buildController(
+        repo,
+        picker: picker,
+      );
+      await controller.initialize();
+
+      await controller.addUpload(CaptureType.audioUpload);
+      await controller.waitForProcessing();
+
+      expect(controller.recordings, hasLength(2));
+      expect(
+        controller.recordings.map((Recording r) => r.segments.length),
+        everyElement(1),
+      );
+      // Newest first: the second file is the top row.
+      expect(controller.recordings.first.sizeBytes, 4);
+      expect(controller.recordings.last.sizeBytes, 3);
+      for (final Recording item in controller.recordings) {
+        expect(File(item.filePath).existsSync(), isTrue);
+      }
+      expect(first.existsSync(), isTrue);
+      expect(second.existsSync(), isTrue);
+      expect(controller.isBusy, isFalse);
+      controller.dispose();
+    });
+
+    test('separate import keeps each file modification time', () async {
+      final DateTime t1 = DateTime(2024, 3, 1, 10);
+      final DateTime t2 = DateTime(2024, 3, 2, 11);
+      first.setLastModifiedSync(t1);
+      second.setLastModifiedSync(t2);
+      final _FakeRepository repo = _FakeRepository(appDir);
+      final RecordingsController controller = buildController(
+        repo,
+        picker: picker,
+      );
+      await controller.initialize();
+
+      await controller.addUpload(CaptureType.audioUpload);
+      await controller.waitForProcessing();
+
+      expect(controller.recordings.last.createdAt, t1);
+      expect(controller.recordings.first.createdAt, t2);
+      controller.dispose();
+    });
+
+    test('single import takes the earliest modification time', () async {
+      final DateTime early = DateTime(2024, 3, 1, 10);
+      first.setLastModifiedSync(DateTime(2024, 3, 5));
+      second.setLastModifiedSync(early);
+      final _FakeRepository repo = _FakeRepository(appDir);
+      final RecordingsController controller = buildController(
+        repo,
+        picker: picker,
+      );
+      await controller.initialize();
+
+      await controller.addUpload(
+        CaptureType.audioUpload,
+        chooseGrouping: (int count) async => UploadGrouping.single,
+      );
+      await controller.waitForProcessing();
+
+      expect(controller.recordings.single.createdAt, early);
+      controller.dispose();
+    });
+
+    test('a future modification time falls back to now', () async {
+      first.setLastModifiedSync(DateTime.now().add(const Duration(days: 30)));
+      picker.results = <PickedMedia>[
+        PickedMedia(file: first, mimeType: 'audio/mpeg'),
+      ];
+      final _FakeRepository repo = _FakeRepository(appDir);
+      final RecordingsController controller = buildController(
+        repo,
+        picker: picker,
+      );
+      await controller.initialize();
+      final DateTime before = DateTime.now();
+
+      await controller.addUpload(CaptureType.audioUpload);
+      await controller.waitForProcessing();
+
+      final DateTime created = controller.recordings.single.createdAt;
+      expect(created.isBefore(before), isFalse);
+      expect(
+        created.isAfter(DateTime.now().add(const Duration(seconds: 1))),
+        isFalse,
+      );
+      controller.dispose();
+    });
+
+    test('ask the chooser once, with the file count', () async {
+      final _FakeRepository repo = _FakeRepository(appDir);
+      final RecordingsController controller = buildController(
+        repo,
+        picker: picker,
+      );
+      await controller.initialize();
+      final List<int> asked = <int>[];
+
+      await controller.addUpload(
+        CaptureType.audioUpload,
+        chooseGrouping: (int count) async {
+          asked.add(count);
+          return UploadGrouping.separate;
+        },
+      );
+      await controller.waitForProcessing();
+
+      expect(asked, <int>[2]);
+      expect(controller.recordings, hasLength(2));
+      controller.dispose();
+    });
+
+    test('a single picked file never asks', () async {
+      final _FakeRepository repo = _FakeRepository(appDir);
+      picker.results = <PickedMedia>[picker.results.first];
+      final RecordingsController controller = buildController(
+        repo,
+        picker: picker,
+      );
+      await controller.initialize();
+      int asked = 0;
+
+      await controller.addUpload(
+        CaptureType.audioUpload,
+        chooseGrouping: (int count) async {
+          asked++;
+          return UploadGrouping.single;
+        },
+      );
+      await controller.waitForProcessing();
+
+      expect(asked, 0);
+      expect(controller.recordings, hasLength(1));
+      controller.dispose();
+    });
+
+    test('a dismissed chooser imports nothing and releases the lock', () async {
+      final _FakeRepository repo = _FakeRepository(appDir);
+      final RecordingsController controller = buildController(
+        repo,
+        picker: picker,
+      );
+      await controller.initialize();
+
+      await controller.addUpload(
+        CaptureType.audioUpload,
+        chooseGrouping: (int count) async => null,
+      );
+      await controller.waitForProcessing();
+
+      expect(controller.recordings, isEmpty);
+      expect(repo.saveCalls, 0);
+      expect(appDir.listSync(), isEmpty);
+      expect(controller.isBusy, isFalse);
+      controller.dispose();
+    });
+
+    test(
+      'become one capture with fragments, indexed after every copy',
+      () async {
+        final _FakeRepository repo = _FakeRepository(appDir);
+        final RecordingsController controller = buildController(
+          repo,
+          picker: picker,
+          service: const _StubTranscriptionService('JOINED'),
+        );
+        await controller.initialize();
+
+        await controller.addUpload(
+          CaptureType.audioUpload,
+          chooseGrouping: (int count) async => UploadGrouping.single,
+        );
+        await controller.waitForProcessing();
+
+        final Recording item = controller.recordings.single;
+        expect(item.segments, hasLength(2));
+        expect(item.segments.map((CaptureSegment s) => s.index), <int>[0, 1]);
+        expect(p.basename(item.segments[0].filePath), '${item.id}.mp3');
+        expect(p.basename(item.segments[1].filePath), '${item.id}-1.mp3');
+        expect(item.segments[1].sizeBytes, 4);
+        expect(item.status, RecordingStatus.completed);
+        // The first index write already carried both fragments, each on disk.
+        final Recording firstSaved = repo.saves.first.single;
+        expect(firstSaved.status, RecordingStatus.saved);
+        expect(firstSaved.segments, hasLength(2));
+        expect(repo.sourcePresentAtSave.first, isTrue);
+        expect(first.existsSync(), isTrue);
+        expect(second.existsSync(), isTrue);
+        controller.dispose();
+      },
+    );
+
+    test('append every picked file as a fragment of the capture', () async {
+      final _FakeRepository repo = _FakeRepository(appDir);
+      final RecordingsController controller = buildController(
+        repo,
+        picker: picker,
+        service: const _StubTranscriptionService('TEXT'),
+      );
+      await controller.initialize();
+      // Seed one capture through the ordinary single-file path.
+      picker.results = <PickedMedia>[
+        PickedMedia(file: first, mimeType: 'audio/mpeg'),
+      ];
+      await controller.addUpload(CaptureType.audioUpload);
+      await controller.waitForProcessing();
+      final String id = controller.recordings.single.id;
+      picker.results = <PickedMedia>[
+        PickedMedia(file: first, mimeType: 'audio/mpeg'),
+        PickedMedia(file: second, mimeType: 'audio/mpeg'),
+      ];
+      int asked = 0;
+
+      await controller.addUpload(
+        CaptureType.audioUpload,
+        appendTo: id,
+        chooseGrouping: (int count) async {
+          asked++;
+          return UploadGrouping.separate;
+        },
+      );
+      await controller.waitForProcessing();
+
+      expect(asked, 0);
+      expect(controller.recordings, hasLength(1));
+      expect(
+        controller.recordings.single.segments.map(
+          (CaptureSegment s) => s.index,
+        ),
+        <int>[0, 1, 2],
+      );
+      controller.dispose();
+    });
   });
 
   test('successful audio upload completes with a transcript', () async {
