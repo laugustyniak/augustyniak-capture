@@ -100,6 +100,64 @@ void main() {
     );
   });
 
+  testWidgets('pausing and resuming the scene controls its clock', (
+    WidgetTester tester,
+  ) async {
+    const Key sceneKey = Key('scene');
+    Future<void> pumpScene({required bool paused}) => tester.pumpWidget(
+      hostTab(
+        () => ProcessingScene(
+          key: sceneKey,
+          height: 240,
+          paused: paused,
+          semanticsLabel: 'Recording in progress',
+        ),
+      ),
+    );
+
+    await pumpScene(paused: false);
+    await tester.pump(const Duration(milliseconds: 300));
+    final dynamic state = tester.state(find.byKey(sceneKey));
+    final double running = state.debugClockValue as double;
+
+    await pumpScene(paused: true);
+    await tester.pump(const Duration(milliseconds: 500));
+    final double paused = state.debugClockValue as double;
+    expect(paused, running);
+
+    await pumpScene(paused: false);
+    await tester.pump(const Duration(milliseconds: 500));
+    expect(state.debugClockValue as double, isNot(paused));
+  });
+
+  testWidgets('reduced motion renders a stable processing scene', (
+    WidgetTester tester,
+  ) async {
+    const Key sceneKey = Key('reduced-scene');
+    await tester.pumpWidget(
+      hostTab(
+        () => Builder(
+          builder: (BuildContext context) => MediaQuery(
+            data: MediaQuery.of(context).copyWith(disableAnimations: true),
+            child: ProcessingScene(
+              key: sceneKey,
+              height: 240,
+              semanticsLabel: 'Transcribing in progress',
+            ),
+          ),
+        ),
+      ),
+    );
+    await tester.pump();
+    final dynamic state = tester.state(find.byKey(sceneKey));
+    final double before = state.debugClockValue as double;
+
+    await tester.pump(const Duration(milliseconds: 500));
+
+    expect(before, 0.18);
+    expect(state.debugClockValue as double, before);
+  });
+
   testWidgets('a new voice note takes the focus and shows the hero', (
     WidgetTester tester,
   ) async {

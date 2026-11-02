@@ -8,6 +8,7 @@ import '../../settings/domain/audio_config.dart';
 import '../../transcription/domain/transcription_limits.dart';
 import '../domain/recording.dart';
 import 'card_parts.dart';
+import 'processing_hero.dart';
 import 'recordings_controller.dart';
 
 /// The capture screen, shown in place of the Queue while the mic is live.
@@ -71,6 +72,10 @@ class RecordingView extends StatelessWidget {
   Widget build(BuildContext context) {
     final AudioConfig audio = controller.audioConfig;
     final bool paused = controller.isRecordingPaused;
+    final double sceneHeight = (MediaQuery.sizeOf(context).height * 0.32).clamp(
+      220.0,
+      320.0,
+    );
     // Read once: a getter cannot be promoted, and this is used twice below.
     final Recording? target = appendTarget;
 
@@ -146,6 +151,14 @@ class RecordingView extends StatelessWidget {
                     children: <Widget>[
                       _ElapsedReadout(controller: controller, audio: audio),
                       const SizedBox(height: 26),
+                      ProcessingScene(
+                        height: sceneHeight,
+                        paused: paused,
+                        semanticsLabel: paused
+                            ? 'Recording paused'
+                            : 'Recording in progress',
+                      ),
+                      const SizedBox(height: 16),
                       _LevelMeter(level: controller.levelTicker),
                       const SizedBox(height: 26),
                       _PipelineChecklist(paused: paused),
@@ -405,14 +418,14 @@ class _LevelMeterState extends State<_LevelMeter> {
   @override
   Widget build(BuildContext context) {
     return SizedBox(
-      height: 72,
+      height: 36,
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.center,
         children: List<Widget>.generate(_barCount, (int index) {
           final double level = _history[index];
           // Newest sample on the right; anything still at the resting height
           // is drawn in the dim track colour, like the design's tail.
-          final double height = 6 + level * 60;
+          final double height = 6 + level * 28;
           return Expanded(
             child: Padding(
               padding: const EdgeInsets.symmetric(horizontal: 2.5),
@@ -469,14 +482,16 @@ class _PipelineChecklist extends StatelessWidget {
                       ),
                     ),
                   const SizedBox(width: 10),
-                  Text(
-                    index == 0 && paused ? 'paused → .m4a' : _steps[index],
-                    style: index == 0
-                        ? ConsoleText.cardMeta.copyWith(
-                            fontWeight: FontWeight.w500,
-                            color: Console.text,
-                          )
-                        : ConsoleText.micro.copyWith(fontSize: 11),
+                  Expanded(
+                    child: Text(
+                      index == 0 && paused ? 'paused → .m4a' : _steps[index],
+                      style: index == 0
+                          ? ConsoleText.cardMeta.copyWith(
+                              fontWeight: FontWeight.w500,
+                              color: Console.text,
+                            )
+                          : ConsoleText.micro.copyWith(fontSize: 11),
+                    ),
                   ),
                 ],
               ),
