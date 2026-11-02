@@ -7,6 +7,8 @@
 **Offline-first capture queue for voice, text, images and video.**
 Your thought lands on disk *before* anything clever is attempted with it.
 
+<img src="docs/media/transcribing.svg" width="880" alt="Animated capture queue: a voice note is saved and verified on disk, then transcribed line by line while the processing scene spins, then titled and tagged" />
+
 [![Flutter](https://img.shields.io/badge/Flutter-3.x-02569B?logo=flutter&logoColor=white)](https://flutter.dev)
 [![Dart](https://img.shields.io/badge/Dart-%E2%89%A53.10-0175C2?logo=dart&logoColor=white)](https://dart.dev)
 [![Platforms](https://img.shields.io/badge/platforms-macOS%20%C2%B7%20Linux%20%C2%B7%20Windows%20%C2%B7%20Android%20%C2%B7%20iOS-555)](#-build--deploy)
