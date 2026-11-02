@@ -2632,7 +2632,7 @@ class RecordingsController extends ChangeNotifier {
         type: CaptureType.audioRecording,
         source: source,
         mimeType: 'audio/mp4',
-        createdAt: await source.lastModified(),
+        createdAt: await _captureTimeOf(source),
       );
       final Recording saved = imported.copyWith(
         projectId: activeProjectId,
@@ -2676,7 +2676,7 @@ class RecordingsController extends ChangeNotifier {
       type: type,
       source: source,
       mimeType: mimeType,
-      createdAt: DateTime.now(),
+      createdAt: await _captureTimeOf(source),
     );
     final Recording saved = imported.copyWith(
       projectId: activeProjectId,
@@ -2712,12 +2712,17 @@ class RecordingsController extends ChangeNotifier {
   }) async {
     final String id = const Uuid().v4();
     final PickedMedia first = files.first;
+    DateTime? earliest;
+    for (final PickedMedia media in files) {
+      final DateTime time = await _captureTimeOf(media.file);
+      if (earliest == null || time.isBefore(earliest)) earliest = time;
+    }
     final Recording imported = await _importer.importFile(
       id: id,
       type: type,
       source: first.file,
       mimeType: first.mimeType,
-      createdAt: DateTime.now(),
+      createdAt: earliest!,
     );
     final List<CaptureSegment> segments = <CaptureSegment>[
       ...imported.segments,
@@ -5351,5 +5356,19 @@ class _UsageScopedConnectionReasoner implements ConnectionReasoner {
       end();
       release();
     }
+  }
+}
+
+/// Capture date of a file brought in from outside: its modification time, or
+/// now when that cannot be read or lies in the future (a wrong clock).
+Future<DateTime> _captureTimeOf(File source) async {
+  final DateTime now = DateTime.now();
+  try {
+    final DateTime modified = await source.lastModified();
+    return modified.isAfter(now.add(const Duration(minutes: 1)))
+        ? now
+        : modified;
+  } catch (_) {
+    return now;
   }
 }

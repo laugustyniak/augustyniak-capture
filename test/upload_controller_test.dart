@@ -521,6 +521,72 @@ void main() {
       controller.dispose();
     });
 
+    test('separate import keeps each file modification time', () async {
+      final DateTime t1 = DateTime(2024, 3, 1, 10);
+      final DateTime t2 = DateTime(2024, 3, 2, 11);
+      first.setLastModifiedSync(t1);
+      second.setLastModifiedSync(t2);
+      final _FakeRepository repo = _FakeRepository(appDir);
+      final RecordingsController controller = buildController(
+        repo,
+        picker: picker,
+      );
+      await controller.initialize();
+
+      await controller.addUpload(CaptureType.audioUpload);
+      await controller.waitForProcessing();
+
+      expect(controller.recordings.last.createdAt, t1);
+      expect(controller.recordings.first.createdAt, t2);
+      controller.dispose();
+    });
+
+    test('single import takes the earliest modification time', () async {
+      final DateTime early = DateTime(2024, 3, 1, 10);
+      first.setLastModifiedSync(DateTime(2024, 3, 5));
+      second.setLastModifiedSync(early);
+      final _FakeRepository repo = _FakeRepository(appDir);
+      final RecordingsController controller = buildController(
+        repo,
+        picker: picker,
+      );
+      await controller.initialize();
+
+      await controller.addUpload(
+        CaptureType.audioUpload,
+        chooseGrouping: (int count) async => UploadGrouping.single,
+      );
+      await controller.waitForProcessing();
+
+      expect(controller.recordings.single.createdAt, early);
+      controller.dispose();
+    });
+
+    test('a future modification time falls back to now', () async {
+      first.setLastModifiedSync(DateTime.now().add(const Duration(days: 30)));
+      picker.results = <PickedMedia>[
+        PickedMedia(file: first, mimeType: 'audio/mpeg'),
+      ];
+      final _FakeRepository repo = _FakeRepository(appDir);
+      final RecordingsController controller = buildController(
+        repo,
+        picker: picker,
+      );
+      await controller.initialize();
+      final DateTime before = DateTime.now();
+
+      await controller.addUpload(CaptureType.audioUpload);
+      await controller.waitForProcessing();
+
+      final DateTime created = controller.recordings.single.createdAt;
+      expect(created.isBefore(before), isFalse);
+      expect(
+        created.isAfter(DateTime.now().add(const Duration(seconds: 1))),
+        isFalse,
+      );
+      controller.dispose();
+    });
+
     test('ask the chooser once, with the file count', () async {
       final _FakeRepository repo = _FakeRepository(appDir);
       final RecordingsController controller = buildController(
