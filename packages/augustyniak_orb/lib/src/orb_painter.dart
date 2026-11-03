@@ -118,7 +118,7 @@ class OrbPainter extends CustomPainter {
           );
         }
         for (int i = 0; i < dots; i++) {
-          final double a = spin * 1.5 + i / dots * _tau;
+          final double a = spin * 2 + i / dots * _tau;
           final Offset at = c + Offset(math.cos(a), math.sin(a)) * radius;
           // Short comet tail behind each particle.
           for (int j = 1; j <= 5; j++) {

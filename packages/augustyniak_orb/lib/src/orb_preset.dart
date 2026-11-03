@@ -111,7 +111,9 @@ class OrbTuning {
   final double spokeFast;
   final double spokeSlow;
 
-  /// Rotations per period of the three dashed rings, inner to outer.
+  /// Rotations per period of the three dashed rings, inner to outer. Particles
+  /// orbit at twice the ring's rotation, so any integer value closes the loop
+  /// after one [period], whatever the particle count.
   final List<double> rings;
   final double sweep;
   final double breath;

@@ -59,14 +59,8 @@ void main() {
     WidgetTester tester,
   ) async {
     await tester.runAsync(() async {
-      // Particles ride the rings at 1.5x the ring spin, so a ring is only
-      // seamless over one period when its rate is even. The default [1, -2, 2]
-      // has an odd inner ring; the loop test uses [2, -2, 2].
-      const OrbPreset even = OrbPreset(
-        tuning: OrbTuning(rings: <double>[2, -2, 2]),
-      );
-      final Uint8List a = await _raw(_still, even);
-      final Uint8List b = await _raw(_still + 12, even);
+      final Uint8List a = await _raw(_still, OrbPreset.defaults);
+      final Uint8List b = await _raw(_still + 12, OrbPreset.defaults);
       int worst = 0;
       for (int i = 0; i < a.length; i++) {
         worst = math.max(worst, (a[i] - b[i]).abs());

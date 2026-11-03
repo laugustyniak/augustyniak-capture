@@ -122,6 +122,14 @@ jobs:
       - name: Test
         run: flutter test
 
+      - name: Analyze augustyniak_orb
+        working-directory: packages/augustyniak_orb
+        run: flutter analyze
+
+      - name: Test augustyniak_orb
+        working-directory: packages/augustyniak_orb
+        run: flutter test
+
       - name: Build Android
         run: flutter build apk --debug
 
