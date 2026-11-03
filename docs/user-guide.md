@@ -634,7 +634,7 @@ No project                                        1 ·  15 min
 ## 💾 Files on disk
 
 Everything lives in the `recordings/` subdirectory of the app documents
-directory. Every rewrite is atomic (`.tmp` → `rename`).
+directory (on macOS, `~/Documents/recordings/`). Every rewrite is atomic (`.tmp` → `rename`).
 
 ```
 recordings/
@@ -732,8 +732,10 @@ enriched from the part that survived.
 
 | Platform | Answer |
 | --- | --- |
-| **Desktop** | `ChunkedTranscriptionService` splits with `ffmpeg` into 5-minute parts, transcribes sequentially, joins. A file that yields one part is passed through unwrapped. |
-| **Mobile** | No `ffmpeg`, so the recording itself is capped — `~8 min` on the `gpt-4o` family, `25 MB ÷ bitrate` otherwise (52 min at 64 kbps). The countdown and its reason are on the capture screen, and reaching it calls the same `stopRecording` the SAVE button calls. **The capture is saved, never discarded.** |
+| **Every supported platform** | `ChunkedTranscriptionService` splits before sending — `ffmpeg` on desktop, MediaExtractor/MediaMuxer on Android, AVFoundation on iOS — into 5-minute parts, transcribes them sequentially and joins them in order. A file that yields one part is passed through unwrapped. |
+| **A platform with no splitter** | The recording itself is capped — `~8 min` on the `gpt-4o` family, `25 MB ÷ bitrate` otherwise (52 min at 64 kbps). The countdown and its reason are on the capture screen, and reaching it calls the same `stopRecording` the SAVE button calls. **The capture is saved, never discarded.** |
+
+Details: [`architecture/transcription.md`](architecture/transcription.md).
 
 ---
 
@@ -756,3 +758,36 @@ picked in Config → Appearance):
   there. Project and category are labels and render outlined. The resting state
   draws no badge at all — `READY` on twenty-seven rows out of twenty-eight makes
   the one failing row compete with a wall of green saying everything is fine.
+
+---
+
+## 🧱 Architecture overview
+
+```mermaid
+flowchart TD
+    UI["RecordingsPage shell<br/><i>owns the controllers</i>"] --> RC["RecordingsController"]
+    RC -->|"1 · persist"| REPO[("recordings.json")]
+    RC -->|"2 · enqueue"| Q["background queue<br/><i>one job at a time</i>"]
+    Q --> REG{"ProcessorRegistry<br/>by CaptureType"}
+    REG --> T["TranscriptionProcessor"]
+    REG --> O["OcrProcessor"]
+    REG --> V["VideoTranscriptionProcessor"]
+    REG --> P["TextPassthrough"]
+    T & O & V & P --> DONE["status: completed"]
+    DONE --> CB["clipboard"]
+    DONE --> EN["enrichment<br/><i>best effort, last</i>"]
+    EN --> REPO
+    EN --> NV["note vault<br/><i>markdown mirror</i>"]
+    REPO -.->|"user presses R"| RT["inbox.md<br/><i>append-only route</i>"]
+
+    style REPO fill:#1056C6,color:#fff
+    style EN fill:#3a3a5c,color:#fff
+    style NV fill:#3a3a5c,color:#fff
+```
+
+Everything external sits behind a swappable seam with a disabled default, which
+is why the test suite is pure Dart: `TranscriptionService`, `EnrichmentService`,
+`OcrService`, `VideoAudioExtractor`, `AudioSplitter`, `ClipboardSink`,
+`MediaOpener`, `MediaPicker`, `DirectoryPicker`, `HotkeyRegistrar`,
+`WindowPresenter`, `CaptureRouter`, `NoteVault`, `TokenCipher`, `LogSink`.
+The full feature list and the invariants are in [`CLAUDE.md`](../CLAUDE.md).

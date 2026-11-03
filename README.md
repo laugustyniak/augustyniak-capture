@@ -99,9 +99,8 @@ Install and run Augustyniak Capture
    how to install it for this OS and stop.
 2. Clone the repo if it is not already here, then read README.md and
    docs/platform-setup.md.
-3. Install the system packages docs/platform-setup.md lists for this OS (Linux:
-   keybinder, libsecret, GTK, clang, ninja; Android: JDK 21). Show me each sudo command
-   before you run it.
+3. Install every package docs/platform-setup.md lists for this OS (Linux: the single
+   apt-get line there; Android: JDK 21). Show me each sudo command before you run it.
 4. Run `flutter pub get` and `git config core.hooksPath .githooks`.
 5. Run `flutter analyze` and `flutter test`. Both must pass. If `flutter create` was
    run, delete test/widget_test.dart first.
@@ -125,10 +124,11 @@ files in the repo. Ask me before every change.
 2. Tell me exactly where to paste the key myself: Models tab -> + profile -> pick preset
    -> paste key -> activate. If I want an on-device option, explain the local whisper
    profile.
-3. Only if I ask for cloud sync: explain the optional Supabase setup (SUPABASE_URL +
-   SUPABASE_PUBLISHABLE_KEY in an ignored .env.local, passed with
-   --dart-define-from-file). Only the publishable key, never service_role or an
-   sb_secret_ key.
+3. Only if I ask for cloud sync: explain the optional Supabase setup. I create a
+   defines file myself, outside the repo, with SUPABASE_URL and
+   SUPABASE_PUBLISHABLE_KEY, and pass it with `tool/deploy.sh --defines <file>` or
+   `flutter run --dart-define-from-file=<file>`. Only the publishable key, never
+   service_role or an sb_secret_ key.
 4. Only if I use Obsidian: walk me through Config -> NOTE VAULT and MIRROR EVERYTHING.
 5. Finish with a checklist of what is configured and what is still off.
 ```
@@ -140,7 +140,10 @@ Connect my coding agent to Augustyniak Capture's read-only MCP server so it can 
 and read my captures. Read docs/architecture/mcp.md first.
 
 1. On Linux or macOS, run `tool/deploy.sh` from the repo. It builds the app and installs
-   the MCP server at ~/.local/bin/augustyniak-capture-mcp. Confirm that file exists.
+   the MCP server at ~/.local/bin/augustyniak-capture-mcp (verified on Linux; the macOS
+   paths are untested). Confirm that file exists. Without a full deploy:
+   `dart build cli -t bin/capture_mcp.dart -o build/mcp` gives
+   build/mcp/bundle/bin/capture_mcp.
 2. Register it.
    Claude Code:
    `claude mcp add augustyniak-capture -- ~/.local/bin/augustyniak-capture-mcp`
@@ -310,7 +313,7 @@ test.
 | [`docs/agent-sessions.md`](docs/agent-sessions.md) | Codex / Claude Code / Antigravity session launchers |
 | [`docs/architecture/`](docs/architecture/) | one reference per area — read before changing it |
 | [`CLAUDE.md`](CLAUDE.md) | the engineering invariants, and why each is one |
-| [`docs/plans/`](docs/plans/) | design and migration plans |
+| [`docs/plans/`](docs/plans/), [`docs/superpowers/specs/`](docs/superpowers/specs/) | design specs and migration plans |
 
 <div align="center">
 

@@ -179,6 +179,22 @@ for a machine being set up from nothing.
 
 **Regenerating one platform rewrites `.metadata`.** `flutter create --platforms=macos .` left _only_ `root` and `macos` under `migration.platforms`, silently dropping android/ios/linux/windows. Restore the other entries by hand; `flutter migrate` reads that list.
 
+**Linux: install every build package in one go.** Each missing one surfaces as
+a different CMake error, so a host with only part of the list takes several
+rounds to configure (#395):
+
+```bash
+sudo apt-get install -y clang cmake ninja-build pkg-config libgtk-3-dev \
+  libkeybinder-3.0-dev libsecret-1-dev \
+  libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev \
+  libpulse-dev libayatana-appindicator3-dev
+rm -rf build/linux   # after any package or toolchain change: a stale CMake cache keeps old include paths
+```
+
+`libgstreamer*` and `libpulse-dev` are for audio playback and recording,
+`libayatana-appindicator3-dev` for the tray. The two that fail most confusingly
+are explained below.
+
 **Linux builds need `keybinder-3.0` installed first.** `hotkey_manager` (global
 shortcuts) links against it, and without it `flutter build linux` aborts at
 _"Unable to generate build files"_ — this is a **build-time** failure, not a
@@ -270,7 +286,7 @@ that can build all five.
 | Target | Release command | Artifact | Prerequisites |
 | --- | --- | --- | --- |
 | macOS | `flutter build macos --release` | `.app` bundle | Xcode + CLI tools |
-| Linux | `flutter build linux --release` | bundle directory | the packages above (`keybinder-3.0`, `libsecret-1-dev`, `clang`, `ninja-build`, `libgtk-3-dev`) |
+| Linux | `flutter build linux --release` | bundle directory | the Linux package list above |
 | Windows | `flutter build windows --release` | `Runner.exe` + DLLs | Visual Studio 2022 (Desktop C++ workload) |
 | Android | `flutter build appbundle --release` | `.aab` for Play | JDK **21**, Android SDK, keystore |
 | iOS | `flutter build ipa --release` | `.ipa` | Xcode, CocoaPods, Apple Developer account |
