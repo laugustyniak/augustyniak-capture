@@ -92,27 +92,43 @@ one is self-contained.
 **1 · Install and run it**
 
 ```text
-Install and run Augustyniak Capture (https://github.com/laugustyniak/augustyniak-capture) on this machine.
+Install and run Augustyniak Capture
+(https://github.com/laugustyniak/augustyniak-capture) on this machine.
 
-1. Check `flutter --version` (Flutter 3.x, Dart >= 3.10). If Flutter is missing, tell me how to install it for this OS and stop.
-2. Clone the repo if it is not already here, then read README.md and docs/platform-setup.md.
-3. Install the system packages docs/platform-setup.md lists for this OS (Linux: keybinder, libsecret, GTK, clang, ninja; Android: JDK 21). Show me each sudo command before you run it.
+1. Check `flutter --version` (Flutter 3.x, Dart >= 3.10). If Flutter is missing, tell me
+   how to install it for this OS and stop.
+2. Clone the repo if it is not already here, then read README.md and
+   docs/platform-setup.md.
+3. Install the system packages docs/platform-setup.md lists for this OS (Linux:
+   keybinder, libsecret, GTK, clang, ninja; Android: JDK 21). Show me each sudo command
+   before you run it.
 4. Run `flutter pub get` and `git config core.hooksPath .githooks`.
-5. Run `flutter analyze` and `flutter test`. Both must pass. If `flutter create` was run, delete test/widget_test.dart first.
-6. Start the app: `flutter run -d <this desktop>`, or on Linux/macOS `tool/deploy.sh --run` to install a desktop copy and launch it.
-7. Report what ran, what passed, and anything you skipped. Do not configure API keys; that is my step.
+5. Run `flutter analyze` and `flutter test`. Both must pass. If `flutter create` was
+   run, delete test/widget_test.dart first.
+6. Start the app: `flutter run -d <this desktop>`, or on Linux/macOS
+   `tool/deploy.sh --run` to install a desktop copy and launch it.
+7. Report what ran, what passed, and anything you skipped. Do not configure API keys;
+   that is my step.
 ```
 
 **2 · Set it up: providers, sync, note vault**
 
 ```text
-Help me configure Augustyniak Capture after it runs. Read README.md, docs/user-guide.md ("Connect a provider", "Note vault") and CLAUDE.md first.
+Help me configure Augustyniak Capture after it runs. Read README.md, docs/user-guide.md
+("Connect a provider", "Note vault") and CLAUDE.md first.
 
-Rules: never put an API key in a command line, a commit or this chat. Never edit .env* files in the repo. Ask me before every change.
+Rules: never put an API key in a command line, a commit or this chat. Never edit .env*
+files in the repo. Ask me before every change.
 
-1. Explain the two provider kinds (transcription, enrichment/vision) and recommend one preset per kind for my case. Ask me which provider accounts I have.
-2. Tell me exactly where to paste the key myself: Models tab -> + profile -> pick preset -> paste key -> activate. If I want an on-device option, explain the local whisper profile.
-3. Only if I ask for cloud sync: explain the optional Supabase setup (SUPABASE_URL + SUPABASE_PUBLISHABLE_KEY in an ignored .env.local, passed with --dart-define-from-file). Only the publishable key, never service_role or an sb_secret_ key.
+1. Explain the two provider kinds (transcription, enrichment/vision) and recommend one
+   preset per kind for my case. Ask me which provider accounts I have.
+2. Tell me exactly where to paste the key myself: Models tab -> + profile -> pick preset
+   -> paste key -> activate. If I want an on-device option, explain the local whisper
+   profile.
+3. Only if I ask for cloud sync: explain the optional Supabase setup (SUPABASE_URL +
+   SUPABASE_PUBLISHABLE_KEY in an ignored .env.local, passed with
+   --dart-define-from-file). Only the publishable key, never service_role or an
+   sb_secret_ key.
 4. Only if I use Obsidian: walk me through Config -> NOTE VAULT and MIRROR EVERYTHING.
 5. Finish with a checklist of what is configured and what is still off.
 ```
@@ -120,24 +136,35 @@ Rules: never put an API key in a command line, a commit or this chat. Never edit
 **3 · Let your coding agent read your captures (MCP)**
 
 ```text
-Connect my coding agent to Augustyniak Capture's read-only MCP server so it can search and read my captures. Read docs/architecture/mcp.md first.
+Connect my coding agent to Augustyniak Capture's read-only MCP server so it can search
+and read my captures. Read docs/architecture/mcp.md first.
 
-1. On Linux or macOS, run `tool/deploy.sh` from the repo. It builds the app and installs the MCP server at ~/.local/bin/augustyniak-capture-mcp. Confirm that file exists.
+1. On Linux or macOS, run `tool/deploy.sh` from the repo. It builds the app and installs
+   the MCP server at ~/.local/bin/augustyniak-capture-mcp. Confirm that file exists.
 2. Register it.
-   Claude Code: `claude mcp add augustyniak-capture -- ~/.local/bin/augustyniak-capture-mcp`
-   Codex: add [mcp_servers.augustyniak-capture] with command = "<absolute path to ~/.local/bin/augustyniak-capture-mcp>" to ~/.codex/config.toml.
-3. Verify: list the server's tools (search_captures, get_capture, list_project_captures) and run one search_captures query.
-4. Tell me what it can and cannot do. It is read-only: it never edits, deletes or routes a capture.
+   Claude Code:
+   `claude mcp add augustyniak-capture -- ~/.local/bin/augustyniak-capture-mcp`
+   Codex: add [mcp_servers.augustyniak-capture] with command = "<absolute path to
+   ~/.local/bin/augustyniak-capture-mcp>" to ~/.codex/config.toml.
+3. Verify: list the server's tools (search_captures, get_capture, list_project_captures)
+   and run one search_captures query.
+4. Tell me what it can and cannot do. It is read-only: it never edits, deletes or routes
+   a capture.
 ```
 
 **4 · What can I use it for?**
 
 ```text
-Explain what Augustyniak Capture can do for me. This is read-only: do not install, run or change anything.
+Explain what Augustyniak Capture can do for me. This is read-only: do not install, run
+or change anything.
 
-1. Read README.md, docs/user-guide.md, docs/agent-sessions.md and the headings of docs/architecture/*.md in https://github.com/laugustyniak/augustyniak-capture.
-2. Ask me three short questions: what I capture today (voice, notes, screenshots, video), where my notes and tasks live (Obsidian, Todoist, git repos), and which coding agents I use.
-3. Answer with 3-5 concrete workflows that fit my answers, each one: trigger -> what the app does -> where the result lands. Name the tab, shortcut or doc for each.
+1. Read README.md, docs/user-guide.md, docs/agent-sessions.md and the headings of
+   docs/architecture/*.md in https://github.com/laugustyniak/augustyniak-capture.
+2. Ask me three short questions: what I capture today (voice, notes, screenshots,
+   video), where my notes and tasks live (Obsidian, Todoist, git repos), and which
+   coding agents I use.
+3. Answer with 3-5 concrete workflows that fit my answers, each one: trigger -> what the
+   app does -> where the result lands. Name the tab, shortcut or doc for each.
 4. Say plainly what it does not do.
 ```
 
