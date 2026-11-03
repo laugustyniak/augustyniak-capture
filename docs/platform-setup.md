@@ -259,3 +259,82 @@ Raising the window from a hotkey on **GNOME/X11** additionally wants `xdotool`
 (`sudo apt-get install xdotool`). It is optional: without it a hotkey still
 captures, but the window only blinks in the taskbar instead of coming forward —
 see `SystemWindowPresenter`.
+
+## Release & distribution
+
+`flutter run` covers development on every target. This is what it takes to
+produce something you can hand to a person or a store. Each target must be built
+**on** its own OS — Flutter has no cross-compilation; macOS is the only host
+that can build all five.
+
+| Target | Release command | Artifact | Prerequisites |
+| --- | --- | --- | --- |
+| macOS | `flutter build macos --release` | `.app` bundle | Xcode + CLI tools |
+| Linux | `flutter build linux --release` | bundle directory | the packages above (`keybinder-3.0`, `libsecret-1-dev`, `clang`, `ninja-build`, `libgtk-3-dev`) |
+| Windows | `flutter build windows --release` | `Runner.exe` + DLLs | Visual Studio 2022 (Desktop C++ workload) |
+| Android | `flutter build appbundle --release` | `.aab` for Play | JDK **21**, Android SDK, keystore |
+| iOS | `flutter build ipa --release` | `.ipa` | Xcode, CocoaPods, Apple Developer account |
+
+**macOS — notarize for other people's Macs.** Local builds are ad-hoc signed
+(see above). To ship without a Gatekeeper warning you need a Developer ID
+certificate and notarization:
+
+```bash
+# 1 · sign with a real identity
+codesign --force --deep --options runtime --timestamp \
+  --sign "Developer ID Application: Your Name (TEAMID)" \
+  "build/macos/Build/Products/Release/Augustyniak Capture.app"
+
+# 2 · ship it in a container Apple will accept
+ditto -c -k --keepParent \
+  "build/macos/Build/Products/Release/Augustyniak Capture.app" AugustyniakCapture.zip
+
+# 3 · notarize and staple
+xcrun notarytool submit AugustyniakCapture.zip \
+  --apple-id you@example.com --team-id TEAMID --password "$APP_SPECIFIC_PASSWORD" --wait
+xcrun stapler staple "build/macos/Build/Products/Release/Augustyniak Capture.app"
+```
+
+**Linux — the whole `bundle/` directory is the artifact**; the binary needs the
+`lib/` and `data/` next to it. Ship it as a tarball, or wrap it:
+
+```bash
+flutter pub global activate flutter_distributor
+flutter_distributor package --platform linux --targets deb,appimage
+```
+
+**Windows — ship the whole `Release\` folder**; the `.exe` needs the DLLs and
+`data\` beside it. The Build Tools alone are enough for Visual Studio 2022. For
+an installer:
+
+```powershell
+flutter build windows --release
+flutter pub global activate flutter_distributor
+flutter_distributor package --platform windows --targets msix
+```
+
+> **Global shortcut defaults need review on Windows.** Windows reports AltGr as
+> `Ctrl+Alt`, and AltGr is how the Polish layout types ą/ć/ę/ł/ń/ó/ś/ź/ż — so the
+> shipped `Ctrl+Alt+A/R/N` defaults would collide. On X11 AltGr is
+> `ISO_Level3_Shift`, which is why they are safe on Linux. Rebind them in Config
+> if you type Polish on Windows.
+
+**Android** — `flutter build apk --release` for sideloading,
+`flutter build appbundle --release` for Google Play. Release signing and the
+check for a debug-signed artifact are above. **Back the keystore up somewhere
+that is not this machine**: once a build is on Play under
+`ai.augustyniak.capture`, losing the key means no future build can update it
+(Play App Signing makes it only the *upload* key, which Google can reset).
+
+**iOS** — signing is configured in Xcode (`open ios/Runner.xcworkspace` →
+*Signing & Capabilities* → your team). For a personal device without a paid
+account, `flutter run --release` sideloads a build that expires after seven
+days.
+
+```bash
+cd ios && pod install && cd ..
+flutter build ipa --release
+# → build/ios/ipa/*.ipa, then upload with Transporter or:
+xcrun altool --upload-app -f build/ios/ipa/*.ipa -t ios \
+  -u you@example.com -p "$APP_SPECIFIC_PASSWORD"
+```
