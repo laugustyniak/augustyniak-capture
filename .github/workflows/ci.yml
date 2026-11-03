@@ -9,10 +9,9 @@
 # the machine that broke the build, rather than after a push and a runner spin-up.
 #
 # NOTE if you add a Linux build job: it must install the full package list
-# from docs/platform-setup.md before `flutter build linux`. Each missing one
-# fails CMake differently: keybinder-3.0 (hotkey_manager) at "Unable to
-# generate build files", libsecret-1-dev for flutter_secure_storage, gstreamer
-# and libpulse for audio, ayatana-appindicator for the tray:
+# from docs/platform-setup.md before `flutter build linux`; each missing one
+# fails CMake differently (libkeybinder-3.0-dev at "Unable to generate build
+# files"):
 #   - run: >-
 #       sudo apt-get update && sudo apt-get install -y clang cmake ninja-build
 #       pkg-config libgtk-3-dev libkeybinder-3.0-dev libsecret-1-dev
