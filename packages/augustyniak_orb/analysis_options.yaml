@@ -1,0 +1,9 @@
+include: package:flutter_lints/flutter.yaml
+
+linter:
+  rules:
+    prefer_final_locals: true
+    # Off for the same reason as in the app: OrbScene is built from a palette
+    # that can change at runtime, and a const widget would keep painting the old
+    # one (see CLAUDE.md, "no const constructor for palette-painting widgets").
+    prefer_const_constructors_in_immutables: false

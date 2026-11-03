@@ -7,6 +7,7 @@ import 'package:augustyniak_capture/features/recordings/presentation/queue_tab.d
 import 'package:augustyniak_capture/features/recordings/presentation/recordings_controller.dart';
 import 'package:augustyniak_capture/features/settings/domain/audio_config.dart';
 import 'package:augustyniak_capture/features/transcription/data/transcription_service.dart';
+import 'package:augustyniak_orb/augustyniak_orb.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:record/record.dart';
@@ -117,17 +118,17 @@ void main() {
 
     await pumpScene(paused: false);
     await tester.pump(const Duration(milliseconds: 300));
-    final dynamic state = tester.state(find.byKey(sceneKey));
-    final double running = state.debugClockValue as double;
+    final dynamic state = tester.state(find.byType(OrbScene));
+    final double running = state.debugSeconds as double;
 
     await pumpScene(paused: true);
     await tester.pump(const Duration(milliseconds: 500));
-    final double paused = state.debugClockValue as double;
+    final double paused = state.debugSeconds as double;
     expect(paused, running);
 
     await pumpScene(paused: false);
     await tester.pump(const Duration(milliseconds: 500));
-    expect(state.debugClockValue as double, isNot(paused));
+    expect(state.debugSeconds as double, isNot(paused));
   });
 
   testWidgets('reduced motion renders a stable processing scene', (
@@ -149,13 +150,13 @@ void main() {
       ),
     );
     await tester.pump();
-    final dynamic state = tester.state(find.byKey(sceneKey));
-    final double before = state.debugClockValue as double;
+    final dynamic state = tester.state(find.byType(OrbScene));
+    final double before = state.debugSeconds as double;
 
     await tester.pump(const Duration(milliseconds: 500));
 
-    expect(before, 0.18);
-    expect(state.debugClockValue as double, before);
+    expect(before, closeTo(0.18 * 12, 1e-9));
+    expect(state.debugSeconds as double, before);
   });
 
   testWidgets('a new voice note takes the focus and shows the hero', (
