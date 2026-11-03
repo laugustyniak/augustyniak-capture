@@ -52,6 +52,13 @@ class _OrbSceneState extends State<OrbScene>
   @override
   void didUpdateWidget(OrbScene oldWidget) {
     super.didUpdateWidget(oldWidget);
+    if (oldWidget.startSeconds != widget.startSeconds) {
+      _base = _seconds.value = widget.startSeconds;
+      if (_ticker.isActive) {
+        _ticker.stop();
+        _ticker.start();
+      }
+    }
     if (oldWidget.paused != widget.paused) _sync();
   }
 

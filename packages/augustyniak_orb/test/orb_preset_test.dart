@@ -66,7 +66,7 @@ void main() {
         layers: OrbLayers(grid: false, sweep: false),
       );
       final OrbPreset back = OrbPreset.fromJson(
-        jsonDecode(jsonEncode(preset.toJson())) as Map<String, Object?>,
+        jsonDecode(jsonEncode(preset.toJson())),
       );
       expect(back, preset);
       expect(back.toJson(), preset.toJson());
@@ -130,6 +130,19 @@ void main() {
       expect(p.tuning.period, 12.0);
       expect(p.tuning.rings, <double>[1, -2, 2]);
       expect(p.tuning.sweep, 3.0);
+    });
+
+    test('anything that is not a map yields the defaults', () {
+      for (final Object? bad in <Object?>[null, <Object?>[], 'x', 3]) {
+        expect(OrbPreset.fromJson(bad), OrbPreset.defaults, reason: '$bad');
+      }
+    });
+
+    test('toJson does not expose the live rings list', () {
+      final OrbTuning tuning = OrbTuning.defaults;
+      final List<double> rings = tuning.toJson()['rings']! as List<double>;
+      rings[0] = 99;
+      expect(tuning.rings, <double>[1, -2, 2]);
     });
 
     test('an unknown or missing version is rejected as the defaults', () {

@@ -44,4 +44,15 @@ void main() {
     await tester.pumpWidget(_host(paused: true, startSeconds: 2.16));
     expect(_seconds(tester), 2.16);
   });
+
+  testWidgets('a new startSeconds while paused re-seeds the clock', (
+    WidgetTester tester,
+  ) async {
+    await tester.pumpWidget(_host());
+    await tester.pump(const Duration(milliseconds: 300));
+    await tester.pumpWidget(_host(paused: true, startSeconds: 2.16));
+    expect(_seconds(tester), 2.16);
+    await tester.pump(const Duration(milliseconds: 500));
+    expect(_seconds(tester), 2.16);
+  });
 }

@@ -167,7 +167,7 @@ class OrbTuning {
     'pulse': pulse,
     'spokeFast': spokeFast,
     'spokeSlow': spokeSlow,
-    'rings': rings,
+    'rings': List<double>.of(rings),
     'sweep': sweep,
     'breath': breath,
     'gridScroll': gridScroll,
@@ -283,10 +283,10 @@ class OrbPreset {
   final OrbLayers layers;
 
   /// Degrade on load, never throw: unknown keys are ignored, missing or bad
-  /// values take their defaults, and a missing or unknown `v` is rejected by
-  /// returning [defaults] untouched.
-  factory OrbPreset.fromJson(Map<String, Object?> json) {
-    if (json['v'] != version) return defaults;
+  /// values take their defaults, and anything that is not a map, or has a
+  /// missing or unknown `v`, is rejected by returning [defaults] untouched.
+  factory OrbPreset.fromJson(Object? json) {
+    if (json is! Map || json['v'] != version) return defaults;
     return OrbPreset(
       palette: OrbPalette.fromJson(json['palette']),
       tuning: OrbTuning.fromJson(json['tuning']),

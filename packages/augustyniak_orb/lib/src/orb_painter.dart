@@ -32,6 +32,9 @@ class OrbPainter extends CustomPainter {
     final double r =
         math.min(size.width, size.height * 0.88) / 2 * k.radiusScale;
 
+    // Opaque fill first, so the picture is complete without a host frame.
+    canvas.drawRect(Offset.zero & size, Paint()..color = backdrop);
+
     if (on.grid) _paintGrid(canvas, size, t);
 
     // Backdrop glow.
