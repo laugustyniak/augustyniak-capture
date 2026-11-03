@@ -31,6 +31,7 @@ import 'package:augustyniak_capture/features/sync/data/e2ee_service.dart';
 import 'package:augustyniak_capture/features/sync/domain/e2ee_cipher.dart';
 import 'package:augustyniak_capture/features/sync/presentation/e2ee_passphrase_dialog.dart';
 
+import 'package:augustyniak_capture/features/settings/domain/app_settings.dart';
 import '../support/harness.dart';
 import '../sync/fake_e2ee_settings_store.dart';
 
@@ -2439,4 +2440,155 @@ void main() {
     await tester.pump(const Duration(seconds: 2));
   });
 
+  testWidgets(
+    'master-detail capture list and detail reading pane can be resized',
+    (WidgetTester tester) async {
+      tester.view.physicalSize = const Size(1800, 1000);
+      tester.view.devicePixelRatio = 1.0;
+      addTearDown(() {
+        tester.view.resetPhysicalSize();
+        tester.view.resetDevicePixelRatio();
+      });
+
+      final RecordingsController controller = await buildRecordingsController(
+        appDir,
+        seed: <Recording>[
+          makeRecording(
+            id: 'item-1',
+            title: 'First item',
+            transcript: 'First transcript',
+            type: CaptureType.text,
+          ),
+        ],
+      );
+
+      double? reportedSplitRatio;
+      double? reportedReadingWidth;
+
+      await tester.pumpWidget(
+        hostTab(
+          () => QueueTab(
+            controller: controller,
+            splitRatio: AppSettings.defaultQueueSplitRatio,
+            onSplitRatioChanged: (double r) => reportedSplitRatio = r,
+            detailReadingWidth: AppSettings.defaultDetailReadingWidth,
+            onDetailReadingWidthChanged: (double w) => reportedReadingWidth = w,
+          ),
+          listenable: controller,
+        ),
+      );
+      await tester.pump();
+
+      // Verify handle is present
+      final Finder listResizeHandle = find.byWidgetPredicate(
+        (Widget w) =>
+            w is PaneResizeHandle && w.semanticLabel == 'Resize capture list',
+      );
+      expect(listResizeHandle, findsOneWidget);
+
+      // Drag the handle to the right (accounting for 20px touch slop)
+      await tester.drag(listResizeHandle, const Offset(60, 0));
+      await tester.pump();
+
+      expect(reportedSplitRatio, isNotNull);
+      expect(reportedSplitRatio, greaterThan(AppSettings.defaultQueueSplitRatio));
+
+      // Double tap the handle to reset
+      await tester.tap(listResizeHandle);
+      await tester.pump(const Duration(milliseconds: 50));
+      await tester.tap(listResizeHandle);
+      await tester.pumpAndSettle();
+
+      expect(reportedSplitRatio, AppSettings.defaultQueueSplitRatio);
+
+      // Now test detail reading pane handle
+      final Finder detailResizeHandle = find.byWidgetPredicate(
+        (Widget w) =>
+            w is PaneResizeHandle &&
+            w.semanticLabel == 'Resize detail reading pane',
+      );
+      expect(detailResizeHandle, findsOneWidget);
+
+      await tester.drag(detailResizeHandle, const Offset(60, 0));
+      await tester.pump();
+
+      expect(reportedReadingWidth, isNotNull);
+      expect(
+        reportedReadingWidth,
+        greaterThan(AppSettings.defaultDetailReadingWidth),
+      );
+
+      // Double tap detail resize handle to reset
+      await tester.tap(detailResizeHandle);
+      await tester.pump(const Duration(milliseconds: 50));
+      await tester.tap(detailResizeHandle);
+      await tester.pumpAndSettle();
+
+      expect(reportedReadingWidth, AppSettings.defaultDetailReadingWidth);
+    },
+  );
+
+  testWidgets(
+    'ultra-wide detail metadata column can be resized and reset',
+    (WidgetTester tester) async {
+      tester.view.physicalSize = const Size(2400, 1000);
+      tester.view.devicePixelRatio = 1.0;
+      addTearDown(() {
+        tester.view.resetPhysicalSize();
+        tester.view.resetDevicePixelRatio();
+      });
+
+      final RecordingsController controller = await buildRecordingsController(
+        appDir,
+        seed: <Recording>[
+          makeRecording(
+            id: 'item-1',
+            title: 'First item',
+            transcript: 'First transcript',
+            type: CaptureType.text,
+          ),
+        ],
+      );
+
+      double? reportedMetaWidth;
+
+      await tester.pumpWidget(
+        hostTab(
+          () => QueueTab(
+            controller: controller,
+            detailMetaWidth: AppSettings.defaultDetailMetaWidth,
+            onDetailMetaWidthChanged: (double w) => reportedMetaWidth = w,
+          ),
+          listenable: controller,
+        ),
+      );
+      await tester.pump();
+
+      final Finder metaResizeHandle = find.byWidgetPredicate(
+        (Widget w) =>
+            w is PaneResizeHandle &&
+            w.semanticLabel == 'Resize metadata column',
+      );
+      expect(metaResizeHandle, findsOneWidget);
+
+      // Drag to the left (negative delta widens the metadata column)
+      await tester.drag(metaResizeHandle, const Offset(-60, 0));
+      await tester.pump();
+
+      expect(reportedMetaWidth, isNotNull);
+      expect(
+        reportedMetaWidth,
+        greaterThan(AppSettings.defaultDetailMetaWidth),
+      );
+
+      // Double tap to reset
+      await tester.tap(metaResizeHandle);
+      await tester.pump(const Duration(milliseconds: 50));
+      await tester.tap(metaResizeHandle);
+      await tester.pumpAndSettle();
+
+      expect(reportedMetaWidth, AppSettings.defaultDetailMetaWidth);
+    },
+  );
 }
+

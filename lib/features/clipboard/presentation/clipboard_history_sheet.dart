@@ -91,6 +91,11 @@ class _ClipboardHistorySheetState extends State<ClipboardHistorySheet> {
   /// [Console.compactBreakpoint], so the sheet switches form at the same width
   /// the shell does.
   static const double _twoPaneWidth = Console.compactBreakpoint;
+  static const double _defaultWideListWidth = 282.0;
+  static const double _defaultNarrowPreviewRatio = 0.45;
+
+  double _wideListWidth = _defaultWideListWidth;
+  double _narrowPreviewRatio = _defaultNarrowPreviewRatio;
 
   final TextEditingController _searchController = TextEditingController();
   final ScrollController _scrollController = ScrollController();
@@ -634,10 +639,21 @@ class _ClipboardHistorySheetState extends State<ClipboardHistorySheet> {
                               return Row(
                                 crossAxisAlignment: CrossAxisAlignment.stretch,
                                 children: <Widget>[
-                                  SizedBox(width: 282, child: list),
-                                  VerticalDivider(
-                                    width: 1,
-                                    color: Console.border,
+                                  SizedBox(width: _wideListWidth, child: list),
+                                  PaneResizeHandle(
+                                    semanticLabel: 'Resize clipboard list',
+                                    onDragDelta: (double delta) {
+                                      setState(() {
+                                        _wideListWidth = (_wideListWidth + delta)
+                                            .clamp(180.0, 480.0);
+                                      });
+                                    },
+                                    onReset: () {
+                                      setState(
+                                        () => _wideListWidth =
+                                            _defaultWideListWidth,
+                                      );
+                                    },
                                   ),
                                   Expanded(child: preview),
                                 ],
@@ -646,12 +662,37 @@ class _ClipboardHistorySheetState extends State<ClipboardHistorySheet> {
                             return Column(
                               children: <Widget>[
                                 Expanded(child: list),
-                                Divider(height: 1, color: Console.border),
+                                PaneResizeHandle(
+                                  axis: Axis.horizontal,
+                                  semanticLabel: 'Resize clipboard preview',
+                                  onDragDelta: (double delta) {
+                                    if (constraints.maxHeight <= 0) return;
+                                    setState(() {
+                                      final double current =
+                                          constraints.maxHeight *
+                                          _narrowPreviewRatio;
+                                      final double target = (current - delta)
+                                          .clamp(
+                                            constraints.maxHeight * 0.25,
+                                            constraints.maxHeight * 0.70,
+                                          );
+                                      _narrowPreviewRatio =
+                                          target / constraints.maxHeight;
+                                    });
+                                  },
+                                  onReset: () {
+                                    setState(
+                                      () => _narrowPreviewRatio =
+                                          _defaultNarrowPreviewRatio,
+                                    );
+                                  },
+                                ),
                                 SizedBox(
                                   // Just under half: enough to read a token or
                                   // a command back and still see which row in
                                   // the list it came from.
-                                  height: constraints.maxHeight * .45,
+                                  height: constraints.maxHeight *
+                                      _narrowPreviewRatio,
                                   child: preview,
                                 ),
                               ],

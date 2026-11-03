@@ -6,6 +6,7 @@ import 'package:augustyniak_capture/features/auth/domain/auth_gateway.dart';
 import 'package:augustyniak_capture/features/auth/domain/auth_identity.dart';
 import 'package:augustyniak_capture/features/auth/presentation/auth_controller.dart';
 import 'package:augustyniak_capture/features/projects/domain/project.dart';
+import 'package:augustyniak_capture/app/ui_kit.dart';
 import 'package:augustyniak_capture/features/settings/domain/app_theme_mode.dart';
 import 'package:augustyniak_capture/features/settings/domain/audio_config.dart';
 import 'package:augustyniak_capture/features/settings/presentation/config_tab.dart';
@@ -463,4 +464,129 @@ void main() {
       expect(find.text('owner@example.com'), findsNothing);
     },
   );
+
+  testWidgets(
+    'appearance category allows adjusting layout sizes and resetting all',
+    (WidgetTester tester) async {
+      final SettingsController controller = buildSettingsController();
+      await controller.initialize();
+      await pumpConfig(tester, controller);
+
+      // Verify initial layout labels
+      expect(find.text('SIDEBAR WIDTH'), findsOneWidget);
+      expect(find.text('CAPTURE LIST WIDTH'), findsOneWidget);
+      expect(find.text('DETAIL READING WIDTH'), findsOneWidget);
+      expect(find.text('DETAIL METADATA WIDTH'), findsOneWidget);
+      expect(find.text('PAGE CONTENT WIDTH'), findsOneWidget);
+      expect(find.text('RESET LAYOUT SIZES'), findsNothing);
+
+      // Sidebar width option
+      await tester.tap(find.text('300 px'));
+      await tester.pump();
+      expect(controller.navRailWidth, 300.0);
+      expect(find.text('RESET (216 px)'), findsOneWidget);
+
+      // Capture list width +/- buttons
+      await tester.tap(find.byTooltip('Wider Capture List'));
+      await tester.pump();
+      expect(controller.queueSplitRatio, 0.57);
+      expect(find.text('RESET (52%)'), findsOneWidget);
+
+      // Detail reading width option
+      await tester.tap(find.text('820 px'));
+      await tester.pump();
+      expect(controller.detailReadingWidth, 820.0);
+      expect(find.text('RESET (680 px)'), findsOneWidget);
+
+      // Detail metadata width option
+      await tester.tap(find.text('360 px'));
+      await tester.pump();
+      expect(controller.detailMetaWidth, 360.0);
+      expect(find.text('RESET (300 px)'), findsOneWidget);
+
+      // Detail metadata narrower button
+      await tester.tap(find.byTooltip('Narrower Metadata Pane'));
+      await tester.pump();
+      expect(controller.detailMetaWidth, 340.0);
+
+      // Page content width option
+      await tester.tap(find.text('1120 px'));
+      await tester.pump();
+      expect(controller.pageMaxWidth, 1120.0);
+      expect(find.text('RESET (960 px)'), findsOneWidget);
+
+      // RESET LAYOUT SIZES button should be visible now
+      expect(find.text('RESET LAYOUT SIZES'), findsOneWidget);
+
+      // Tap RESET LAYOUT SIZES
+      await tester.tap(find.text('RESET LAYOUT SIZES'));
+      await tester.pump();
+
+      expect(controller.navRailWidth, 216.0);
+      expect(controller.queueSplitRatio, 0.52);
+      expect(controller.detailReadingWidth, 680.0);
+      expect(controller.detailMetaWidth, 300.0);
+      expect(controller.pageMaxWidth, 960.0);
+      expect(controller.hasCustomLayoutSizes, isFalse);
+      expect(find.text('RESET LAYOUT SIZES'), findsNothing);
+    },
+  );
+
+  testWidgets(
+    'ConsolePageWidth allows resizing page max width and double tap resets',
+    (WidgetTester tester) async {
+      tester.view.physicalSize = const Size(1400, 800);
+      tester.view.devicePixelRatio = 1.0;
+      addTearDown(() {
+        tester.view.resetPhysicalSize();
+        tester.view.resetDevicePixelRatio();
+      });
+
+      double currentWidth = 960.0;
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: StatefulBuilder(
+              builder: (BuildContext context, StateSetter setState) {
+                return ConsolePageWidth(
+                  maxWidth: currentWidth,
+                  onMaxWidthChanged: (double val) =>
+                      setState(() => currentWidth = val),
+                  onResetMaxWidth: () =>
+                      setState(() => currentWidth = 960.0),
+                  child: Container(color: Colors.blue),
+                );
+              },
+            ),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      final Finder handles = find.byWidgetPredicate(
+        (Widget w) =>
+            w is PaneResizeHandle && w.semanticLabel == 'Resize page width',
+      );
+      expect(handles, findsNWidgets(2));
+
+      // Drag right handle outward (positive x)
+      final Finder rightHandle = handles.last;
+      final double initialRightDx = tester.getTopLeft(rightHandle).dx;
+      await tester.drag(rightHandle, const Offset(60, 0));
+      await tester.pumpAndSettle();
+
+      expect(currentWidth, greaterThan(960.0));
+      expect(tester.getTopLeft(rightHandle).dx, greaterThan(initialRightDx));
+
+      // Double tap resets
+      await tester.tap(rightHandle);
+      await tester.pump(const Duration(milliseconds: 50));
+      await tester.tap(rightHandle);
+      await tester.pumpAndSettle();
+
+      expect(currentWidth, 960.0);
+      expect(tester.getTopLeft(rightHandle).dx, closeTo(initialRightDx, 0.001));
+    },
+  );
 }
+

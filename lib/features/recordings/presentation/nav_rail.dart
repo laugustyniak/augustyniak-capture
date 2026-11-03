@@ -37,8 +37,8 @@ class RailDestination {
 /// the floating `CaptureDock`; this is the wide counterpart of *both*, which is
 /// why the record button lives down here rather than staying afloat over a
 /// list that is now several columns wide.
-class ConsoleNavRail extends StatelessWidget {
-  const ConsoleNavRail({
+class ConsoleNavRail extends StatefulWidget {
+  ConsoleNavRail({
     super.key,
     required this.destinations,
     required this.selectedIndex,
@@ -50,6 +50,9 @@ class ConsoleNavRail extends StatelessWidget {
     required this.busy,
     this.expanded = true,
     this.onToggleExpanded,
+    this.expandedWidth = Console.railWidth,
+    this.onResizeWidth,
+    this.onResetWidth,
   });
 
   final List<RailDestination> destinations;
@@ -81,11 +84,43 @@ class ConsoleNavRail extends StatelessWidget {
   /// does not persist the choice.
   final VoidCallback? onToggleExpanded;
 
+  /// Width of the rail when expanded. Clamped between [Console.railWidthMin]
+  /// and [Console.railWidthMax].
+  final double expandedWidth;
+
+  /// Called when dragging the resize handle.
+  final ValueChanged<double>? onResizeWidth;
+
+  /// Called when double-tapping the resize handle to reset width.
+  final VoidCallback? onResetWidth;
+
+  @override
+  State<ConsoleNavRail> createState() => _ConsoleNavRailState();
+}
+
+class _ConsoleNavRailState extends State<ConsoleNavRail> {
+  double? _activeDragWidth;
+  double _collapsedDrag = 0.0;
+
+  @override
+  void didUpdateWidget(ConsoleNavRail oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.expanded != widget.expanded ||
+        oldWidget.expandedWidth != widget.expandedWidth) {
+      _activeDragWidth = null;
+      _collapsedDrag = 0.0;
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
-    if (!expanded) return _buildCollapsed();
-    return Container(
-      width: Console.railWidth,
+    if (!widget.expanded) return _buildCollapsed();
+    final double width = widget.expandedWidth.clamp(
+      Console.railWidthMin,
+      Console.railWidthMax,
+    );
+    final Widget content = Container(
+      width: width,
       decoration: BoxDecoration(
         color: Console.surfaceDeep,
         border: Border(right: BorderSide(color: Console.track)),
@@ -99,34 +134,74 @@ class ConsoleNavRail extends StatelessWidget {
             children: <Widget>[
               _Wordmark(),
               const SizedBox(height: 10),
-              for (int i = 0; i < destinations.length; i++)
+              for (int i = 0; i < widget.destinations.length; i++)
                 _RailButton(
-                  destination: destinations[i],
-                  selected: i == selectedIndex,
-                  onTap: () => onSelected(i),
+                  destination: widget.destinations[i],
+                  selected: i == widget.selectedIndex,
+                  onTap: () => widget.onSelected(i),
                 ),
               const Spacer(),
-              if (onToggleExpanded != null) ...<Widget>[
+              if (widget.onToggleExpanded != null) ...<Widget>[
                 Align(
                   alignment: Alignment.centerLeft,
-                  child: _ToggleButton(expanded: true, onTap: onToggleExpanded!),
+                  child: _ToggleButton(
+                    expanded: true,
+                    onTap: widget.onToggleExpanded!,
+                  ),
                 ),
                 const SizedBox(height: 8),
               ],
-              _ReviewProgress(reviewed: reviewed, total: total),
+              _ReviewProgress(reviewed: widget.reviewed, total: widget.total),
               const SizedBox(height: 10),
-              _SecondaryButton(onTap: busy ? null : onCapture),
+              _SecondaryButton(onTap: widget.busy ? null : widget.onCapture),
               const SizedBox(height: 8),
-              _RecordButton(onTap: busy ? null : onRecord, busy: busy),
+              _RecordButton(
+                onTap: widget.busy ? null : widget.onRecord,
+                busy: widget.busy,
+              ),
             ],
           ),
         ),
       ),
     );
+
+    if (widget.onResizeWidth != null) {
+      return Stack(
+        children: <Widget>[
+          content,
+          Positioned(
+            right: 0,
+            top: 0,
+            bottom: 0,
+            child: PaneResizeHandle(
+              semanticLabel: 'Resize sidebar',
+              showDividerLine: false,
+              onDragDelta: (double delta) {
+                final double current =
+                    _activeDragWidth ?? widget.expandedWidth;
+                final double target = current + delta;
+                _activeDragWidth = target;
+                if (target < 110.0 && widget.onToggleExpanded != null) {
+                  _activeDragWidth = null;
+                  widget.onToggleExpanded!();
+                } else {
+                  widget.onResizeWidth!(target);
+                }
+              },
+              onReset: () {
+                _activeDragWidth = null;
+                widget.onResetWidth?.call();
+              },
+            ),
+          ),
+        ],
+      );
+    }
+    return content;
   }
 
   Widget _buildCollapsed() {
-    return Container(
+    final Widget content = Container(
       width: Console.railCollapsedWidth,
       decoration: BoxDecoration(
         color: Console.surfaceDeep,
@@ -140,33 +215,37 @@ class ConsoleNavRail extends StatelessWidget {
             children: <Widget>[
               _Monogram(),
               const SizedBox(height: 14),
-              for (int i = 0; i < destinations.length; i++)
+              for (int i = 0; i < widget.destinations.length; i++)
                 _RailIconButton(
-                  destination: destinations[i],
-                  selected: i == selectedIndex,
-                  onTap: () => onSelected(i),
+                  destination: widget.destinations[i],
+                  selected: i == widget.selectedIndex,
+                  onTap: () => widget.onSelected(i),
                 ),
               const Spacer(),
-              if (onToggleExpanded != null)
-                _ToggleButton(expanded: false, onTap: onToggleExpanded!),
+              if (widget.onToggleExpanded != null)
+                _ToggleButton(
+                  expanded: false,
+                  onTap: widget.onToggleExpanded!,
+                ),
               const SizedBox(height: 6),
               _RoundButton(
                 tooltip: 'Note / upload',
                 semanticLabel: 'New note or upload',
-                onTap: busy ? null : onCapture,
+                onTap: widget.busy ? null : widget.onCapture,
                 child: Icon(
                   Icons.add_rounded,
                   size: 20,
-                  color: busy ? Console.dim : Console.mutedSoft,
+                  color: widget.busy ? Console.dim : Console.mutedSoft,
                 ),
               ),
               const SizedBox(height: 8),
               _RoundButton(
                 tooltip: 'Record',
-                semanticLabel: busy ? 'Saving capture' : 'Start recording',
-                filled: !busy,
-                onTap: busy ? null : onRecord,
-                child: busy
+                semanticLabel:
+                    widget.busy ? 'Saving capture' : 'Start recording',
+                filled: !widget.busy,
+                onTap: widget.busy ? null : widget.onRecord,
+                child: widget.busy
                     ? SizedBox.square(
                         dimension: 16,
                         child: CircularProgressIndicator(
@@ -188,6 +267,35 @@ class ConsoleNavRail extends StatelessWidget {
         ),
       ),
     );
+
+    if (widget.onResizeWidth != null) {
+      return Stack(
+        children: <Widget>[
+          content,
+          Positioned(
+            right: 0,
+            top: 0,
+            bottom: 0,
+            child: PaneResizeHandle(
+              semanticLabel: 'Resize sidebar',
+              showDividerLine: false,
+              onDragDelta: (double delta) {
+                _collapsedDrag += delta;
+                if (_collapsedDrag > 24 && widget.onToggleExpanded != null) {
+                  _collapsedDrag = 0.0;
+                  widget.onToggleExpanded!();
+                }
+              },
+              onReset: () {
+                _collapsedDrag = 0.0;
+                widget.onResetWidth?.call();
+              },
+            ),
+          ),
+        ],
+      );
+    }
+    return content;
   }
 }
 

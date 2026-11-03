@@ -8,6 +8,7 @@ import 'package:flutter/services.dart';
 import '../../../app/markdown_view.dart';
 import '../../../app/ui_kit.dart';
 import '../../projects/domain/project.dart';
+import '../../settings/domain/app_settings.dart';
 import '../domain/capture_category.dart';
 import '../domain/capture_priority.dart';
 import '../domain/capture_type.dart';
@@ -1094,7 +1095,7 @@ class _AudioPlaybackBarState extends State<_AudioPlaybackBar> {
 /// for the reason the dialog does — the item keeps moving while it is shown —
 /// and adds no capture logic: every control calls the controller entry point
 /// the card calls.
-class CaptureDetailPanel extends StatelessWidget {
+class CaptureDetailPanel extends StatefulWidget {
   CaptureDetailPanel({
     super.key,
     required this.controller,
@@ -1113,6 +1114,10 @@ class CaptureDetailPanel extends StatelessWidget {
     this.compact = false,
     this.projects = const <Project>[],
     this.tagSuggestions = const <String>[],
+    this.readingMaxWidth = CaptureDetailPanel.readingWidth,
+    this.onReadingMaxWidthChanged,
+    this.detailMetaWidth = AppSettings.defaultDetailMetaWidth,
+    this.onDetailMetaWidthChanged,
   });
 
   final RecordingsController controller;
@@ -1145,11 +1150,102 @@ class CaptureDetailPanel extends StatelessWidget {
   /// same content in the same order.
   final bool compact;
 
+  /// Maximum width of the reading column.
+  final double readingMaxWidth;
+
+  /// Called when the reading column is resized via drag.
+  final ValueChanged<double>? onReadingMaxWidthChanged;
+
+  /// Width of the metadata column in wide layout.
+  final double detailMetaWidth;
+
+  /// Called when the metadata column is resized via drag.
+  final ValueChanged<double>? onDetailMetaWidthChanged;
+
   /// The reading measure: about 72 characters of 15 px text.
   static const double readingWidth = 680;
 
   @override
+  State<CaptureDetailPanel> createState() => _CaptureDetailPanelState();
+}
+
+class _CaptureDetailPanelState extends State<CaptureDetailPanel> {
+  double? _localReadingMaxWidth;
+  double? _localMetaWidth;
+
+  double get effectiveReadingWidth =>
+      _localReadingMaxWidth ?? widget.readingMaxWidth;
+
+  double get effectiveMetaWidth => _localMetaWidth ?? widget.detailMetaWidth;
+
+  void _handleReadingWidthDelta(double delta) {
+    final double target = AppSettings.clampDetailReadingWidth(
+      effectiveReadingWidth + delta,
+    );
+    if (widget.onReadingMaxWidthChanged != null) {
+      widget.onReadingMaxWidthChanged!(target);
+    } else {
+      setState(() => _localReadingMaxWidth = target);
+    }
+  }
+
+  void _handleReadingWidthReset() {
+    if (widget.onReadingMaxWidthChanged != null) {
+      widget.onReadingMaxWidthChanged!(AppSettings.defaultDetailReadingWidth);
+    } else {
+      setState(() => _localReadingMaxWidth = null);
+    }
+  }
+
+  void _handleMetaWidthDelta(double delta) {
+    final double target = AppSettings.clampDetailMetaWidth(
+      effectiveMetaWidth - delta,
+    );
+    if (widget.onDetailMetaWidthChanged != null) {
+      widget.onDetailMetaWidthChanged!(target);
+    } else {
+      setState(() => _localMetaWidth = target);
+    }
+  }
+
+  void _handleMetaWidthReset() {
+    if (widget.onDetailMetaWidthChanged != null) {
+      widget.onDetailMetaWidthChanged!(AppSettings.defaultDetailMetaWidth);
+    } else {
+      setState(() => _localMetaWidth = null);
+    }
+  }
+
+  @override
+  void didUpdateWidget(CaptureDetailPanel oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.readingMaxWidth != widget.readingMaxWidth) {
+      _localReadingMaxWidth = null;
+    }
+    if (oldWidget.detailMetaWidth != widget.detailMetaWidth) {
+      _localMetaWidth = null;
+    }
+  }
+
+  @override
   Widget build(BuildContext context) {
+    final Recording recording = widget.recording;
+    final RecordingsController controller = widget.controller;
+    final String? projectName = widget.projectName;
+    final List<Project> projects = widget.projects;
+    final List<String> tagSuggestions = widget.tagSuggestions;
+    final bool showMetaColumn = widget.showMetaColumn;
+    final VoidCallback onEdit = widget.onEdit;
+    final VoidCallback onToggleProcessed = widget.onToggleProcessed;
+    final VoidCallback? onAppendRecording = widget.onAppendRecording;
+    final VoidCallback? onAppendNote = widget.onAppendNote;
+    final ValueChanged<CaptureType>? onAppendUpload = widget.onAppendUpload;
+    final bool isMarkingDone = widget.isMarkingDone;
+    final VoidCallback? onConfigureModels = widget.onConfigureModels;
+    final double? costUsd = widget.costUsd;
+    final ScrollController? scrollController = widget.scrollController;
+    final bool compact = widget.compact;
+
     final String transcript = (recording.transcript ?? '').trim();
     final String summary = (recording.summary ?? '').trim();
     final int wordCount = transcript.isEmpty
@@ -1166,7 +1262,7 @@ class CaptureDetailPanel extends StatelessWidget {
     );
 
     final Widget article = ConstrainedBox(
-      constraints: const BoxConstraints(maxWidth: readingWidth),
+      constraints: BoxConstraints(maxWidth: effectiveReadingWidth),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: <Widget>[
@@ -1444,21 +1540,67 @@ class CaptureDetailPanel extends StatelessWidget {
             const SizedBox(height: 24),
           ],
           if (showMetaColumn)
-            Row(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: <Widget>[
-                Expanded(
-                  child: Align(alignment: Alignment.topLeft, child: article),
-                ),
-                const SizedBox(width: 48),
-                SizedBox(width: Console.detailMetaWidth, child: meta),
-              ],
+            IntrinsicHeight(
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: <Widget>[
+                  Expanded(
+                    child: Row(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: <Widget>[
+                        Flexible(child: article),
+                        if (!compact)
+                          Padding(
+                            padding: const EdgeInsets.symmetric(horizontal: 12),
+                            child: PaneResizeHandle(
+                              semanticLabel: 'Resize detail reading pane',
+                              onDragDelta: _handleReadingWidthDelta,
+                              onReset: _handleReadingWidthReset,
+                            ),
+                          ),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(width: 24),
+                  SizedBox(
+                    width: effectiveMetaWidth,
+                    child: Row(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: <Widget>[
+                        PaneResizeHandle(
+                          semanticLabel: 'Resize metadata column',
+                          onDragDelta: _handleMetaWidthDelta,
+                          onReset: _handleMetaWidthReset,
+                        ),
+                        const SizedBox(width: 16),
+                        Expanded(child: meta),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
             )
           else ...<Widget>[
-            article,
+            IntrinsicHeight(
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: <Widget>[
+                  Flexible(child: article),
+                  if (!compact)
+                    Padding(
+                      padding: const EdgeInsets.only(left: 12),
+                      child: PaneResizeHandle(
+                        semanticLabel: 'Resize detail reading pane',
+                        onDragDelta: _handleReadingWidthDelta,
+                        onReset: _handleReadingWidthReset,
+                      ),
+                    ),
+                ],
+              ),
+            ),
             const SizedBox(height: 32),
             ConstrainedBox(
-              constraints: const BoxConstraints(maxWidth: readingWidth),
+              constraints: BoxConstraints(maxWidth: effectiveReadingWidth),
               child: meta,
             ),
           ],
@@ -1969,8 +2111,13 @@ class _PanelMeta extends StatelessWidget {
                       color: Console.muted,
                     ),
                   ),
-                  const Spacer(),
-                  value,
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Align(
+                      alignment: Alignment.centerRight,
+                      child: value,
+                    ),
+                  ),
                 ],
               ),
             ),
@@ -1992,6 +2139,8 @@ class _PanelMeta extends StatelessWidget {
 
   Widget _value(String text) => Text(
     text,
+    overflow: TextOverflow.ellipsis,
+    maxLines: 1,
     style: ConsoleText.cardMeta.copyWith(fontSize: 13, color: Console.text),
   );
 

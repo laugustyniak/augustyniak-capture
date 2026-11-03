@@ -133,6 +133,56 @@ class SettingsController extends ChangeNotifier {
     await _persist(_settings.copyWith(navRailExpanded: value));
   }
 
+  double get navRailWidth => _settings.navRailWidth;
+  double get queueSplitRatio => _settings.queueSplitRatio;
+  double get detailReadingWidth => _settings.detailReadingWidth;
+  double get detailMetaWidth => _settings.detailMetaWidth;
+  double get pageMaxWidth => _settings.pageMaxWidth;
+  bool get hasCustomLayoutSizes => _settings.hasCustomLayoutSizes;
+
+  Future<void> setNavRailWidth(double value) async {
+    final double clamped = AppSettings.clampNavRailWidth(value);
+    if ((clamped - _settings.navRailWidth).abs() < 0.5) return;
+    await _persist(_settings.copyWith(navRailWidth: clamped));
+  }
+
+  Future<void> setQueueSplitRatio(double value) async {
+    final double clamped = AppSettings.clampQueueSplitRatio(value);
+    if ((clamped - _settings.queueSplitRatio).abs() < 0.005) return;
+    await _persist(_settings.copyWith(queueSplitRatio: clamped));
+  }
+
+  Future<void> setDetailReadingWidth(double value) async {
+    final double clamped = AppSettings.clampDetailReadingWidth(value);
+    if ((clamped - _settings.detailReadingWidth).abs() < 0.5) return;
+    await _persist(_settings.copyWith(detailReadingWidth: clamped));
+  }
+
+  Future<void> setDetailMetaWidth(double value) async {
+    final double clamped = AppSettings.clampDetailMetaWidth(value);
+    if ((clamped - _settings.detailMetaWidth).abs() < 0.5) return;
+    await _persist(_settings.copyWith(detailMetaWidth: clamped));
+  }
+
+  Future<void> setPageMaxWidth(double value) async {
+    final double clamped = AppSettings.clampPageMaxWidth(value);
+    if ((clamped - _settings.pageMaxWidth).abs() < 0.5) return;
+    await _persist(_settings.copyWith(pageMaxWidth: clamped));
+  }
+
+  Future<void> resetLayoutSizes() async {
+    if (!_settings.hasCustomLayoutSizes) return;
+    await _persist(
+      _settings.copyWith(
+        resetNavRailWidth: true,
+        resetQueueSplitRatio: true,
+        resetDetailReadingWidth: true,
+        resetDetailMetaWidth: true,
+        resetPageMaxWidth: true,
+      ),
+    );
+  }
+
   /// Never null: an untouched install resolves to the shipped default.
   String get enrichmentInstructions => _settings.enrichmentInstructions;
 

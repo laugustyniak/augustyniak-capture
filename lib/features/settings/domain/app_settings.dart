@@ -28,6 +28,11 @@ class AppSettings {
     this.textScale = defaultTextScale,
     this.queueDensity = QueueDensity.compact,
     this.navRailExpanded = false,
+    this.navRailWidth = defaultNavRailWidth,
+    this.queueSplitRatio = defaultQueueSplitRatio,
+    this.detailReadingWidth = defaultDetailReadingWidth,
+    this.detailMetaWidth = defaultDetailMetaWidth,
+    this.pageMaxWidth = defaultPageMaxWidth,
     this.vaultPath,
     this.vaultFolder = VaultDefaults.folder,
     this.vaultCopySources = true,
@@ -61,6 +66,43 @@ class AppSettings {
     final double clamped = value.clamp(minTextScale, maxTextScale);
     return double.parse(clamped.toStringAsFixed(2));
   }
+
+  static const double defaultNavRailWidth = 216.0;
+  static const double minNavRailWidth = 168.0;
+  static const double maxNavRailWidth = 340.0;
+
+  static double clampNavRailWidth(double value) =>
+      value.clamp(minNavRailWidth, maxNavRailWidth).roundToDouble();
+
+  static const double defaultQueueSplitRatio = 0.52;
+  static const double minQueueSplitRatio = 0.25;
+  static const double maxQueueSplitRatio = 0.75;
+
+  static double clampQueueSplitRatio(double value) {
+    final double clamped = value.clamp(minQueueSplitRatio, maxQueueSplitRatio);
+    return double.parse(clamped.toStringAsFixed(2));
+  }
+
+  static const double defaultDetailReadingWidth = 680.0;
+  static const double minDetailReadingWidth = 480.0;
+  static const double maxDetailReadingWidth = 1200.0;
+
+  static double clampDetailReadingWidth(double value) =>
+      value.clamp(minDetailReadingWidth, maxDetailReadingWidth).roundToDouble();
+
+  static const double defaultDetailMetaWidth = 300.0;
+  static const double minDetailMetaWidth = 220.0;
+  static const double maxDetailMetaWidth = 480.0;
+
+  static double clampDetailMetaWidth(double value) =>
+      value.clamp(minDetailMetaWidth, maxDetailMetaWidth).roundToDouble();
+
+  static const double defaultPageMaxWidth = 960.0;
+  static const double minPageMaxWidth = 680.0;
+  static const double maxPageMaxWidth = 1600.0;
+
+  static double clampPageMaxWidth(double value) =>
+      value.clamp(minPageMaxWidth, maxPageMaxWidth).roundToDouble();
 
   final List<ProviderProfile> profiles;
   final String? activeProfileId;
@@ -130,6 +172,28 @@ class AppSettings {
   /// Whether the wide shell's rail shows labels (220 px) or icons only
   /// (64 px, the default). Written only when expanded.
   final bool navRailExpanded;
+
+  /// Desktop sidebar width when expanded. Clamped to [minNavRailWidth]..[maxNavRailWidth].
+  final double navRailWidth;
+
+  /// Split ratio of the Queue master list in master-detail layout.
+  final double queueSplitRatio;
+
+  /// Maximum reading measure for capture details and transcript.
+  final double detailReadingWidth;
+
+  /// Width of the metadata column in wide detail view.
+  final double detailMetaWidth;
+
+  /// Maximum centered width of tab content on desktop.
+  final double pageMaxWidth;
+
+  bool get hasCustomLayoutSizes =>
+      navRailWidth != defaultNavRailWidth ||
+      queueSplitRatio != defaultQueueSplitRatio ||
+      detailReadingWidth != defaultDetailReadingWidth ||
+      detailMetaWidth != defaultDetailMetaWidth ||
+      pageMaxWidth != defaultPageMaxWidth;
   final String? vaultPath;
   final String vaultFolder;
   final bool vaultCopySources;
@@ -251,6 +315,16 @@ class AppSettings {
     bool resetTextScale = false,
     QueueDensity? queueDensity,
     bool? navRailExpanded,
+    double? navRailWidth,
+    bool resetNavRailWidth = false,
+    double? queueSplitRatio,
+    bool resetQueueSplitRatio = false,
+    double? detailReadingWidth,
+    bool resetDetailReadingWidth = false,
+    double? detailMetaWidth,
+    bool resetDetailMetaWidth = false,
+    double? pageMaxWidth,
+    bool resetPageMaxWidth = false,
     String? vaultPath,
     bool clearVaultPath = false,
     String? vaultFolder,
@@ -307,6 +381,31 @@ class AppSettings {
           : (textScale != null ? clampTextScale(textScale) : this.textScale),
       queueDensity: queueDensity ?? this.queueDensity,
       navRailExpanded: navRailExpanded ?? this.navRailExpanded,
+      navRailWidth: resetNavRailWidth
+          ? defaultNavRailWidth
+          : (navRailWidth != null
+              ? clampNavRailWidth(navRailWidth)
+              : this.navRailWidth),
+      queueSplitRatio: resetQueueSplitRatio
+          ? defaultQueueSplitRatio
+          : (queueSplitRatio != null
+              ? clampQueueSplitRatio(queueSplitRatio)
+              : this.queueSplitRatio),
+      detailReadingWidth: resetDetailReadingWidth
+          ? defaultDetailReadingWidth
+          : (detailReadingWidth != null
+              ? clampDetailReadingWidth(detailReadingWidth)
+              : this.detailReadingWidth),
+      detailMetaWidth: resetDetailMetaWidth
+          ? defaultDetailMetaWidth
+          : (detailMetaWidth != null
+              ? clampDetailMetaWidth(detailMetaWidth)
+              : this.detailMetaWidth),
+      pageMaxWidth: resetPageMaxWidth
+          ? defaultPageMaxWidth
+          : (pageMaxWidth != null
+              ? clampPageMaxWidth(pageMaxWidth)
+              : this.pageMaxWidth),
       vaultPath: clearVaultPath ? null : (vaultPath ?? this.vaultPath),
       vaultFolder: vaultFolder ?? this.vaultFolder,
       vaultCopySources: vaultCopySources ?? this.vaultCopySources,
@@ -350,6 +449,14 @@ class AppSettings {
       if (queueDensity != QueueDensity.compact)
         'queueDensity': queueDensity.name,
       if (navRailExpanded) 'navRailExpanded': true,
+      if (navRailWidth != defaultNavRailWidth) 'navRailWidth': navRailWidth,
+      if (queueSplitRatio != defaultQueueSplitRatio)
+        'queueSplitRatio': queueSplitRatio,
+      if (detailReadingWidth != defaultDetailReadingWidth)
+        'detailReadingWidth': detailReadingWidth,
+      if (detailMetaWidth != defaultDetailMetaWidth)
+        'detailMetaWidth': detailMetaWidth,
+      if (pageMaxWidth != defaultPageMaxWidth) 'pageMaxWidth': pageMaxWidth,
       'timerMinutes': timerMinutes,
       'timerAlarm': timerAlarm.name,
       if (commandBaseUrl != null) 'commandBaseUrl': commandBaseUrl,
@@ -460,6 +567,31 @@ class AppSettings {
         json['queueDensity'] is String ? json['queueDensity'] as String : null,
       ),
       navRailExpanded: json['navRailExpanded'] == true,
+      navRailWidth: json['navRailWidth'] is num
+          ? AppSettings.clampNavRailWidth(
+              (json['navRailWidth'] as num).toDouble(),
+            )
+          : AppSettings.defaultNavRailWidth,
+      queueSplitRatio: json['queueSplitRatio'] is num
+          ? AppSettings.clampQueueSplitRatio(
+              (json['queueSplitRatio'] as num).toDouble(),
+            )
+          : AppSettings.defaultQueueSplitRatio,
+      detailReadingWidth: json['detailReadingWidth'] is num
+          ? AppSettings.clampDetailReadingWidth(
+              (json['detailReadingWidth'] as num).toDouble(),
+            )
+          : AppSettings.defaultDetailReadingWidth,
+      detailMetaWidth: json['detailMetaWidth'] is num
+          ? AppSettings.clampDetailMetaWidth(
+              (json['detailMetaWidth'] as num).toDouble(),
+            )
+          : AppSettings.defaultDetailMetaWidth,
+      pageMaxWidth: json['pageMaxWidth'] is num
+          ? AppSettings.clampPageMaxWidth(
+              (json['pageMaxWidth'] as num).toDouble(),
+            )
+          : AppSettings.defaultPageMaxWidth,
       autoCleanup: json['autoCleanup'] == true,
       autoInstruction: json['autoInstruction'] != false,
       asrGlossary: json['asrGlossary'] is String

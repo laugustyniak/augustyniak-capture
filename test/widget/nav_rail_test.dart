@@ -194,4 +194,99 @@ void main() {
     expect(recordings, 1);
     expect(toggles, 1);
   });
+
+  testWidgets('resizing sidebar: custom width, drag update, collapse on narrow drag, and reset', (
+    WidgetTester tester,
+  ) async {
+    double? resizedWidth;
+    int resets = 0;
+    int toggles = 0;
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: Row(
+            children: <Widget>[
+              ConsoleNavRail(
+                destinations: destinations,
+                selectedIndex: 0,
+                onSelected: (_) {},
+                reviewed: 3,
+                total: 7,
+                busy: false,
+                onRecord: () {},
+                onCapture: () {},
+                expandedWidth: 260.0,
+                onResizeWidth: (double value) => resizedWidth = value,
+                onResetWidth: () => resets++,
+                onToggleExpanded: () => toggles++,
+              ),
+              const Expanded(child: SizedBox.shrink()),
+            ],
+          ),
+        ),
+      ),
+    );
+
+    expect(tester.getSize(find.byType(ConsoleNavRail)).width, 260.0);
+    final Finder handle = find.bySemanticsLabel('Resize sidebar');
+    expect(handle, findsOneWidget);
+
+    // Drag handle by +50 px (+30 px net after 20 px slop)
+    await tester.drag(handle, const Offset(50, 0));
+    await tester.pump();
+    expect(resizedWidth, 290.0);
+
+    // Dragging left so width < 110 triggers onToggleExpanded
+    await tester.drag(handle, const Offset(-220, 0));
+    await tester.pump();
+    expect(toggles, 1);
+
+    // Double tap handle triggers onResetWidth
+    await tester.tap(handle);
+    await tester.pump(const Duration(milliseconds: 50));
+    await tester.tap(handle);
+    await tester.pumpAndSettle();
+    expect(resets, 1);
+  });
+
+  testWidgets('resizing collapsed sidebar: dragging right past 24 px expands rail', (
+    WidgetTester tester,
+  ) async {
+    int toggles = 0;
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: Row(
+            children: <Widget>[
+              ConsoleNavRail(
+                destinations: destinations,
+                selectedIndex: 0,
+                onSelected: (_) {},
+                reviewed: 3,
+                total: 7,
+                busy: false,
+                onRecord: () {},
+                onCapture: () {},
+                expanded: false,
+                onResizeWidth: (_) {},
+                onToggleExpanded: () => toggles++,
+              ),
+              const Expanded(child: SizedBox.shrink()),
+            ],
+          ),
+        ),
+      ),
+    );
+
+    expect(tester.getSize(find.byType(ConsoleNavRail)).width, 64.0);
+    final Finder handle = find.bySemanticsLabel('Resize sidebar');
+    expect(handle, findsOneWidget);
+
+    // Drag by +50 px (+30 px net after 20 px slop > 24)
+    await tester.drag(handle, const Offset(50, 0));
+    await tester.pumpAndSettle();
+    expect(toggles, 1);
+  });
 }
+
