@@ -183,4 +183,58 @@ void main() {
     );
     inventedOnly.close();
   });
+
+  test(
+    'public http is refused before the daily review sends a request',
+    () async {
+      int requests = 0;
+      final HttpDailyConnectionsService service = HttpDailyConnectionsService(
+        activeProfile: () => const ProviderProfile(
+          id: 'p',
+          name: 'Model',
+          endpoint: 'http://api.example.com/v1/chat/completions',
+          kind: ProfileKind.enrichment,
+          bearerToken: 'token',
+        ),
+        client: MockClient((_) async {
+          requests++;
+          return http.Response('{}', 200);
+        }),
+      );
+
+      await expectLater(
+        service.review(day, recordings),
+        throwsA(isA<InsecureConnectionsEndpointException>()),
+      );
+      expect(requests, 0);
+      expect(
+        const InsecureConnectionsEndpointException().toString(),
+        contains('Use HTTPS'),
+      );
+      service.close();
+    },
+  );
+
+  test('an unsupported endpoint scheme is refused before review', () async {
+    int requests = 0;
+    final HttpDailyConnectionsService service = HttpDailyConnectionsService(
+      activeProfile: () => const ProviderProfile(
+        id: 'p',
+        name: 'Model',
+        endpoint: 'ftp://api.example.com/v1/chat/completions',
+        kind: ProfileKind.enrichment,
+      ),
+      client: MockClient((_) async {
+        requests++;
+        return http.Response('{}', 200);
+      }),
+    );
+
+    await expectLater(
+      service.review(day, recordings),
+      throwsA(isA<InsecureConnectionsEndpointException>()),
+    );
+    expect(requests, 0);
+    service.close();
+  });
 }

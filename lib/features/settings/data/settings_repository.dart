@@ -11,6 +11,17 @@ import '../domain/app_settings.dart';
 import '../domain/provider_profile.dart';
 import '../domain/token_cipher.dart';
 
+class CredentialStorageUnavailableException implements Exception {
+  const CredentialStorageUnavailableException([this.reason]);
+
+  final String? reason;
+
+  @override
+  String toString() =>
+      'Not saved: secure credential storage is unavailable, so new tokens '
+      'cannot be stored.${reason == null ? '' : ' $reason'}';
+}
+
 /// Persists settings in SQLite database while preserving AES-GCM token encryption
 /// at rest via [TokenCipher] and master key in the OS keyring.
 class SettingsRepository {
@@ -20,8 +31,11 @@ class SettingsRepository {
 
   final TokenCipher _cipher;
   final Database? _dbOverride;
+  final Map<String, String> _loadedPlaintextCredentials = <String, String>{};
 
   bool get encryptsTokens => _cipher.encrypts;
+
+  bool get requiresLoadBeforeSave => _cipher.requiresStoredValueInspection;
 
   String? get tokenEncryptionIssue => _cipher.unavailableReason;
 
@@ -65,6 +79,7 @@ class SettingsRepository {
       final dynamic decoded = jsonDecode(raw);
       if (decoded is! Map<String, dynamic>) return null;
       final AppSettings stored = AppSettings.fromJson(decoded);
+      _rememberPlaintextCredentials(stored);
       final AppSettings settings = await unsealTokens(stored);
       if (_cipher.encrypts && _hasPlaintextToken(stored)) {
         try {
@@ -94,7 +109,9 @@ class SettingsRepository {
             await _prepareCipher(raw);
             final dynamic decoded = jsonDecode(raw);
             if (decoded is Map<String, dynamic>) {
-              settings = await unsealTokens(AppSettings.fromJson(decoded));
+              final AppSettings stored = AppSettings.fromJson(decoded);
+              _rememberPlaintextCredentials(stored);
+              settings = await unsealTokens(stored);
             }
           }
         }
@@ -114,6 +131,7 @@ class SettingsRepository {
     if (decoded is! Map<String, dynamic>) return null;
 
     final AppSettings stored = AppSettings.fromJson(decoded);
+    _rememberPlaintextCredentials(stored);
     final AppSettings settings = await unsealTokens(stored);
 
     // A token that will not open is left exactly as it is: only a plaintext
@@ -154,6 +172,7 @@ class SettingsRepository {
 
   Future<void> save(AppSettings settings) async {
     await _cipher.ensureReady();
+    validateCredentialsForSave(settings);
     final AppSettings sealed = await sealTokens(settings);
 
     final File? customFile = await settingsFile();
@@ -168,6 +187,7 @@ class SettingsRepository {
       // reason, as `FileMasterKeyStore.write`.
       await restrictToOwner(temporary.path);
       await temporary.rename(customFile.path);
+      _rememberPlaintextCredentials(sealed);
       return;
     }
 
@@ -178,6 +198,25 @@ class SettingsRepository {
     ''',
       <Object?>[jsonEncode(sealed.toJson())],
     );
+    _rememberPlaintextCredentials(sealed);
+  }
+
+  /// Reject a new plaintext credential synchronously once [load] has prepared
+  /// the cipher. The controller calls this before its optimistic state update,
+  /// while [save] repeats it after [TokenCipher.ensureReady] for direct callers.
+  /// A deliberate [PlaintextTokenCipher] has no unavailable reason and keeps
+  /// the legacy identity behavior used by repository fakes.
+  void validateCredentialsForSave(AppSettings settings) {
+    if (!_cipher.encrypts && _cipher.unavailableReason != null) {
+      final Map<String, String> plaintext = _plaintextCredentials(settings);
+      final bool introducesCredential = plaintext.entries.any(
+        (MapEntry<String, String> entry) =>
+            _loadedPlaintextCredentials[entry.key] != entry.value,
+      );
+      if (introducesCredential) {
+        throw CredentialStorageUnavailableException(_cipher.unavailableReason);
+      }
+    }
   }
 
   Future<AppSettings> sealTokens(AppSettings settings) =>
@@ -250,5 +289,27 @@ class SettingsRepository {
           profile.bearerToken != null &&
           !TokenCipher.isSealed(profile.bearerToken!),
     );
+  }
+
+  void _rememberPlaintextCredentials(AppSettings settings) {
+    _loadedPlaintextCredentials
+      ..clear()
+      ..addAll(_plaintextCredentials(settings));
+  }
+
+  static Map<String, String> _plaintextCredentials(AppSettings settings) {
+    final Map<String, String> values = <String, String>{};
+    void add(String key, String? value) {
+      if (value != null && value.isNotEmpty && !TokenCipher.isSealed(value)) {
+        values[key] = value;
+      }
+    }
+
+    add('command', settings.commandToken);
+    add('s3', settings.s3SecretAccessKey);
+    for (final ProviderProfile profile in settings.profiles) {
+      add('profile:${profile.id}', profile.bearerToken);
+    }
+    return values;
   }
 }

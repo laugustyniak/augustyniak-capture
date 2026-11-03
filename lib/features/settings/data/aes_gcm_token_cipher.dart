@@ -42,6 +42,9 @@ class AesGcmTokenCipher extends TokenCipher {
   bool get encrypts => _ready;
 
   @override
+  bool get requiresStoredValueInspection => true;
+
+  @override
   String? get unavailableReason => _ready ? null : _reason;
 
   @override

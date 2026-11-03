@@ -166,6 +166,8 @@ a key. Presets ship for:
 
 Exactly one profile is active per kind, and the two are independent. **No profile
 = that stage is simply disabled** — recording and persistence carry on unchanged.
+Public custom endpoints require HTTPS. Plain HTTP is accepted only for loopback
+and private-network model servers such as the shipped Ollama and llama.cpp presets.
 
 **The three bolded presets are the defaults worth picking**, because an
 enrichment profile does double duty: it writes titles, categories, summaries and
@@ -253,9 +255,9 @@ you set by hand.
 
 Encrypted with **AES-256-GCM** under a master key held in the OS keyring
 (Keychain / libsecret / DPAPI), stored as `enc:v1:<base64>`. Legacy plaintext
-tokens migrate on the first load with a working keyring. **No keyring → clean
-plaintext fallback, said out loud** in the Models and Config tabs rather than
-failed silently.
+tokens migrate on the first load with a working keyring. If secure credential
+storage is unavailable, existing legacy plaintext tokens remain usable but new
+tokens are refused; the Models tab reports the cause.
 
 ---
 

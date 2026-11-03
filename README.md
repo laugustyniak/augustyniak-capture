@@ -238,8 +238,20 @@ capture carries on unchanged.
 
 The three bolded presets are the ones worth picking: an enrichment profile is also
 the OCR engine for images, so one key turns on both stages. Tokens are encrypted
-at rest (AES-256-GCM, master key in the OS keyring). Wire contracts for custom
-endpoints: [user guide → Connect a provider](docs/user-guide.md#-connect-a-provider).
+at rest (AES-256-GCM, master key in the OS keyring); if secure credential storage
+is unavailable, Capture refuses new tokens instead of writing them in plaintext.
+Public custom endpoints require HTTPS. Wire contracts:
+[user guide → Connect a provider](docs/user-guide.md#-connect-a-provider).
+
+### Privacy boundaries
+
+- Captures, transcripts and exported backups are ordinary local files, readable
+  to the OS account that owns them. Sync E2EE does not encrypt these local copies.
+- Remote transcription, OCR and enrichment send the required capture content to
+  the provider you configure. Public endpoints require HTTPS; plain HTTP remains
+  available only for loopback and private-network model servers.
+- Cloud sync is optional. Client-side E2EE is opt-in; without it, syncing in
+  plaintext requires an explicit confirmation in the app.
 
 ---
 

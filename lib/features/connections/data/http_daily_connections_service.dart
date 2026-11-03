@@ -5,6 +5,7 @@ import 'package:http/http.dart' as http;
 
 import '../../../core/http/bounded_client.dart';
 import '../../../core/http/provider_failure.dart';
+import '../../../core/http/transport_guard.dart';
 import '../../costs/domain/usage_parsing.dart';
 import '../../recordings/domain/recording.dart';
 import '../../settings/domain/provider_profile.dart';
@@ -22,6 +23,15 @@ class ConnectionsResponseException implements Exception {
 
   @override
   String toString() => 'The model returned an unreadable review. Try again.';
+}
+
+class InsecureConnectionsEndpointException implements Exception {
+  const InsecureConnectionsEndpointException();
+
+  @override
+  String toString() =>
+      'Daily review blocked: Use HTTPS, or HTTP only for localhost or a '
+      'private-network model server.';
 }
 
 /// Reviews capture text through the active enrichment profile. The profile is
@@ -71,6 +81,9 @@ class HttpDailyConnectionsService implements DailyConnectionsService {
     final Uri? endpoint = Uri.tryParse(profile?.endpoint.trim() ?? '');
     if (profile == null || endpoint == null || !endpoint.hasScheme) {
       throw const ConnectionsNotConfiguredException();
+    }
+    if (!providerEndpointIsAllowed(endpoint)) {
+      throw const InsecureConnectionsEndpointException();
     }
 
     final List<Map<String, String>> input = <Map<String, String>>[

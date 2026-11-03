@@ -26,12 +26,10 @@ class SecureStorageMasterKeyStore implements MasterKeyStore {
   /// (`CODE_SIGN_IDENTITY = "-"`, see CLAUDE.md), so it has no such identity and
   /// `SecItemAdd` answers `-34018 errSecMissingEntitlement` on every launch.
   ///
-  /// The consequence was invisible, because it degrades exactly the way a
-  /// missing keyring daemon does: [AesGcmTokenCipher] swallows the
-  /// `PlatformException`, `encrypts` stays false, `seal` becomes the identity,
-  /// and the provider tokens are written to `settings.json` in plaintext. The
-  /// only visible trace was one amber line in the Config tab reading
-  /// *"plaintext on disk"*, which is also what a headless Linux box says.
+  /// The consequence used to be a silent plaintext fallback. The cipher still
+  /// reports the platform failure without blocking local capture, but the
+  /// settings repository now refuses new credentials until secure storage is
+  /// available and the Models/Config UI shows the reason.
   ///
   /// `false` selects the classic file-based login keychain, which a
   /// **non-sandboxed** app reaches with no entitlement at all — and the sandbox
@@ -44,8 +42,8 @@ class SecureStorageMasterKeyStore implements MasterKeyStore {
   /// signature, and an ad-hoc signature changes on every rebuild — so a rebuilt
   /// binary can prompt *"Augustyniak Capture wants to use your keychain"*, the
   /// same way a rebuild can re-prompt for microphone consent. Answering "Always
-  /// Allow" once per build settles it; denying it degrades to the plaintext
-  /// fallback rather than failing a capture.
+  /// Allow" once per build settles it; denying it refuses new credentials
+  /// rather than failing a capture.
   static const MacOsOptions macOsOptions = AppSecureStorage.macOsOptions;
 
   static const FlutterSecureStorage _storage = AppSecureStorage.instance;

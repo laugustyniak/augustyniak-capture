@@ -835,6 +835,7 @@ class _ConfigTabState extends State<ConfigTab> {
               value: _tokenStatus(
                 active,
                 widget.controller.tokenEncryptionActive,
+                widget.controller.tokenEncryptionIssue,
               ),
               valueColor: _tokenColor(
                 active,
@@ -948,15 +949,20 @@ class _ConfigTabState extends State<ConfigTab> {
       audio.bitRate * 3600 / 8 / 1024 / 1024;
 }
 
-String _tokenStatus(ProviderProfile? active, bool encrypted) {
+String _tokenStatus(
+  ProviderProfile? active,
+  bool encrypted,
+  String? encryptionIssue,
+) {
   final String? token = active?.bearerToken;
   if (token == null) return 'none';
   if (TokenCipher.isSealed(token)) {
-    // The master key moved off the keyring into a file beside the database, so
-    // naming the keyring here would send someone to fix the wrong thing.
     return '•••• unreadable — master key unavailable';
   }
-  return encrypted ? '•••• encrypted at rest' : '•••• set (plaintext on disk)';
+  if (encrypted) return '•••• encrypted at rest';
+  return encryptionIssue == null
+      ? '•••• set (plaintext on disk)'
+      : '•••• legacy token · secure storage unavailable';
 }
 
 Color _tokenColor(ProviderProfile? active, bool encrypted) {

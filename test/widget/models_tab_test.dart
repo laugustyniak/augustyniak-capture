@@ -9,6 +9,11 @@ import 'package:augustyniak_capture/features/settings/presentation/settings_cont
 
 import '../support/harness.dart';
 
+class _EncryptedSettingsRepository extends FakeSettingsRepository {
+  @override
+  bool get encryptsTokens => true;
+}
+
 /// Guards the profile list before the destructive-confirm dialog and the
 /// icon-tile pattern are extracted into `ui_kit.dart`.
 void main() {
@@ -290,21 +295,18 @@ void main() {
     expect(find.textContaining('plaintext'), findsNothing);
   });
 
-  testWidgets('the storage note names neither settings.json nor the keyring', (
+  testWidgets('the storage note names the OS keyring, not settings.json', (
     WidgetTester tester,
   ) async {
-    // Both claims went stale under the same pair of commits: settings moved to
-    // SQLite, and the master key moved to a file beside it because the keyring
-    // keys access to a code signature an ad-hoc build changes on every build.
-    // A note about where a reader's secrets live is the one place that must not
-    // be approximately right.
-    final SettingsController controller = buildSettingsController();
+    final SettingsController controller = SettingsController(
+      repository: _EncryptedSettingsRepository(),
+    );
     await controller.initialize();
     await pumpModels(tester, controller);
 
-    await scrollTo(tester, find.textContaining('plaintext'));
+    await scrollTo(tester, find.textContaining('OS keyring'));
     expect(find.textContaining('settings.json'), findsNothing);
-    expect(find.textContaining('keyring'), findsNothing);
+    expect(find.textContaining('OS keyring'), findsOneWidget);
   });
 
   testWidgets('a sealed token is not advertised as set', (
@@ -384,10 +386,7 @@ void main() {
     expect(find.textContaining('cannot be decrypted'), findsNothing);
   });
 
-  /// The endpoint is free text behind a `hasScheme` guard, so `http://` is
-  /// accepted as readily as `https://` — and then the token, the audio and the
-  /// transcript all go out in the clear with nothing on screen saying so.
-  testWidgets('a plain-http endpoint says so on the profile', (
+  testWidgets('a public plain-http endpoint is visibly blocked', (
     WidgetTester tester,
   ) async {
     final SettingsController controller = buildSettingsController();
@@ -398,7 +397,7 @@ void main() {
     );
     await pumpModels(tester, controller);
 
-    expect(find.text('NO TLS'), findsWidgets);
+    expect(find.text('BLOCKED · USE HTTPS'), findsWidgets);
   });
 
   testWidgets('a local model server is not accused of anything', (
@@ -414,7 +413,7 @@ void main() {
     );
     await pumpModels(tester, controller);
 
-    expect(find.text('NO TLS'), findsNothing);
+    expect(find.text('BLOCKED · USE HTTPS'), findsNothing);
   });
 
   testWidgets('a text-only enrichment profile renders NO OCR pill', (
