@@ -207,8 +207,9 @@ sudo apt-get install keybinder-3.0   # resolves to libkeybinder-3.0-dev
 **Linux builds also need `libsecret-1-dev`** — `flutter_secure_storage` links
 against libsecret for the token-encryption master key. Without it
 `flutter build linux` fails at build time. At runtime a keyring daemon
-(gnome-keyring) must be running and unlocked, otherwise token encryption
-degrades to plaintext with a visible Config-tab warning:
+(gnome-keyring) must be running and unlocked. Otherwise existing legacy
+plaintext tokens remain usable, but new credentials are refused with a visible
+Models/Config warning:
 
 ```bash
 sudo apt-get install libsecret-1-dev

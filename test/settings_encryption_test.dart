@@ -5,8 +5,10 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:augustyniak_capture/features/settings/data/aes_gcm_token_cipher.dart';
 import 'package:augustyniak_capture/features/settings/data/settings_repository.dart';
 import 'package:augustyniak_capture/features/settings/domain/app_settings.dart';
+import 'package:augustyniak_capture/features/settings/domain/app_theme_mode.dart';
 import 'package:augustyniak_capture/features/settings/domain/provider_profile.dart';
 import 'package:augustyniak_capture/features/settings/domain/token_cipher.dart';
+import 'package:augustyniak_capture/features/settings/presentation/settings_controller.dart';
 import 'package:augustyniak_capture/features/transcription/data/transcription_service.dart';
 
 /// Same convention as `_FakeSettingsRepository` in settings_test.dart, but
@@ -58,6 +60,15 @@ class _UnreadableKeyStore implements MasterKeyStore {
   Future<void> write(String next) async {
     hidden = next;
   }
+}
+
+class _UnavailableKeyStore implements MasterKeyStore {
+  @override
+  Future<String?> read() async => throw StateError('keyring unavailable');
+
+  @override
+  Future<void> write(String next) async =>
+      throw StateError('keyring unavailable');
 }
 
 AppSettings _settingsWithToken(String? token) {
@@ -258,6 +269,222 @@ void main() {
       expect(loaded!.profiles.single.bearerToken, 'sk-secret');
       expect(await fileIn(tempDir).readAsString(), legacy);
       expect(repository.encryptsTokens, isFalse);
+      expect(repository.tokenEncryptionIssue, isNull);
+    });
+
+    test('an unavailable keyring refuses a new plaintext token', () async {
+      final File file = fileIn(tempDir);
+      final _TempFileSettingsRepository repository =
+          _TempFileSettingsRepository(
+            file,
+            cipher: AesGcmTokenCipher(keyStore: _UnavailableKeyStore()),
+          );
+
+      await expectLater(
+        repository.save(_settingsWithToken('new-secret')),
+        throwsA(isA<CredentialStorageUnavailableException>()),
+      );
+
+      expect(await file.exists(), isFalse);
+    });
+
+    test('an unavailable keyring still saves non-secret settings', () async {
+      final File file = fileIn(tempDir);
+      final _TempFileSettingsRepository repository =
+          _TempFileSettingsRepository(
+            file,
+            cipher: AesGcmTokenCipher(keyStore: _UnavailableKeyStore()),
+          );
+
+      await repository.save(
+        const AppSettings(asrGlossary: 'Augustyniak Capture'),
+      );
+
+      expect(await file.readAsString(), contains('Augustyniak Capture'));
+    });
+
+    test('an unavailable keyring preserves an existing plaintext token while '
+        'saving non-secret settings', () async {
+      final File file = fileIn(tempDir);
+      await file.writeAsString(
+        jsonEncode(_settingsWithToken('existing-secret').toJson()),
+      );
+      final _TempFileSettingsRepository repository =
+          _TempFileSettingsRepository(
+            file,
+            cipher: AesGcmTokenCipher(keyStore: _UnavailableKeyStore()),
+          );
+      final AppSettings loaded = (await repository.load())!;
+
+      await repository.save(
+        loaded.copyWith(asrGlossary: 'Augustyniak Capture'),
+      );
+
+      final String raw = await file.readAsString();
+      expect(raw, contains('existing-secret'));
+      expect(raw, contains('Augustyniak Capture'));
+    });
+
+    test(
+      'an unavailable keyring refuses replacing a legacy plaintext token',
+      () async {
+        final File file = fileIn(tempDir);
+        await file.writeAsString(
+          jsonEncode(_settingsWithToken('existing-secret').toJson()),
+        );
+        final _TempFileSettingsRepository repository =
+            _TempFileSettingsRepository(
+              file,
+              cipher: AesGcmTokenCipher(keyStore: _UnavailableKeyStore()),
+            );
+        final AppSettings loaded = (await repository.load())!;
+
+        await expectLater(
+          repository.save(
+            loaded.copyWith(
+              profiles: <ProviderProfile>[
+                loaded.profiles.single.copyWith(bearerToken: 'replacement'),
+              ],
+            ),
+          ),
+          throwsA(isA<CredentialStorageUnavailableException>()),
+        );
+
+        final String raw = await file.readAsString();
+        expect(raw, contains('existing-secret'));
+        expect(raw, isNot(contains('replacement')));
+      },
+    );
+
+    test('a rejected token does not become active in the controller', () async {
+      final _TempFileSettingsRepository repository =
+          _TempFileSettingsRepository(
+            fileIn(tempDir),
+            cipher: AesGcmTokenCipher(keyStore: _UnavailableKeyStore()),
+          );
+      final SettingsController controller = SettingsController(
+        repository: repository,
+      );
+      await controller.initialize();
+
+      await controller.addProfile(
+        name: 'Provider',
+        endpoint: 'https://api.example.com/v1/audio/transcriptions',
+        bearerToken: 'new-secret',
+      );
+
+      expect(controller.settings.profiles, isEmpty);
+      expect(controller.error, contains('secure credential storage'));
+    });
+
+    test(
+      'a rejected token cannot leak into an overlapping non-secret save',
+      () async {
+        final File file = fileIn(tempDir);
+        final _TempFileSettingsRepository repository =
+            _TempFileSettingsRepository(
+              file,
+              cipher: AesGcmTokenCipher(keyStore: _UnavailableKeyStore()),
+            );
+        final SettingsController controller = SettingsController(
+          repository: repository,
+        );
+        await controller.initialize();
+
+        final Future<ProviderProfile> rejected = controller.addProfile(
+          name: 'Provider',
+          endpoint: 'https://api.example.com/v1/audio/transcriptions',
+          bearerToken: 'new-secret',
+        );
+        final Future<void> accepted = controller.setThemeMode(
+          AppThemeMode.light,
+        );
+        await Future.wait(<Future<Object?>>[rejected, accepted]);
+
+        expect(controller.settings.profiles, isEmpty);
+        expect(controller.themeMode, AppThemeMode.light);
+        final String raw = await file.readAsString();
+        expect(raw, isNot(contains('new-secret')));
+        expect(raw, contains('light'));
+      },
+    );
+
+    test(
+      'credential storage is ready before a pre-initialize token mutation',
+      () async {
+        final File file = fileIn(tempDir);
+        final _TempFileSettingsRepository repository =
+            _TempFileSettingsRepository(
+              file,
+              cipher: AesGcmTokenCipher(keyStore: _UnavailableKeyStore()),
+            );
+        final SettingsController controller = SettingsController(
+          repository: repository,
+        );
+
+        final Future<void> initialization = controller.initialize();
+        final Future<ProviderProfile> rejected = controller.addProfile(
+          name: 'Provider',
+          endpoint: 'https://api.example.com/v1/audio/transcriptions',
+          bearerToken: 'new-secret',
+        );
+        final Future<void> accepted = controller.setThemeMode(
+          AppThemeMode.light,
+        );
+        await Future.wait(<Future<Object?>>[
+          initialization,
+          rejected,
+          accepted,
+        ]);
+
+        expect(controller.settings.profiles, isEmpty);
+        expect(controller.themeMode, AppThemeMode.system);
+        expect(await file.exists(), isFalse);
+        expect(controller.error, contains('secure credential storage'));
+      },
+    );
+
+    test('a pre-initialize token mutation cannot replace a lost key', () async {
+      final File file = fileIn(tempDir);
+      final _MemoryKeyStore originalKeyStore = _MemoryKeyStore();
+      await _TempFileSettingsRepository(
+        file,
+        cipher: AesGcmTokenCipher(keyStore: originalKeyStore),
+      ).save(_settingsWithToken('stored-secret'));
+      final String sealedOnDisk = await file.readAsString();
+      final String originalKey = originalKeyStore.value!;
+
+      final _UnreadableKeyStore unreadableKeyStore = _UnreadableKeyStore(
+        originalKey,
+      );
+      final SettingsController controller = SettingsController(
+        repository: _TempFileSettingsRepository(
+          file,
+          cipher: AesGcmTokenCipher(keyStore: unreadableKeyStore),
+        ),
+      );
+
+      final Future<void> initialization = controller.initialize();
+      final Future<ProviderProfile> rejected = controller.addProfile(
+        name: 'Provider',
+        endpoint: 'https://api.example.com/v1/audio/transcriptions',
+        bearerToken: 'new-secret',
+      );
+      final Future<void> rejectedTheme = controller.setThemeMode(
+        AppThemeMode.light,
+      );
+      await Future.wait(<Future<Object?>>[
+        initialization,
+        rejected,
+        rejectedTheme,
+      ]);
+
+      expect(unreadableKeyStore.hidden, originalKey);
+      expect(await file.readAsString(), sealedOnDisk);
+      expect(controller.settings.profiles, hasLength(1));
+      expect(controller.settings.profiles.single.usableBearerToken, isNull);
+      expect(controller.themeMode, AppThemeMode.system);
+      expect(controller.error, contains('secure credential storage'));
     });
 
     test('a blob sealed under a lost key survives load and re-save', () async {

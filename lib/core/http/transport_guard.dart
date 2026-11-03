@@ -1,9 +1,9 @@
 /// Whether a request to [uri] would carry its bearer token in the clear to a
 /// host that is not the user's own.
 ///
-/// Shared by every client that puts a token in an `Authorization` header:
-/// provider profiles report it as a `NO TLS` pill, the Command address refuses
-/// it at save time. **Only a public host over plain `http` is insecure.**
+/// Used by Command's save-time policy. Provider requests use
+/// [providerEndpointIsAllowed], which also rejects unsupported schemes.
+/// **Only a public host over plain `http` is insecure here.**
 /// `http://localhost:11434` (Ollama), `http://localhost:8080` (llama.cpp) and a
 /// server on the desk under the LAN are first-class setups — flagging those
 /// would train the warning away, which costs more than it buys.
@@ -15,6 +15,16 @@ bool transportIsInsecure(Uri uri) {
   if (uri.host.isEmpty) return false;
   if (uri.scheme.toLowerCase() != 'http') return false;
   return !isOwnNetworkHost(uri.host);
+}
+
+/// Whether an AI-provider endpoint uses a supported transport: HTTPS for any
+/// host, or plain HTTP only for a loopback/private-network model server.
+/// Command has its own policy and deliberately does not use this helper.
+bool providerEndpointIsAllowed(Uri uri) {
+  if (uri.host.isEmpty) return false;
+  final String scheme = uri.scheme.toLowerCase();
+  if (scheme == 'https') return true;
+  return scheme == 'http' && isOwnNetworkHost(uri.host);
 }
 
 /// Loopback, or one of the three private IPv4 ranges.

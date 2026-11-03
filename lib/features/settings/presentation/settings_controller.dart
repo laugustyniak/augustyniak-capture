@@ -90,6 +90,7 @@ class SettingsController extends ChangeNotifier {
   /// [_error]: a later unrelated `_persist` failure also sets `_error`
   /// without meaning settings were never loaded.
   bool _loaded = false;
+  Future<void>? _initialization;
 
   // Cached so that unrelated changes (audio params, profile reordering) don't
   // spawn a fresh HttpWhisperTranscriptionService — and with it a fresh
@@ -192,8 +193,9 @@ class SettingsController extends ChangeNotifier {
       _settings.hasCustomEnrichmentInstructions;
   String? get error => _error;
 
-  /// Whether tokens written to disk are actually encrypted. False on the
-  /// plaintext fallback (no master key) so the Models/Config tabs can say so.
+  /// Whether tokens written to disk are actually encrypted. False when the
+  /// master key is unavailable so the Models/Config tabs can explain why new
+  /// credentials cannot be saved.
   bool get tokenEncryptionActive => _repository.encryptsTokens;
 
   /// What the key store said when it refused, for the Models tab. Null when
@@ -212,14 +214,9 @@ class SettingsController extends ChangeNotifier {
   /// a stored value still carries the `enc:v1:` marker after [initialize] has
   /// run the cipher over it.
   ///
-  /// **This is a failure, not the plaintext fallback, and the two must not
-  /// share a message.** With no master key an install simply never encrypts and
-  /// every token keeps working; here they were encrypted, the key is out of
-  /// reach, and `ProviderProfile.usableBearerToken` drops each blob rather than
-  /// putting it in an `Authorization` header. The observable result is a 401
-  /// reading "you didn't provide an API key" on every capture, with the amber
-  /// "stored as plaintext" note — which is the opposite of what happened —
-  /// as the only thing on screen.
+  /// This is distinct from a legacy plaintext token: here the token is
+  /// protected but unusable until the key returns. `usableBearerToken` drops
+  /// the sealed blob rather than putting it in an `Authorization` header.
   bool get sealedTokensUnreadable {
     if (tokenEncryptionActive) return false;
     bool sealed(String? value) => value != null && TokenCipher.isSealed(value);
@@ -399,7 +396,9 @@ class SettingsController extends ChangeNotifier {
   CommandClient? _command;
   String? _commandSignature;
 
-  Future<void> initialize() async {
+  Future<void> initialize() => _initialization ??= _initialize();
+
+  Future<void> _initialize() async {
     try {
       final AppSettings? stored = await _repository.load();
       if (stored != null) {
@@ -407,9 +406,18 @@ class SettingsController extends ChangeNotifier {
       } else {
         // First run: build-time defines seed the first profile, then the saved
         // file wins forever after.
-        _settings = _seedFromEnvironment();
-        if (_settings.profiles.isNotEmpty) {
-          await _repository.save(_settings);
+        final AppSettings seed = _seedFromEnvironment();
+        if (seed.profiles.isNotEmpty) {
+          try {
+            await _repository.save(seed);
+            _settings = seed;
+          } catch (exception) {
+            // A build-time token must not become a usable, memory-only
+            // credential after secure storage refused it. The empty settings
+            // keep local capture usable and the error tells the user what to
+            // repair before adding a remote provider.
+            _error = exception.toString();
+          }
         }
       }
       _loaded = true;
@@ -428,6 +436,9 @@ class SettingsController extends ChangeNotifier {
     String? language,
     String? bearerToken,
   }) async {
+    if ((bearerToken?.trim().isNotEmpty ?? false) && !_loaded) {
+      await initialize();
+    }
     final ProviderProfile profile = ProviderProfile(
       id: _uuid.v4(),
       name: name.trim().isEmpty ? 'Profile' : name.trim(),
@@ -455,6 +466,9 @@ class SettingsController extends ChangeNotifier {
   }
 
   Future<void> updateProfile(ProviderProfile updated) async {
+    if ((updated.bearerToken?.trim().isNotEmpty ?? false) && !_loaded) {
+      await initialize();
+    }
     await _persist(
       _settings.copyWith(
         profiles: _settings.profiles
@@ -604,16 +618,15 @@ class SettingsController extends ChangeNotifier {
   /// saves has a moment on disk where the token belongs to an address that is
   /// no longer there.
   ///
-  /// **A public `http://` address is refused, not reported.** A provider
-  /// profile gets a `NO TLS` pill because `http://localhost` model servers are
-  /// shipped presets; the fleet token is a different kind of secret — it opens
-  /// a host that can run agents on the user's repositories — and nothing on a
-  /// public host answers over plain HTTP on purpose. Loopback and private IPv4
-  /// stay allowed, exactly as for providers. Throws [InsecureCommandAddress]
+  /// A public `http://` address is refused, as it is for provider profiles.
+  /// Loopback and private IPv4 stay allowed. Throws [InsecureCommandAddress]
   /// before anything is written, so the stored pair is untouched.
   Future<void> setCommandConfig({String? baseUrl, String? token}) async {
     if (baseUrl != null && commandAddressIsInsecure(baseUrl)) {
       throw InsecureCommandAddress(baseUrl.trim());
+    }
+    if ((token?.trim().isNotEmpty ?? false) && !_loaded) {
+      await initialize();
     }
     await _persist(
       _settings.copyWith(
@@ -633,6 +646,9 @@ class SettingsController extends ChangeNotifier {
     String? secretAccessKey,
     String? prefix,
   }) async {
+    if ((secretAccessKey?.trim().isNotEmpty ?? false) && !_loaded) {
+      await initialize();
+    }
     await _persist(
       _settings.copyWith(
         s3Endpoint: endpoint,
@@ -925,12 +941,37 @@ class SettingsController extends ChangeNotifier {
       _persist(_settings.copyWith(resetShortcuts: true));
 
   Future<void> _persist(AppSettings next) async {
+    if (!_loaded && _repository.requiresLoadBeforeSave) {
+      // `next` was built from the pre-load empty snapshot. Waiting here and
+      // saving it afterwards would overwrite whatever initialize() discovers;
+      // saving immediately could also initialize the key store before sealed
+      // settings announce that their old key must already exist. Refuse this
+      // transient write and let the UI retry from the loaded snapshot.
+      _error = 'Settings are still loading. Try again.';
+      notifyListeners();
+      return;
+    }
+    try {
+      _repository.validateCredentialsForSave(next);
+    } on CredentialStorageUnavailableException catch (exception) {
+      _error = exception.toString();
+      notifyListeners();
+      return;
+    }
+    final AppSettings previous = _settings;
     _settings = next;
     _error = null;
     notifyListeners();
     try {
       await _repository.save(next);
     } catch (exception) {
+      if (exception is CredentialStorageUnavailableException &&
+          identical(_settings, next)) {
+        // A refused credential must not become a usable memory-only secret.
+        // The identity check avoids undoing a newer optimistic update if two
+        // setters overlap.
+        _settings = previous;
+      }
       _error = exception.toString();
       notifyListeners();
     }

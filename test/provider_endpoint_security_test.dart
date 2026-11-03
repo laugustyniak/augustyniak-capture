@@ -1,4 +1,9 @@
+import 'package:augustyniak_capture/features/enrichment/data/http_chat_enrichment_service.dart';
+import 'package:augustyniak_capture/features/enrichment/domain/embedding_service.dart';
+import 'package:augustyniak_capture/features/enrichment/domain/enrichment_service.dart';
+import 'package:augustyniak_capture/features/processing/data/ocr_service.dart';
 import 'package:augustyniak_capture/features/settings/domain/provider_profile.dart';
+import 'package:augustyniak_capture/features/transcription/data/transcription_service.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 /// A provider profile decides where the bearer token, the audio and the
@@ -101,5 +106,43 @@ void main() {
         isTrue,
       );
     });
+  });
+
+  test('public http is disabled for every provider request path', () {
+    final ProviderProfile profile = profileAt(
+      'http://api.example.com/v1/chat/completions',
+    );
+
+    expect(profile.toService(), isA<DisabledTranscriptionService>());
+    expect(profile.toEnrichmentService(), isA<DisabledEnrichmentService>());
+    expect(profile.toOcrService(), isA<DisabledOcrService>());
+    expect(
+      profile.toEmbeddingService(model: 'embedding-model'),
+      isA<DisabledEmbeddingService>(),
+    );
+  });
+
+  test('unsupported network schemes are blocked like public http', () {
+    for (final String endpoint in <String>[
+      'ftp://api.example.com/v1/chat/completions',
+      'ws://api.example.com/v1/chat/completions',
+    ]) {
+      final ProviderProfile profile = profileAt(endpoint);
+      expect(profile.usesInsecureTransport, isTrue, reason: endpoint);
+      expect(
+        profile.toEnrichmentService(),
+        isA<DisabledEnrichmentService>(),
+        reason: endpoint,
+      );
+    }
+  });
+
+  test('private-network http still builds provider clients', () {
+    final ProviderProfile profile = profileAt(
+      'http://192.168.1.5/v1/chat/completions',
+    );
+
+    expect(profile.toService(), isA<HttpWhisperTranscriptionService>());
+    expect(profile.toEnrichmentService(), isA<HttpChatEnrichmentService>());
   });
 }

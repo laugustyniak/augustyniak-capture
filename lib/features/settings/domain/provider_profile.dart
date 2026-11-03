@@ -85,8 +85,8 @@ class ProviderProfile {
   /// Optional ISO-639-1 hint (`pl`, `en`). Skips language auto-detection.
   final String? language;
 
-  /// Encrypted at rest in `settings.json` when the OS keyring is available
-  /// (see `TokenCipher`); plaintext otherwise, which the Config tab surfaces.
+  /// Encrypted at rest when the OS keyring is available (see `TokenCipher`).
+  /// A new value is refused when secure credential storage is unavailable.
   /// In memory this is normally the plaintext value, but after a failed
   /// decrypt (keyring wiped or locked) it holds the sealed `enc:v1:` blob so
   /// the stored token is never destroyed — [usableBearerToken] filters that
@@ -98,13 +98,13 @@ class ProviderProfile {
   /// Whether this profile would put the bearer token, the audio and the
   /// transcript on the wire in the clear.
   ///
-  /// **Reported rather than refused, and only for a host that is not the
-  /// user's own.** `http://localhost:11434` (Ollama) and
+  /// **Refused unless HTTPS, or HTTP to a host that is the user's own.**
+  /// `http://localhost:11434` (Ollama) and
   /// `http://localhost:8080` (llama.cpp) are first-class setups this app ships
   /// presets for, and a model server on the desk under the LAN is the same
   /// decision — flagging those would train the warning away, which costs more
-  /// than it buys. Plain HTTP to a host on the internet is the case that is
-  /// almost never chosen deliberately: the endpoint is free text behind a
+  /// than it buys. Plain HTTP to a host on the internet and unsupported
+  /// network schemes are blocked: the endpoint is free text behind a
   /// `hasScheme` guard, so it takes one copied example.
   ///
   /// An endpoint that reaches nothing at all is not flagged: it already
@@ -112,7 +112,7 @@ class ProviderProfile {
   /// field would bury the first.
   bool get usesInsecureTransport {
     final Uri? uri = hasEndpoint ? Uri.tryParse(endpoint.trim()) : null;
-    return uri != null && transportIsInsecure(uri);
+    return uri != null && uri.hasScheme && !providerEndpointIsAllowed(uri);
   }
 
   /// The token a request may actually send: null when unset, blank, or still
@@ -208,8 +208,8 @@ class ProviderProfile {
     UsageSink usageSink = const NoopUsageSink(),
   }) {
     if (!kind.isRemote) return const DisabledTranscriptionService();
-    final Uri? uri = hasEndpoint ? Uri.tryParse(endpoint.trim()) : null;
-    if (uri == null || !uri.hasScheme) {
+    final Uri? uri = _requestEndpoint;
+    if (uri == null) {
       return const DisabledTranscriptionService();
     }
     return HttpWhisperTranscriptionService(
@@ -230,8 +230,8 @@ class ProviderProfile {
   EnrichmentService toEnrichmentService({
     UsageSink usageSink = const NoopUsageSink(),
   }) {
-    final Uri? uri = hasEndpoint ? Uri.tryParse(endpoint.trim()) : null;
-    if (uri == null || !uri.hasScheme) {
+    final Uri? uri = _requestEndpoint;
+    if (uri == null) {
       return const DisabledEnrichmentService();
     }
     return HttpChatEnrichmentService(
@@ -248,8 +248,8 @@ class ProviderProfile {
   /// and one profile configuring both stages beats a third Models-tab section.
   /// Same blank-or-schemeless guard as [toService].
   OcrService toOcrService({UsageSink usageSink = const NoopUsageSink()}) {
-    final Uri? uri = hasEndpoint ? Uri.tryParse(endpoint.trim()) : null;
-    if (uri == null || !uri.hasScheme) {
+    final Uri? uri = _requestEndpoint;
+    if (uri == null) {
       return const DisabledOcrService();
     }
     return HttpVisionOcrService(
@@ -268,10 +268,8 @@ class ProviderProfile {
     required String model,
     UsageSink usageSink = const NoopUsageSink(),
   }) {
-    final Uri? uri = hasEndpoint ? Uri.tryParse(endpoint.trim()) : null;
-    final Uri? embeddings = uri == null || !uri.hasScheme
-        ? null
-        : embeddingsEndpointFor(uri);
+    final Uri? uri = _requestEndpoint;
+    final Uri? embeddings = uri == null ? null : embeddingsEndpointFor(uri);
     if (embeddings == null) return const DisabledEmbeddingService();
     return HttpEmbeddingService(
       endpoint: embeddings,
@@ -307,6 +305,17 @@ class ProviderProfile {
     if (value == null) return null;
     final String trimmed = value.trim();
     return trimmed.isEmpty ? null : trimmed;
+  }
+
+  /// A remote endpoint that is complete enough and safe enough to request.
+  /// Loopback and private-network HTTP remain valid for user-owned model
+  /// servers; public hosts require HTTPS.
+  Uri? get _requestEndpoint {
+    final Uri? uri = hasEndpoint ? Uri.tryParse(endpoint.trim()) : null;
+    if (uri == null || !uri.hasScheme || !providerEndpointIsAllowed(uri)) {
+      return null;
+    }
+    return uri;
   }
 
   static const Set<String> _knownTextOnlyModels = <String>{

@@ -49,12 +49,9 @@ class ModelsTab extends StatelessWidget {
           // are what an existing install is here to edit.
           LocalModelsSection(controller: controller, store: modelStore),
           const SizedBox(height: 14),
-          // Three states, not two. "Encrypted, key unreachable" is a failure
-          // and shares nothing with the plaintext fallback below it: there the
-          // tokens work and are merely unprotected, here they are protected and
-          // do not work. Reporting the second as the first is what left a
-          // string of 401s on screen with an amber line claiming the tokens
-          // were sitting on disk in the clear — the opposite of the truth.
+          // Three states: encrypted and available; encrypted but locked; or
+          // secure storage unavailable, where existing legacy plaintext
+          // tokens remain usable but new credentials are refused.
           if (controller.sealedTokensUnreadable)
             ErrorBanner(
               message:
@@ -80,25 +77,18 @@ class ModelsTab extends StatelessWidget {
                   Expanded(
                     child: Text(
                       controller.tokenEncryptionActive
-                          // Neither half of this sentence may name the keyring
-                          // or settings.json any more: the key is an
-                          // owner-only file beside the database, and the
-                          // settings live in the database rather than in a
-                          // JSON file. A note about where someone's secrets
-                          // are is the one place that cannot be approximately
-                          // right.
                           ? 'Tokens are encrypted at rest (AES-256-GCM). The '
-                                'key is an owner-only file next to the '
-                                'database, never inside it.'
+                                'master key is held in the OS keyring.'
                           // The reason is appended rather than replacing the
                           // sentence: what it costs the user comes first, and
                           // the key store's own words are what makes the
                           // difference between "nothing to read here" and a
                           // real bug findable at all. Null until initialize()
                           // has made the cipher try.
-                          : 'Tokens are stored as plaintext in the app '
-                                'database — no master key could be read or '
-                                'created.'
+                          : 'Secure credential storage is unavailable. New '
+                                'tokens will not be saved; existing legacy '
+                                'plaintext tokens remain usable until a '
+                                'master key can be read or created.'
                                 '${controller.tokenEncryptionIssue == null ? '' : '\n${controller.tokenEncryptionIssue}'}',
                       style: TextStyle(
                         color: Console.mutedSoft,
@@ -335,7 +325,7 @@ class _ActiveProfileCard extends StatelessWidget {
               // the warning belongs beside TOKEN SET rather than only on the
               // card further down the tab.
               if (item?.usesInsecureTransport ?? false)
-                StatusPill(label: 'NO TLS', color: Console.amber),
+                StatusPill(label: 'BLOCKED · USE HTTPS', color: Console.red),
             ],
           ),
         ],
@@ -424,12 +414,11 @@ class _ProfileCard extends StatelessWidget {
                         if (profile.kind == ProfileKind.enrichment &&
                             !profile.supportsVision)
                           StatusPill(label: 'NO OCR', color: Console.amber),
-                        // Amber rather than red: plain HTTP to a machine the
-                        // user controls is a documented setup, so this only
-                        // ever appears for a host on the internet — where it
-                        // is a mistake rather than a failure.
                         if (profile.usesInsecureTransport)
-                          StatusPill(label: 'NO TLS', color: Console.amber),
+                          StatusPill(
+                            label: 'BLOCKED · USE HTTPS',
+                            color: Console.red,
+                          ),
                       ],
                     ),
                   ],

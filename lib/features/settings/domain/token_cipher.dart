@@ -24,6 +24,12 @@ abstract class TokenCipher {
   /// tab copy and the load-time migration decision.
   bool get encrypts;
 
+  /// Whether persisted values must be inspected before the first save can
+  /// prepare this cipher. A key-generating cipher needs that ordering so
+  /// sealed values can announce that a missing key is a failure, not a first
+  /// run. Deliberate identity ciphers do not.
+  bool get requiresStoredValueInspection => false;
+
   /// Why [encrypts] is false, in one short human-readable line, or null when there
   /// is nothing to explain (encryption is on, or this implementation never
   /// encrypts by design).
@@ -58,8 +64,10 @@ abstract class TokenCipher {
   Future<String> unseal(String stored);
 }
 
-/// Identity cipher: the fallback when no keyring is available, and the
-/// default in tests. Keeps the pre-encryption behaviour byte for byte.
+/// Deliberate identity cipher used by repository fakes and compatibility tests.
+/// Its null [unavailableReason] distinguishes an intentional plaintext store
+/// from a production cipher whose keyring failed; only the latter refuses new
+/// credentials.
 class PlaintextTokenCipher extends TokenCipher {
   const PlaintextTokenCipher();
 
