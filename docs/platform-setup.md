@@ -193,7 +193,9 @@ rm -rf build/linux   # after any package or toolchain change: a stale CMake cach
 
 `libgstreamer*` and `libpulse-dev` are for audio playback and recording,
 `libayatana-appindicator3-dev` for the tray. The two that fail most confusingly
-are explained below.
+are explained below. The whisper.cpp `FetchContent` clone in
+`native/CMakeLists.txt` can fail once on a flaky network; rerunning the build
+fixes it.
 
 **Linux builds need `keybinder-3.0` installed first.** `hotkey_manager` (global
 shortcuts) links against it, and without it `flutter build linux` aborts at
