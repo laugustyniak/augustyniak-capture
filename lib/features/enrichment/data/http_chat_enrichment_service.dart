@@ -11,12 +11,14 @@ import '../../costs/domain/usage_sink.dart';
 import '../../recordings/domain/capture_category.dart';
 import '../../recordings/domain/capture_priority.dart';
 import '../../recordings/domain/connection_reasoner.dart';
+import '../../recordings/domain/smart_route.dart';
 import '../../recordings/domain/suggested_route.dart';
 import '../domain/enrichment_context.dart';
 import '../domain/enrichment_prompt.dart';
 import '../domain/enrichment_result.dart';
 import '../domain/enrichment_service.dart';
 import '../domain/instruction_writer.dart';
+import '../domain/intent_classifier.dart';
 import '../domain/transcript_cleaner.dart';
 
 /// OpenAI-compatible `/v1/chat/completions` client.
@@ -30,7 +32,8 @@ class HttpChatEnrichmentService
         EnrichmentService,
         ConnectionReasoner,
         TranscriptCleaner,
-        InstructionWriter {
+        InstructionWriter,
+        IntentClassifier {
   HttpChatEnrichmentService({
     required this.endpoint,
     this.bearerToken,
@@ -344,6 +347,56 @@ class HttpChatEnrichmentService
     final String body = utf8.decode(response.bodyBytes);
     _recordUsage(body);
     return _stripFence(parseTextContent(body)).trim();
+  }
+
+  /// One JSON-mode request. The reply is validated by [parseIntentReply]: a
+  /// name outside the offered set, or anything unreadable, is a note. Throws on
+  /// transport failure so the caller can use the keyword fallback.
+  @override
+  Future<SmartIntentDecision> classify(
+    String text, {
+    required Set<SmartIntent> offered,
+  }) async {
+    final http.Response response = await _client
+        .post(
+          endpoint,
+          headers: <String, String>{
+            'content-type': 'application/json; charset=utf-8',
+            if (bearerToken != null && bearerToken!.isNotEmpty)
+              'Authorization': 'Bearer $bearerToken',
+          },
+          body: utf8.encode(
+            jsonEncode(<String, dynamic>{
+              if (model != null && model!.isNotEmpty) 'model': model,
+              'response_format': <String, String>{'type': 'json_object'},
+              'messages': <Map<String, String>>[
+                <String, String>{
+                  'role': 'system',
+                  'content': buildIntentSystemPrompt(offered),
+                },
+                <String, String>{
+                  'role': 'user',
+                  'content': buildIntentUserMessage(
+                    truncateForEnrichment(text),
+                  ),
+                },
+              ],
+            }),
+          ),
+        )
+        .timeout(const Duration(seconds: 30));
+    if (response.statusCode < 200 || response.statusCode >= 300) {
+      throw HttpException(
+        describeProviderFailure(
+          'Intent',
+          response.statusCode,
+          response.body,
+        ),
+      );
+    }
+    final String body = utf8.decode(response.bodyBytes);
+    _recordUsage(body);
+    return parseIntentReply(parseTextContent(body), offered);
   }
 
   /// The message content of a chat completion, as text. Throws when there is

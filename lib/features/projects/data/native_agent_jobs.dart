@@ -10,6 +10,7 @@ import '../../../core/security/symlink_guard.dart';
 import '../domain/agent_session_launcher.dart';
 import '../domain/native_agent_job.dart';
 import '../domain/native_agent_types.dart';
+import '../domain/agent_command.dart';
 import 'executable_resolver.dart';
 import 'process_runner.dart';
 
@@ -117,12 +118,11 @@ class NativeAgentJobs {
       );
     }
     final NativeAgentBackend backend = nativeBackendFor(request.agent);
-    final String? executable = await _executables.resolve(
-      request.agent.executable,
-    );
+    final String wanted = request.executable ?? request.agent.executable;
+    final String? executable = await _resolveExecutable(wanted);
     if (executable == null) {
       throw AgentSessionLaunchException(
-        'Could not find `${request.agent.executable}` on this machine.',
+        'Could not find `$wanted` on this machine.',
       );
     }
     final String id = _idFactory();
@@ -154,6 +154,7 @@ class NativeAgentJobs {
       'configuredArguments': request.arguments,
       'prompt': prompt,
     };
+    if (request.executable != null) metadata['executable'] = request.executable;
     if (parentJobId != null) metadata['parentJobId'] = parentJobId;
     if (expectedConversationId != null) {
       metadata['expectedConversationId'] = expectedConversationId;
@@ -248,6 +249,15 @@ class NativeAgentJobs {
     throw AgentSessionLaunchException(
       'The agent did not confirm the prompt before the startup timeout. Job `$id` remains available in Jobs for diagnosis.',
     );
+  }
+
+  /// An absolute path is used as it is when it exists; `ExecutableResolver`
+  /// joins names onto directories and would mangle one.
+  Future<String?> _resolveExecutable(String wanted) async {
+    if (wanted.startsWith('/')) {
+      return await File(wanted).exists() ? wanted : null;
+    }
+    return _executables.resolve(wanted);
   }
 
   Future<List<NativeAgentJob>> list() async {
@@ -394,10 +404,9 @@ class NativeAgentJobs {
           : null,
       approvalsOff:
           configuredArguments is List &&
-          configuredArguments.whereType<String>().any(
-            (String argument) =>
-                argument == '--dangerously-bypass-approvals-and-sandbox' ||
-                argument == '--dangerously-skip-permissions',
+          argumentsControlApprovals(
+            configuredArguments.whereType<String>().toList(growable: false),
+            agent: _agent(metadata['agent']),
           ),
       promptAccepted: parsed.promptAccepted,
       errorBeforePromptAccepted: parsed.errorBeforePromptAccepted,
@@ -513,6 +522,9 @@ class NativeAgentJobs {
           arguments: arguments.whereType<String>().toList(growable: false),
           prompt: prompt,
           detached: true,
+          executable: metadata['executable'] is String
+              ? metadata['executable'] as String
+              : null,
         ),
         parentJobId: id,
         expectedConversationId: parent.conversationId,

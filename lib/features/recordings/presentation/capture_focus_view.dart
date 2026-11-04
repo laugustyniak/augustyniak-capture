@@ -21,6 +21,7 @@ import 'capture_text_tabs.dart';
 import 'card_parts.dart';
 import 'processing_hero.dart';
 import 'handoff_sheet.dart';
+import 'smart_route_action.dart';
 import 'inline_edit.dart';
 import 'inline_video_player.dart';
 import 'recording_card.dart';
@@ -853,6 +854,13 @@ class _Actions extends StatelessWidget {
                     projectName: projectName,
                   ),
                   semanticLabel: RecordingCard.handoffLabel,
+                ),
+              if (controller.canSmartRoute(recording) && !reviewed)
+                ConsoleIconButton(
+                  icon: Icons.auto_awesome_outlined,
+                  onTap: () =>
+                      runSmartRoute(context, controller, recording.id),
+                  semanticLabel: RecordingCard.smartRouteLabel,
                 ),
               if (controller.canRoute(recording) && !reviewed)
                 ConsoleIconButton(
@@ -1901,6 +1909,13 @@ class _PanelActions extends StatelessWidget {
             recording: recording,
             projectName: projectName,
           ),
+        ),
+      if (controller.canSmartRoute(recording) && !reviewed)
+        _PanelButton(
+          icon: Icons.auto_awesome_outlined,
+          label: 'Smart',
+          semanticLabel: RecordingCard.smartRouteLabel,
+          onPressed: () => runSmartRoute(context, controller, recording.id),
         ),
       if (controller.canRoute(recording) && !reviewed)
         _PanelButton(

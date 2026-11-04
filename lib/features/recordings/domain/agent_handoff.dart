@@ -1,6 +1,7 @@
 import '../../../core/security/record_id.dart';
 import 'capture_router.dart';
 import 'route_record.dart';
+import '../../projects/domain/agent_command.dart';
 import '../../projects/domain/native_agent_types.dart';
 
 /// One agent a capture can be handed to, as the queue sees it.
@@ -38,6 +39,10 @@ class AgentHandoffRequest {
     required this.agentId,
     required this.instruction,
     this.detached = false,
+    this.directive,
+    this.purpose,
+    this.command,
+    this.honorSkipPermissions = true,
   });
 
   /// Names the brief this capture owns, so a second handoff appends to the same
@@ -63,6 +68,24 @@ class AgentHandoffRequest {
   /// Start the session in the background rather than in a terminal window.
   /// See `AgentSessionLaunchRequest.detached`.
   final bool detached;
+
+  /// A trusted task line placed **above** the capture's fence in the opening
+  /// prompt (see `frameCapturePrompt`). Chosen from a fixed table in code by
+  /// the SMART route, never taken from a capture or a model.
+  final String? directive;
+
+  /// Shown in the route's target beside the agent, e.g. `Search`.
+  final String? purpose;
+
+  /// A user-configured command to run instead of the project's agent
+  /// (the Todoist intent). Background only; the project's own agent settings
+  /// are not applied to it.
+  final AgentCommand? command;
+
+  /// Whether the project's `skipPermissions` switch is applied. The SMART route
+  /// passes false: a classifier's choice never inherits a switch that removes
+  /// the user's tool approvals.
+  final bool honorSkipPermissions;
 }
 
 class AgentHandoffResult {

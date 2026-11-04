@@ -43,6 +43,9 @@ class RecordingCard extends StatelessWidget {
     this.canRoute = false,
     required this.onHandoff,
     this.canHandoff = false,
+    this.canSmartRoute = false,
+    this.smartRouting = false,
+    this.onSmartRoute,
     this.suggestedRoute,
     this.onConfirmSuggestedRoute,
     this.onDismissSuggestedRoute,
@@ -90,6 +93,9 @@ class RecordingCard extends StatelessWidget {
   /// agent (when the project has one) and any assistant, so it names both.
   /// Kept distinct from [routeLabel] in wording as well as icon: two controls
   /// that both said "hand off" would be one control the user has to guess at.
+  static const String smartRouteLabel =
+      'Smart route: read what this capture asks for and send it there';
+
   static const String handoffLabel =
       'Send this capture to an assistant or agent';
 
@@ -148,6 +154,14 @@ class RecordingCard extends StatelessWidget {
   /// the same reason as [canRoute] — an install with no repository configured
   /// would otherwise carry a dead button on every row.
   final bool canHandoff;
+
+  /// The SMART route: one tap reads what the capture asks for and routes it
+  /// (#386). Hidden when nothing can deliver, like [canRoute].
+  final bool canSmartRoute;
+
+  /// A classification is in flight; the button shows as active.
+  final bool smartRouting;
+  final VoidCallback? onSmartRoute;
 
   /// The enrichment model's proposed destination, already re-checked against
   /// the item as it is now (`RecordingsController.suggestedRouteAction`): null
@@ -428,6 +442,18 @@ class RecordingCard extends StatelessWidget {
                 ),
                 const SizedBox(width: 7),
               ],
+              if (canSmartRoute && onSmartRoute != null && !reviewed)
+                ...<Widget>[
+                  ConsoleIconButton(
+                    icon: Icons.auto_awesome_outlined,
+                    onTap: onSmartRoute!,
+                    semanticLabel: RecordingCard.smartRouteLabel,
+                    active: smartRouting,
+                    size: 30,
+                    iconSize: 17,
+                  ),
+                  const SizedBox(width: 7),
+                ],
               if (canHandoff && !reviewed) ...<Widget>[
                 ConsoleIconButton(
                   icon: Icons.smart_toy_outlined,
