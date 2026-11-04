@@ -20,7 +20,7 @@ enum UsageStage {
     UsageStage.transcription => 'TRANSCRIPTION',
     UsageStage.ocr => 'OCR',
     UsageStage.enrichment => 'ENRICHMENT',
-    UsageStage.connections => 'DAILY CONNECTIONS',
+    UsageStage.connections => 'CONNECTIONS',
     UsageStage.cleanup => 'CLEAN-UP',
     UsageStage.embedding => 'EMBEDDING',
     UsageStage.instruction => 'INSTRUCTION',
@@ -94,9 +94,10 @@ class UsageTotal {
 
 /// One API call, what it consumed, and what it cost.
 ///
-/// A capture may produce several calls. Daily connection reviews use a
-/// `daily-connections:<date>` synthetic capture id so overall costs include
-/// them without assigning their charge to one source capture.
+/// A capture may produce several calls. Connection reviews use a
+/// `daily-connections:<day>` or `open-connections:<run day>` synthetic capture
+/// id so overall costs include them without assigning their charge to one
+/// source capture.
 class UsageEvent {
   const UsageEvent({
     required this.id,

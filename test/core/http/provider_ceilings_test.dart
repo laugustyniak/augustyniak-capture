@@ -3,6 +3,7 @@ import 'dart:io';
 import 'package:augustyniak_capture/core/http/bounded_client.dart';
 import 'package:augustyniak_capture/features/command/data/http_command_client.dart';
 import 'package:augustyniak_capture/features/connections/data/http_daily_connections_service.dart';
+import 'package:augustyniak_capture/features/connections/domain/daily_connections.dart';
 import 'package:augustyniak_capture/features/enrichment/data/http_chat_enrichment_service.dart';
 import 'package:augustyniak_capture/features/enrichment/data/http_embedding_service.dart';
 import 'package:augustyniak_capture/features/processing/data/http_vision_ocr_service.dart';
@@ -94,7 +95,9 @@ void main() {
       transcript: 'Some words',
     );
     await expectLater(
-      service.review(DateTime(2026, 10, 3), <Recording>[capture]),
+      service.review(ConnectionsScope.day(DateTime(2026, 10, 3)), <Recording>[
+        capture,
+      ]),
       tooLarge,
     );
     service.close();

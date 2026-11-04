@@ -10,15 +10,17 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
 
-Recording capture(String id, DateTime day, String? text) => Recording(
-  id: id,
-  filePath: '/tmp/$id.txt',
-  createdAt: day,
-  durationMs: 0,
-  status: RecordingStatus.completed,
-  type: CaptureType.text,
-  transcript: text,
-);
+Recording capture(String id, DateTime day, String? text, {bool done = false}) =>
+    Recording(
+      id: id,
+      isProcessedByUser: done,
+      filePath: '/tmp/$id.txt',
+      createdAt: day,
+      durationMs: 0,
+      status: RecordingStatus.completed,
+      type: CaptureType.text,
+      transcript: text,
+    );
 
 void main() {
   final DateTime day = DateTime(2026, 10, 3);
@@ -36,13 +38,126 @@ void main() {
     ]);
   });
 
+  test('open selection takes every not-done text-ready capture, any day', () {
+    final List<Recording> desk = <Recording>[
+      ...recordings,
+      capture('done', DateTime(2026, 9, 1), 'Already handled', done: true),
+      capture('old', DateTime(2025, 1, 1), 'Still open from last year'),
+    ];
+    expect(
+      capturesInScope(
+        desk,
+        const ConnectionsScope.open(),
+      ).map((Recording r) => r.id),
+      <String>['one', 'two', 'yesterday', 'old'],
+    );
+    expect(
+      capturesInScope(
+        desk,
+        ConnectionsScope.day(day),
+      ).map((Recording r) => r.id),
+      <String>['one', 'two'],
+    );
+  });
+
+  test(
+    'open review sends exactly the open captures and files open usage',
+    () async {
+      late List<dynamic> sent;
+      bool? reportedOpen;
+      final HttpDailyConnectionsService service = HttpDailyConnectionsService(
+        recordUsage:
+            ({
+              required day,
+              required openCaptures,
+              required provider,
+              required model,
+              required usage,
+            }) => reportedOpen = openCaptures,
+        activeProfile: () => const ProviderProfile(
+          id: 'p',
+          name: 'Model',
+          endpoint: 'https://example.com/v1/chat/completions',
+          kind: ProfileKind.enrichment,
+        ),
+        client: MockClient((http.Request request) async {
+          final Map<String, dynamic> body =
+              jsonDecode(utf8.decode(request.bodyBytes))
+                  as Map<String, dynamic>;
+          sent =
+              jsonDecode(
+                    ((body['messages'] as List<dynamic>).last
+                            as Map<String, dynamic>)['content']
+                        as String,
+                  )
+                  as List<dynamic>;
+          return http.Response(
+            jsonEncode(<String, dynamic>{
+              'usage': <String, int>{
+                'prompt_tokens': 1,
+                'completion_tokens': 1,
+              },
+              'choices': <dynamic>[
+                <String, dynamic>{
+                  'message': <String, dynamic>{
+                    'content': jsonEncode(<String, dynamic>{
+                      'groups': <dynamic>[],
+                    }),
+                  },
+                },
+              ],
+            }),
+            200,
+          );
+        }),
+      );
+      final DailyConnectionsReport report = await service.review(
+        const ConnectionsScope.open(),
+        <Recording>[
+          ...recordings,
+          capture('done', DateTime(2026, 9, 1), 'Handled', done: true),
+        ],
+      );
+      expect(sent.map((dynamic c) => c['id']), <String>[
+        'one',
+        'two',
+        'yesterday',
+      ]);
+      expect(report.scope.isOpen, isTrue);
+      expect(reportedOpen, isTrue);
+      service.close();
+    },
+  );
+
+  test('excerpts shrink to the text budget but keep every capture', () {
+    expect(HttpDailyConnectionsService.excerptLimit(1), 2000);
+    expect(HttpDailyConnectionsService.excerptLimit(100), 1200);
+    expect(HttpDailyConnectionsService.excerptLimit(5000), 200);
+    final String text = '${'a' * 1500}MIDDLE${'z' * 1500}';
+    expect(
+      HttpDailyConnectionsService.excerpt(text, 2000),
+      '${'a' * 1300}\n[…]\n${'z' * 700}',
+    );
+    final String small = HttpDailyConnectionsService.excerpt(text, 200);
+    expect(small, startsWith('a' * 130));
+    expect(small, endsWith('z' * 70));
+    expect(small.length, 200 + '\n[…]\n'.length);
+  });
+
   test('sends selected sources and rejects fabricated links', () async {
     late Map<String, dynamic> request;
     MeasuredUsage? reportedUsage;
     final HttpDailyConnectionsService service = HttpDailyConnectionsService(
       recordUsage:
-          ({required day, required provider, required model, required usage}) {
+          ({
+            required day,
+            required openCaptures,
+            required provider,
+            required model,
+            required usage,
+          }) {
             reportedUsage = usage;
+            expect(openCaptures, isFalse);
           },
       activeProfile: () => const ProviderProfile(
         id: 'p',
@@ -99,7 +214,10 @@ void main() {
       }),
     );
 
-    final DailyConnectionsReport result = await service.review(day, recordings);
+    final DailyConnectionsReport result = await service.review(
+      ConnectionsScope.day(day),
+      recordings,
+    );
     final List<dynamic> sentCaptures =
         jsonDecode(
               ((request['messages'] as List<dynamic>).last
@@ -125,7 +243,7 @@ void main() {
       activeProfile: () => null,
     );
     await expectLater(
-      disabled.review(day, recordings),
+      disabled.review(ConnectionsScope.day(day), recordings),
       throwsA(isA<ConnectionsNotConfiguredException>()),
     );
     disabled.close();
@@ -140,7 +258,7 @@ void main() {
       client: MockClient((_) async => http.Response('not json', 200)),
     );
     await expectLater(
-      malformed.review(day, recordings),
+      malformed.review(ConnectionsScope.day(day), recordings),
       throwsA(isA<ConnectionsResponseException>()),
     );
     malformed.close();
@@ -178,7 +296,7 @@ void main() {
           ),
         );
     await expectLater(
-      inventedOnly.review(day, recordings),
+      inventedOnly.review(ConnectionsScope.day(day), recordings),
       throwsA(isA<ConnectionsResponseException>()),
     );
     inventedOnly.close();
@@ -203,7 +321,7 @@ void main() {
       );
 
       await expectLater(
-        service.review(day, recordings),
+        service.review(ConnectionsScope.day(day), recordings),
         throwsA(isA<InsecureConnectionsEndpointException>()),
       );
       expect(requests, 0);
@@ -231,7 +349,7 @@ void main() {
     );
 
     await expectLater(
-      service.review(day, recordings),
+      service.review(ConnectionsScope.day(day), recordings),
       throwsA(isA<InsecureConnectionsEndpointException>()),
     );
     expect(requests, 0);

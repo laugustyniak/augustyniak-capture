@@ -12,22 +12,27 @@ import '../support/harness.dart';
 
 class _ReviewService implements DailyConnectionsService {
   int runs = 0;
+  ConnectionsScope? lastScope;
+  List<String>? lastIds;
 
   @override
   Future<DailyConnectionsReport> review(
-    DateTime day,
+    ConnectionsScope scope,
     List<Recording> captures, {
     Map<String, String> projectNames = const <String, String>{},
   }) async {
     runs++;
+    lastScope = scope;
+    final List<Recording> selected = capturesInScope(captures, scope);
+    lastIds = selected.map((Recording c) => c.id).toList();
     return DailyConnectionsReport(
-      day: day,
+      scope: scope,
       groups: <ConnectionGroup>[
         ConnectionGroup(
           kind: ConnectionKind.appImprovement,
           title: 'Improve search',
           explanation: 'The capture describes a missing search behavior.',
-          captureIds: <String>[captures.single.id],
+          captureIds: <String>[selected.first.id],
         ),
       ],
     );
@@ -105,10 +110,69 @@ void main() {
     await tester.pump();
     expect(service.runs, 1);
     expect(find.text('Improve search'), findsOneWidget);
+    await tester.ensureVisible(find.text('Search note'));
     await tester.tap(find.text('Search note'));
     await tester.pumpAndSettle();
     expect(opened, same(capture));
     expect(find.text('Daily connections'), findsNothing);
+  });
+
+  testWidgets('not-done scope counts and reviews every open capture', (
+    WidgetTester tester,
+  ) async {
+    Recording text(String id, DateTime at, {bool done = false}) => Recording(
+      id: id,
+      filePath: '/tmp/$id.txt',
+      createdAt: at,
+      durationMs: 0,
+      status: RecordingStatus.completed,
+      type: CaptureType.text,
+      title: id,
+      transcript: 'Text of $id',
+      isProcessedByUser: done,
+    );
+    final List<Recording> all = <Recording>[
+      text('today-open', DateTime.now()),
+      text('today-done', DateTime.now(), done: true),
+      text('old-open', DateTime(2025, 3, 1)),
+    ];
+    final _ReviewService service = _ReviewService();
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: Builder(
+            builder: (BuildContext context) => TextButton(
+              onPressed: () => showDialog<void>(
+                context: context,
+                builder: (_) => DailyConnectionsDialog(
+                  service: service,
+                  captures: () => all,
+                  onOpenCapture: (_) {},
+                ),
+              ),
+              child: const Text('Open review'),
+            ),
+          ),
+        ),
+      ),
+    );
+    await tester.tap(find.text('Open review'));
+    await tester.pumpAndSettle();
+    expect(find.text('2 text-ready captures on this day'), findsOneWidget);
+    await tester.tap(find.text('Not done yet'));
+    await tester.pumpAndSettle();
+    expect(find.text('2 text-ready captures not marked done'), findsOneWidget);
+    expect(find.byIcon(Icons.calendar_today_outlined), findsNothing);
+    await tester.tap(find.text('REVIEW OPEN'));
+    await tester.pump();
+    await tester.pump();
+    expect(service.lastScope?.isOpen, isTrue);
+    expect(service.lastIds, <String>['today-open', 'old-open']);
+    expect(find.text('Improve search'), findsOneWidget);
+    await tester.tap(find.text('One day'));
+    await tester.pumpAndSettle();
+    expect(find.text('Improve search'), findsNothing);
+    expect(find.text('2 text-ready captures on this day'), findsOneWidget);
   });
 
   testWidgets('Queue opens a suggested source on a phone', (
