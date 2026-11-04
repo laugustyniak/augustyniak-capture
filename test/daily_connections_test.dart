@@ -131,6 +131,9 @@ void main() {
 
   test('excerpts shrink to the text budget but keep every capture', () {
     expect(HttpDailyConnectionsService.excerptLimit(1), 2000);
+    expect(HttpDailyConnectionsService.excerptLimit(60), 2000);
+    expect(HttpDailyConnectionsService.excerptLimit(61), 1967);
+    expect(HttpDailyConnectionsService.excerptLimit(600), 200);
     expect(HttpDailyConnectionsService.excerptLimit(100), 1200);
     expect(HttpDailyConnectionsService.excerptLimit(5000), 200);
     final String text = '${'a' * 1500}MIDDLE${'z' * 1500}';
