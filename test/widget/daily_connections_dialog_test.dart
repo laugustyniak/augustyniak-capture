@@ -162,6 +162,7 @@ void main() {
     await tester.tap(find.text('Not done yet'));
     await tester.pumpAndSettle();
     expect(find.text('2 text-ready captures not marked done'), findsOneWidget);
+    expect(find.text('Open captures'), findsOneWidget);
     expect(find.byIcon(Icons.calendar_today_outlined), findsNothing);
     await tester.tap(find.text('REVIEW OPEN'));
     await tester.pump();

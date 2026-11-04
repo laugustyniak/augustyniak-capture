@@ -89,7 +89,7 @@ class _DailyConnectionsDialogState extends State<DailyConnectionsDialog> {
     ).formatMediumDate(_day);
     final String noun = eligible.length == 1 ? 'capture' : 'captures';
     return AlertDialog(
-      title: Text(_openScope ? 'Open connections' : 'Daily connections'),
+      title: Text(_openScope ? 'Open captures' : 'Daily connections'),
       content: SizedBox(
         width: 620,
         child: SingleChildScrollView(
