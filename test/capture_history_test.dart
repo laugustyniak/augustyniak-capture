@@ -1,10 +1,11 @@
+import 'dart:async';
 import 'dart:io';
 
 import 'package:augustyniak_capture/features/momentum/domain/closure_event.dart';
 import 'package:augustyniak_capture/features/recordings/data/capture_history.dart';
+import 'package:augustyniak_capture/features/recordings/data/revisions_repository.dart';
 import 'package:augustyniak_capture/features/recordings/domain/capture_type.dart';
 import 'package:augustyniak_capture/features/recordings/domain/recording.dart';
-import 'package:augustyniak_capture/features/recordings/data/revisions_repository.dart';
 import 'package:augustyniak_capture/features/recordings/domain/recording_revision.dart';
 import 'package:flutter_test/flutter_test.dart';
 
@@ -41,6 +42,20 @@ class _MemoryRevisions extends RevisionsRepository {
       appended.addAll(revisions);
 }
 
+class _ControlledRevisions extends RevisionsRepository {
+  final Completer<Map<String, List<RecordingRevision>>> loadResult =
+      Completer<Map<String, List<RecordingRevision>>>();
+  Object? appendError;
+
+  @override
+  Future<Map<String, List<RecordingRevision>>> load() => loadResult.future;
+
+  @override
+  Future<void> append(List<RecordingRevision> revisions) async {
+    if (appendError case final Object error) throw error;
+  }
+}
+
 /// Refuses every append, which is the case the in-memory-first ordering exists
 /// for: the session keeps a correct view of a history that is incomplete on
 /// disk, rather than one that is wrong in both places.
@@ -72,6 +87,59 @@ Recording _item(
 
 void main() {
   group('the change history', () {
+    test('a delayed load merges with revisions added while it was waiting', () async {
+      final _ControlledRevisions repository = _ControlledRevisions();
+      final CaptureHistory history = CaptureHistory(
+        revisionsRepository: repository,
+      );
+      final Future<void> loading = history.loadRevisions();
+
+      await history.recordRevisions(
+        _item('a', title: 'old'),
+        _item('a', title: 'new'),
+        RevisionSource.user,
+      );
+      final RecordingRevision sessionRevision =
+          history.revisionsFor('a').single;
+      repository.loadResult.complete(<String, List<RecordingRevision>>{
+        'b': <RecordingRevision>[
+          RecordingRevision(
+            recordingId: 'b',
+            at: DateTime.utc(2026, 8, 4),
+            field: 'title',
+            from: 'disk old',
+            to: 'disk new',
+            source: RevisionSource.sync,
+          ),
+        ],
+        'a': <RecordingRevision>[sessionRevision],
+      });
+
+      await loading;
+
+      expect(history.revisionsFor('a'), <RecordingRevision>[sessionRevision]);
+      expect(history.revisionsFor('b'), hasLength(1));
+    });
+
+    test('a failed append remains in memory after a disk reload', () async {
+      final _ControlledRevisions repository = _ControlledRevisions()
+        ..appendError = const FileSystemException('the file is unwritable');
+      final CaptureHistory history = CaptureHistory(
+        revisionsRepository: repository,
+      );
+      repository.loadResult.complete(<String, List<RecordingRevision>>{});
+
+      await history.recordRevisions(
+        _item('a', title: 'old'),
+        _item('a', title: 'new'),
+        RevisionSource.user,
+      );
+      await history.loadRevisions();
+
+      expect(history.revisionsFor('a'), hasLength(1));
+      expect(history.revisionsFor('a').single.from, 'old');
+    });
+
     test('records what a change overwrote', () async {
       final CaptureHistory history = CaptureHistory(
         revisionsRepository: _MemoryRevisions(),
