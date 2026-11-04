@@ -53,7 +53,10 @@ GREP=/usr/bin/grep
 blocked_re='(^|/)(\.agent-tasks/|inbox\.md[[:space:]]*$|key\.properties[[:space:]]*$|[^/]*\.(jks|p12|keystore|pem|mobileprovision)[[:space:]]*$|googleservice-info\.plist[[:space:]]*$|google-services\.json[[:space:]]*$|\.env(\.[^/]*)?(/|[[:space:]]*$))'
 
 exempt_re='(^|/)\.env\.example[[:space:]]*$'
-match() { printf '%s\n' "$1" | "$GREP" -qiaE "$2"; }   # 0 match, 1 none, 2 grep error
+# LC_ALL=C: BSD grep (macOS) under a UTF-8 locale rejects a line with an invalid
+# byte sequence as a non-match, so `caf\xe9/inbox.md` passed as clean. Every
+# pattern here is ASCII, so the byte-wise locale loses nothing.
+match() { printf '%s\n' "$1" | LC_ALL=C "$GREP" -qiaE "$2"; }   # 0 match, 1 none, 2 grep error
 
 hits=''
 # `|| [ -n "$line" ]` keeps a final line that has no trailing newline.
