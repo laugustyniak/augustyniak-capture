@@ -106,5 +106,15 @@ void main() {
         isNot(contains('ENABLE_HARDENED_RUNTIME')),
       );
     });
+
+    test('the Release build can load its own embedded frameworks', () {
+      // Without this a self-signed build (no Team ID) is killed by dyld at
+      // launch: "code signature ... not valid for use in process: mapping
+      // process and mapped file (non-platform) have different Team IDs".
+      expect(
+        read('macos/Runner/Release.entitlements'),
+        contains('com.apple.security.cs.disable-library-validation'),
+      );
+    });
   });
 }

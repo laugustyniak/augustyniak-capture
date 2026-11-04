@@ -37,5 +37,14 @@
 	     (`saveFile` would need read-write, and is not used). -->
 	<key>com.apple.security.files.user-selected.read-only</key>
 	<true/>
+	<!-- Hardened runtime enforces library validation: every dylib the process
+	     loads must be Apple-signed or carry the app's own Team ID. A local
+	     self-signed or ad-hoc identity has no Team ID, so the embedded
+	     frameworks (HotKey, FlutterMacOS, plugins) are refused by dyld with
+	     "different Team IDs" and the app dies at launch, before Dart runs.
+	     Everything in Contents/Frameworks is signed by this same build, so
+	     nothing foreign is loaded; the runtime's other protections stay on. -->
+	<key>com.apple.security.cs.disable-library-validation</key>
+	<true/>
 </dict>
 </plist>
