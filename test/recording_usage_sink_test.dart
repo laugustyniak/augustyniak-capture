@@ -78,6 +78,21 @@ void main() {
     expect(repository.totalAll().amountUsd, closeTo(2.80, 1e-9));
   });
 
+  test('an open-captures review is filed under its own synthetic id', () {
+    sink.recordConnections(
+      day: DateTime(2026, 11, 4),
+      openCaptures: true,
+      provider: 'api.openai.com',
+      model: 'gpt-5.6-luna',
+      usage: const MeasuredUsage(inputTokens: 10, outputTokens: 10),
+    );
+    expect(
+      repository.forCapture('open-connections:2026-11-04').single.stage,
+      UsageStage.connections,
+    );
+    expect(repository.forCapture('daily-connections:2026-11-04'), isEmpty);
+  });
+
   test('a transcription with no reported duration falls back to the capture', () {
     sink.beginJob(
       'cap-2',
