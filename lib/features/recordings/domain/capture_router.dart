@@ -16,6 +16,7 @@ class RoutedCapture {
     this.summary,
     this.category,
     this.tags = const <String>[],
+    this.sourceFiles = const <String>[],
   });
 
   /// The capture's own id.
@@ -53,6 +54,16 @@ class RoutedCapture {
   final String? summary;
   final CaptureCategory? category;
   final List<String> tags;
+
+  /// Where the capture's source artifacts live on this device, one per
+  /// segment, in segment order.
+  ///
+  /// [body] is what was *read* from them — OCR of a screenshot, a transcript —
+  /// and for an image that is a lossy summary of the thing itself. A
+  /// destination that hands the capture to an agent names these so the agent
+  /// can open the original. Empty means none is known, and a destination then
+  /// writes nothing about sources rather than an empty list.
+  final List<String> sourceFiles;
 }
 
 /// Sends a capture somewhere outside the queue.

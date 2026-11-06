@@ -28,6 +28,7 @@ ProcessResult _exit(int code) => ProcessResult(1, code, '', '');
 
 void main() {
   final File target = File('/media/abc.png');
+  final File missing = File('/nonexistent-capture-dir/abc.png');
 
   test(
     'macOS runs the interactive region/window picker into the target',
@@ -97,6 +98,72 @@ void main() {
         <String>['slurp'],
         <String>['grim', '-g', '10,20 300x200', target.path],
       ]);
+    },
+  );
+
+  test('Linux falls through to slurp + grim when gnome-screenshot is installed '
+      'but cannot capture', () async {
+    // On a wlroots session gnome-screenshot is often installed and exits
+    // non-zero without writing anything; stopping there turned every press
+    // into what looked like a cancelled selection.
+    final _FakeRun run = _FakeRun(<String, ProcessResult>{
+      'gnome-screenshot': _exit(1),
+      'slurp': _ok('10,20 300x200\n'),
+      'grim': _ok(),
+    });
+
+    await SystemScreenshotTaker(
+      operatingSystem: 'linux',
+      run: run.call,
+    ).capture(missing);
+
+    expect(run.calls, <List<String>>[
+      <String>['gnome-screenshot', '-a', '-f', missing.path],
+      <String>['slurp'],
+      <String>['grim', '-g', '10,20 300x200', missing.path],
+    ]);
+  });
+
+  test(
+    'a gnome-screenshot cancel with no slurp installed stays a cancel',
+    () async {
+      // GNOME answers Escape non-zero too. With no wlroots pair to fall back
+      // on, that must not become "no screenshot tool found".
+      final _FakeRun run = _FakeRun(<String, ProcessResult>{
+        'gnome-screenshot': _exit(1),
+      });
+
+      await SystemScreenshotTaker(
+        operatingSystem: 'linux',
+        run: run.call,
+      ).capture(missing);
+
+      expect(run.calls.map((List<String> c) => c.first), <String>[
+        'gnome-screenshot',
+        'slurp',
+      ]);
+    },
+  );
+
+  test(
+    'a gnome-screenshot that wrote the file is never second-guessed',
+    () async {
+      final Directory dir = Directory.systemTemp.createTempSync('shot_');
+      addTearDown(() => dir.deleteSync(recursive: true));
+      final File written = File('${dir.path}/abc.png')
+        ..writeAsBytesSync(<int>[1, 2, 3]);
+      final _FakeRun run = _FakeRun(<String, ProcessResult>{
+        'gnome-screenshot': _exit(1),
+        'slurp': _ok('10,20 300x200\n'),
+        'grim': _ok(),
+      });
+
+      await SystemScreenshotTaker(
+        operatingSystem: 'linux',
+        run: run.call,
+      ).capture(written);
+
+      expect(run.calls, hasLength(1));
     },
   );
 

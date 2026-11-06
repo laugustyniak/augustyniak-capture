@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 
 import 'package:audioplayers/audioplayers.dart';
@@ -7,8 +8,10 @@ import 'package:record/record.dart';
 import 'package:augustyniak_capture/features/logs/domain/log_event.dart';
 import 'package:augustyniak_capture/features/processing/data/ocr_service.dart';
 import 'package:augustyniak_capture/features/recordings/data/recordings_repository.dart';
+import 'package:augustyniak_capture/features/recordings/domain/capture_router.dart';
 import 'package:augustyniak_capture/features/recordings/domain/capture_type.dart';
 import 'package:augustyniak_capture/features/recordings/domain/recording.dart';
+import 'package:augustyniak_capture/features/recordings/domain/route_record.dart';
 import 'package:augustyniak_capture/features/recordings/domain/screenshot_taker.dart';
 import 'package:augustyniak_capture/features/recordings/presentation/recordings_controller.dart';
 import 'package:augustyniak_capture/features/transcription/data/transcription_service.dart';
@@ -34,9 +37,16 @@ class _FakeRepository extends RecordingsRepository {
   @override
   Future<List<Recording>> loadAll() async => <Recording>[];
 
+  /// When set, every `saveAll` from this count on throws — a disk that fills
+  /// up after the capture's own row is already written.
+  int? failFromSave;
+
   @override
   Future<void> saveAll(List<Recording> recordings) async {
     saveCount++;
+    if (failFromSave != null && saveCount >= failFromSave!) {
+      throw const FileSystemException('No space left on device');
+    }
     statusesAtSave.add(<RecordingStatus>[
       for (final Recording r in recordings) r.status,
     ]);
@@ -77,6 +87,41 @@ class _ThrowingOcr implements OcrService {
 class _TextOcr implements OcrService {
   @override
   Future<String> extractText(File image) async => 'Error 500 on /checkout';
+}
+
+/// Holds OCR open until the test releases it, so a voice comment can be
+/// attached while segment 0 is still being read.
+class _GatedOcr implements OcrService {
+  final Completer<void> started = Completer<void>();
+  final Completer<void> release = Completer<void>();
+
+  @override
+  Future<String> extractText(File image) async {
+    if (!started.isCompleted) started.complete();
+    await release.future;
+    return 'Error 500 on /checkout';
+  }
+}
+
+/// Records what the controller hands a destination.
+class _CapturingRouter implements CaptureRouter {
+  RoutedCapture? routed;
+
+  @override
+  bool canRoute(String? projectId) => true;
+
+  @override
+  RouteKind? resolvedKind(RoutedCapture capture) => RouteKind.command;
+
+  @override
+  Future<RouteRecord> route(RoutedCapture capture) async {
+    routed = capture;
+    return RouteRecord(
+      at: DateTime.now(),
+      kind: RouteKind.command,
+      target: 'test',
+    );
+  }
 }
 
 class _RecordingLog implements LogSink {
@@ -135,15 +180,17 @@ void main() {
   late _RecordingLog log;
   late RecordingsController controller;
 
-  RecordingsController build({OcrService? ocr}) => RecordingsController(
-    repository: repository,
-    transcriptionService: _FakeTranscription(),
-    ocrService: ocr ?? _TextOcr(),
-    screenshotTaker: taker,
-    recorder: _GrantingRecorder(),
-    player: _FakePlayer(),
-    logSink: log,
-  );
+  RecordingsController build({OcrService? ocr, CaptureRouter? router}) =>
+      RecordingsController(
+        repository: repository,
+        captureRouter: router ?? const DisabledCaptureRouter(),
+        transcriptionService: _FakeTranscription(),
+        ocrService: ocr ?? _TextOcr(),
+        screenshotTaker: taker,
+        recorder: _GrantingRecorder(),
+        player: _FakePlayer(),
+        logSink: log,
+      );
 
   setUp(() async {
     appDir = Directory.systemTemp.createTempSync('augustyniak_capture_shot_');
@@ -264,6 +311,66 @@ void main() {
       expect(item.transcript, contains('look at the red banner'));
     },
   );
+
+  test('a voice comment stopped while OCR is still running is transcribed '
+      'too', () async {
+    // The comment is attached while segment 0 is mid-OCR. The drain had
+    // already listed that job's pending segments, and the enqueue for the new
+    // one was dropped as a duplicate of the running id — so the capture
+    // completed with the comment's audio never transcribed.
+    final _GatedOcr ocr = _GatedOcr();
+    controller.dispose();
+    controller = build(ocr: ocr);
+    await controller.initialize();
+
+    final String? id = await controller.captureScreenshot(
+      withVoiceComment: true,
+    );
+    await ocr.started.future;
+    await controller.stopRecording();
+    ocr.release.complete();
+    await controller.waitForProcessing();
+
+    final Recording item = controller.recordings.single;
+    expect(item.id, id);
+    expect(item.segments, hasLength(2));
+    expect(item.segments.every((segment) => !segment.isPending), isTrue);
+    expect(item.status, RecordingStatus.completed);
+    expect(item.transcript, contains('Error 500 on /checkout'));
+    expect(item.transcript, contains('look at the red banner'));
+  });
+
+  test('a routed screenshot hands its destination the image path', () async {
+    final _CapturingRouter router = _CapturingRouter();
+    controller.dispose();
+    controller = build(router: router);
+    await controller.initialize();
+
+    final String? id = await controller.captureScreenshot();
+    await controller.waitForProcessing();
+    await controller.route(id!);
+
+    expect(router.routed!.sourceFiles, <String>[
+      p.join(appDir.path, '$id.png'),
+    ]);
+  });
+
+  test('a queuing failure after the row is persisted is not reported as a '
+      'failed screenshot', () async {
+    // Save 1 is the image row; save 2 is the `pendingTranscription` write.
+    repository.failFromSave = repository.saveCount + 2;
+
+    final String? id = await controller.captureScreenshot();
+
+    expect(id, isNotNull);
+    expect(controller.recordings.single.id, id);
+    expect(File(p.join(appDir.path, '$id.png')).existsSync(), isTrue);
+    expect(
+      log.lines.where((line) => line.$1.startsWith('Screenshot failed')),
+      isEmpty,
+    );
+    expect(controller.error, contains('Screenshot saved'));
+  });
 
   test('a cancelled selection never opens the microphone', () async {
     taker.behaviour = () => null;
