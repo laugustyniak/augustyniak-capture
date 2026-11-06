@@ -65,6 +65,7 @@ import '../../settings/presentation/config_tab.dart';
 import '../../settings/presentation/models_tab.dart';
 import '../../settings/presentation/settings_controller.dart';
 import '../../sync/data/e2ee_service.dart';
+import '../../sync/presentation/sync_binding_controller.dart';
 import '../../shortcuts/data/linux_hotkey_registrar.dart';
 import '../../shortcuts/data/system_hotkey_registrar.dart';
 import '../../shortcuts/data/system_window_presenter.dart';
@@ -137,6 +138,7 @@ class RecordingsPage extends StatefulWidget {
     this.e2eeService,
     this.launchArguments = const <String>[],
     this.shortcutLinkSource = const NoopShortcutLinkSource(),
+    this.syncBinding,
   });
 
   /// Where the shell publishes the persisted theme so `AugustyniakCaptureApp`,
@@ -182,6 +184,11 @@ class RecordingsPage extends StatefulWidget {
   /// the running instance — how GNOME Wayland, where no app may grab a key,
   /// reaches the same `ShortcutsCoordinator.handle` a hotkey does.
   final ShortcutLinkSource shortcutLinkSource;
+
+  /// Which account this device's library belongs to (#206): its gate runs
+  /// before every Supabase run, and the Account card shows and changes it.
+  /// Null under the same condition as [syncTransportResolver].
+  final SyncBindingController? syncBinding;
 
   @override
   State<RecordingsPage> createState() => _RecordingsPageState();
@@ -540,6 +547,7 @@ class _RecordingsPageState extends State<RecordingsPage>
       syncTransportResolver: widget.syncTransportResolver,
       mediaStoreResolver: widget.mediaStoreResolver,
       authGateway: widget.authGateway,
+      syncBindingGate: widget.syncBinding?.gate,
       projectsRepository: ProjectsRepository(),
       clipboardRepository: clipboardRepository,
       appVersion: () => _appVersion,
@@ -1484,6 +1492,7 @@ class _RecordingsPageState extends State<RecordingsPage>
                                     controller: settings,
                                     authController: widget.authController,
                                     e2ee: widget.e2eeService,
+                                    syncBinding: widget.syncBinding,
                                     recordingsController: controller,
                                     storagePath: storagePath,
                                     recordingsCount:
