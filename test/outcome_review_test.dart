@@ -97,6 +97,14 @@ class _RecordingSpeaker implements OutcomeSpeaker {
   }
 }
 
+class _ThrowingProbeSpeaker implements OutcomeSpeaker {
+  @override
+  Future<bool> isAvailable() async => throw StateError('engine probe died');
+
+  @override
+  Future<void> speak(String text) async {}
+}
+
 class _MemoryRepo extends RecordingsRepository {
   _MemoryRepo(this._dir, this.seed);
   final Directory _dir;
@@ -240,7 +248,10 @@ void main() {
       if (await dir.exists()) await dir.delete(recursive: true);
     });
 
-    Future<Recording> seedCapture({RouteOutcome? outcome}) async {
+    Future<Recording> seedCapture({
+      RouteOutcome? outcome,
+      List<RouteRecord>? routes,
+    }) async {
       final File file = File(p.join(dir.path, 'abc.txt'));
       await file.writeAsString(_secretTranscript);
       return Recording(
@@ -256,9 +267,9 @@ void main() {
         summary: _secretSummary,
         isProcessedByUser: true,
         processedAt: DateTime.utc(2026, 8, 15),
-        routes: <RouteRecord>[
-          _route(outcome ?? _outcome(CommandState.inProgress)),
-        ],
+        routes:
+            routes ??
+            <RouteRecord>[_route(outcome ?? _outcome(CommandState.inProgress))],
       );
     }
 
@@ -534,8 +545,6 @@ void main() {
         recorder: _GrantingRecorder(take: ''),
       );
       await controller.initialize();
-      final int savesBefore = repo.saveCalls;
-
       expect(await controller.replyToOutcome('abc'), isTrue);
       await controller.stopRecording();
       await controller.waitForProcessing();
@@ -547,7 +556,6 @@ void main() {
       expect(item.isProcessedByUser, isTrue);
       // Whatever reached the index still describes the capture as it was: a
       // fragment that failed verification never touches the parent row.
-      expect(repo.saveCalls, greaterThanOrEqualTo(savesBefore));
       for (final Recording saved in repo.saved) {
         expect(saved.hasStoredSegments, isFalse);
         expect(saved.transcript, _secretTranscript);
@@ -556,6 +564,28 @@ void main() {
     });
 
     test('a reply is refused for a capture with no outcome', () async {
+      // The capture exists, so `startRecording(appendTo:)` alone would start a
+      // take: only the outcome guard can refuse these.
+      for (final List<RouteRecord> routes in <List<RouteRecord>>[
+        const <RouteRecord>[],
+        <RouteRecord>[_route(null)],
+      ]) {
+        final _MemoryRepo repo = _MemoryRepo(dir, <Recording>[
+          await seedCapture(routes: routes),
+        ]);
+        final RecordingsController controller = build(
+          repo,
+          recorder: _GrantingRecorder(),
+        );
+        await controller.initialize();
+
+        expect(await controller.replyToOutcome('abc'), isFalse);
+        expect(controller.isRecording, isFalse);
+        expect(controller.hasOutcome('abc'), isFalse);
+      }
+    });
+
+    test('a reply is refused for an id that does not exist', () async {
       final _MemoryRepo repo = _MemoryRepo(dir, <Recording>[
         await seedCapture(),
       ]);
@@ -567,6 +597,29 @@ void main() {
 
       expect(await controller.replyToOutcome('missing'), isFalse);
       expect(controller.isRecording, isFalse);
+    });
+
+    test('Listen is offered only where a speaker answers available', () async {
+      for (final (OutcomeSpeaker speaker, bool expected)
+          in <(OutcomeSpeaker, bool)>[
+            (const UnavailableOutcomeSpeaker(), false),
+            (_RecordingSpeaker(available: false), false),
+            (_ThrowingProbeSpeaker(), false),
+            (_RecordingSpeaker(), true),
+          ]) {
+        final _MemoryRepo repo = _MemoryRepo(dir, <Recording>[
+          await seedCapture(outcome: _outcome(CommandState.done)),
+        ]);
+        final RecordingsController controller = build(
+          repo,
+          outcomeSpeaker: speaker,
+        );
+        expect(controller.canListenToOutcome, isFalse);
+        await controller.initialize();
+
+        expect(controller.canListenToOutcome, expected, reason: '$speaker');
+        expect(controller.hasOutcome('abc'), isTrue);
+      }
     });
   });
 }

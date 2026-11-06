@@ -6,6 +6,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:path/path.dart' as p;
 import 'package:record/record.dart';
 import 'package:augustyniak_capture/features/command/domain/command_client.dart';
+import 'package:augustyniak_capture/features/command/domain/outcome_review.dart';
 import 'package:augustyniak_capture/features/enrichment/domain/enrichment_context.dart';
 import 'package:augustyniak_capture/features/enrichment/domain/enrichment_service.dart';
 import 'package:augustyniak_capture/features/costs/domain/usage_sink.dart';
@@ -143,6 +144,8 @@ Future<RecordingsController> buildRecordingsController(
   GamificationController? gamificationController,
   CommandClient commandClient = const DisabledCommandClient(),
   String? Function()? commandBaseUrl,
+  OutcomeSpeaker outcomeSpeaker = const UnavailableOutcomeSpeaker(),
+  AudioRecorder? recorder,
   EnrichmentService enrichmentService = const DisabledEnrichmentService(),
   EnrichmentContextSource enrichmentContextSource =
       const EmptyEnrichmentContextSource(),
@@ -155,7 +158,7 @@ Future<RecordingsController> buildRecordingsController(
     captureRouter: captureRouter,
     agentHandoff: agentHandoff,
     captureSender: captureSender,
-    recorder: FakeRecorder(),
+    recorder: recorder ?? FakeRecorder(),
     player: FakePlayer(),
     usageSink: usageSink,
     closureLog: closureLog,
@@ -165,6 +168,7 @@ Future<RecordingsController> buildRecordingsController(
     gamificationController: gamificationController,
     commandClient: commandClient,
     commandBaseUrl: commandBaseUrl,
+    outcomeSpeaker: outcomeSpeaker,
     enrichmentService: enrichmentService,
     enrichmentContextSource: enrichmentContextSource,
   );

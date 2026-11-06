@@ -19,6 +19,7 @@ import '../../backup/data/file_picker_archive_location.dart';
 import '../../backup/data/zip_capture_archive.dart';
 import '../../backup/domain/capture_archive.dart';
 import '../../backup/presentation/backup_coordinator.dart';
+import '../../command/data/system_outcome_review.dart';
 import '../../clipboard/data/clipboard_repository.dart';
 import '../../clipboard/data/clipboard_capture_reader.dart';
 import '../../clipboard/data/xdotool_auto_paste.dart';
@@ -476,6 +477,12 @@ class _RecordingsPageState extends State<RecordingsPage>
       // directory: the address can change in Config at any moment and the next
       // tap on an outcome must follow it.
       commandBaseUrl: () => settings.settings.commandBaseUrl,
+      // Spoken review of agent outcomes (#252): the desktop's own speech
+      // engine and notification tool, found per host. On a phone both answer
+      // unavailable until a plugin backs them, which hides Listen and leaves
+      // the card's outcome line as the whole feature.
+      outcomeNotifier: SystemOutcomeNotifier(),
+      outcomeSpeaker: SystemOutcomeSpeaker(),
       captureRouter: ProjectCaptureRouter(
         command: CommandRouter(
           projectById: _projectById,

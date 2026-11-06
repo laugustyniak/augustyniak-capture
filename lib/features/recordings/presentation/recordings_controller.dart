@@ -336,6 +336,11 @@ class RecordingsController extends ChangeNotifier {
   /// Announcements still in flight, so a test can wait for them rather than
   /// sleep. Teardown never waits on them.
   final Set<Future<void>> _outcomeAnnouncements = <Future<void>>{};
+
+  /// Whether [_outcomeSpeaker] answered available when [initialize] asked.
+  /// False until then and whenever the probe fails, which hides the Listen
+  /// control rather than offering one that can only fail.
+  bool _canListenToOutcome = false;
   final AgentHandoff _agentHandoff;
   final CaptureSender _captureSender;
   final NoteVault _noteVault;
@@ -1171,6 +1176,7 @@ class RecordingsController extends ChangeNotifier {
     );
 
     await _history.loadRevisions();
+    await _probeOutcomeSpeaker();
 
     notifyListeners();
 
@@ -3835,6 +3841,27 @@ class RecordingsController extends ChangeNotifier {
       await Future.wait(_outcomeAnnouncements.toList(growable: false));
     }
   }
+
+  /// Asks the speaker once whether it can talk. A probe that throws reads as
+  /// "no speaker": the card is the whole feature without one.
+  Future<void> _probeOutcomeSpeaker() async {
+    try {
+      _canListenToOutcome = await _outcomeSpeaker.isAvailable();
+    } catch (exception) {
+      _canListenToOutcome = false;
+      _logSink.log(
+        'Text-to-speech is unavailable: $exception',
+        level: LogLevel.warn,
+      );
+    }
+  }
+
+  /// Whether the Listen control is offered at all — a property of the install,
+  /// not of a capture. Pair it with [hasOutcome] per row.
+  bool get canListenToOutcome => _canListenToOutcome;
+
+  /// Whether [id]'s latest delivery carries an outcome to listen or reply to.
+  bool hasOutcome(String id) => _outcomeRoute(id) != null;
 
   /// The latest delivery of [id], when it carries an outcome.
   RouteRecord? _outcomeRoute(String id) {
