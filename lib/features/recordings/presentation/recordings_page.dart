@@ -105,11 +105,13 @@ import '../data/inbox_drainer.dart';
 import '../data/media_picker.dart';
 import '../data/markdown_note_vault.dart';
 import '../domain/capture_session.dart';
+import '../domain/screenshot_taker.dart';
 import '../data/plugin_capture_sender.dart';
 import '../data/project_agent_handoff.dart';
 import '../data/command_router.dart';
 import '../data/project_inbox_router.dart';
 import '../data/recordings_repository.dart';
+import '../data/system_screenshot_taker.dart';
 import '../data/system_clipboard_sink.dart';
 import '../data/revisions_repository.dart';
 import '../data/system_media_opener.dart';
@@ -431,6 +433,11 @@ class _RecordingsPageState extends State<RecordingsPage>
     controller = RecordingsController(
       repository: repository,
       gamificationController: gamification,
+      // Desktop only, like the hotkeys that drive it; a phone has its own
+      // screenshot gesture and an image upload already takes its result.
+      screenshotTaker: _isDesktop
+          ? SystemScreenshotTaker()
+          : const UnavailableScreenshotTaker(),
       // The durable record of what was finished, one appended line per capture.
       // Deliberately not derived from `recordings.json`: that index is
       // rewritten wholesale and shrinks on delete, so a history read from it

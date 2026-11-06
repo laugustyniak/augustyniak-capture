@@ -74,6 +74,7 @@ import '../domain/media_opener.dart';
 import '../domain/capture_session.dart';
 import '../domain/note_vault.dart';
 import '../domain/recording.dart';
+import '../domain/screenshot_taker.dart';
 import '../domain/upload_grouping.dart';
 import '../domain/recording_revision.dart';
 import '../domain/recording_tag.dart';
@@ -119,6 +120,7 @@ class RecordingsController extends ChangeNotifier {
     RevisionsRepository? revisionsRepository,
     ProcessorRegistry? processorRegistry,
     MediaPicker? mediaPicker,
+    ScreenshotTaker screenshotTaker = const UnavailableScreenshotTaker(),
     AudioRecorder? recorder,
     AudioPlayer? player,
     GamificationController? gamificationController,
@@ -212,6 +214,7 @@ class RecordingsController extends ChangeNotifier {
        _contentHasher = contentHasher,
        _mediaPicker = mediaPicker ?? const FilePickerMediaPicker(),
        _importer = MediaImporter(repository),
+       _screenshotTaker = screenshotTaker,
        _recorder = recorder ?? AudioRecorder(),
        _player = player ?? AudioPlayer(),
        _gamificationController = gamificationController {
@@ -360,6 +363,7 @@ class RecordingsController extends ChangeNotifier {
   final SourceContentHasher _contentHasher;
   final MediaPicker _mediaPicker;
   final MediaImporter _importer;
+  final ScreenshotTaker _screenshotTaker;
   late final ProcessorRegistry _registry;
 
   // All swappable at runtime from the Models/Config tabs. A swap only affects
@@ -484,6 +488,13 @@ class RecordingsController extends ChangeNotifier {
   DateTime? _processingStartTime;
   Timer? _processingTickerTimer;
   final Set<String> _cancelledProcessingIds = <String>{};
+
+  /// Ids asked to be processed again while their job was already running —
+  /// a fragment appended mid-job. That job listed its pending segments before
+  /// the fragment existed, so dropping the request as a duplicate would leave
+  /// the fragment unprocessed under a `completed` capture. The drain re-queues
+  /// these once the running job ends.
+  final Set<String> _rerunAfterCurrent = <String>{};
   Future<void>? _saveInFlight; // serializes saveAll (shared temp file)
 
   /// Tail of the queue waiting for the ambient usage scope, or null when it is
@@ -2925,6 +2936,129 @@ class RecordingsController extends ChangeNotifier {
     }
   }
 
+  /// Whether [captureScreenshot] has a platform tool behind it.
+  bool get canCaptureScreenshot => _screenshotTaker.isAvailable;
+
+  /// Take a region or window screenshot as a new image capture, optionally
+  /// followed by a spoken comment recorded into the same capture.
+  ///
+  /// The five capture steps, with the platform tool as step 1: it writes the
+  /// PNG straight to `<id>.png` in the recordings directory, the file is
+  /// verified present and non-empty, the row is built `saved`, persisted, and
+  /// only then queued for OCR. An OCR failure therefore leaves the image where
+  /// it is, `failed` and retryable.
+  ///
+  /// A cancelled selection — no file, or an empty one — is not an error: the
+  /// queue is left untouched, nothing is logged as a failure, and an empty file
+  /// is removed so it is not adopted as an orphan on the next launch.
+  ///
+  /// With [withVoiceComment] the microphone opens only after the image row is
+  /// persisted, through the ordinary append path, so the comment lands as the
+  /// capture's second segment and is transcribed beside the OCR text.
+  ///
+  /// Returns the new capture's id, or null when nothing was captured.
+  Future<String?> captureScreenshot({bool withVoiceComment = false}) async {
+    // Before the first load the list is empty, not right: persisting now would
+    // overwrite recordings.json with just this capture (see addTextNote).
+    if (!_initialized) {
+      if (!_indexUnreadable) {
+        _error = 'Captures are still loading — try again.';
+        notifyListeners();
+      }
+      return null;
+    }
+    if (_isRecording || _isBusy) return null;
+    _isBusy = true;
+    _error = null;
+    notifyListeners();
+
+    String? captured;
+    File? destination;
+    try {
+      final String id = const Uuid().v4();
+      const String mimeType = 'image/png';
+      destination = await _repository.createSourceFile(
+        id,
+        RecordingsRepository.extensionFor(
+          CaptureType.image,
+          sourceMimeType: mimeType,
+        ),
+      );
+      await _screenshotTaker.capture(destination);
+
+      final int sizeBytes = await destination.exists()
+          ? await destination.length()
+          : 0;
+      if (sizeBytes == 0) {
+        await _removeEmptyScreenshot(destination);
+        _logSink.log('Screenshot cancelled.');
+        return null;
+      }
+
+      final Recording saved = Recording(
+        id: id,
+        filePath: destination.path,
+        createdAt: DateTime.now(),
+        durationMs: 0,
+        sizeBytes: sizeBytes,
+        status: RecordingStatus.saved,
+        type: CaptureType.image,
+        sourceMimeType: mimeType,
+        projectId: activeProjectId,
+        projectAuto: activeProjectId != null,
+      );
+
+      // Critical invariant: index only after the source is verified.
+      _recordings = <Recording>[saved, ..._recordings];
+      await _persistAll();
+      captured = id;
+      unawaited(_computeContentHash(id));
+      unawaited(_gamificationController?.onCaptureCreated(_recordings.length));
+      _logSink.log('Screenshot saved · $sizeBytes B', recordingId: id);
+
+      await _enqueueProcessing(id);
+    } catch (exception) {
+      if (captured == null) {
+        if (destination != null) await _removeEmptyScreenshot(destination);
+        _error = exception.toString();
+        _logSink.log('Screenshot failed: $exception', level: LogLevel.error);
+      } else {
+        // The capture exists and is on disk; only queuing it failed. Saying
+        // "Screenshot failed" here would tell the user the image is gone when
+        // it is in the queue, `saved`, waiting for a retry.
+        _error =
+            'Screenshot saved, but it could not be queued for '
+            'processing: $exception';
+        _logSink.log(
+          'Screenshot saved but not queued for processing: $exception',
+          level: LogLevel.error,
+          recordingId: captured,
+        );
+      }
+    } finally {
+      _isBusy = false;
+      notifyListeners();
+    }
+
+    if (captured != null && withVoiceComment) {
+      await startRecording(appendTo: captured);
+    }
+    return captured;
+  }
+
+  /// Deletes [file] only when it holds nothing. A non-empty file is a
+  /// screenshot that landed — if indexing it failed, it stays on disk for
+  /// `recoverOrphans()` rather than being destroyed here.
+  Future<void> _removeEmptyScreenshot(File file) async {
+    try {
+      if (await file.exists() && await file.length() == 0) {
+        await file.delete();
+      }
+    } catch (_) {
+      // Best-effort: a zero-byte file is skipped by `findOrphans` anyway.
+    }
+  }
+
   /// Direct file import (e.g. from clipboard image or system drop).
   Future<void> addImportedFile(
     File file,
@@ -3503,6 +3637,9 @@ class RecordingsController extends ChangeNotifier {
     // fallback cascade — and never writes a uuid as a heading.
     title: displayNameFor(recording),
     body: recording.transcript ?? '',
+    sourceFiles: <String>[
+      for (final CaptureSegment segment in recording.segments) segment.filePath,
+    ],
     capturedAt: recording.createdAt,
     type: recording.type,
     summary: recording.summary,
@@ -4154,6 +4291,7 @@ class RecordingsController extends ChangeNotifier {
     }
     if (_processingId == id) {
       _cancelledProcessingIds.add(id);
+      _rerunAfterCurrent.remove(id);
       _processingTickerTimer?.cancel();
       _processingTickerTimer = null;
       _processingStartTime = null;
@@ -4423,7 +4561,11 @@ class RecordingsController extends ChangeNotifier {
     // Idempotent: don't re-enqueue an item that is already queued or currently
     // running — that would process it twice (the UI only ever retries `failed`
     // items, so this is a defensive guard).
-    if (id == _processingId || _processingQueue.contains(id)) return;
+    if (_processingQueue.contains(id)) return;
+    if (id == _processingId) {
+      _rerunAfterCurrent.add(id);
+      return;
+    }
     final Recording? item = _recordings
         .where((Recording r) => r.id == id)
         .cast<Recording?>()
@@ -4506,6 +4648,22 @@ class RecordingsController extends ChangeNotifier {
         // The item could have been dropped between enqueue and now; skip it.
         if (!_recordings.any((Recording item) => item.id == id)) continue;
         await _processOne(id);
+        // Through the funnel, so the row goes back to `pendingTranscription`
+        // and the loop picks it up; segments that already have text are
+        // skipped by `_processOne`.
+        if (_rerunAfterCurrent.remove(id) && !_disposed) {
+          try {
+            await _enqueueProcessing(id);
+          } catch (exception) {
+            // This loop runs unawaited; a throw here would be unhandled. The
+            // row stays as the job left it and RETRY picks the fragment up.
+            _logSink.log(
+              'Could not re-queue an appended fragment: $exception',
+              level: LogLevel.error,
+              recordingId: id,
+            );
+          }
+        }
       }
     } finally {
       _isDraining = false;

@@ -255,6 +255,22 @@ class ShortcutsCoordinator {
           // window it will paste back into; raising the app here would take
           // that focus before anything could write it down.
           await _onToggleClipboardHistory?.call();
+        case ShortcutAction.screenshotCapture:
+          // No window either side: before, it would be in the picture; after,
+          // the capture is already persisted and raising the app would pull
+          // the user off the screen they were pointing at.
+          await _recordings.captureScreenshot();
+        case ShortcutAction.screenshotWithVoiceComment:
+          final String? id = await _recordings.captureScreenshot(
+            withVoiceComment: true,
+          );
+          // Surfaced once the comment is being recorded, on the rule
+          // `toggleRecording` follows: the running SAVE control lives on the
+          // Queue tab. A cancelled selection raises nothing.
+          if (id != null && _recordings.isRecording) {
+            await _windowPresenter.present();
+            await _revealQueue?.call();
+          }
       }
     } catch (exception) {
       _logSink.log(

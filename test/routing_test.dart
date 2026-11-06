@@ -4,6 +4,7 @@ import 'package:augustyniak_capture/features/projects/domain/project.dart';
 import 'package:augustyniak_capture/features/recordings/data/project_inbox_router.dart';
 import 'package:augustyniak_capture/features/recordings/domain/capture_category.dart';
 import 'package:augustyniak_capture/features/recordings/domain/capture_router.dart';
+import 'package:augustyniak_capture/features/recordings/domain/capture_type.dart';
 import 'package:augustyniak_capture/features/recordings/domain/recording.dart';
 import 'package:augustyniak_capture/features/recordings/domain/route_record.dart';
 import 'package:augustyniak_capture/features/recordings/presentation/recordings_controller.dart';
@@ -88,6 +89,32 @@ void main() {
     // This is what lets the queue drain as a side effect of the work.
     expect(routed.isProcessedByUser, isTrue);
     expect(routed.processedAt, routed.routes.single.at);
+  });
+
+  test('an inbox entry for a screenshot names the image file', () async {
+    final String image = '${appDir.path}${Platform.pathSeparator}shot.png';
+    final RecordingsController controller = await buildRecordingsController(
+      appDir,
+      seed: <Recording>[
+        makeRecording(
+          id: 'shot',
+          type: CaptureType.image,
+          projectId: 'p1',
+          title: 'Checkout error',
+          transcript: 'Error 500 on /checkout',
+          filePath: image,
+        ),
+      ],
+      captureRouter: routerFor(repo),
+    );
+
+    await controller.route('shot');
+
+    final String written = await File(
+      '${repo.path}${Platform.pathSeparator}inbox.md',
+    ).readAsString();
+    expect(written, contains('Error 500 on /checkout'));
+    expect(written, contains('Source: `$image`'));
   });
 
   test(
