@@ -10,6 +10,7 @@ import 'package:uuid/uuid.dart';
 
 import '../../costs/domain/usage_event.dart';
 import '../../command/domain/command_client.dart';
+import '../../command/domain/outcome_review.dart';
 import '../../costs/domain/usage_sink.dart';
 import '../../enrichment/domain/embedding_service.dart';
 import '../../enrichment/domain/enrichment_context.dart';
@@ -124,6 +125,8 @@ class RecordingsController extends ChangeNotifier {
     ClosureLog closureLog = const NoopClosureLog(),
     CommandClient commandClient = const DisabledCommandClient(),
     String? Function()? commandBaseUrl,
+    OutcomeNotifier outcomeNotifier = const NoopOutcomeNotifier(),
+    OutcomeSpeaker outcomeSpeaker = const UnavailableOutcomeSpeaker(),
     // The Supabase sync seam — a resolver, never a snapshot, so a Config
     // change only affects a run started afterwards. All eight are null in
     // every existing call site and in every pure-Dart test, which is what
@@ -164,6 +167,8 @@ class RecordingsController extends ChangeNotifier {
        _repository = repository,
        _commandClient = commandClient,
        _commandBaseUrl = commandBaseUrl,
+       _outcomeNotifier = outcomeNotifier,
+       _outcomeSpeaker = outcomeSpeaker,
        _revisionsRepository = revisionsRepository,
        _syncTransportResolver = syncTransportResolver,
        _authGateway = authGateway,
@@ -320,6 +325,22 @@ class RecordingsController extends ChangeNotifier {
   /// pull-to-refresh land together often enough to matter, and two sweeps would
   /// both write the index.
   bool _refreshingOutcomes = false;
+
+  /// Where a change into an attention state is announced — a best-effort
+  /// sink, see `_announceOutcome`.
+  final OutcomeNotifier _outcomeNotifier;
+
+  /// Reads an outcome summary aloud for [listenToOutcome].
+  final OutcomeSpeaker _outcomeSpeaker;
+
+  /// Announcements still in flight, so a test can wait for them rather than
+  /// sleep. Teardown never waits on them.
+  final Set<Future<void>> _outcomeAnnouncements = <Future<void>>{};
+
+  /// Whether [_outcomeSpeaker] answered available when [initialize] asked.
+  /// False until then and whenever the probe fails, which hides the Listen
+  /// control rather than offering one that can only fail.
+  bool _canListenToOutcome = false;
   final AgentHandoff _agentHandoff;
   final CaptureSender _captureSender;
   final NoteVault _noteVault;
@@ -1155,6 +1176,7 @@ class RecordingsController extends ChangeNotifier {
     );
 
     await _history.loadRevisions();
+    await _probeOutcomeSpeaker();
 
     notifyListeners();
 
@@ -3761,11 +3783,135 @@ class RecordingsController extends ChangeNotifier {
             ],
           ),
         );
+        // Only after the outcome is on disk, and only on a *change* into a
+        // state worth a look: asking again about a brief that is still `done`
+        // must not ring a second time.
+        if (next.state != known.state && outcomeNeedsAttention(next.state)) {
+          final Recording? saved = _recordingOrNull(id);
+          if (saved != null && saved.routes.isNotEmpty) {
+            _announceOutcome(id, saved.routes.last);
+          }
+        }
       }
     } finally {
       _refreshingOutcomes = false;
     }
     return updated;
+  }
+
+  /// Hands one outcome change to the notifier under the `ClipboardSink`
+  /// contract: after the persist, unawaited, every failure swallowed. A
+  /// notifier that answers false — no permission, no platform support — leaves
+  /// the outcome on the card, which is where it was always shown.
+  void _announceOutcome(String id, RouteRecord route) {
+    final RouteOutcome? outcome = route.outcome;
+    if (outcome == null) return;
+    final OutcomeAnnouncement announcement = OutcomeAnnouncement(
+      recordingId: id,
+      state: outcome.state,
+      summary: spokenOutcomeSummary(route),
+    );
+    late final Future<void> job;
+    job = _notifyOutcome(
+      id,
+      announcement,
+    ).whenComplete(() => _outcomeAnnouncements.remove(job));
+    _outcomeAnnouncements.add(job);
+  }
+
+  Future<void> _notifyOutcome(
+    String id,
+    OutcomeAnnouncement announcement,
+  ) async {
+    try {
+      await _outcomeNotifier.notify(announcement);
+    } catch (exception) {
+      _logSink.log(
+        'Could not announce the Command outcome: $exception',
+        level: LogLevel.warn,
+        recordingId: id,
+      );
+    }
+  }
+
+  /// Completes once every outcome announcement started so far has settled.
+  @visibleForTesting
+  Future<void> waitForOutcomeAnnouncements() async {
+    while (_outcomeAnnouncements.isNotEmpty) {
+      await Future.wait(_outcomeAnnouncements.toList(growable: false));
+    }
+  }
+
+  /// Asks the speaker once whether it can talk. A probe that throws reads as
+  /// "no speaker": the card is the whole feature without one.
+  Future<void> _probeOutcomeSpeaker() async {
+    try {
+      _canListenToOutcome = await _outcomeSpeaker.isAvailable();
+    } catch (exception) {
+      _canListenToOutcome = false;
+      _logSink.log(
+        'Text-to-speech is unavailable: $exception',
+        level: LogLevel.warn,
+      );
+    }
+  }
+
+  /// Whether the Listen control is offered at all — a property of the install,
+  /// not of a capture. Pair it with [hasOutcome] per row.
+  bool get canListenToOutcome => _canListenToOutcome;
+
+  /// Whether [id]'s latest delivery carries an outcome to listen or reply to.
+  bool hasOutcome(String id) => _outcomeRoute(id) != null;
+
+  /// The latest delivery of [id], when it carries an outcome.
+  RouteRecord? _outcomeRoute(String id) {
+    final Recording? item = _recordingOrNull(id);
+    if (item == null || item.routes.isEmpty) return null;
+    final RouteRecord route = item.routes.last;
+    return route.outcome == null ? null : route;
+  }
+
+  /// What [listenToOutcome] would say about [id], or null when it has no
+  /// outcome. Built from the outcome alone — never the capture's own text.
+  String? outcomeSummaryFor(String id) {
+    final RouteRecord? route = _outcomeRoute(id);
+    return route == null ? null : spokenOutcomeSummary(route);
+  }
+
+  /// Reads [id]'s outcome summary aloud.
+  ///
+  /// False when there is nothing to say or nothing to say it with — no
+  /// outcome, no text-to-speech, or the engine failed — and the card view,
+  /// which already shows the outcome, is then the whole feature.
+  Future<bool> listenToOutcome(String id) async {
+    final String? summary = outcomeSummaryFor(id);
+    if (summary == null) return false;
+    try {
+      if (!await _outcomeSpeaker.isAvailable()) return false;
+      await _outcomeSpeaker.speak(summary);
+      return true;
+    } catch (exception) {
+      _logSink.log(
+        'Could not read the Command outcome aloud: $exception',
+        level: LogLevel.warn,
+        recordingId: id,
+      );
+      return false;
+    }
+  }
+
+  /// Starts a spoken reply to [id]'s outcome.
+  ///
+  /// Nothing but [startRecording] with `appendTo`: the reply becomes a new
+  /// segment of the same capture through the one append path, so it is on
+  /// disk and verified before the parent row changes, and it re-opens the
+  /// capture for a follow-up handoff. Nothing is sent anywhere — acting on the
+  /// reply stays an explicit handoff. False when [id] has no outcome to reply
+  /// to or the recording did not start.
+  Future<bool> replyToOutcome(String id) async {
+    if (_outcomeRoute(id) == null) return false;
+    await startRecording(appendTo: id);
+    return _isRecording && _appendTargetId == id;
   }
 
   /// Opens a delivery's page on the control plane, or its pull request.

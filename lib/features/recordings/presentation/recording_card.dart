@@ -49,6 +49,8 @@ class RecordingCard extends StatelessWidget {
     this.onSelectArtifact,
     this.onOpenOutcome,
     this.canOpenOutcome,
+    this.onListenOutcome,
+    this.onReplyOutcome,
     this.onAttachSession,
     this.focused = false,
     this.costUsd,
@@ -170,6 +172,15 @@ class RecordingCard extends StatelessWidget {
   /// plane whose address is still configured. Asked per outcome rather than
   /// once for the card, because the answer differs row by row.
   final bool Function(RouteOutcome outcome)? canOpenOutcome;
+
+  /// Reads the outcome's summary aloud (#252). Null where there is no speaker,
+  /// which hides the control rather than offering one that can only fail.
+  final VoidCallback? onListenOutcome;
+
+  /// Starts a spoken reply: a recording appended to this capture through the
+  /// one append path. Null hides it — no microphone path, or a take is
+  /// already running.
+  final VoidCallback? onReplyOutcome;
 
   /// Opens a terminal on the agent session the latest delivery started — the
   /// way back into a session that ran in the background. Null where no
@@ -677,17 +688,45 @@ class RecordingCard extends StatelessWidget {
                       (canOpenOutcome?.call(outcome) ?? true);
                   return Padding(
                     padding: const EdgeInsets.only(top: 5, left: 18),
-                    child: InkWell(
-                      onTap: canOpen ? () => onOpenOutcome!(outcome) : null,
-                      borderRadius: BorderRadius.circular(6),
-                      child: Text(
-                        outcomeLineFor(outcome),
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: ConsoleText.micro.copyWith(
-                          color: canOpen ? Console.accent : Console.mutedSoft,
+                    child: Row(
+                      children: <Widget>[
+                        Flexible(
+                          child: InkWell(
+                            onTap: canOpen
+                                ? () => onOpenOutcome!(outcome)
+                                : null,
+                            borderRadius: BorderRadius.circular(6),
+                            child: Text(
+                              outcomeLineFor(outcome),
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: ConsoleText.micro.copyWith(
+                                color: canOpen
+                                    ? Console.accent
+                                    : Console.mutedSoft,
+                              ),
+                            ),
+                          ),
                         ),
-                      ),
+                        if (onListenOutcome case final VoidCallback listen)
+                          _OutcomeAction(
+                            key: ValueKey<String>(
+                              'listen-outcome-${recording.id}',
+                            ),
+                            label: 'LISTEN',
+                            tooltip: 'Read the agent result aloud',
+                            onTap: listen,
+                          ),
+                        if (onReplyOutcome case final VoidCallback reply)
+                          _OutcomeAction(
+                            key: ValueKey<String>(
+                              'reply-outcome-${recording.id}',
+                            ),
+                            label: 'REPLY',
+                            tooltip: 'Record a reply onto this capture',
+                            onTap: reply,
+                          ),
+                      ],
                     ),
                   );
                 },
@@ -1202,6 +1241,46 @@ class _CardTranscriptSectionState extends State<_CardTranscriptSection> {
           ],
         ),
       ],
+    );
+  }
+}
+
+/// One of the outcome line's text actions, drawn like `ATTACH`.
+class _OutcomeAction extends StatelessWidget {
+  // Not `const`: it paints a palette colour (see the theme rule in CLAUDE.md).
+  _OutcomeAction({
+    super.key,
+    required this.label,
+    required this.tooltip,
+    required this.onTap,
+  });
+
+  final String label;
+  final String tooltip;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.only(left: 8),
+      child: Tooltip(
+        message: tooltip,
+        child: InkWell(
+          onTap: onTap,
+          borderRadius: BorderRadius.circular(6),
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
+            child: Text(
+              label,
+              style: ConsoleText.micro.copyWith(
+                color: Console.accent,
+                fontWeight: FontWeight.w700,
+                letterSpacing: 1.1,
+              ),
+            ),
+          ),
+        ),
+      ),
     );
   }
 }

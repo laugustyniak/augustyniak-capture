@@ -526,6 +526,23 @@ class _QueueTabState extends State<QueueTab> {
     });
   }
 
+  /// Reads [recording]'s outcome aloud. The controller answers false rather
+  /// than throwing when there is nothing to say or nothing to say it with, so
+  /// the keyboard path can call this on any row.
+  void _listenToOutcome(Recording recording) {
+    if (!widget.controller.canListenToOutcome) return;
+    if (!widget.controller.hasOutcome(recording.id)) return;
+    unawaited(widget.controller.listenToOutcome(recording.id));
+  }
+
+  /// Starts a spoken reply onto [recording] — `startRecording(appendTo:)`
+  /// through the controller, nothing else.
+  void _replyToOutcome(Recording recording) {
+    if (widget.controller.isRecording) return;
+    if (!widget.controller.hasOutcome(recording.id)) return;
+    unawaited(widget.controller.replyToOutcome(recording.id));
+  }
+
   /// The row the master–detail layout shows: the user's choice while it is
   /// still visible, otherwise the first row — so the panel is never empty
   /// while the list is not.
@@ -629,6 +646,8 @@ class _QueueTabState extends State<QueueTab> {
             searchFocus.requestFocus();
           },
           onOpen: () => onSelected(_openFocus),
+          onListenOutcome: () => onSelected(_listenToOutcome),
+          onReplyOutcome: () => onSelected(_replyToOutcome),
           onClearFocus: () => setState(() => focusedId = null),
           child: Stack(
             children: <Widget>[
@@ -1145,6 +1164,14 @@ class _QueueTabState extends State<QueueTab> {
       onOpenOutcome: controller.openCommandOutcome,
       canOpenOutcome: (RouteOutcome outcome) =>
           controller.commandOutcomeUrl(outcome) != null,
+      // Spoken review (#252): offered on the outcome line only, so a capture
+      // with no outcome never carries either control.
+      onListenOutcome: controller.canListenToOutcome
+          ? () => _listenToOutcome(recording)
+          : null,
+      onReplyOutcome: controller.isRecording
+          ? null
+          : () => _replyToOutcome(recording),
       // Offered wherever a session can be launched at all; a session that has
       // since ended is refused by name, through the controller's error.
       onAttachSession: controller.canHandoff(recording)
@@ -1841,6 +1868,8 @@ class _QueueShortcuts extends StatelessWidget {
     required this.onPrevious,
     required this.onOpen,
     required this.onSearch,
+    required this.onListenOutcome,
+    required this.onReplyOutcome,
     required this.onClearFocus,
     required this.child,
   });
@@ -1850,6 +1879,8 @@ class _QueueShortcuts extends StatelessWidget {
   final VoidCallback onPrevious;
   final VoidCallback onOpen;
   final VoidCallback onSearch;
+  final VoidCallback onListenOutcome;
+  final VoidCallback onReplyOutcome;
   final VoidCallback onClearFocus;
   final Widget child;
 
@@ -1874,6 +1905,29 @@ class _QueueShortcuts extends StatelessWidget {
         // Both spellings: control on Linux/Windows, meta on macOS.
         const SingleActivator(LogicalKeyboardKey.keyF, control: true): onSearch,
         const SingleActivator(LogicalKeyboardKey.keyF, meta: true): onSearch,
+        // Spoken review of the selected row's agent outcome (#252). Chords,
+        // not letters: single-key actions were taken out of this layer (#219),
+        // and Shift keeps them clear of the app's Ctrl/Cmd bindings.
+        const SingleActivator(
+          LogicalKeyboardKey.keyL,
+          control: true,
+          shift: true,
+        ): onListenOutcome,
+        const SingleActivator(
+          LogicalKeyboardKey.keyL,
+          meta: true,
+          shift: true,
+        ): onListenOutcome,
+        const SingleActivator(
+          LogicalKeyboardKey.keyR,
+          control: true,
+          shift: true,
+        ): onReplyOutcome,
+        const SingleActivator(
+          LogicalKeyboardKey.keyR,
+          meta: true,
+          shift: true,
+        ): onReplyOutcome,
       },
       child: Focus(
         focusNode: focusNode,
