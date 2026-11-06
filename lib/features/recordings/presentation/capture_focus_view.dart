@@ -605,6 +605,7 @@ class _Header extends StatelessWidget {
                         label: projectName!,
                         color: Console.mutedSoft,
                         outlined: true,
+                        tooltip: projectName,
                       ),
                     if (recording.category != null)
                       StatusPill(
