@@ -11,6 +11,7 @@ import '../features/logs/domain/log_event.dart';
 import '../features/recordings/presentation/recordings_page.dart';
 import '../features/settings/domain/app_settings.dart';
 import '../features/settings/domain/app_theme_mode.dart';
+import '../features/shortcuts/domain/shortcut_link_source.dart';
 import '../features/sync/data/e2ee_service.dart';
 import '../features/sync/data/supabase_e2ee_settings_store.dart';
 import '../features/sync/data/supabase_media_store.dart';
@@ -25,9 +26,22 @@ import '../features/sync/data/supabase_sync_transport.dart';
 /// every settings change, and this widget is the only reader. One direction
 /// only, so there is no second source of truth to keep in step.
 class AugustyniakCaptureApp extends StatefulWidget {
-  const AugustyniakCaptureApp({super.key, this.supabaseClient});
+  const AugustyniakCaptureApp({
+    super.key,
+    this.supabaseClient,
+    this.launchArguments = const <String>[],
+    this.shortcutLinkSource = const NoopShortcutLinkSource(),
+  });
 
   final SupabaseClient? supabaseClient;
+
+  /// `main`'s arguments, handed down so a cold start with a shortcut URL runs
+  /// that action once the shell has loaded.
+  final List<String> launchArguments;
+
+  /// Shortcut URLs forwarded to the running instance. The no-op default keeps
+  /// every widget test off the `app_links` platform channel.
+  final ShortcutLinkSource shortcutLinkSource;
 
   @override
   State<AugustyniakCaptureApp> createState() => _AugustyniakCaptureAppState();
@@ -174,6 +188,8 @@ class _AugustyniakCaptureAppState extends State<AugustyniakCaptureApp> {
                     ownerId: ownerId,
                   ),
             e2eeService: _e2ee,
+            launchArguments: widget.launchArguments,
+            shortcutLinkSource: widget.shortcutLinkSource,
           ),
         );
       },
