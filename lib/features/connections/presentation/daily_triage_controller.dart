@@ -139,6 +139,8 @@ class DailyTriageController extends ChangeNotifier {
         projectNames: _projectNames(),
       );
       _digest = digest;
+      // Acceptances answered the previous digest; rejections stand.
+      _accepted.clear();
       try {
         await _log.appendDigest(digest);
       } catch (_) {

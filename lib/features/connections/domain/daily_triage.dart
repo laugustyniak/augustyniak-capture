@@ -51,20 +51,32 @@ class TriageProposal {
     if (priority case final CapturePriority priority) 'priority': priority.name,
   };
 
+  /// Whether [ids] (already de-duplicated) is a shape [kind] can act on: a
+  /// rerank names exactly one capture, a merge at least two, and nothing
+  /// names none. Shared by the model's reply and the log loader, so a row
+  /// the service would refuse cannot come back in through `triage.jsonl`.
+  static bool idsFitKind(TriageKind kind, List<String> ids) => switch (kind) {
+    TriageKind.merge => ids.length >= 2,
+    TriageKind.rerank => ids.length == 1,
+    TriageKind.close || TriageKind.stale => ids.isNotEmpty,
+  };
+
   /// Null for a row this build cannot read, which is dropped on its own.
   static TriageProposal? fromJson(Object? json) {
     if (json is! Map) return null;
     final TriageKind? kind = TriageKind.tryName(json['kind']);
     final Object? reason = json['reason'];
-    final Object? ids = json['captureIds'];
-    if (kind == null || reason is! String || ids is! List) return null;
-    if (ids.any((Object? id) => id is! String)) return null;
+    final Object? rawIds = json['captureIds'];
+    if (kind == null || reason is! String || rawIds is! List) return null;
+    if (rawIds.any((Object? id) => id is! String)) return null;
+    final List<String> ids = rawIds.cast<String>().toSet().toList();
+    if (!idsFitKind(kind, ids)) return null;
     final CapturePriority? priority = CapturePriority.tryName(json['priority']);
     if (kind == TriageKind.rerank && priority == null) return null;
     return TriageProposal(
       kind: kind,
       reason: reason,
-      captureIds: ids.cast<String>().toList(),
+      captureIds: ids,
       priority: kind == TriageKind.rerank ? priority : null,
     );
   }
@@ -133,7 +145,8 @@ class TriageDecision {
   }
 }
 
-/// What the append-only log says: the newest digest and every decision.
+/// What the append-only log says: the newest digest and the decisions that
+/// still apply to it.
 class TriageHistory {
   const TriageHistory({
     this.latest,
@@ -151,19 +164,26 @@ class TriageHistory {
     }
     // The last answer to a key wins, so a later accept of a once-rejected
     // proposal is not shadowed by the older rejection.
-    final Map<String, TriageOutcome> last = <String, TriageOutcome>{};
+    final Map<String, TriageDecision> last = <String, TriageDecision>{};
     for (final TriageDecision decision in decisions) {
-      last[decision.key] = decision.outcome;
+      last[decision.key] = decision;
     }
     return TriageHistory(
       latest: latest,
+      // A rejection holds for good: the model must not bring it back.
       rejected: <String>{
-        for (final MapEntry<String, TriageOutcome> entry in last.entries)
-          if (entry.value == TriageOutcome.rejected) entry.key,
+        for (final TriageDecision decision in last.values)
+          if (decision.outcome == TriageOutcome.rejected) decision.key,
       },
+      // An acceptance answers the digest it was made from. A later digest
+      // may propose the same change again — the user may have undone it by
+      // hand since — so only an acceptance at or after the newest digest
+      // still hides it.
       accepted: <String>{
-        for (final MapEntry<String, TriageOutcome> entry in last.entries)
-          if (entry.value == TriageOutcome.accepted) entry.key,
+        for (final TriageDecision decision in last.values)
+          if (decision.outcome == TriageOutcome.accepted &&
+              (latest == null || !decision.at.isBefore(latest.at)))
+            decision.key,
       },
     );
   }

@@ -188,16 +188,9 @@ class HttpDailyTriageService implements DailyTriageService {
       return null;
     }
     final List<String> ids = rawIds.cast<String>().toSet().toList();
+    if (!TriageProposal.idsFitKind(kind, ids)) return null;
     final CapturePriority? priority = CapturePriority.tryName(item['priority']);
-    switch (kind) {
-      case TriageKind.merge:
-        if (ids.length < 2) return null;
-      case TriageKind.rerank:
-        if (ids.length != 1 || priority == null) return null;
-      case TriageKind.close:
-      case TriageKind.stale:
-        break;
-    }
+    if (kind == TriageKind.rerank && priority == null) return null;
     return TriageProposal(
       kind: kind,
       reason: _limit(reason.trim(), 400),

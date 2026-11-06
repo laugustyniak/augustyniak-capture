@@ -432,6 +432,52 @@ void main() {
       expect(history.latest?.proposals.single.reason, 'new');
       expect(history.rejected, <String>{'stale:b'});
     });
+
+    test('a row whose ids do not fit its kind is dropped on load', () async {
+      // A hand edit or a merged-in archive can carry rows the service would
+      // never have written. Loaded as-is, a rerank with no id made the queue
+      // toolbar throw on `captureIds.single`.
+      Map<String, dynamic> row(String kind, List<String> ids) =>
+          <String, dynamic>{
+            'kind': kind,
+            'reason': 'r',
+            'captureIds': ids,
+            if (kind == 'rerank') 'priority': 'p0',
+          };
+      File('${temp.path}/triage.jsonl').writeAsStringSync(
+        '${jsonEncode(<String, dynamic>{
+          'type': 'digest',
+          'at': '2026-10-02T00:00:00.000Z',
+          'proposals': <Map<String, dynamic>>[
+            row('rerank', <String>[]),
+            row('rerank', <String>['a', 'b']),
+            row('merge', <String>['a']),
+            row('merge', <String>['a', 'a']),
+            row('close', <String>[]),
+            row('stale', <String>[]),
+            row('close', <String>['c']),
+          ],
+        })}\n',
+      );
+
+      final FileTriageLog log = FileTriageLog(directory: () async => temp);
+      final TriageHistory history = await log.load();
+      expect(
+        history.latest?.proposals.map((TriageProposal p) => p.key),
+        <String>['close:c'],
+      );
+
+      final DailyTriageController controller = DailyTriageController(
+        service: ScriptedService((_) => throw StateError('not run')),
+        log: log,
+        recordings: () => <Recording>[capture('a'), capture('b'), capture('c')],
+        actions: RecordingActions(),
+      );
+      await controller.load();
+      expect(controller.proposals.map((TriageProposal p) => p.key), <String>[
+        'close:c',
+      ]);
+    });
   });
 
   group('DailyTriageController', () {
@@ -532,6 +578,39 @@ void main() {
         );
       },
     );
+
+    test('an accepted proposal can come back in a later digest', () async {
+      // Accepting answers this digest. If the user later undoes it by hand,
+      // a later run must be free to propose the same change again.
+      final ScriptedService service = ScriptedService(
+        (_) async =>
+            TriageDigest(at: now, proposals: const <TriageProposal>[rerank]),
+      );
+      final DailyTriageController today = build(service);
+      await today.load();
+      await today.run();
+      now = now.add(const Duration(minutes: 5));
+      await today.accept(rerank);
+      expect(today.proposals, isEmpty);
+
+      // Same digest, fresh controller: the answer is still remembered.
+      final DailyTriageController reloaded = build(service);
+      await reloaded.load();
+      expect(reloaded.proposals, isEmpty);
+
+      // Next day, the model proposes it again: shown, in this session and
+      // after a reload.
+      now = now.add(const Duration(days: 1));
+      await today.run();
+      expect(today.proposals.map((TriageProposal p) => p.key), <String>[
+        rerank.key,
+      ]);
+      final DailyTriageController tomorrow = build(service);
+      await tomorrow.load();
+      expect(tomorrow.proposals.map((TriageProposal p) => p.key), <String>[
+        rerank.key,
+      ]);
+    });
 
     test('a rejected proposal does not reappear the next day', () async {
       final ScriptedService service = ScriptedService(

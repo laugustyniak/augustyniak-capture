@@ -139,15 +139,32 @@ void main() {
   );
 
   /// A handoff writes the brief to the real filesystem and the fake-async zone
-  /// does not pump that work, so the launch has to be settled explicitly. Ten
-  /// rounds because the chain is long: stat the repo, stat the brief, create the
-  /// directory, append, launch, then persist the closed capture.
-  Future<void> settleIo(WidgetTester tester) async {
-    for (int i = 0; i < 10; i++) {
+  /// does not pump that work, so the launch has to be settled explicitly. The
+  /// chain is long: stat the repo, stat the brief, create the directory,
+  /// append, launch, then persist the closed capture.
+  ///
+  /// [until] names the fact the test waits for, and is polled rather than
+  /// assumed: a fixed number of short rounds passed alone and failed under a
+  /// full parallel run, when the launch had not been reached yet. The ten
+  /// rounds stay as a floor so a wait with no observable fact still settles.
+  Future<void> settleIo(WidgetTester tester, {bool Function()? until}) async {
+    Future<void> round() async {
       await tester.runAsync(
         () => Future<void>.delayed(const Duration(milliseconds: 20)),
       );
       await tester.pump();
+    }
+
+    for (int i = 0; i < 10; i++) {
+      await round();
+    }
+    if (until != null) {
+      final Stopwatch waited = Stopwatch()..start();
+      while (!until() && waited.elapsed < const Duration(seconds: 10)) {
+        await round();
+      }
+      // The fact can land before the sheet repaints from it.
+      await round();
     }
     await tester.pumpAndSettle();
   }
@@ -197,7 +214,12 @@ void main() {
     expect(find.textContaining('.agent-tasks/r1.md'), findsOneWidget);
 
     await tester.tap(find.text('LAUNCH SESSION'));
-    await settleIo(tester);
+    await settleIo(
+      tester,
+      until: () =>
+          launcher.requests.isNotEmpty &&
+          controller.recordings.single.isProcessedByUser,
+    );
 
     // Preselected default means one tap: the launch used Antigravity without
     // the user touching the chips.
@@ -273,7 +295,7 @@ void main() {
     await tester.tap(find.text('CLAUDE CODE'));
     await tester.pump();
     await tester.tap(find.text('LAUNCH SESSION'));
-    await settleIo(tester);
+    await settleIo(tester, until: () => launcher.requests.isNotEmpty);
 
     expect(launcher.requests.single.agent, ProjectAgent.claude);
   });
@@ -286,7 +308,7 @@ void main() {
 
       await openSheet(tester, controller);
       await tester.tap(find.text('LAUNCH SESSION'));
-      await settleIo(tester);
+      await settleIo(tester, until: () => launcher.requests.isNotEmpty);
 
       // The one outcome that looks like success and is not finished: the session
       // was reattached, so the running agent never saw this prompt.
@@ -300,31 +322,36 @@ void main() {
   testWidgets('launches in the background by default and offers the way in', (
     WidgetTester tester,
   ) async {
-      final _FakeLauncher launcher = _FakeLauncher();
-      final RecordingsController controller = await controllerWith(launcher);
+    final _FakeLauncher launcher = _FakeLauncher();
+    final RecordingsController controller = await controllerWith(launcher);
 
-      await openSheet(tester, controller);
-      await tester.tap(find.text('LAUNCH SESSION'));
-      await settleIo(tester);
+    await openSheet(tester, controller);
+    await tester.tap(find.text('LAUNCH SESSION'));
+    await settleIo(
+      tester,
+      until: () =>
+          launcher.requests.isNotEmpty &&
+          controller.recordings.single.isProcessedByUser,
+    );
 
-      final String session =
-          'augustyniak-acme-p1-${launcher.requests.single.agent.executable}';
-      expect(launcher.requests.single.detached, isTrue);
-      // Stays open: with no window, the sheet is the only thing that says
-      // where the session went and how to reach it.
-      expect(find.text('Session started in the background'), findsOneWidget);
-      expect(find.text('zellij attach $session'), findsOneWidget);
-      // The capture is closed — the prompt was delivered.
-      expect(controller.recordings.single.isProcessedByUser, isTrue);
+    final String session =
+        'augustyniak-acme-p1-${launcher.requests.single.agent.executable}';
+    expect(launcher.requests.single.detached, isTrue);
+    // Stays open: with no window, the sheet is the only thing that says
+    // where the session went and how to reach it.
+    expect(find.text('Session started in the background'), findsOneWidget);
+    expect(find.text('zellij attach $session'), findsOneWidget);
+    // The capture is closed — the prompt was delivered.
+    expect(controller.recordings.single.isProcessedByUser, isTrue);
 
-      await tester.ensureVisible(
-        find.byKey(const ValueKey<String>('handoff-attach')),
-      );
-      await tester.tap(find.byKey(const ValueKey<String>('handoff-attach')));
-      await settleIo(tester);
+    await tester.ensureVisible(
+      find.byKey(const ValueKey<String>('handoff-attach')),
+    );
+    await tester.tap(find.byKey(const ValueKey<String>('handoff-attach')));
+    await settleIo(tester, until: () => launcher.attached.isNotEmpty);
 
-      expect(launcher.attached, <String>[session]);
-      expect(find.text('DONE'), findsOneWidget);
+    expect(launcher.attached, <String>[session]);
+    expect(find.text('DONE'), findsOneWidget);
   });
 
   testWidgets('a native background handoff shows the durable job notice', (
@@ -335,12 +362,12 @@ void main() {
         id: '00000000-0000-4000-8000-000000000001',
         backend: NativeAgentBackend.codex,
       ),
-  );
+    );
     final RecordingsController controller = await controllerWith(launcher);
 
     await openSheet(tester, controller);
     await tester.tap(find.text('LAUNCH SESSION'));
-    await settleIo(tester);
+    await settleIo(tester, until: () => launcher.requests.isNotEmpty);
 
     expect(
       find.byKey(const ValueKey<String>('handoff-native-job-notice')),
@@ -377,7 +404,7 @@ void main() {
     await tester.tap(find.text('WINDOW · ZELLIJ'));
     await tester.pump();
     await tester.tap(find.text('LAUNCH SESSION'));
-    await settleIo(tester);
+    await settleIo(tester, until: () => launcher.requests.isNotEmpty);
 
     expect(launcher.requests.single.detached, isFalse);
     expect(find.text('LAUNCH SESSION'), findsNothing);
@@ -393,11 +420,11 @@ void main() {
 
     await openSheet(tester, controller);
     await tester.tap(find.text('LAUNCH SESSION'));
-    await settleIo(tester);
+    await settleIo(tester, until: () => launcher.requests.isNotEmpty);
     await tester.ensureVisible(
-        find.byKey(const ValueKey<String>('handoff-attach')),
-      );
-      await tester.tap(find.byKey(const ValueKey<String>('handoff-attach')));
+      find.byKey(const ValueKey<String>('handoff-attach')),
+    );
+    await tester.tap(find.byKey(const ValueKey<String>('handoff-attach')));
     await settleIo(tester);
 
     expect(launcher.attached, isEmpty);
@@ -418,7 +445,7 @@ void main() {
     );
     await tester.ensureVisible(find.text('LAUNCH SESSION'));
     await tester.tap(find.text('LAUNCH SESSION'));
-    await settleIo(tester);
+    await settleIo(tester, until: () => launcher.requests.isNotEmpty);
 
     // Framed at launch (#306): the edited text is inside the fence.
     expect(
