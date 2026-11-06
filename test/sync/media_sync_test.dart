@@ -125,35 +125,38 @@ void main() {
     expect(result.failureReason, contains('1 transfer failed'));
   });
 
-  test('a failed transfer is logged with its object key and recording id',
-      () async {
-    final _RecordingLog log = _RecordingLog();
-    final _RefusingStore refusing = _RefusingStore();
-    refusing.objects['captures/r1/r1.m4a'] = audio;
+  test(
+    'a failed transfer is logged with its object key and recording id',
+    () async {
+      final _RecordingLog log = _RecordingLog();
+      final _RefusingStore refusing = _RefusingStore();
+      refusing.objects['captures/r1/r1.m4a'] = audio;
 
-    await MediaSyncService(store: refusing, log: log).sync(<MediaSyncJob>[
-      job('r1.m4a', hash: hashOf(audio)),
-    ], downloadRoot: dir.path);
+      await MediaSyncService(store: refusing, log: log).sync(<MediaSyncJob>[
+        job('r1.m4a', hash: hashOf(audio)),
+      ], downloadRoot: dir.path);
 
-    expect(log.lines, hasLength(1));
-    expect(log.lines.single.$1, LogLevel.warn);
-    expect(log.lines.single.$2, contains('captures/r1/r1.m4a'));
-    expect(log.lines.single.$2, contains('E2eeDecryptionException'));
-    expect(log.lines.single.$3, 'r1');
-  });
+      expect(log.lines, hasLength(1));
+      expect(log.lines.single.$1, LogLevel.warn);
+      expect(log.lines.single.$2, contains('captures/r1/r1.m4a'));
+      expect(log.lines.single.$2, contains('E2eeDecryptionException'));
+      expect(log.lines.single.$3, 'r1');
+    },
+  );
 
   test('a plaintext-era object lands when it hashes to the row', () async {
     final _SealedOnlyStore sealed = _SealedOnlyStore();
     sealed.objects['captures/r1/r1.m4a'] = audio;
     final _RecordingLog log = _RecordingLog();
 
-    final MediaSyncResult result = await MediaSyncService(
-      store: sealed,
-      log: log,
-      mayReadPlaintext: (_) => true,
-    ).sync(<MediaSyncJob>[
-      job('r1.m4a', hash: hashOf(audio)),
-    ], downloadRoot: dir.path);
+    final MediaSyncResult result =
+        await MediaSyncService(
+          store: sealed,
+          log: log,
+          mayReadPlaintext: (_) => true,
+        ).sync(<MediaSyncJob>[
+          job('r1.m4a', hash: hashOf(audio)),
+        ], downloadRoot: dir.path);
 
     expect(result.downloaded, 1);
     expect(result.failed, 0);
@@ -163,92 +166,100 @@ void main() {
     expect(log.lines.single.$3, 'r1');
   });
 
-  test('an unsealable object that does not hash to the row is rejected',
-      () async {
-    final _SealedOnlyStore sealed = _SealedOnlyStore();
-    sealed.objects['captures/r1/r1.m4a'] = <int>[9, 9, 9, 9];
+  test(
+    'an unsealable object that does not hash to the row is rejected',
+    () async {
+      final _SealedOnlyStore sealed = _SealedOnlyStore();
+      sealed.objects['captures/r1/r1.m4a'] = <int>[9, 9, 9, 9];
 
-    final MediaSyncResult result = await MediaSyncService(
-      store: sealed,
-      mayReadPlaintext: (_) => true,
-    ).sync(<MediaSyncJob>[
-      job('r1.m4a', hash: hashOf(audio)),
-    ], downloadRoot: dir.path);
+      final MediaSyncResult result =
+          await MediaSyncService(
+            store: sealed,
+            mayReadPlaintext: (_) => true,
+          ).sync(<MediaSyncJob>[
+            job('r1.m4a', hash: hashOf(audio)),
+          ], downloadRoot: dir.path);
 
-    expect(result.rejected, 1);
-    expect(result.downloaded, 0);
-    expect(File(p.join(dir.path, 'r1.m4a')).existsSync(), isFalse);
-  });
+      expect(result.rejected, 1);
+      expect(result.downloaded, 0);
+      expect(File(p.join(dir.path, 'r1.m4a')).existsSync(), isFalse);
+    },
+  );
 
   test('a store without a raw read keeps failing, as before', () async {
     final _RefusingStore refusing = _RefusingStore();
     refusing.objects['captures/r1/r1.m4a'] = audio;
 
-    final MediaSyncResult result = await MediaSyncService(
-      store: refusing,
-    ).sync(<MediaSyncJob>[
-      job('r1.m4a', hash: hashOf(audio)),
-    ], downloadRoot: dir.path);
+    final MediaSyncResult result = await MediaSyncService(store: refusing).sync(
+      <MediaSyncJob>[job('r1.m4a', hash: hashOf(audio))],
+      downloadRoot: dir.path,
+    );
 
     expect(result.failed, 1);
     expect(File(p.join(dir.path, 'r1.m4a')).existsSync(), isFalse);
   });
 
-  test('a sealed recording is never read raw, even if the bytes would hash',
-      () async {
-    final _SealedOnlyStore sealed = _SealedOnlyStore();
-    sealed.objects['captures/r1/r1.m4a'] = audio;
-    final _RecordingLog log = _RecordingLog();
+  test(
+    'a sealed recording is never read raw, even if the bytes would hash',
+    () async {
+      final _SealedOnlyStore sealed = _SealedOnlyStore();
+      sealed.objects['captures/r1/r1.m4a'] = audio;
+      final _RecordingLog log = _RecordingLog();
 
-    final MediaSyncResult unwired = await MediaSyncService(
-      store: sealed,
-      log: log,
-    ).sync(<MediaSyncJob>[
-      job('r1.m4a', hash: hashOf(audio)),
-    ], downloadRoot: dir.path);
-    final MediaSyncResult refused = await MediaSyncService(
-      store: sealed,
-      mayReadPlaintext: (_) => false,
-    ).sync(<MediaSyncJob>[
-      job('r1.m4a', hash: hashOf(audio)),
-    ], downloadRoot: dir.path);
+      final MediaSyncResult unwired =
+          await MediaSyncService(store: sealed, log: log).sync(<MediaSyncJob>[
+            job('r1.m4a', hash: hashOf(audio)),
+          ], downloadRoot: dir.path);
+      final MediaSyncResult refused =
+          await MediaSyncService(
+            store: sealed,
+            mayReadPlaintext: (_) => false,
+          ).sync(<MediaSyncJob>[
+            job('r1.m4a', hash: hashOf(audio)),
+          ], downloadRoot: dir.path);
 
-    expect(unwired.failed, 1);
-    expect(refused.failed, 1);
-    expect(File(p.join(dir.path, 'r1.m4a')).existsSync(), isFalse);
-    expect(log.lines.first.$2, contains('is not read raw'));
-  });
+      expect(unwired.failed, 1);
+      expect(refused.failed, 1);
+      expect(File(p.join(dir.path, 'r1.m4a')).existsSync(), isFalse);
+      expect(log.lines.first.$2, contains('is not read raw'));
+    },
+  );
 
-  test('with the real encrypted store: raw lands, foreign ciphertext does not',
-      () async {
-    final E2eeKeyDerivation kdf = E2eeKeyDerivation(iterations: 1000);
-    final E2eeCipher mine = E2eeCipher(
-      key: await kdf.deriveKey(passphrase: 'mine', salt: kdf.generateSalt()),
-    );
-    final E2eeCipher theirs = E2eeCipher(
-      key: await kdf.deriveKey(passphrase: 'theirs', salt: kdf.generateSalt()),
-    );
-    final FakeMediaStore bucket = FakeMediaStore();
-    bucket.objects['captures/r1/raw.m4a'] = audio;
-    bucket.objects['captures/r1/foreign.m4a'] = await theirs.sealBytes(
-      audio,
-      aad: utf8.encode('o\ncaptures/r1/foreign.m4a'),
-    );
-    final MediaSyncService service = MediaSyncService(
-      store: EncryptedMediaStore(inner: bucket, cipher: mine, ownerId: 'o'),
-      mayReadPlaintext: (_) => true,
-    );
+  test(
+    'with the real encrypted store: raw lands, foreign ciphertext does not',
+    () async {
+      final E2eeKeyDerivation kdf = E2eeKeyDerivation(iterations: 1000);
+      final E2eeCipher mine = E2eeCipher(
+        key: await kdf.deriveKey(passphrase: 'mine', salt: kdf.generateSalt()),
+      );
+      final E2eeCipher theirs = E2eeCipher(
+        key: await kdf.deriveKey(
+          passphrase: 'theirs',
+          salt: kdf.generateSalt(),
+        ),
+      );
+      final FakeMediaStore bucket = FakeMediaStore();
+      bucket.objects['captures/r1/raw.m4a'] = audio;
+      bucket.objects['captures/r1/foreign.m4a'] = await theirs.sealBytes(
+        audio,
+        aad: utf8.encode('o\ncaptures/r1/foreign.m4a'),
+      );
+      final MediaSyncService service = MediaSyncService(
+        store: EncryptedMediaStore(inner: bucket, cipher: mine, ownerId: 'o'),
+        mayReadPlaintext: (_) => true,
+      );
 
-    final MediaSyncResult result = await service.sync(<MediaSyncJob>[
-      job('raw.m4a', hash: hashOf(audio)),
-      job('foreign.m4a', hash: hashOf(audio), sizeBytes: audio.length),
-    ], downloadRoot: dir.path);
+      final MediaSyncResult result = await service.sync(<MediaSyncJob>[
+        job('raw.m4a', hash: hashOf(audio)),
+        job('foreign.m4a', hash: hashOf(audio), sizeBytes: audio.length),
+      ], downloadRoot: dir.path);
 
-    expect(result.downloaded, 1);
-    expect(result.rejected, 1);
-    expect(File(p.join(dir.path, 'raw.m4a')).readAsBytesSync(), audio);
-    expect(File(p.join(dir.path, 'foreign.m4a')).existsSync(), isFalse);
-  });
+      expect(result.downloaded, 1);
+      expect(result.rejected, 1);
+      expect(File(p.join(dir.path, 'raw.m4a')).readAsBytesSync(), audio);
+      expect(File(p.join(dir.path, 'foreign.m4a')).existsSync(), isFalse);
+    },
+  );
 
   test('a download no longer wanted is not renamed into place', () async {
     store.objects['captures/r1/r1.m4a'] = audio;
@@ -516,7 +527,8 @@ class _RefusingStore extends FakeMediaStore {
 }
 
 class _RecordingLog implements LogSink {
-  final List<(LogLevel, String, String?)> lines = <(LogLevel, String, String?)>[];
+  final List<(LogLevel, String, String?)> lines =
+      <(LogLevel, String, String?)>[];
 
   @override
   void log(

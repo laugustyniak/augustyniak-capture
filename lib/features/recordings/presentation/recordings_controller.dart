@@ -1444,12 +1444,7 @@ class RecordingsController extends ChangeNotifier {
               return MediaSyncService(
                 store: resolvedMediaStore,
                 log: _logSink,
-                mayReadPlaintext: (MediaSyncJob job) {
-                  final List<String> parts = job.key.split('/');
-                  final SyncRowState? state =
-                      parts.length >= 3 ? rowStates[parts[1]] : null;
-                  return state != null && !state.sealed;
-                },
+                mayReadPlaintext: plaintextReadGate(rowStates),
                 // A capture deleted while its download was in flight must
                 // not come back as an orphan the next launch re-adopts.
                 stillWanted: (MediaSyncJob job) => _recordings.any(

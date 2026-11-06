@@ -11,6 +11,7 @@ import '../../logs/domain/log_event.dart';
 import '../../recordings/domain/capture_segment.dart';
 import '../../recordings/domain/recording.dart';
 import 'e2ee_cipher.dart';
+import 'sync_snapshot.dart';
 
 /// Private object storage for capture media, keyed relative to the signed-in
 /// user — the store adds the owner prefix its access policy checks, so this
@@ -38,6 +39,22 @@ abstract interface class MediaObjectStore {
 abstract interface class PlaintextFallbackMediaStore
     implements MediaObjectStore {
   Stream<List<int>> downloadUnsealed(String key, {required int maxBytes});
+}
+
+/// The [MediaSyncService.mayReadPlaintext] rule over the `recordings`
+/// bookkeeping: true only for a job whose key is `captures/<id>/<file>` and
+/// whose recording this device holds as plaintext (`sealed = 0`). A sealed
+/// row, an unknown id and any other key shape answer false.
+bool Function(MediaSyncJob job) plaintextReadGate(
+  Map<String, SyncRowState> recordingRows,
+) {
+  return (MediaSyncJob job) {
+    final List<String> parts = job.key.split('/');
+    final SyncRowState? state = parts.length >= 3
+        ? recordingRows[parts[1]]
+        : null;
+    return state != null && !state.sealed;
+  };
 }
 
 /// A download crossed the ceiling it was given.
