@@ -5,6 +5,7 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 
 import 'ui_kit.dart';
 
+import '../core/database/app_database.dart';
 import '../features/auth/data/supabase_auth_gateway.dart';
 import '../features/auth/presentation/auth_controller.dart';
 import '../features/logs/domain/log_event.dart';
@@ -16,6 +17,8 @@ import '../features/sync/data/e2ee_service.dart';
 import '../features/sync/data/supabase_e2ee_settings_store.dart';
 import '../features/sync/data/supabase_media_store.dart';
 import '../features/sync/data/supabase_sync_transport.dart';
+import '../features/sync/data/sync_rows_store.dart';
+import '../features/sync/presentation/sync_binding_controller.dart';
 
 /// The app shell, and the one place the palette is chosen.
 ///
@@ -76,6 +79,11 @@ class _AugustyniakCaptureAppState extends State<AugustyniakCaptureApp> {
   /// banner and the Account card; both reach this same instance.
   E2eeService? _e2ee;
 
+  /// Which account this device's library belongs to (#206). Built under the
+  /// same condition as [_e2ee]; every sync run asks its gate first, and the
+  /// Account card shows its state.
+  SyncBindingController? _syncBinding;
+
   @override
   void initState() {
     super.initState();
@@ -85,6 +93,10 @@ class _AugustyniakCaptureAppState extends State<AugustyniakCaptureApp> {
       final AuthController auth = AuthController(gateway)..initialize();
       _authController = auth;
       _e2ee = E2eeService(settings: SupabaseE2eeSettingsStore(client));
+      _syncBinding = SyncBindingController(
+        store: () async =>
+            SyncRowsStore((await AppDatabase.getInstance()).rawDb),
+      );
       auth.addListener(_followIdentity);
       _followIdentity();
     }
@@ -92,6 +104,7 @@ class _AugustyniakCaptureAppState extends State<AugustyniakCaptureApp> {
 
   void _followIdentity() {
     unawaited(_e2ee?.followIdentity(_authController?.identity?.id));
+    unawaited(_syncBinding?.followIdentity(_authController?.identity));
   }
 
   @override
@@ -99,6 +112,7 @@ class _AugustyniakCaptureAppState extends State<AugustyniakCaptureApp> {
     _authController?.removeListener(_followIdentity);
     _authController?.dispose();
     _e2ee?.dispose();
+    _syncBinding?.dispose();
     _themeMode.dispose();
     _textScale.dispose();
     super.dispose();
@@ -135,26 +149,23 @@ class _AugustyniakCaptureAppState extends State<AugustyniakCaptureApp> {
             );
             return ValueListenableBuilder<double>(
               valueListenable: _textScale,
-              builder: (
-                BuildContext context,
-                double scale,
-                Widget? innerChild,
-              ) {
-                final MediaQueryData mediaQuery = MediaQuery.of(context);
-                final double autoFactor = Console.autoScaleFor(
-                  mediaQuery.size,
-                  mediaQuery.devicePixelRatio,
-                );
-                final double effectiveScale = AppSettings.clampTextScale(
-                  scale * autoFactor,
-                );
-                return MediaQuery(
-                  data: mediaQuery.copyWith(
-                    textScaler: TextScaler.linear(effectiveScale),
-                  ),
-                  child: innerChild!,
-                );
-              },
+              builder:
+                  (BuildContext context, double scale, Widget? innerChild) {
+                    final MediaQueryData mediaQuery = MediaQuery.of(context);
+                    final double autoFactor = Console.autoScaleFor(
+                      mediaQuery.size,
+                      mediaQuery.devicePixelRatio,
+                    );
+                    final double effectiveScale = AppSettings.clampTextScale(
+                      scale * autoFactor,
+                    );
+                    return MediaQuery(
+                      data: mediaQuery.copyWith(
+                        textScaler: TextScaler.linear(effectiveScale),
+                      ),
+                      child: innerChild!,
+                    );
+                  },
               child: child,
             );
           },
@@ -190,6 +201,7 @@ class _AugustyniakCaptureAppState extends State<AugustyniakCaptureApp> {
             e2eeService: _e2ee,
             launchArguments: widget.launchArguments,
             shortcutLinkSource: widget.shortcutLinkSource,
+            syncBinding: _syncBinding,
           ),
         );
       },

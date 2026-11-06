@@ -27,11 +27,13 @@ import '../../../core/database/app_database.dart';
 import '../../../core/sync/cloud_sync_coordinator.dart';
 import '../../../core/sync/sync_path_policy.dart';
 import '../../auth/domain/auth_gateway.dart';
+import '../../auth/domain/auth_identity.dart';
 import '../../clipboard/data/clipboard_repository.dart';
 import '../../settings/domain/audio_config.dart';
 import '../../sync/data/repository_sync_applier.dart';
 import '../../sync/data/sync_rows_store.dart';
 import '../../sync/domain/media_sync.dart';
+import '../../sync/domain/sync_binding.dart';
 import '../../sync/domain/sync_engine.dart';
 import '../../sync/domain/sync_row_codec.dart';
 import '../../sync/domain/sync_snapshot.dart';
@@ -143,6 +145,15 @@ class RecordingsController extends ChangeNotifier {
     // Supabase Storage for capture media, built per run for the signed-in
     // user. Null keeps the media slot out entirely, like the seven above.
     MediaObjectStore Function(String ownerId)? mediaStoreResolver,
+    // Which account this device's library belongs to (#206). Asked at the
+    // top of every Supabase run, before either resolver above, so a paused
+    // run makes no push, pull or Storage call. Null leaves runs ungated —
+    // every pure-Dart test that predates the binding.
+    Future<SyncGateDecision> Function(
+      AuthIdentity identity, {
+      required bool libraryIsEmpty,
+    })?
+    syncBindingGate,
     Duration recorderTimeout = const Duration(seconds: 8),
     // How long a hand edit waits before it is pushed, so a burst of field
     // edits is one sync run rather than one per blur.
@@ -163,6 +174,7 @@ class RecordingsController extends ChangeNotifier {
        _applySyncedProjects = applySyncedProjects,
        _applySyncedProjectDelete = applySyncedProjectDelete,
        _mediaStoreResolver = mediaStoreResolver,
+       _syncBindingGate = syncBindingGate,
        _history = CaptureHistory(
          revisionsRepository: revisionsRepository,
          closureLog: closureLog,
@@ -253,6 +265,11 @@ class RecordingsController extends ChangeNotifier {
   final Future<void> Function(List<Project> upserts)? _applySyncedProjects;
   final Future<void> Function(String id)? _applySyncedProjectDelete;
   final MediaObjectStore Function(String ownerId)? _mediaStoreResolver;
+  final Future<SyncGateDecision> Function(
+    AuthIdentity identity, {
+    required bool libraryIsEmpty,
+  })?
+  _syncBindingGate;
 
   /// What every mutation overwrote, and when each capture left the desk. Both
   /// are driven from [_update] and nowhere else — see [CaptureHistory] for why
@@ -1342,7 +1359,8 @@ class RecordingsController extends ChangeNotifier {
     // which this gate backs up rather than relies on alone.
     // A snapshot taken before initialize() is [] for the same reason an
     // unreadable index is, and the engine's fuse covers `recordings` only.
-    final String? ownerId = _authGateway?.currentIdentity?.id;
+    final AuthIdentity? identity = _authGateway?.currentIdentity;
+    final String? ownerId = identity?.id;
     final bool hasSupabase =
         _initialized &&
         !_indexUnreadable &&
@@ -1366,7 +1384,15 @@ class RecordingsController extends ChangeNotifier {
     SyncTransport? transport;
     MediaObjectStore? mediaStore;
     String? resolveFailure;
-    if (hasSupabase) {
+    // The account binding (#206) is asked before either resolver: a paused
+    // run resolves neither, so it cannot reach the server or the bucket. A
+    // gate that throws pauses the run too — it never fails `syncCloud`.
+    final String? bindingFailure = hasSupabase
+        ? await _checkSyncBinding(identity!)
+        : null;
+    if (hasSupabase && bindingFailure != null) {
+      resolveFailure = bindingFailure;
+    } else if (hasSupabase) {
       try {
         transport = _syncTransportResolver(ownerId, _logSink);
         mediaStore = _mediaStoreResolver?.call(ownerId);
@@ -1431,7 +1457,8 @@ class RecordingsController extends ChangeNotifier {
       // After the metadata slot: its pull is what adds the rows whose media
       // this fetches. Reads `_recordings` at call time, not the snapshot the
       // metadata slot captured before its pull.
-      syncMedia: hasSupabase && resolvedMediaStore != null
+      syncMedia:
+          hasSupabase && bindingFailure == null && resolvedMediaStore != null
           ? () async {
               await _rerootSyncedPaths();
               return MediaSyncService(
@@ -1467,6 +1494,29 @@ class RecordingsController extends ChangeNotifier {
     );
     if (!_disposed) notifyListeners();
     return _lastCloudSyncReport!;
+  }
+
+  /// Asks the account-binding gate whether this run may proceed; null when
+  /// it may, the slot's failure reason when it is paused.
+  Future<String?> _checkSyncBinding(AuthIdentity identity) async {
+    final gate = _syncBindingGate;
+    if (gate == null) return null;
+    try {
+      // Only what this run would actually push counts: clipboard items stay
+      // local while clipboard sync is off.
+      final bool libraryIsEmpty =
+          _recordings.isEmpty &&
+          (await _projectsRepository!.loadAll()).isEmpty &&
+          (!(_syncClipboard?.call() ?? false) ||
+              (await _clipboardRepository!.getItems()).isEmpty);
+      final SyncGateDecision decision = await gate(
+        identity,
+        libraryIsEmpty: libraryIsEmpty,
+      );
+      return decision.reason;
+    } catch (_) {
+      return 'sync paused: the account binding could not be checked';
+    }
   }
 
   /// Bring source files with no index row back into the queue.

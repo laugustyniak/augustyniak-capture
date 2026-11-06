@@ -30,6 +30,7 @@ import 'vault_section.dart';
 import '../../momentum/domain/closure_event.dart';
 import '../../momentum/presentation/momentum_section.dart';
 import '../../sync/data/e2ee_service.dart';
+import '../../sync/presentation/sync_binding_controller.dart';
 
 /// Categories for organizing configuration settings into dedicated views.
 enum ConfigCategory {
@@ -51,6 +52,7 @@ class ConfigTab extends StatefulWidget {
     required this.controller,
     this.authController,
     this.e2ee,
+    this.syncBinding,
     this.recordingsController,
     required this.storagePath,
     required this.recordingsCount,
@@ -90,6 +92,9 @@ class ConfigTab extends StatefulWidget {
 
   /// Passed through to `AccountSection`; null where Supabase is not configured.
   final E2eeService? e2ee;
+
+  /// Passed through to `AccountSection`; null where Supabase is not configured.
+  final SyncBindingController? syncBinding;
   final RecordingsController? recordingsController;
   final String? storagePath;
   final int recordingsCount;
@@ -880,7 +885,11 @@ class _ConfigTabState extends State<ConfigTab> {
   List<Widget> _buildSyncCategory(BuildContext context) {
     return <Widget>[
       // Primary cloud block: the account this library will belong to.
-      AccountSection(controller: widget.authController, e2ee: widget.e2ee),
+      AccountSection(
+        controller: widget.authController,
+        e2ee: widget.e2ee,
+        binding: widget.syncBinding,
+      ),
       const SizedBox(height: 22),
       CommandSection(controller: widget.controller),
       const SizedBox(height: 22),

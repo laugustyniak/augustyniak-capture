@@ -36,6 +36,41 @@ A crashed or partial push is harmless: the next run re-diffs and re-pushes
 the same rows at the same versions, and the version gate below makes the
 retry idempotent.
 
+## One library, one account (#206)
+
+The ledger and the cursors describe what *one* account's server holds. Without
+an owner beside them, a second account signing in on the same device would
+find already-pushed rows clean, receive a partial copy of the first library,
+and pull its own rows into the same store. So `settings['sync.owner']`
+(`{"id", "email"}`, `SyncRowsStore.readOwner`/`bindOwner`) binds the device to
+one account, and `SyncBindingController.gate` runs at the top of every
+Supabase run — inside `_performCloudSync`, **before** either resolver — so a
+paused run resolves neither the transport nor the media store and cannot make
+a push, pull or Storage call:
+
+| `sync.owner` | condition | outcome |
+| --- | --- | --- |
+| the signed-in id | — | proceed |
+| another id | — | paused; the Account card names the bound email |
+| unreadable (not JSON, no string id) | — | paused, as a mismatch — never read as unbound |
+| absent | `sync_rows` non-empty (synced before #206) | bind silently, proceed |
+| absent | library empty | bind silently, proceed |
+| absent | library has data | paused until UPLOAD THIS LIBRARY |
+
+"Library empty" is the recordings, the projects and — only while clipboard
+sync is on — the clipboard items: what the run would push. A gate that throws
+pauses the run (`failureReason`), never `syncCloud`. Signed out, the gate is
+never asked. UNBIND THIS DEVICE (`SyncRowsStore.unbind`) deletes `sync_rows`,
+every `sync.cursor.*` key and `sync.owner` in one transaction and nothing
+else; the next run on a non-empty library asks again. Moving a library from
+one account into another is not offered. Known gap: an unbind while a run of
+the bound account is in flight lets that run re-populate part of the ledger,
+and the next run then binds silently to the same account as a pre-#206
+device would. Tests: `test/sync/sync_binding_store_test.dart`,
+`test/sync/sync_binding_controller_test.dart`,
+`test/sync/sync_binding_wiring_test.dart`, and the card in
+`test/widget/account_section_test.dart`.
+
 ## Transport: one RPC, version-gated, RLS intact
 
 `sync_push(table_name, rows)` — `security invoker`, so the RLS policies from
