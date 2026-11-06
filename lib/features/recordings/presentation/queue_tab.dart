@@ -23,13 +23,17 @@ import '../../sync/presentation/e2ee_passphrase_dialog.dart';
 import '../domain/agent_artifact.dart';
 import '../domain/capture_category.dart';
 import '../domain/capture_priority.dart';
+import '../data/plugin_commitment_exporter.dart';
 import '../domain/capture_type.dart';
+import '../domain/commitment.dart';
+import '../domain/commitment_list.dart';
 import '../domain/recording.dart';
 import '../domain/route_record.dart';
 import '../domain/suggested_route.dart';
 import 'agent_artifact_viewer_modal.dart';
 import 'capture_focus_view.dart';
 import 'card_parts.dart';
+import 'commitments_dialog.dart';
 import 'compact_queue_header.dart';
 import 'handoff_sheet.dart';
 import 'queue_list_row.dart';
@@ -89,6 +93,7 @@ class QueueTab extends StatefulWidget {
     this.density = QueueDensity.compact,
     this.onDensityChanged,
     this.dailyConnectionsService,
+    this.exportCommitment = exportCommitmentWithPlugins,
     this.e2ee,
     this.splitRatio = AppSettings.defaultQueueSplitRatio,
     this.onSplitRatioChanged,
@@ -137,6 +142,11 @@ class QueueTab extends StatefulWidget {
 
   final RecordingsController controller;
   final DailyConnectionsService? dailyConnectionsService;
+
+  /// Hands one commitment to the user's calendar. The plugin-backed share or
+  /// save by default; a test passes a fake so no platform channel is touched.
+  final Future<void> Function(Recording recording, Commitment commitment)
+  exportCommitment;
   final ProjectsController? projects;
   final String? initialProjectId;
 
@@ -323,6 +333,26 @@ class _QueueTabState extends State<QueueTab> {
         service: service,
         captures: () => widget.controller.recordings,
         projectNames: projectNames,
+        onOpenCapture: _revealCapture,
+      ),
+    );
+  }
+
+  Future<void> _openCommitments() async {
+    final RecordingsController controller = widget.controller;
+    await showDialog<void>(
+      context: context,
+      builder: (BuildContext context) => CommitmentsDialog(
+        listenable: controller,
+        captures: () => controller.recordings,
+        onSetState: (String id, Commitment commitment, CommitmentState state) =>
+            controller.setCommitmentState(id, commitment.key, state),
+        onExport: (Recording recording, Commitment commitment) =>
+            controller.exportCommitment(
+              recording.id,
+              commitment,
+              widget.exportCommitment,
+            ),
         onOpenCapture: _revealCapture,
       ),
     );
@@ -532,6 +562,7 @@ class _QueueTabState extends State<QueueTab> {
     final int reviewedCount = all
         .where((Recording item) => item.isProcessedByUser)
         .length;
+    final int openCommitmentCount = openCommitments(all).length;
     return LayoutBuilder(
       builder: (BuildContext context, BoxConstraints constraints) {
         final bool compact = constraints.maxWidth < Console.compactBreakpoint;
@@ -813,17 +844,39 @@ class _QueueTabState extends State<QueueTab> {
                               : const <Widget>[],
                         ),
                       ),
-                    if (widget.dailyConnectionsService != null)
+                    if (widget.dailyConnectionsService != null ||
+                        openCommitmentCount > 0)
                       Align(
                         alignment: Alignment.centerRight,
                         child: Padding(
                           padding: EdgeInsets.symmetric(
                             horizontal: compact ? 12 : 20,
                           ),
-                          child: TextButton.icon(
-                            onPressed: _openDailyConnections,
-                            icon: const Icon(Icons.hub_outlined, size: 18),
-                            label: const Text('REVIEW CONNECTIONS'),
+                          child: Wrap(
+                            alignment: WrapAlignment.end,
+                            spacing: 8,
+                            children: <Widget>[
+                              if (openCommitmentCount > 0)
+                                TextButton.icon(
+                                  onPressed: _openCommitments,
+                                  icon: const Icon(
+                                    Icons.event_available_outlined,
+                                    size: 18,
+                                  ),
+                                  label: Text(
+                                    'COMMITMENTS ($openCommitmentCount)',
+                                  ),
+                                ),
+                              if (widget.dailyConnectionsService != null)
+                                TextButton.icon(
+                                  onPressed: _openDailyConnections,
+                                  icon: const Icon(
+                                    Icons.hub_outlined,
+                                    size: 18,
+                                  ),
+                                  label: const Text('REVIEW CONNECTIONS'),
+                                ),
+                            ],
                           ),
                         ),
                       ),
