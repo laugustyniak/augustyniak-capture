@@ -52,7 +52,7 @@ void main() {
   ) async {
     const String body = 'end-to-end note: persist before process';
 
-    app.main();
+    app.main(const <String>[]);
 
     final Directory library = Directory(
       p.join(sandbox.path, 'documents', 'recordings'),
