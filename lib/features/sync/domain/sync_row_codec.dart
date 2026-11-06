@@ -119,6 +119,11 @@ class SyncRowCodec {
       if (json.containsKey('cleanup')) 'cleanup': json['cleanup'],
       if (json.containsKey('instruction'))
         'instruction': json['instruction'],
+      // Absent while never extracted, so such a row hashes as it did before;
+      // the done/dismissed state is the user's and must reach their other
+      // devices with it.
+      if (json.containsKey('commitments'))
+        'commitments': json['commitments'],
     };
     return <String, Object?>{
       'id': r.id,
@@ -211,6 +216,7 @@ class SyncRowCodec {
       'suggestedRoute': payload['suggestedRoute'],
       'cleanup': payload['cleanup'],
       'instruction': payload['instruction'],
+      'commitments': payload['commitments'],
       'routes': payload['routes'] ?? <Object?>[],
       // Artifacts name files on the machine that ran the agent, and the viewer
       // reads and opens whatever path one carries. A remote row therefore never

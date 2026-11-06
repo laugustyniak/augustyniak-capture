@@ -61,6 +61,7 @@ import '../domain/capture_priority.dart';
 import '../domain/stale_rank.dart';
 import '../domain/capture_segment.dart';
 import '../domain/capture_instruction.dart';
+import '../domain/commitment.dart';
 import '../domain/cleanup_proposal.dart';
 import '../domain/related_captures.dart';
 import '../domain/capture_type.dart';
@@ -3101,6 +3102,61 @@ class RecordingsController extends ChangeNotifier {
     );
   }
 
+  /// Record the user's answer to one of a capture's commitments, found by its
+  /// [key] (`Commitment.keyFor`). `done` and `dismissed` are user-owned: a
+  /// later enrichment run keeps them. [CommitmentState.open] reopens one. An
+  /// unknown capture or key is a no-op.
+  Future<void> setCommitmentState(
+    String id,
+    String key,
+    CommitmentState state,
+  ) async {
+    final String wanted = Commitment.keyFor(key);
+    final Recording? current = _recordings
+        .where((Recording item) => item.id == id)
+        .firstOrNull;
+    final List<Commitment>? list = current?.commitments;
+    if (list == null ||
+        !list.any((Commitment c) => c.key == wanted && c.state != state)) {
+      return;
+    }
+    await _update(
+      id,
+      (Recording item) => item.copyWith(
+        commitments: <Commitment>[
+          for (final Commitment c in item.commitments ?? const <Commitment>[])
+            c.key == wanted ? c.copyWith(state: state) : c,
+        ],
+      ),
+      source: RevisionSource.user,
+    );
+    _logSink.log('Commitment ${state.name}.', recordingId: id);
+  }
+
+  /// Run [exporter] (an `.ics` share or save) for one commitment and log the
+  /// outcome. Read-only towards the capture: nothing here writes the row, and
+  /// a failing export is a log line, never an exception into the UI.
+  Future<void> exportCommitment(
+    String id,
+    Commitment commitment,
+    Future<void> Function(Recording recording, Commitment commitment) exporter,
+  ) async {
+    final Recording? item = _recordings
+        .where((Recording r) => r.id == id)
+        .firstOrNull;
+    if (item == null) return;
+    try {
+      await exporter(item, commitment);
+      _logSink.log('Commitment exported.', recordingId: id);
+    } catch (exception) {
+      _logSink.log(
+        'Commitment export failed: $exception',
+        level: LogLevel.warn,
+        recordingId: id,
+      );
+    }
+  }
+
   /// Overwrite the model's verdict. Null clears it back to "unclassified" — a
   /// wrong category is worse than none, because an export will read this field.
   Future<void> setCategory(String id, CaptureCategory? category) async {
@@ -4885,6 +4941,13 @@ class RecordingsController extends ChangeNotifier {
                 listOffered &&
                 chosenProject == null &&
                 offeredIds.contains(item.projectId),
+            // Due phrases resolve against when the capture was made, not when
+            // this run happens; the user's done/dismissed answers survive.
+            commitments: mergeCommitments(
+              existing: item.commitments,
+              extracted: result.commitments,
+              anchor: item.createdAt,
+            ),
           ),
           result,
           offeredRoutes,

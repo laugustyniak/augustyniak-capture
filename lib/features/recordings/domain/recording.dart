@@ -2,6 +2,7 @@ import 'agent_artifact.dart';
 import 'capture_category.dart';
 import 'capture_instruction.dart';
 import 'cleanup_proposal.dart';
+import 'commitment.dart';
 import 'capture_priority.dart';
 import 'capture_segment.dart';
 import 'capture_type.dart';
@@ -51,6 +52,7 @@ class Recording {
     this.projectId,
     this.projectAuto = false,
     this.suggestedRoute,
+    this.commitments,
     this.error,
     this.isProcessedByUser = false,
     this.processedAt,
@@ -179,6 +181,14 @@ class Recording {
   /// replaced by a later run, and none is written once the item has a route.
   final SuggestedRoute? suggestedRoute;
 
+  /// Promises found in the capture (#251). **Null and empty are different
+  /// facts**: null means enrichment never extracted any — it never ran, or the
+  /// reply said nothing about them — and the key stays out of the JSON; an
+  /// empty list means the model looked and found none. Each entry's state is
+  /// user-owned: a re-run never reopens what the user marked done or dismissed
+  /// (`mergeCommitments`).
+  final List<Commitment>? commitments;
+
   final String? error;
 
   /// User-level state. This is intentionally separate from AI processing.
@@ -294,6 +304,7 @@ class Recording {
     bool? projectAuto,
     SuggestedRoute? suggestedRoute,
     bool clearSuggestedRoute = false,
+    List<Commitment>? commitments,
     String? error,
     bool clearError = false,
     bool? isProcessedByUser,
@@ -335,6 +346,7 @@ class Recording {
       suggestedRoute: clearSuggestedRoute
           ? null
           : (suggestedRoute ?? this.suggestedRoute),
+      commitments: commitments ?? this.commitments,
       error: clearError ? null : (error ?? this.error),
       isProcessedByUser: isProcessedByUser ?? this.isProcessedByUser,
       processedAt: clearProcessedAt ? null : (processedAt ?? this.processedAt),
@@ -372,6 +384,9 @@ class Recording {
     if (projectAuto) 'projectAuto': true,
     // Omitted while null: "never proposed" is a different fact from `none`.
     if (suggestedRoute != null) 'suggestedRoute': suggestedRoute!.toJson(),
+    // Omitted while null: "never extracted" is a different fact from `[]`.
+    if (commitments != null)
+      'commitments': commitments!.map((Commitment c) => c.toJson()).toList(),
     'error': error,
     'isProcessedByUser': isProcessedByUser,
     'processedAt': processedAt?.toIso8601String(),
@@ -441,6 +456,10 @@ class Recording {
       // moves a project it did not stamp.
       projectAuto: json['projectAuto'] == true,
       suggestedRoute: SuggestedRoute.fromJson(json['suggestedRoute']),
+      // Absent on every row written before commitments existed, and on every
+      // row enrichment never extracted them for. Unreadable entries are
+      // dropped one at a time, like `routes`.
+      commitments: Commitment.listFromJson(json['commitments']),
       error: json['error'] as String?,
       isProcessedByUser: json['isProcessedByUser'] as bool? ?? false,
       processedAt: json['processedAt'] == null

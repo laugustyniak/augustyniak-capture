@@ -700,6 +700,7 @@ class ZipCaptureArchive implements CaptureArchive {
       projectId: recording.projectId,
       projectAuto: recording.projectAuto,
       suggestedRoute: recording.suggestedRoute,
+      commitments: recording.commitments,
       error: recording.error,
       isProcessedByUser: recording.isProcessedByUser,
       processedAt: recording.processedAt,
