@@ -41,6 +41,7 @@ class DailyTriageController extends ChangeNotifier {
   bool _loaded = false;
   bool _historyUnreadable = false;
   bool _running = false;
+  bool _disposed = false;
   String? _error;
 
   /// Set by any run, successful or not, so a failing model is not asked again
@@ -53,6 +54,21 @@ class DailyTriageController extends ChangeNotifier {
   bool get isRunning => _running;
   String? get error => _error;
   TriageDigest? get digest => _digest;
+
+  /// The page starts the launch and resume runs unawaited and disposes this on
+  /// teardown, so a run (or a log write) can finish after its listeners are
+  /// gone. Notifying then would assert in debug as an unhandled async error.
+  @override
+  void notifyListeners() {
+    if (_disposed) return;
+    super.notifyListeners();
+  }
+
+  @override
+  void dispose() {
+    _disposed = true;
+    super.dispose();
+  }
 
   /// The digest's proposals the user still has to answer, checked against the
   /// live list: one citing a capture that is gone or already closed is hidden,
@@ -100,7 +116,7 @@ class DailyTriageController extends ChangeNotifier {
   /// The launch/resume trigger: runs only when the last digest (or failed
   /// attempt) is at least [triageInterval] old.
   Future<void> runIfDue() async {
-    if (!_loaded || _historyUnreadable || _running) return;
+    if (_disposed || !_loaded || _historyUnreadable || _running) return;
     DateTime? last = _digest?.at;
     final DateTime? attempt = _lastAttemptAt;
     if (attempt != null && (last == null || attempt.isAfter(last))) {
@@ -112,7 +128,7 @@ class DailyTriageController extends ChangeNotifier {
 
   /// The manual "Run triage" action.
   Future<void> run() async {
-    if (_running) return;
+    if (_disposed || _running) return;
     _running = true;
     _error = null;
     _lastAttemptAt = _clock();
@@ -137,6 +153,7 @@ class DailyTriageController extends ChangeNotifier {
   }
 
   Future<void> accept(TriageProposal proposal) async {
+    if (_disposed) return;
     _error = null;
     try {
       await _apply(proposal);
@@ -150,6 +167,7 @@ class DailyTriageController extends ChangeNotifier {
   }
 
   Future<void> reject(TriageProposal proposal) async {
+    if (_disposed) return;
     _error = null;
     _rejected.add(proposal.key);
     await _remember(proposal, TriageOutcome.rejected);

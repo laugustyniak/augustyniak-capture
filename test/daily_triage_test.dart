@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
@@ -633,6 +634,27 @@ void main() {
         expect(controller.error, startsWith('Triage failed'));
       },
     );
+
+    test('a run still in flight at dispose does not notify', () async {
+      // The page starts the launch/resume run unawaited and disposes the
+      // controller on teardown, so a run can outlive its listeners. Notifying
+      // a disposed ChangeNotifier asserts in debug.
+      final Completer<TriageDigest> answer = Completer<TriageDigest>();
+      final DailyTriageController controller = build(
+        ScriptedService((_) => answer.future),
+      );
+      await controller.load();
+      final Future<void> running = controller.run();
+      controller.dispose();
+      answer.complete(
+        TriageDigest(at: now, proposals: const <TriageProposal>[close]),
+      );
+      await running;
+      await controller.load();
+      await controller.reject(close);
+      await controller.accept(close);
+      expect(controller.isRunning, isFalse);
+    });
 
     test('an unreadable log blocks the automatic run', () async {
       log.failLoad = true;
