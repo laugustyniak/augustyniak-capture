@@ -1,5 +1,6 @@
 import 'package:augustyniak_capture/core/database/app_database.dart';
 import 'package:augustyniak_capture/features/sync/data/sync_rows_store.dart';
+import 'package:augustyniak_capture/features/sync/domain/media_sync.dart';
 import 'package:augustyniak_capture/features/sync/domain/sync_snapshot.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:sqlite3/sqlite3.dart';
@@ -76,5 +77,24 @@ void main() {
     expect(row.sealed, isFalse);
     migrated.put('recordings', 'old', 5, 'hash2', sealed: true);
     expect(migrated.loadTable('recordings')['old']!.sealed, isTrue);
+  });
+
+  test('plaintextReadGate reads the real bookkeeping: only sealed = 0 passes', () {
+    store.put('recordings', 'plain', 1, 'h');
+    store.put('recordings', 'sealed', 1, 'h', sealed: true);
+    // Another table's row with the same id must not count.
+    store.put('segments', 'other', 1, 'h');
+    final bool Function(MediaSyncJob) gate =
+        plaintextReadGate(store.loadTable('recordings'));
+
+    MediaSyncJob job(String key) =>
+        MediaSyncJob(key: key, localPath: '/x', contentHash: 'h');
+
+    expect(gate(job('captures/plain/a.m4a')), isTrue);
+    expect(gate(job('captures/sealed/a.m4a')), isFalse);
+    expect(gate(job('captures/unknown/a.m4a')), isFalse);
+    expect(gate(job('captures/other/a.m4a')), isFalse);
+    expect(gate(job('plain')), isFalse);
+    expect(gate(job('captures/plain')), isFalse);
   });
 }
