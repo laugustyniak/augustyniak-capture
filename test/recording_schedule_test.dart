@@ -5,6 +5,7 @@ import 'package:augustyniak_capture/features/momentum/domain/closure_event.dart'
 import 'package:augustyniak_capture/features/recordings/domain/recording.dart';
 import 'package:augustyniak_capture/features/recordings/presentation/card_parts.dart';
 import 'package:augustyniak_capture/features/recordings/presentation/recordings_controller.dart';
+import 'package:augustyniak_capture/features/recordings/presentation/schedule_dialog.dart';
 import 'package:augustyniak_capture/features/sync/domain/sync_row_codec.dart';
 import 'package:flutter_test/flutter_test.dart';
 
@@ -125,6 +126,51 @@ void main() {
         scheduleLabelFor(item, DateTime(2026, 11, 8)),
         'Repeats every 7 d',
       );
+    });
+  });
+
+  group('schedulePresets', () {
+    test('next month clamps the 31st to the last day of that month', () {
+      expect(
+        schedulePresets(DateTime(2026, 1, 31, 15))['Next month'],
+        DateTime(2026, 2, 28, 9),
+      );
+      expect(
+        schedulePresets(DateTime(2026, 10, 31, 15))['Next month'],
+        DateTime(2026, 11, 30, 9),
+      );
+      expect(
+        schedulePresets(DateTime(2026, 12, 31, 15))['Next month'],
+        DateTime(2027, 1, 31, 9),
+      );
+      expect(
+        schedulePresets(DateTime(2028, 1, 30, 15))['Next month'],
+        DateTime(2028, 2, 29, 9),
+      );
+    });
+
+    test('next month keeps an ordinary day as it is', () {
+      expect(
+        schedulePresets(DateTime(2026, 11, 6, 15))['Next month'],
+        DateTime(2026, 12, 6, 9),
+      );
+    });
+  });
+
+  group('countOffDesk', () {
+    test('counts handed-off and waiting captures, not the open desk', () {
+      final List<Recording> items = <Recording>[
+        makeRecording(id: 'desk'),
+        makeRecording(id: 'done').copyWith(isProcessedByUser: true),
+        makeRecording(
+          id: 'waiting',
+        ).copyWith(resurfaceAt: now.add(const Duration(days: 1))),
+        makeRecording(
+          id: 'due',
+        ).copyWith(resurfaceAt: now.subtract(const Duration(hours: 1))),
+      ];
+
+      expect(countOffDesk(items, now), 2);
     });
   });
 
@@ -279,11 +325,38 @@ void main() {
         expect(log.appended.single.recordingId, 'r1');
         expect(log.appended.single.kind, ClosureKind.review);
 
-        // Each occurrence is its own closure — unlike a re-tick.
+        // DONE again before the next occurrence is due counts nothing and
+        // leaves the date where it was: the work was not due yet.
         await controller.toggleProcessed('r1');
-        expect(log.appended.length, 2);
+        expect(log.appended.length, 1);
+        expect(controller.recordings.single.resurfaceAt, next);
+        expect(controller.recordings.single.isProcessedByUser, isFalse);
       },
     );
+
+    test('each due occurrence is its own closure', () async {
+      final _RecordingClosureLog log = _RecordingClosureLog();
+      final RecordingsController controller = await buildRecordingsController(
+        appDir,
+        seed: <Recording>[
+          makeRecording(
+            id: 'r1',
+          ).copyWith(resurfaceAt: DateTime(2026, 1, 1), repeatEveryDays: 7),
+          makeRecording(
+            id: 'r2',
+          ).copyWith(resurfaceAt: DateTime(2026, 1, 2), repeatEveryDays: 1),
+        ],
+        closureLog: log,
+      );
+
+      await controller.toggleProcessed('r1');
+      await controller.toggleProcessed('r2');
+
+      expect(log.appended.map((ClosureEvent e) => e.recordingId), <String>[
+        'r1',
+        'r2',
+      ]);
+    });
 
     test('a failing closure log never fails a repeat occurrence', () async {
       final RecordingsController controller = await buildRecordingsController(

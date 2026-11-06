@@ -1,3 +1,5 @@
+import 'dart:math';
+
 import 'package:flutter/material.dart';
 
 import '../../../app/ui_kit.dart';
@@ -28,11 +30,24 @@ const Map<String, int?> scheduleRepeatOptions = <String, int?>{
 
 /// The preset dates, computed from [now] at 09:00 local — a capture returning
 /// at 03:12 because that is when it was scheduled helps nobody.
-Map<String, DateTime> schedulePresets(DateTime now) => <String, DateTime>{
-  'Tomorrow': DateTime(now.year, now.month, now.day + 1, 9),
-  'Next week': DateTime(now.year, now.month, now.day + 7, 9),
-  'Next month': DateTime(now.year, now.month + 1, now.day, 9),
-};
+///
+/// "Next month" is the same day of the following month, clamped to that
+/// month's last day: `DateTime` rolls an overflowing day forward, so an
+/// unclamped Jan 31 would land on Mar 3.
+Map<String, DateTime> schedulePresets(DateTime now) {
+  // Day 0 of the month after next is the last day of next month.
+  final int lastOfNext = DateTime(now.year, now.month + 2, 0).day;
+  return <String, DateTime>{
+    'Tomorrow': DateTime(now.year, now.month, now.day + 1, 9),
+    'Next week': DateTime(now.year, now.month, now.day + 7, 9),
+    'Next month': DateTime(
+      now.year,
+      now.month + 1,
+      min(now.day, lastOfNext),
+      9,
+    ),
+  };
+}
 
 /// Asks when [recording] should return to the desk. Null on dismiss.
 Future<ScheduleChoice?> showScheduleDialog(

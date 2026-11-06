@@ -528,3 +528,8 @@ class Recording {
   }
 }
 
+/// How many of [items] are off the desk at [now]: handed off, or waiting for
+/// a date (#383). The queue's chip and the nav rail's progress both read
+/// this, so the two counts cannot drift apart.
+int countOffDesk(Iterable<Recording> items, DateTime now) =>
+    items.where((Recording item) => !item.isOnDeskAt(now)).length;

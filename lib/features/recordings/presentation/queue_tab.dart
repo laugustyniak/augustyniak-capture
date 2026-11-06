@@ -629,9 +629,7 @@ class _QueueTabState extends State<QueueTab> {
     );
     _visible = visible;
     // Everything not on the desk: handed off, and waiting for a date.
-    final int reviewedCount = all
-        .where((Recording item) => !item.isOnDeskAt(_now))
-        .length;
+    final int reviewedCount = countOffDesk(all, _now);
     final int openCommitmentCount = openCommitments(all).length;
     return LayoutBuilder(
       builder: (BuildContext context, BoxConstraints constraints) {

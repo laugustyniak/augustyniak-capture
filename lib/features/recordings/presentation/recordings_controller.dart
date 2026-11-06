@@ -3243,6 +3243,16 @@ class RecordingsController extends ChangeNotifier {
     );
     final int? every = recording.repeatEveryDays;
     if (!recording.isProcessedByUser && every != null) {
+      // An occurrence counts only once it is due. DONE on one still waiting
+      // would log a closure for work that was not due yet and push the date
+      // further out, so it does nothing; ending the series is unschedule.
+      if (recording.isScheduledAt(DateTime.now())) {
+        _logSink.log(
+          'Not due yet · the next occurrence is still waiting.',
+          recordingId: id,
+        );
+        return;
+      }
       await _completeOccurrence(recording, every);
       return;
     }
