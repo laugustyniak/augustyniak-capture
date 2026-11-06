@@ -1851,50 +1851,56 @@ class _CaptureMenuSheet extends StatelessWidget {
           right: BorderSide(color: Console.borderStrong),
         ),
       ),
-      child: SafeArea(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: <Widget>[
-            const SizedBox(height: 12),
-            Container(
-              width: 40,
-              height: 4,
-              decoration: BoxDecoration(
-                color: Console.borderStrong,
-                borderRadius: BorderRadius.circular(2),
+      // The rows are ListTiles, which paint their ink on the nearest Material.
+      // Without one of their own that is the sheet's, underneath this
+      // container's fill — so the splash is hidden and debug builds assert.
+      child: Material(
+        type: MaterialType.transparency,
+        child: SafeArea(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: <Widget>[
+              const SizedBox(height: 12),
+              Container(
+                width: 40,
+                height: 4,
+                decoration: BoxDecoration(
+                  color: Console.borderStrong,
+                  borderRadius: BorderRadius.circular(2),
+                ),
               ),
-            ),
-            const SizedBox(height: 8),
-            _row(
-              context,
-              Icons.description_outlined,
-              'New text note',
-              'typed · passthrough',
-              _CaptureAction.textNote,
-            ),
-            _row(
-              context,
-              Icons.audio_file_outlined,
-              'Upload audio',
-              'transcribed',
-              _CaptureAction.audioUpload,
-            ),
-            _row(
-              context,
-              Icons.image_outlined,
-              'Upload image',
-              'OCR',
-              _CaptureAction.imageUpload,
-            ),
-            _row(
-              context,
-              Icons.movie_outlined,
-              'Upload video',
-              'audio track · transcribed',
-              _CaptureAction.videoUpload,
-            ),
-            const SizedBox(height: 8),
-          ],
+              const SizedBox(height: 8),
+              _row(
+                context,
+                Icons.description_outlined,
+                'New text note',
+                'typed · passthrough',
+                _CaptureAction.textNote,
+              ),
+              _row(
+                context,
+                Icons.audio_file_outlined,
+                'Upload audio',
+                'transcribed',
+                _CaptureAction.audioUpload,
+              ),
+              _row(
+                context,
+                Icons.image_outlined,
+                'Upload image',
+                'OCR',
+                _CaptureAction.imageUpload,
+              ),
+              _row(
+                context,
+                Icons.movie_outlined,
+                'Upload video',
+                'audio track · transcribed',
+                _CaptureAction.videoUpload,
+              ),
+              const SizedBox(height: 8),
+            ],
+          ),
         ),
       ),
     );
