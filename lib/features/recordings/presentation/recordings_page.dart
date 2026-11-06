@@ -70,7 +70,9 @@ import '../../shortcuts/data/system_hotkey_registrar.dart';
 import '../../shortcuts/data/system_window_presenter.dart';
 import '../../shortcuts/domain/hotkey_registrar.dart';
 import '../../shortcuts/domain/shortcut_action.dart';
+import '../../shortcuts/domain/shortcut_link_source.dart';
 import '../../shortcuts/domain/window_presenter.dart';
+import '../../shortcuts/presentation/shortcut_link_dispatcher.dart';
 import '../../shortcuts/presentation/shortcuts_coordinator.dart';
 import '../../timer/data/asset_alarm_player.dart';
 import '../../momentum/data/file_closure_log.dart';
@@ -133,6 +135,8 @@ class RecordingsPage extends StatefulWidget {
     this.syncTransportResolver,
     this.mediaStoreResolver,
     this.e2eeService,
+    this.launchArguments = const <String>[],
+    this.shortcutLinkSource = const NoopShortcutLinkSource(),
   });
 
   /// Where the shell publishes the persisted theme so `AugustyniakCaptureApp`,
@@ -169,6 +173,15 @@ class RecordingsPage extends StatefulWidget {
   /// sync status can say whether rows left sealed or in plaintext. Null
   /// under the same condition as [syncTransportResolver].
   final E2eeService? e2eeService;
+
+  /// The process arguments. A shortcut URL among them is a cold start from the
+  /// desktop's own keybinding, and runs once `_bootstrap()` has loaded.
+  final List<String> launchArguments;
+
+  /// Shortcut URLs (`ai.augustyniak.capture://shortcut/<action>`) forwarded to
+  /// the running instance — how GNOME Wayland, where no app may grab a key,
+  /// reaches the same `ShortcutsCoordinator.handle` a hotkey does.
+  final ShortcutLinkSource shortcutLinkSource;
 
   @override
   State<RecordingsPage> createState() => _RecordingsPageState();
@@ -243,6 +256,7 @@ class _RecordingsPageState extends State<RecordingsPage>
   /// which needs dated events a cumulative counter cannot be run backwards into.
   late final MomentumController momentum;
   late final ShortcutsCoordinator shortcuts;
+  late final ShortcutLinkDispatcher shortcutLinks;
   late final ClipboardWatcherService clipboardWatcher;
 
   /// Held rather than passed straight into the coordinator: the clipboard
@@ -613,6 +627,14 @@ class _RecordingsPageState extends State<RecordingsPage>
       windowPresenter: windowPresenter,
       logSink: logs,
     );
+    // Started now so a URL arriving during bootstrap is held rather than lost;
+    // `_bootstrap()` releases it once the queue has loaded.
+    shortcutLinks = ShortcutLinkDispatcher(
+      source: widget.shortcutLinkSource,
+      handle: shortcuts.handle,
+      launchArguments: widget.launchArguments,
+      logSink: logs,
+    )..start();
 
     settings.addListener(_applySettings);
     projects.addListener(_applyActiveProject);
@@ -828,6 +850,10 @@ class _RecordingsPageState extends State<RecordingsPage>
     // Explicit rather than relying on the notification `initialize` emits, so
     // the hotkeys are guaranteed live once bootstrap returns.
     await _applyShortcuts();
+    // Last of the loading steps the shortcut actions depend on: a shortcut URL
+    // from a cold start, or one sent while this ran, acts on a loaded queue.
+    // Not awaited: a held note action resolves only when its sheet closes.
+    if (mounted) unawaited(shortcutLinks.markReady());
 
     final Directory directory = await repository.recordingsDirectory();
     if (!mounted) return;
@@ -1190,6 +1216,7 @@ class _RecordingsPageState extends State<RecordingsPage>
     // The OS keeps a registration until it is told otherwise. This cannot be
     // awaited here, so the coordinator sets its `_disposed` flag synchronously
     // and refuses presses landing in the gap before the unregister completes.
+    unawaited(shortcutLinks.dispose());
     unawaited(shortcuts.dispose());
     clipboardWatcher.dispose();
     controller.dispose();

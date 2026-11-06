@@ -176,6 +176,31 @@ static void my_application_activate(GApplication* application) {
   gtk_widget_grab_focus(GTK_WIDGET(view));
 }
 
+// The URL a desktop environment opens to run a shortcut action
+// (`ShortcutLink` on the Dart side). GNOME Wayland lets no client grab a key
+// system-wide, so there the desktop owns the key and runs `xdg-open` on it.
+static const gchar kShortcutUrlPrefix[] = "ai.augustyniak.capture://shortcut/";
+
+static gboolean is_shortcut_argument(const gchar* argument) {
+  return g_str_has_prefix(argument, kShortcutUrlPrefix);
+}
+
+// Removes every shortcut URL from `arguments[1..]`, in place. Used on a cold
+// start: the URL already reaches Dart as an entrypoint argument, and leaving it
+// in the command line too would replay it through `command-line` → `app_links`
+// and run the action twice (a toggle that starts and immediately stops).
+static void strip_shortcut_arguments(gchar** arguments) {
+  gchar** out = arguments + 1;
+  for (gchar** in = arguments + 1; *in != nullptr; ++in) {
+    if (is_shortcut_argument(*in)) {
+      g_free(*in);
+    } else {
+      *out++ = *in;
+    }
+  }
+  *out = nullptr;
+}
+
 // Implements GApplication::local_command_line.
 static gboolean my_application_local_command_line(GApplication* application,
                                                   gchar*** arguments,
@@ -191,7 +216,20 @@ static gboolean my_application_local_command_line(GApplication* application,
     return TRUE;
   }
 
-  g_application_activate(application);
+  gboolean has_shortcut = FALSE;
+  for (gchar** argument = *arguments + 1; *argument != nullptr; ++argument) {
+    if (is_shortcut_argument(*argument)) has_shortcut = TRUE;
+  }
+  const gboolean is_remote = g_application_get_is_remote(application);
+
+  // A shortcut URL for a running instance must not activate it: `activate`
+  // ends in `gtk_window_present`, which would raise the window before a
+  // recording starts and on every stop. The URL still reaches the instance
+  // through `command-line` below; the shortcut layer decides about the window.
+  if (!(is_remote && has_shortcut)) {
+    g_application_activate(application);
+  }
+  if (!is_remote && has_shortcut) strip_shortcut_arguments(*arguments);
   *exit_status = 0;
 
   return FALSE;
