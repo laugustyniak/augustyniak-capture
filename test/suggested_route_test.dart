@@ -158,13 +158,14 @@ Recording _row({
   SuggestedRoute? suggestion,
   bool auto = false,
   bool noProject = false,
+  String projectId = 'a',
 }) => Recording(
   id: 'rec-1',
   filePath: '/tmp/rec-1.m4a',
   createdAt: DateTime.utc(2026, 9, 21, 8),
   durationMs: 1,
   status: RecordingStatus.completed,
-  projectId: noProject ? null : 'a',
+  projectId: noProject ? null : projectId,
   projectAuto: auto,
   suggestedRoute: suggestion,
 );
@@ -642,6 +643,26 @@ void main() {
         SuggestedRouteKind.agent,
       });
     });
+
+    test(
+      'a user-owned project offers only its own kinds, never the union',
+      () async {
+        // The capture sits on 'b' (inbox only) by the user's choice, so the
+        // model cannot move it: 'a' being Command-bound with an agent must not
+        // widen what is offered for it.
+        final _Enrichment enrichment = _Enrichment(const EnrichmentResult());
+        final RecordingsController c = await seeded(
+          _row(projectId: 'b'),
+          result: const EnrichmentResult(),
+          source: _Source(twoProjects),
+          enrichment: enrichment,
+        );
+        await reEnrich(c);
+        expect(enrichment.lastContext!.routeKinds, <SuggestedRouteKind>[
+          SuggestedRouteKind.file,
+        ]);
+      },
+    );
 
     test('a kind valid only for the project it moves to is kept', () async {
       final RecordingsController c = await seeded(
