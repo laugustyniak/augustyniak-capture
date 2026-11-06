@@ -387,6 +387,36 @@ class _QueueTabState extends State<QueueTab> {
   int _doneFeedbackSequence = 0;
   Timer? _doneFeedbackTimer;
 
+  /// One-shot rebuild at the soonest future `resurfaceAt` (#383), so a
+  /// scheduled capture returns to the desk at its moment rather than at the
+  /// next unrelated repaint. It only wakes the build — which reads the date
+  /// from the clock — and never counts anything down itself.
+  Timer? _resurfaceTimer;
+
+  /// The instant the current build filtered the desk at.
+  DateTime _now = DateTime.now();
+
+  /// Long waits are re-armed rather than held, so a laptop that slept through
+  /// a date still wakes within a bounded span of it.
+  static const Duration _maxResurfaceWait = Duration(hours: 1);
+
+  void _armResurfaceTimer(List<Recording> all, DateTime now) {
+    _resurfaceTimer?.cancel();
+    _resurfaceTimer = null;
+    DateTime? soonest;
+    for (final Recording item in all) {
+      final DateTime? at = item.resurfaceAt;
+      if (item.isProcessedByUser || at == null || !at.isAfter(now)) continue;
+      if (soonest == null || at.isBefore(soonest)) soonest = at;
+    }
+    if (soonest == null) return;
+    Duration wait = soonest.difference(now) + const Duration(seconds: 1);
+    if (wait > _maxResurfaceWait) wait = _maxResurfaceWait;
+    _resurfaceTimer = Timer(wait, () {
+      if (mounted) setState(() {});
+    });
+  }
+
   /// Whether the compact header's two panels are open *by the user's hand*.
   ///
   /// Not the whole answer: a panel whose control is engaged is forced open
@@ -501,6 +531,7 @@ class _QueueTabState extends State<QueueTab> {
     widget.controller.addedCapture.removeListener(_focusAddedCapture);
     _syncStatusTimer?.cancel();
     _doneFeedbackTimer?.cancel();
+    _resurfaceTimer?.cancel();
     searchController.dispose();
     searchFocus.dispose();
     listFocus.dispose();
@@ -577,6 +608,8 @@ class _QueueTabState extends State<QueueTab> {
   Widget build(BuildContext context) {
     final RecordingsController controller = widget.controller;
     final List<Recording> all = controller.recordings;
+    _now = DateTime.now();
+    _armResurfaceTimer(all, _now);
     // Resolved once here, not once per card: `totalsByCapture()` is a single
     // grouped query, and a thousand-row queue must not turn into a thousand
     // repository reads on every pipeline tick.
@@ -595,9 +628,8 @@ class _QueueTabState extends State<QueueTab> {
       queueSort,
     );
     _visible = visible;
-    final int reviewedCount = all
-        .where((Recording item) => item.isProcessedByUser)
-        .length;
+    // Everything not on the desk: handed off, and waiting for a date.
+    final int reviewedCount = countOffDesk(all, _now);
     final int openCommitmentCount = openCommitments(all).length;
     return LayoutBuilder(
       builder: (BuildContext context, BoxConstraints constraints) {
@@ -1153,7 +1185,7 @@ class _QueueTabState extends State<QueueTab> {
       // settles, otherwise the default Desk filter removes the very spinner
       // that tells the user the Done action is still in progress.
       if (markingDoneIds.contains(item.id)) return true;
-      if (!_matchesReview(reviewFilter, item)) return false;
+      if (!_matchesReview(reviewFilter, item, _now)) return false;
       if (!_matches(selectedFilter, item)) return false;
       if (!_matchesType(selectedTypeFilter, item)) return false;
       if (!matchesPriority(priorityFilter, item)) return false;
@@ -1872,11 +1904,15 @@ bool _matches(RecordingFilter filter, Recording item) => switch (filter) {
 
 /// Single definition of the review axis, for the same reason [_matches] is one:
 /// the chip counts and the list must be answering the same question.
-bool _matchesReview(ReviewFilter filter, Recording item) => switch (filter) {
-  ReviewFilter.all => true,
-  ReviewFilter.desk => !item.isProcessedByUser,
-  ReviewFilter.handedOff => item.isProcessedByUser,
-};
+///
+/// A capture scheduled for later (#383) is off the desk until its date, so
+/// OFF DESK lists what is waiting beside what was handed off.
+bool _matchesReview(ReviewFilter filter, Recording item, DateTime now) =>
+    switch (filter) {
+      ReviewFilter.all => true,
+      ReviewFilter.desk => item.isOnDeskAt(now),
+      ReviewFilter.handedOff => !item.isOnDeskAt(now),
+    };
 
 /// Single definition of the capture type axis, matching [_matches] and [_matchesReview].
 bool _matchesType(CaptureTypeFilter filter, Recording item) => switch (filter) {

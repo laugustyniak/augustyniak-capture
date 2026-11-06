@@ -811,6 +811,24 @@ void main() {
     },
   );
 
+  test('a schedule and its repeat survive a round trip (#383)', () async {
+    final Recording scheduled = capture(
+      'a',
+    ).copyWith(resurfaceAt: DateTime.utc(2026, 11, 7, 9), repeatEveryDays: 7);
+    final Recording plain = capture('b');
+    await seed(source, <Recording>[scheduled, plain]);
+
+    await archiveFor(source).exportTo(zipPath());
+    await archiveFor(target).importFrom(zipPath());
+
+    final List<Recording> rows = await repositoryFor(target).loadAll();
+    Recording row(String id) => rows.firstWhere((Recording r) => r.id == id);
+    expect(row('a').resurfaceAt, DateTime.utc(2026, 11, 7, 9));
+    expect(row('a').repeatEveryDays, 7);
+    expect(row('b').resurfaceAt, isNull);
+    expect(row('b').repeatEveryDays, isNull);
+  });
+
   test('the closure history survives a restore', () async {
     await seed(source, <Recording>[capture('a')]);
     // One closure, written the way `FileClosureLog` appends them.

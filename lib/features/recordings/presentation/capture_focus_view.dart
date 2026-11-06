@@ -26,6 +26,7 @@ import 'inline_video_player.dart';
 import 'recording_card.dart';
 import 'recording_editor.dart';
 import 'recordings_controller.dart';
+import 'schedule_dialog.dart';
 import 'tag_editor.dart';
 
 /// Opens the capture in a dedicated reading view.
@@ -1938,6 +1939,17 @@ class _PanelActions extends StatelessWidget {
       ),
       if (hasTranscript)
         _PanelCopyButton(text: recording.displayText.trim()),
+      // Last in the group, so it sits beside Mark done: it is the third way
+      // off the desk (#383) — done, delegated, or back on a date. Inside the
+      // wrapping group rather than beside DONE so a phone row can wrap it.
+      _PanelButton(
+        icon: recording.repeatEveryDays != null
+            ? Icons.event_repeat_rounded
+            : Icons.event_outlined,
+        label: 'Schedule',
+        semanticLabel: 'Schedule capture',
+        onPressed: () => _schedule(context),
+      ),
     ];
 
     return Row(
@@ -1956,6 +1968,20 @@ class _PanelActions extends StatelessWidget {
         ),
       ],
     );
+  }
+
+  Future<void> _schedule(BuildContext context) async {
+    final ScheduleChoice? choice = await showScheduleDialog(context, recording);
+    if (choice == null) return;
+    if (choice.clear) {
+      await controller.unschedule(recording.id);
+    } else if (choice.at != null) {
+      await controller.schedule(
+        recording.id,
+        choice.at!,
+        repeatEveryDays: choice.repeatEveryDays,
+      );
+    }
   }
 }
 

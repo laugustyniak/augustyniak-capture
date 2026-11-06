@@ -3241,6 +3241,21 @@ class RecordingsController extends ChangeNotifier {
     final Recording recording = _recordings.firstWhere(
       (Recording item) => item.id == id,
     );
+    final int? every = recording.repeatEveryDays;
+    if (!recording.isProcessedByUser && every != null) {
+      // An occurrence counts only once it is due. DONE on one still waiting
+      // would log a closure for work that was not due yet and push the date
+      // further out, so it does nothing; ending the series is unschedule.
+      if (recording.isScheduledAt(DateTime.now())) {
+        _logSink.log(
+          'Not due yet · the next occurrence is still waiting.',
+          recordingId: id,
+        );
+        return;
+      }
+      await _completeOccurrence(recording, every);
+      return;
+    }
     final bool nextValue = !recording.isProcessedByUser;
 
     await _update(
@@ -3257,6 +3272,80 @@ class RecordingsController extends ChangeNotifier {
     );
     // The tally is raised inside `_update`, which is the only place that can
     // tell a first closure from a re-tick — see [CaptureHistory].
+  }
+
+  /// DONE on a repeating capture (#383): it stays open and goes back to wait,
+  /// [every] days from now, and this occurrence is logged as a closure.
+  ///
+  /// The next date is computed from the clock at the moment of DONE, never
+  /// accumulated: an occurrence finished late does not leave the next one
+  /// already overdue. Calendar days rather than a fixed `Duration`, so a
+  /// daily item keeps its hour across a DST change.
+  Future<void> _completeOccurrence(Recording recording, int every) async {
+    final DateTime now = DateTime.now();
+    final DateTime next = DateTime(
+      now.year,
+      now.month,
+      now.day + every,
+      now.hour,
+      now.minute,
+    );
+    await _update(
+      recording.id,
+      (Recording item) => item.copyWith(resurfaceAt: next),
+      source: RevisionSource.user,
+    );
+    // After the persist, like every closure: the log may only lag the index.
+    await _history.recordOccurrence(recording, _closureKindFor(recording), now);
+    _logSink.log(
+      'Occurrence done · returns ${next.toIso8601String()}.',
+      recordingId: recording.id,
+    );
+  }
+
+  /// Take a capture off the desk until [at] (#383), optionally repeating
+  /// every [repeatEveryDays] days after each DONE.
+  ///
+  /// Scheduling a capture that was already off the desk reopens it to wait:
+  /// a schedule is a promise to see it again, which a closed item cannot keep.
+  /// Nothing here touches `status`, a source file or the pipeline.
+  Future<void> schedule(String id, DateTime at, {int? repeatEveryDays}) async {
+    if (repeatEveryDays != null && repeatEveryDays <= 0) {
+      throw ArgumentError.value(
+        repeatEveryDays,
+        'repeatEveryDays',
+        'must be positive',
+      );
+    }
+    await _update(
+      id,
+      (Recording item) => item.copyWith(
+        resurfaceAt: at,
+        repeatEveryDays: repeatEveryDays,
+        clearRepeatEveryDays: repeatEveryDays == null,
+        isProcessedByUser: false,
+        clearProcessedAt: true,
+      ),
+      source: RevisionSource.user,
+    );
+    _logSink.log(
+      repeatEveryDays == null
+          ? 'Scheduled for ${at.toIso8601String()}.'
+          : 'Scheduled for ${at.toIso8601String()}, '
+                'repeating every $repeatEveryDays d.',
+      recordingId: id,
+    );
+  }
+
+  /// Drop a capture's schedule and repeat; it is back on the desk at once.
+  Future<void> unschedule(String id) async {
+    await _update(
+      id,
+      (Recording item) =>
+          item.copyWith(clearResurfaceAt: true, clearRepeatEveryDays: true),
+      source: RevisionSource.user,
+    );
+    _logSink.log('Schedule cleared.', recordingId: id);
   }
 
   /// Whether [route] has anywhere to send this capture. Synchronous because the

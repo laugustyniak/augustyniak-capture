@@ -202,6 +202,39 @@ class CaptureHistory {
     return true;
   }
 
+  /// Records one occurrence of a repeating capture (#383).
+  ///
+  /// The single exception to "a capture closes once, ever": a repeat never
+  /// sets `isProcessedByUser`, so [recordClosure] cannot see it, and each
+  /// occurrence is real work done on its own day. Best-effort like every
+  /// other append here — a failing log never fails the occurrence.
+  Future<void> recordOccurrence(
+    Recording after,
+    ClosureKind kind,
+    DateTime at,
+  ) async {
+    try {
+      await _closureLog.append(
+        ClosureEvent(
+          recordingId: after.id,
+          at: at,
+          kind: kind,
+          type: after.type,
+          projectId: after.projectId,
+          projectName: after.projectId == null
+              ? null
+              : _projectById?.call(after.projectId!)?.name,
+        ),
+      );
+    } catch (exception) {
+      _logSink.log(
+        'Closure not written: $exception',
+        level: LogLevel.warn,
+        recordingId: after.id,
+      );
+    }
+  }
+
   /// Records a capture that was already closed before the log existed, and
   /// answers whether the row reached disk.
   ///

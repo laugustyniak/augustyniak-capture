@@ -1715,9 +1715,8 @@ class _RecordingsPageState extends State<RecordingsPage>
   /// `setState(() => navigationIndex = …)` in this file.
   Widget _buildRail() {
     final int total = controller.recordings.length;
-    final int reviewed = controller.recordings
-        .where((Recording item) => item.isProcessedByUser)
-        .length;
+    // Off the desk, the same count the queue's chip shows (#383).
+    final int reviewed = countOffDesk(controller.recordings, DateTime.now());
     return ConsoleNavRail(
       selectedIndex: navigationIndex,
       onSelected: (int value) => setState(() => navigationIndex = value),

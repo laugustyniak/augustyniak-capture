@@ -209,7 +209,11 @@ class _StoppingRecorder implements AudioRecorder {
   Future<void> start(RecordConfig config, {required String path}) async {
     if (_wedged) return Completer<void>().future;
     this.path = path;
-    await File(path).writeAsString(
+    // Synchronous on purpose: the controller bounds `start()` by the 50 ms
+    // `recorderTimeout` above, and an async write on a loaded machine can
+    // outlast it — the start then "times out", no capture ever begins, and the
+    // test fails on a race rather than on the behaviour it is about.
+    File(path).writeAsStringSync(
       behaviour == _StopBehaviour.emptyFile ? '' : 'audio',
     );
   }
