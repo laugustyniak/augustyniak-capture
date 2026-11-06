@@ -69,7 +69,7 @@ class OrbPainter extends CustomPainter {
 
     // Spectrum spokes around the core.
     if (on.spokes) {
-      const int spokes = 72;
+      final int spokes = k.spokeCount;
       final double inner = r * 0.30;
       final Paint spoke = Paint()
         ..strokeWidth = math.max(2, r * 0.012)
@@ -99,9 +99,9 @@ class OrbPainter extends CustomPainter {
     if (on.rings) {
       final List<(double, double, Color, int)> rings =
           <(double, double, Color, int)>[
-            (0.62, k.rings[0], accent, 5),
-            (0.78, k.rings[1], violet, 7),
-            (0.94, k.rings[2], pink, 4),
+            (0.62, k.rings[0], accent, k.dots[0]),
+            (0.78, k.rings[1], violet, k.dots[1]),
+            (0.94, k.rings[2], pink, k.dots[2]),
           ];
       for (final (double scale, double speed, Color color, int dots) in rings) {
         final double radius = r * scale;
