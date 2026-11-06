@@ -58,6 +58,8 @@ class Recording {
     this.processedAt,
     this.routes = const <RouteRecord>[],
     this.artifacts = const <AgentArtifact>[],
+    this.resurfaceAt,
+    this.repeatEveryDays,
     List<CaptureSegment>? segments,
   }) : _segments = segments;
 
@@ -208,6 +210,29 @@ class Recording {
   /// this capture. Empty on legacy rows and captures without agent results.
   final List<AgentArtifact> artifacts;
 
+  /// When a scheduled capture returns to the desk (#383). Until then it waits
+  /// off the desk; afterwards it is simply back, read from the clock at every
+  /// build — nothing ticks it down and nothing has to clear it.
+  ///
+  /// Null means never scheduled, and the key stays out of `recordings.json`
+  /// so such a row serialises byte for byte as it did before this existed.
+  final DateTime? resurfaceAt;
+
+  /// Days between occurrences of a repeating capture, or null for one that
+  /// does not repeat. When set, DONE does not close the item: it moves
+  /// [resurfaceAt] forward by this many days and logs a closure for the
+  /// occurrence. Always positive when present.
+  final int? repeatEveryDays;
+
+  /// Waiting off the desk at [now]: scheduled for a moment still ahead.
+  bool isScheduledAt(DateTime now) {
+    final DateTime? at = resurfaceAt;
+    return at != null && at.isAfter(now);
+  }
+
+  /// What the DESK view shows at [now]: open, and not waiting for a date.
+  bool isOnDeskAt(DateTime now) => !isProcessedByUser && !isScheduledAt(now);
+
   /// The capture's source artifacts, oldest first, or null on every row that
   /// has never gained a fragment.
   ///
@@ -312,6 +337,10 @@ class Recording {
     bool clearProcessedAt = false,
     List<RouteRecord>? routes,
     List<AgentArtifact>? artifacts,
+    DateTime? resurfaceAt,
+    bool clearResurfaceAt = false,
+    int? repeatEveryDays,
+    bool clearRepeatEveryDays = false,
     List<CaptureSegment>? segments,
   }) {
     return Recording(
@@ -352,6 +381,10 @@ class Recording {
       processedAt: clearProcessedAt ? null : (processedAt ?? this.processedAt),
       routes: routes ?? this.routes,
       artifacts: artifacts ?? this.artifacts,
+      resurfaceAt: clearResurfaceAt ? null : (resurfaceAt ?? this.resurfaceAt),
+      repeatEveryDays: clearRepeatEveryDays
+          ? null
+          : (repeatEveryDays ?? this.repeatEveryDays),
       segments: segments ?? _segments,
     );
   }
@@ -392,6 +425,10 @@ class Recording {
     'processedAt': processedAt?.toIso8601String(),
     'routes': routes.map((RouteRecord route) => route.toJson()).toList(),
     'artifacts': artifacts.map((AgentArtifact a) => a.toJson()).toList(),
+    // Both omitted while null, so an unscheduled row serialises byte for byte
+    // as it did before scheduling existed.
+    if (resurfaceAt != null) 'resurfaceAt': resurfaceAt!.toIso8601String(),
+    if (repeatEveryDays != null) 'repeatEveryDays': repeatEveryDays,
     if (_segments != null)
       'segments': _segments.map((CaptureSegment s) => s.toJson()).toList(),
   };
@@ -470,6 +507,16 @@ class Recording {
       // the same rule `tags` and `category` follow.
       routes: RouteRecord.listFromJson(json['routes']),
       artifacts: AgentArtifact.listFromJson(json['artifacts']),
+      // Absent on every row written before scheduling existed. Type-checked
+      // rather than cast, like `summary`: an unreadable value degrades to
+      // "not scheduled" instead of costing the whole load.
+      resurfaceAt: json['resurfaceAt'] is String
+          ? DateTime.tryParse(json['resurfaceAt'] as String)
+          : null,
+      repeatEveryDays:
+          json['repeatEveryDays'] is int && (json['repeatEveryDays'] as int) > 0
+          ? json['repeatEveryDays'] as int
+          : null,
       // An empty parsed list means every segment row was unreadable, which is
       // the same information as no list at all — fall back to synthesis rather
       // than to a capture with no sources.

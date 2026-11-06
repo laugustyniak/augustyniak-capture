@@ -218,6 +218,12 @@ class QueueListRow extends StatelessWidget {
   /// The summary when there is one; otherwise the stage the capture is in, so
   /// an un-enriched row still says something a neighbour does not.
   String _secondLine() {
+    final String line = _stageOrText();
+    final String? schedule = scheduleLabelFor(recording, DateTime.now());
+    return schedule == null ? line : '$schedule · $line';
+  }
+
+  String _stageOrText() {
     if (isEnriching) return analyzingLine;
     switch (recording.status) {
       case RecordingStatus.saved:

@@ -1419,6 +1419,75 @@ void main() {
     expect(find.byTooltip('Handed off 1 of 3'), findsOneWidget);
   });
 
+  testWidgets('a scheduled capture waits off the desk until its date (#383)', (
+    WidgetTester tester,
+  ) async {
+    final RecordingsController controller = await buildRecordingsController(
+      appDir,
+      seed: <Recording>[
+        makeRecording(id: 'open', title: 'Open one'),
+        makeRecording(
+          id: 'later',
+          title: 'Later one',
+        ).copyWith(resurfaceAt: DateTime.now().add(const Duration(days: 3))),
+        makeRecording(id: 'back', title: 'Back one').copyWith(
+          resurfaceAt: DateTime.now().subtract(const Duration(hours: 1)),
+        ),
+        makeRecording(id: 'done', isProcessedByUser: true),
+      ],
+    );
+    await pumpQueue(tester, controller);
+
+    // A future date is off the desk; a passed one is back on it.
+    expect(find.text('DESK 2'), findsOneWidget);
+    expect(find.text('OFF DESK 2'), findsOneWidget);
+    expect(find.text('ANY 4'), findsOneWidget);
+    expect(find.text('Later one'), findsNothing);
+    expect(find.text('Back one'), findsOneWidget);
+
+    await tester.tap(find.text('OFF DESK 2'));
+    await tester.pumpAndSettle();
+    expect(find.text('Later one'), findsOneWidget);
+    expect(find.textContaining('Returns '), findsWidgets);
+  });
+
+  testWidgets('Schedule in the detail panel takes the capture off the desk', (
+    WidgetTester tester,
+  ) async {
+    tester.view.physicalSize = const Size(1800, 1000);
+    tester.view.devicePixelRatio = 1.0;
+    addTearDown(() {
+      tester.view.resetPhysicalSize();
+      tester.view.resetDevicePixelRatio();
+    });
+    final RecordingsController controller = await buildRecordingsController(
+      appDir,
+      seed: <Recording>[
+        makeRecording(
+          id: 's1',
+          title: 'Read again',
+          transcript: 'repetitio mater studiorum est',
+          type: CaptureType.text,
+        ),
+      ],
+    );
+    await pumpQueue(tester, controller);
+
+    await tester.tap(find.bySemanticsLabel('Schedule capture'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Every week'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Tomorrow'));
+    await tester.pumpAndSettle();
+
+    final Recording item = controller.recordings.single;
+    expect(item.resurfaceAt, isNotNull);
+    expect(item.resurfaceAt!.isAfter(DateTime.now()), isTrue);
+    expect(item.repeatEveryDays, 7);
+    expect(find.text('DESK 0'), findsOneWidget);
+    expect(find.text('OFF DESK 1'), findsOneWidget);
+  });
+
   testWidgets('empty panel names combined status and review filters', (
     WidgetTester tester,
   ) async {

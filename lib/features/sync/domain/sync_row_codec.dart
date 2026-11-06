@@ -124,6 +124,13 @@ class SyncRowCodec {
       // devices with it.
       if (json.containsKey('commitments'))
         'commitments': json['commitments'],
+      // A schedule is the user's own decision, so it follows the capture to
+      // every device. Absent while unscheduled, so such a row hashes as it
+      // did before scheduling existed (#383).
+      if (json.containsKey('resurfaceAt'))
+        'resurfaceAt': json['resurfaceAt'],
+      if (json.containsKey('repeatEveryDays'))
+        'repeatEveryDays': json['repeatEveryDays'],
     };
     return <String, Object?>{
       'id': r.id,
@@ -217,6 +224,8 @@ class SyncRowCodec {
       'cleanup': payload['cleanup'],
       'instruction': payload['instruction'],
       'commitments': payload['commitments'],
+      'resurfaceAt': payload['resurfaceAt'],
+      'repeatEveryDays': payload['repeatEveryDays'],
       'routes': payload['routes'] ?? <Object?>[],
       // Artifacts name files on the machine that ran the agent, and the viewer
       // reads and opens whatever path one carries. A remote row therefore never

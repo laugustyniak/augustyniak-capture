@@ -708,6 +708,8 @@ class ZipCaptureArchive implements CaptureArchive {
       isProcessedByUser: recording.isProcessedByUser,
       processedAt: recording.processedAt,
       routes: recording.routes,
+      resurfaceAt: recording.resurfaceAt,
+      repeatEveryDays: recording.repeatEveryDays,
       // Artifact paths belong to the machine that produced the archive; the
       // viewer reads whatever they name, so an archive never supplies them.
       artifacts: const [],
