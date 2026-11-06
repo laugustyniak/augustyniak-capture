@@ -257,6 +257,9 @@ class RecordingCard extends StatelessWidget {
           label: projectName!,
           color: Console.mutedSoft,
           outlined: true,
+          // A project name is the user's own text and can be any length; the
+          // pill ellipsizes it to the card, so the whole name rides a tooltip.
+          tooltip: projectName,
         ),
       if (recording.category != null)
         StatusPill(
