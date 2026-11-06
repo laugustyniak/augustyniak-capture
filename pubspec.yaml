@@ -48,6 +48,9 @@ dev_dependencies:
   integration_test:
     sdk: flutter
   flutter_lints: ^6.0.0
+  # The end-to-end capture test points path_provider at a throwaway directory
+  # so it never reaches the real library on the host running it.
+  path_provider_platform_interface: ^2.1.2
 
 # The published record_linux never reads the stderr of the ffmpeg it spawns:
 # once the pipe buffer fills, ffmpeg blocks, the take stops growing mid-recording
