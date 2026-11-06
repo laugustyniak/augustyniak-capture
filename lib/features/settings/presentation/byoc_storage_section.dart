@@ -193,7 +193,7 @@ class _ByocStorageSectionState extends State<ByocStorageSection> {
       
       if (!mounted) return;
       setState(() {
-        _checked = 'Connected';
+        _checked = 'Reachable (not used by sync yet)';
       });
     } catch (exception) {
       if (!mounted) return;
@@ -236,8 +236,9 @@ class _ByocStorageSectionState extends State<ByocStorageSection> {
                 children: <Widget>[
                   Expanded(
                     child: Text(
-                      'Store media files on your own S3-compatible storage. '
-                      'Requires an endpoint, bucket, access key ID, and secret access key.',
+                      'Not used by sync yet: media still goes to your Supabase '
+                      'Storage bucket. These settings are saved and can be '
+                      'tested, but nothing is uploaded here.',
                       style: TextStyle(
                         color: Console.mutedSoft,
                         fontSize: 10,

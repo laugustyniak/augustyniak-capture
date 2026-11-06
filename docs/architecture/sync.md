@@ -392,6 +392,13 @@ receiving device).
 
 ## Media: private Storage, verified before it lands
 
+**The Config tab's BYOC S3 settings are not read here (#415).**
+`mediaStoreResolver` always builds `SupabaseMediaStore`; `S3MediaStore` is
+only used by the section's connection test, which the section labels as not
+used by sync yet. Wiring it needs a decision first: how devices agree on which
+store holds a row's media, what happens to media already uploaded, and
+unsealing the secret through `usableS3SecretAccessKey`.
+
 Slice 4 of #187 (#198). The second `CloudSyncCoordinator` slot, `syncMedia`,
 runs after `syncSupabase`: the metadata pull is what adds
 the rows whose sources it fetches, so it reads `_recordings` **at call time**,
