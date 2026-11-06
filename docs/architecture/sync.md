@@ -712,6 +712,29 @@ Four rules, each with a test that fails when it is broken
   here would re-fetch it forever. A transport that *opened* a row removes
   the envelope, which is how the codec tells the two apart — and why an
   install without the key applies nothing rather than blanks.
+- **A plaintext-era media object is read, hash-gated (#396).** The bucket is
+  write-once, so an object uploaded raw before the account was enrolled stays
+  raw, and a sealed device that pulls it cannot open it as an envelope
+  (`unsealBytes` says `Envelope too short` or `Authentication failed`, which
+  keeps a never-sealed object apart from a wrong key in the log).
+  `EncryptedMediaStore.download` stays strict; it also implements
+  `PlaintextFallbackMediaStore.downloadUnsealed`, which hands over the stored
+  bytes. `MediaSyncService` asks for them only when `download` threw
+  `E2eeDecryptionException` before yielding anything **and** its
+  `mayReadPlaintext` callback says yes. `content_hash` travels unauthenticated
+  (the segment envelope holds only `text`/`error`), so a hash match alone
+  would let a hostile server plant raw bytes under a forged row; the
+  controller therefore answers yes only for a recording whose `sync_rows`
+  entry exists with `sealed = 0`, the same rule as the row downgrade below.
+  Otherwise the failure stands and is logged as "not read raw". When it does
+  read raw it logs one `warn` line
+  with the object key and recording id, and runs the bytes through the same
+  stream-and-hash check as any download: they land only if they hash to the
+  synced `contentHash`. A sealed object can never satisfy that (its bytes are
+  the ciphertext), so a wrong key or a swapped blob ends as `rejected`, not
+  as a source. Uploads are untouched: nothing is ever written unsealed by
+  this path. Every failed or rejected transfer also logs one `warn` line
+  (`Storage: <key> failed: …`) tagged with the recording id.
 - **A sealed row never comes back unsealed (#377).** The envelope-less
   branch of `_unsealRow` exists for legacy plaintext rows, but on its own it
   would let a hostile server strip the envelope from a sealed row and write

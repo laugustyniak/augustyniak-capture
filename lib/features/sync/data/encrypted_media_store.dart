@@ -18,7 +18,7 @@ import '../domain/media_sync.dart';
 /// data, so a blob the server moves under another recording's key — or
 /// another owner's folder, which the inner store prefixes outside the
 /// cipher — fails to open rather than landing as that recording's audio.
-class EncryptedMediaStore implements MediaObjectStore {
+class EncryptedMediaStore implements PlaintextFallbackMediaStore {
   EncryptedMediaStore({
     required MediaObjectStore inner,
     required E2eeCipher cipher,
@@ -77,4 +77,10 @@ class EncryptedMediaStore implements MediaObjectStore {
     }
     yield await _cipher.unsealBytes(cipherBytes.takeBytes(), aad: _aad(key));
   }
+
+  /// The object exactly as stored, for a caller that verifies the bytes
+  /// against a hash it trusts. [download] stays strict and never does this.
+  @override
+  Stream<List<int>> downloadUnsealed(String key, {required int maxBytes}) =>
+      _inner.download(key, maxBytes: maxBytes);
 }

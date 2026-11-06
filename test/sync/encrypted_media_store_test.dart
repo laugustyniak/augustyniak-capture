@@ -155,4 +155,17 @@ void main() {
 
     expect(() => _read(badStore, storageKey), throwsA(isA<E2eeDecryptionException>()));
   });
+
+  test('download stays strict; downloadUnsealed hands over the raw object', () async {
+    const String key = 'user123/captures/rec1/old.m4a';
+    final List<int> raw = utf8.encode('....ftypmp42 plaintext-era audio');
+    innerStore.storage[key] = raw;
+
+    await expectLater(_read(encryptedStore, key), throwsA(isA<E2eeDecryptionException>()));
+
+    final List<int> bytes = <int>[
+      for (final List<int> c in await encryptedStore.downloadUnsealed(key, maxBytes: 1 << 20).toList()) ...c,
+    ];
+    expect(bytes, raw);
+  });
 }

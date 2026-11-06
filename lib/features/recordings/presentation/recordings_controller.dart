@@ -35,6 +35,7 @@ import '../../sync/domain/media_sync.dart';
 import '../../sync/domain/sync_engine.dart';
 import '../../sync/domain/sync_row_codec.dart';
 import '../../sync/domain/sync_snapshot.dart';
+import '../../sync/domain/sync_table.dart';
 import '../../sync/domain/sync_transport.dart';
 import '../../transcription/data/transcription_service.dart';
 import '../../transcription/domain/transcription_limits.dart';
@@ -1434,8 +1435,21 @@ class RecordingsController extends ChangeNotifier {
       syncMedia: hasSupabase && resolvedMediaStore != null
           ? () async {
               await _rerootSyncedPaths();
+              // The media counterpart of the #377 row rule: an object that
+              // does not open as sealed is read raw only for a recording this
+              // device has bookkept as plaintext (`sealed = 0`).
+              final Map<String, SyncRowState> rowStates = SyncRowsStore(
+                db.rawDb,
+              ).loadTable(SyncTable.recordings.serverName);
               return MediaSyncService(
                 store: resolvedMediaStore,
+                log: _logSink,
+                mayReadPlaintext: (MediaSyncJob job) {
+                  final List<String> parts = job.key.split('/');
+                  final SyncRowState? state =
+                      parts.length >= 3 ? rowStates[parts[1]] : null;
+                  return state != null && !state.sealed;
+                },
                 // A capture deleted while its download was in flight must
                 // not come back as an orphan the next launch re-adopts.
                 stillWanted: (MediaSyncJob job) => _recordings.any(

@@ -178,6 +178,21 @@ void main() {
       );
     });
 
+    test('unsealBytes tells a too-short blob from an authentication failure', () async {
+      final E2eeCipher cipher = await _cipher('pass-one');
+      final List<int> aad = utf8.encode('owner-1/rec-1/take.m4a');
+      final List<int> sealed = await cipher.sealBytes(<int>[1, 2, 3], aad: aad);
+
+      await expectLater(
+        cipher.unsealBytes(<int>[1, 2, 3], aad: aad),
+        throwsA(isA<E2eeDecryptionException>().having((E2eeDecryptionException e) => e.message, 'message', contains('too short'))),
+      );
+      await expectLater(
+        cipher.unsealBytes(sealed, aad: utf8.encode('other')),
+        throwsA(isA<E2eeDecryptionException>().having((E2eeDecryptionException e) => e.message, 'message', contains('Authentication failed'))),
+      );
+    });
+
     test('unseal throws E2eeDecryptionException on wrong key or altered ciphertext', () async {
       final E2eeKeyDerivation kdf = E2eeKeyDerivation(iterations: _testIterations);
       final List<int> salt = kdf.generateSalt();

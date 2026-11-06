@@ -7,8 +7,10 @@ import 'package:path/path.dart' as p;
 import 'package:uuid/uuid.dart';
 
 import '../../../core/sync/sync_path_policy.dart';
+import '../../logs/domain/log_event.dart';
 import '../../recordings/domain/capture_segment.dart';
 import '../../recordings/domain/recording.dart';
+import 'e2ee_cipher.dart';
 
 /// Private object storage for capture media, keyed relative to the signed-in
 /// user — the store adds the owner prefix its access policy checks, so this
@@ -24,6 +26,18 @@ abstract interface class MediaObjectStore {
   /// in total: an object past the ceiling errors with
   /// [MediaObjectTooLargeException] and is not read further.
   Stream<List<int>> download(String key, {required int maxBytes});
+}
+
+/// A store that refuses an object which is not in its own format (an E2EE
+/// envelope) and can still hand that object over unopened.
+///
+/// For the one caller that checks every byte against a hash it already holds:
+/// an object written before the account was enrolled is raw, and the
+/// `contentHash` check proves it is the capture, so reading it unsealed adds
+/// no trust. Nothing here ever writes plaintext.
+abstract interface class PlaintextFallbackMediaStore
+    implements MediaObjectStore {
+  Stream<List<int>> downloadUnsealed(String key, {required int maxBytes});
 }
 
 /// A download crossed the ceiling it was given.
@@ -173,9 +187,25 @@ class MediaSyncJob {
 /// source.
 /// It never touches a recording's row or status.
 class MediaSyncService {
-  const MediaSyncService({required this.store, this.stillWanted});
+  const MediaSyncService({
+    required this.store,
+    this.stillWanted,
+    this.log = const NoopLogSink(),
+    this.mayReadPlaintext,
+  });
 
   final MediaObjectStore store;
+
+  /// Whether an object that does not open as sealed may be read raw for
+  /// [job]. `content_hash` travels unauthenticated, so a hash match alone
+  /// would let a hostile server plant bytes under a row it forged; the caller
+  /// answers true only for a capture whose row this device never saw sealed
+  /// (the media counterpart of the #377 row rule). Null means never.
+  final bool Function(MediaSyncJob job)? mayReadPlaintext;
+
+  /// Best-effort: one line per object that failed or needed the plaintext
+  /// fallback, so a repeating failure can be traced to a capture.
+  final LogSink log;
 
   /// The ceiling for a row an older build synced without `size_bytes`.
   static const int fallbackDownloadCeilingBytes = 2 << 30;
@@ -228,6 +258,7 @@ class MediaSyncService {
               unverifiable++;
             case _Outcome.rejected:
               rejected++;
+              _note(job, 'Storage: ${job.key} did not match its contentHash');
           }
         } on TimeoutException {
           rethrow;
@@ -238,6 +269,7 @@ class MediaSyncService {
         } catch (error) {
           failed++;
           lastError = error;
+          _note(job, 'Storage: ${job.key} failed: $error');
         }
       }
     } on TimeoutException {
@@ -256,6 +288,55 @@ class MediaSyncService {
               '(${lastError.runtimeType})',
       ].join(' · ').nullIfEmpty,
     );
+  }
+
+  /// Never throws: a log line must not fail a transfer.
+  void _note(MediaSyncJob job, String message) {
+    try {
+      final List<String> parts = job.key.split('/');
+      log.log(
+        message,
+        level: LogLevel.warn,
+        recordingId: parts.length >= 3 ? parts[1] : null,
+      );
+    } catch (_) {}
+  }
+
+  /// The object's bytes, opened by the store; if the store refuses it as not
+  /// sealed and can read it raw, the raw bytes instead. A sealed store opens
+  /// only after the whole object arrived, so nothing has been yielded when it
+  /// refuses, and the caller's hash check judges what the fallback yields.
+  Stream<List<int>> _open(MediaSyncJob job, int ceiling) async* {
+    final MediaObjectStore s = store;
+    bool yielded = false;
+    try {
+      // `await for`, not `yield*`: an error forwarded by `yield*` is not
+      // catchable here.
+      await for (final List<int> chunk in s.download(
+        job.key,
+        maxBytes: ceiling,
+      )) {
+        yielded = true;
+        yield chunk;
+      }
+    } on E2eeDecryptionException catch (error) {
+      if (yielded || s is! PlaintextFallbackMediaStore) rethrow;
+      if (mayReadPlaintext?.call(job) != true) {
+        _note(
+          job,
+          'Storage: ${job.key} did not open as sealed (${error.message}) and '
+          'its recording is sealed or unknown on this device, so it is not '
+          'read raw',
+        );
+        rethrow;
+      }
+      _note(
+        job,
+        'Storage: ${job.key} did not open as sealed (${error.message}); '
+        'not sealed, accepted only if it hashes to the contentHash',
+      );
+      yield* s.downloadUnsealed(job.key, maxBytes: ceiling);
+    }
   }
 
   Future<_Outcome> _transfer(MediaSyncJob job, String downloadRoot) async {
@@ -290,10 +371,7 @@ class MediaSyncService {
       final IOSink out = partial.openWrite();
       int received = 0;
       try {
-        await for (final List<int> chunk in store.download(
-          job.key,
-          maxBytes: ceiling,
-        )) {
+        await for (final List<int> chunk in _open(job, ceiling)) {
           received += chunk.length;
           hashInput.add(chunk);
           out.add(chunk);

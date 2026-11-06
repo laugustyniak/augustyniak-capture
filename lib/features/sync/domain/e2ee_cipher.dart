@@ -214,6 +214,13 @@ class E2eeCipher {
     List<int> boxBytes, {
     required List<int> aad,
   }) async {
+    // Kept apart so a log can tell an object that was never sealed from one
+    // sealed under another key or context.
+    if (boxBytes.length < AesGcm.defaultNonceLength + _macLengthBytes) {
+      throw E2eeDecryptionException(
+        'Envelope too short (${boxBytes.length} bytes): not a sealed object',
+      );
+    }
     try {
       final SecretBox box = SecretBox.fromConcatenation(
         boxBytes,
