@@ -34,7 +34,11 @@ import '../../costs/domain/model_price.dart';
 import '../../costs/domain/price_book.dart';
 import '../../costs/domain/usage_event.dart';
 import '../../costs/domain/usage_model_keys.dart';
+import '../../connections/data/file_triage_log.dart';
 import '../../connections/data/http_daily_connections_service.dart';
+import '../../connections/data/http_daily_triage_service.dart';
+import '../../connections/presentation/daily_triage_controller.dart';
+import '../../connections/presentation/daily_triage_dialog.dart';
 import '../../enrichment/domain/transcript_cleaner.dart';
 import '../../enrichment/domain/instruction_writer.dart';
 import '../../enrichment/data/composed_enrichment_context_source.dart';
@@ -245,6 +249,8 @@ class _RecordingsPageState extends State<RecordingsPage>
   late final RecordingUsageSink usageSink;
   late final SettingsController settings;
   late final HttpDailyConnectionsService dailyConnectionsService;
+  late final HttpDailyTriageService dailyTriageService;
+  late final DailyTriageController dailyTriage;
   final LiteLlmPriceService priceService = LiteLlmPriceService();
   late final LogStore logs;
   late final GamificationController gamification;
@@ -567,6 +573,22 @@ class _RecordingsPageState extends State<RecordingsPage>
       applySyncedProjects: projects.applySyncedProjects,
       applySyncedProjectDelete: projects.applySyncedProjectDelete,
     );
+    // Read-only proposals over the open captures. Accepting one goes through
+    // `controller`'s own entry points; running one never touches the index.
+    dailyTriageService = HttpDailyTriageService(
+      activeProfile: () => settings.activeEnrichmentProfile,
+      recordUsage: usageSink.recordTriage,
+    );
+    dailyTriage = DailyTriageController(
+      service: dailyTriageService,
+      log: FileTriageLog(),
+      recordings: () => controller.recordings,
+      actions: RecordingsTriageActions(controller),
+      projectNames: () => <String, String>{
+        for (final Project project in projects.projects)
+          project.id: project.name,
+      },
+    );
     // Its own `AudioPlayer` inside `AssetAlarmPlayer`, never the recordings
     // controller's: an alarm must not stop a clip being reviewed, and a review
     // must not have to wait out an alarm.
@@ -862,6 +884,9 @@ class _RecordingsPageState extends State<RecordingsPage>
     // to the developer's own disk.
     await controller.loadClosures();
     await momentum.initialize();
+    // Not awaited: a model call must never hold up start-up. Loads the log
+    // first, so the launch run sees yesterday's rejections.
+    unawaited(_startTriage());
     // Explicit rather than relying on the notification `initialize` emits, so
     // the hotkeys are guaranteed live once bootstrap returns.
     await _applyShortcuts();
@@ -1220,7 +1245,13 @@ class _RecordingsPageState extends State<RecordingsPage>
       unawaited(controller.refreshCommandOutcomes());
       unawaited(controller.resumeInterruptedProcessing());
       unawaited(_drainInbox());
+      unawaited(dailyTriage.runIfDue());
     }
+  }
+
+  Future<void> _startTriage() async {
+    await dailyTriage.load();
+    await dailyTriage.runIfDue();
   }
 
   @override
@@ -1239,6 +1270,8 @@ class _RecordingsPageState extends State<RecordingsPage>
     timer.dispose();
     momentum.dispose();
     dailyConnectionsService.close();
+    dailyTriage.dispose();
+    dailyTriageService.close();
     priceService.close();
     settings.dispose();
     logs.dispose();
@@ -1359,6 +1392,7 @@ class _RecordingsPageState extends State<RecordingsPage>
                                 QueueTab(
                                   controller: controller,
                                   dailyConnectionsService: dailyConnectionsService,
+                                  dailyTriage: dailyTriage,
                                   projects: projects,
                                   initialProjectId:
                                       activeQueueProjectFilterId,

@@ -10,6 +10,8 @@ import '../../../core/sync/cloud_sync_coordinator.dart';
 import '../../settings/domain/app_settings.dart';
 import '../../connections/domain/daily_connections.dart';
 import '../../connections/presentation/daily_connections_dialog.dart';
+import '../../connections/presentation/daily_triage_controller.dart';
+import '../../connections/presentation/daily_triage_dialog.dart';
 import '../../costs/data/usage_repository.dart';
 import '../../costs/domain/price_book.dart';
 import '../../costs/domain/usage_event.dart';
@@ -94,6 +96,7 @@ class QueueTab extends StatefulWidget {
     this.onDensityChanged,
     this.dailyConnectionsService,
     this.exportCommitment = exportCommitmentWithPlugins,
+    this.dailyTriage,
     this.e2ee,
     this.splitRatio = AppSettings.defaultQueueSplitRatio,
     this.onSplitRatioChanged,
@@ -147,6 +150,9 @@ class QueueTab extends StatefulWidget {
   /// save by default; a test passes a fake so no platform channel is touched.
   final Future<void> Function(Recording recording, Commitment commitment)
   exportCommitment;
+
+  /// Null hides the TRIAGE action.
+  final DailyTriageController? dailyTriage;
   final ProjectsController? projects;
   final String? initialProjectId;
 
@@ -353,6 +359,19 @@ class _QueueTabState extends State<QueueTab> {
               commitment,
               widget.exportCommitment,
             ),
+        onOpenCapture: _revealCapture,
+      ),
+    );
+  }
+
+  Future<void> _openDailyTriage() async {
+    final DailyTriageController? triage = widget.dailyTriage;
+    if (triage == null) return;
+    await showDialog<void>(
+      context: context,
+      builder: (BuildContext context) => DailyTriageDialog(
+        triage: triage,
+        captures: () => widget.controller.recordings,
         onOpenCapture: _revealCapture,
       ),
     );
@@ -864,7 +883,8 @@ class _QueueTabState extends State<QueueTab> {
                         ),
                       ),
                     if (widget.dailyConnectionsService != null ||
-                        openCommitmentCount > 0)
+                        openCommitmentCount > 0 ||
+                        widget.dailyTriage != null)
                       Align(
                         alignment: Alignment.centerRight,
                         child: Padding(
@@ -885,6 +905,26 @@ class _QueueTabState extends State<QueueTab> {
                                   label: Text(
                                     'COMMITMENTS ($openCommitmentCount)',
                                   ),
+                                ),
+                              if (widget.dailyTriage
+                                  case final DailyTriageController triage)
+                                ListenableBuilder(
+                                  listenable: triage,
+                                  builder: (BuildContext context, _) {
+                                    final int pending = triage.proposals.length;
+                                    return TextButton.icon(
+                                      onPressed: _openDailyTriage,
+                                      icon: const Icon(
+                                        Icons.rule_outlined,
+                                        size: 18,
+                                      ),
+                                      label: Text(
+                                        pending == 0
+                                            ? 'TRIAGE'
+                                            : 'TRIAGE ($pending)',
+                                      ),
+                                    );
+                                  },
                                 ),
                               if (widget.dailyConnectionsService != null)
                                 TextButton.icon(

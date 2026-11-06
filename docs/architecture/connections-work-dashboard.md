@@ -19,6 +19,18 @@ Two small, read-only views over the user's own work: a model's daily review of t
 - **`work_dashboard` has no `domain/` layer.** The reader lives in `data/` and the tab talks to it directly, with `TodoistProject`, `TodoistTask` and `TodoistSnapshot` defined beside it. Nothing else consumes them.
 - **Tests.** `test/daily_connections_test.dart` pins local-day selection, that fabricated links are rejected and that a missing profile or malformed output fails readably. `test/features/work_dashboard/todoist_reader_test.dart` pins that every API page is read, that the token stays out of URLs and out of the error for a rejected token. `test/features/work_dashboard/work_dashboard_navigation_test.dart` pins that the WORK destination opens the dashboard. The tab body's own behaviour (mapping, disconnect, the secure-storage failure path) has no test.
 
+### Daily triage
+
+`DailyTriageController` (`connections/presentation/`) proposes duplicates to merge, captures that look done, stale items and re-ranks over the **open** captures (`triageCandidates`: not processed, non-empty transcript). Same stance as the review, with one door out.
+
+- **Running never changes a capture.** `HttpDailyTriageService` only reads; the digest goes to `triage.jsonl` (`FileTriageLog`, appended like `closures.jsonl`, never inside `recordings.json`). Only **accepting** a proposal changes anything, and it goes through `TriageActions` — `RecordingsTriageActions` calls `toggleProcessed` (close, stale, and a merge, which keeps the oldest capture and closes the rest) or `setPriority` (rerank). No merge of text, no delete.
+- **Invented ids drop the proposal whole**, as in the review: every cited id must be in the input, a merge needs two, a rerank exactly one plus a known priority. When every proposal is rejected for that, the run fails with `TriageResponseException`. At display time a proposal citing a capture that is gone or already closed, or a rerank the capture already has, is hidden.
+- **Rejections are remembered by key** (`kind:sorted ids[:priority]`), so a reworded proposal still matches; the last decision for a key wins. An unreadable log sets `historyUnreadable` and blocks the automatic run, because without it every rejection would come back.
+- **Trigger.** Launch (`_startTriage`, after the queue loads, unawaited) and resume call `runIfDue`, which runs when the newest digest — or this session's last failed attempt — is at least 24 h old; the dialog's RUN TRIAGE runs on demand. No OS scheduler.
+- **Failures are strings** (`describeTriageFailure`): `TriageNotConfiguredException`, `TriageResponseException`, `InsecureTriageEndpointException`, the provider failure for non-2xx, and `Triage failed: …` for anything else.
+- **Cost** is `RecordingUsageSink.recordTriage` under `daily-triage:<date>` with `UsageStage.triage`.
+- **Tests.** `test/daily_triage_test.dart`.
+
 ### Wiring
 
 - **Connections is built in the shell and handed down.** `recordings_page.dart` constructs `HttpDailyConnectionsService` next to `usageSink` and passes it to `QueueTab`; `DailyConnectionsDialog` depends on the `DailyConnectionsService` interface only, so a test can swap it without a client.
