@@ -97,10 +97,11 @@ class RecordingUsageSink implements UsageSink {
     );
   }
 
-  /// A daily review has no single capture owner. Its synthetic id keeps the
-  /// call in overall costs without charging any capture's detail panel.
+  /// A connections review has no single capture owner. Its synthetic id keeps
+  /// the call in overall costs without charging any capture's detail panel.
   void recordConnections({
     required DateTime day,
+    bool openCaptures = false,
     required String provider,
     required String model,
     required MeasuredUsage usage,
@@ -111,7 +112,8 @@ class RecordingUsageSink implements UsageSink {
         '${localDay.month.toString().padLeft(2, '0')}-'
         '${localDay.day.toString().padLeft(2, '0')}';
     _recordFor(
-      captureId: 'daily-connections:$date',
+      captureId:
+          '${openCaptures ? 'open-connections' : 'daily-connections'}:$date',
       stage: UsageStage.connections,
       provider: provider,
       model: model,

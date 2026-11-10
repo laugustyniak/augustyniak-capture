@@ -62,10 +62,13 @@ map it to a Capture project to see recent captures and completed focus sessions.
 The mapping is local to this device. Refresh is manual, and task rows open in
 Todoist.
 
-**Daily connections:** In Queue, choose **REVIEW CONNECTIONS**, pick a date,
-then run **REVIEW DAY**. The active enrichment model reviews every capture from
-that local calendar day with processed text, using its title, summary and text
-excerpts. It suggests overlapping topics, complementary ideas, different
+**Connections:** In Queue, choose **REVIEW CONNECTIONS**. Keep **One day**,
+pick a date and run **REVIEW DAY** to review every capture from that local
+calendar day with processed text. Or choose **Not done yet** and run **REVIEW
+OPEN** to review every capture with processed text that is not marked done,
+whatever day it was captured. The active enrichment model uses each capture's
+title, summary and a text excerpt; with many open captures the excerpts get
+shorter so every capture still fits in one request. It suggests overlapping topics, complementary ideas, different
 perspectives and app improvements, with links back to the original captures.
 The report stays in the open dialog; closing it discards the suggestions. The
 review never edits or merges captures. Model-provider charges may apply; review

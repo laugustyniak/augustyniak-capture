@@ -23,6 +23,7 @@ class DailyConnectionsDialog extends StatefulWidget {
 
 class _DailyConnectionsDialogState extends State<DailyConnectionsDialog> {
   late DateTime _day = DateTime.now();
+  bool _openScope = false;
   DailyConnectionsReport? _report;
   bool _running = false;
   String? _error;
@@ -42,6 +43,18 @@ class _DailyConnectionsDialogState extends State<DailyConnectionsDialog> {
     });
   }
 
+  ConnectionsScope get _scope =>
+      _openScope ? const ConnectionsScope.open() : ConnectionsScope.day(_day);
+
+  void _setOpenScope(bool open) {
+    if (_running || open == _openScope) return;
+    setState(() {
+      _openScope = open;
+      _report = null;
+      _error = null;
+    });
+  }
+
   Future<void> _run() async {
     if (_running) return;
     final List<Recording> captures = widget.captures();
@@ -52,7 +65,7 @@ class _DailyConnectionsDialogState extends State<DailyConnectionsDialog> {
     });
     try {
       final DailyConnectionsReport report = await widget.service.review(
-        _day,
+        _scope,
         captures,
         projectNames: widget.projectNames,
       );
@@ -67,15 +80,16 @@ class _DailyConnectionsDialogState extends State<DailyConnectionsDialog> {
   @override
   Widget build(BuildContext context) {
     final List<Recording> captures = widget.captures();
-    final List<Recording> eligible = capturesOnDay(captures, _day);
+    final List<Recording> eligible = capturesInScope(captures, _scope);
     final Map<String, Recording> byId = <String, Recording>{
       for (final Recording capture in eligible) capture.id: capture,
     };
     final String date = MaterialLocalizations.of(
       context,
     ).formatMediumDate(_day);
+    final String noun = eligible.length == 1 ? 'capture' : 'captures';
     return AlertDialog(
-      title: const Text('Daily connections'),
+      title: Text(_openScope ? 'Open captures' : 'Daily connections'),
       content: SizedBox(
         width: 620,
         child: SingleChildScrollView(
@@ -87,13 +101,33 @@ class _DailyConnectionsDialogState extends State<DailyConnectionsDialog> {
                 'Find related captures, different perspectives, and ideas for improving an app. Titles, summaries and text excerpts go to your active enrichment model, which may charge for the review. Your captures stay unchanged.',
               ),
               const SizedBox(height: 12),
-              OutlinedButton.icon(
-                onPressed: _running ? null : _chooseDay,
-                icon: const Icon(Icons.calendar_today_outlined),
-                label: Text(date),
+              Wrap(
+                spacing: 8,
+                runSpacing: 4,
+                children: <Widget>[
+                  ChoiceChip(
+                    label: const Text('One day'),
+                    selected: !_openScope,
+                    onSelected: _running ? null : (_) => _setOpenScope(false),
+                  ),
+                  ChoiceChip(
+                    label: const Text('Not done yet'),
+                    selected: _openScope,
+                    onSelected: _running ? null : (_) => _setOpenScope(true),
+                  ),
+                ],
               ),
+              const SizedBox(height: 8),
+              if (!_openScope)
+                OutlinedButton.icon(
+                  onPressed: _running ? null : _chooseDay,
+                  icon: const Icon(Icons.calendar_today_outlined),
+                  label: Text(date),
+                ),
               Text(
-                '${eligible.length} text-ready ${eligible.length == 1 ? 'capture' : 'captures'} on this day',
+                _openScope
+                    ? '${eligible.length} text-ready $noun not marked done'
+                    : '${eligible.length} text-ready $noun on this day',
               ),
               if (_running) ...<Widget>[
                 const SizedBox(height: 16),
@@ -111,7 +145,11 @@ class _DailyConnectionsDialogState extends State<DailyConnectionsDialog> {
               if (_report case final DailyConnectionsReport report) ...<Widget>[
                 const SizedBox(height: 16),
                 if (report.groups.isEmpty)
-                  const Text('No strong connections found for this day.'),
+                  Text(
+                    _openScope
+                        ? 'No strong connections found among open captures.'
+                        : 'No strong connections found for this day.',
+                  ),
                 for (final ConnectionGroup group in report.groups) ...<Widget>[
                   const Divider(height: 24),
                   Text(
@@ -159,7 +197,7 @@ class _DailyConnectionsDialogState extends State<DailyConnectionsDialog> {
         ),
         FilledButton(
           onPressed: _running || eligible.isEmpty ? null : _run,
-          child: const Text('REVIEW DAY'),
+          child: Text(_openScope ? 'REVIEW OPEN' : 'REVIEW DAY'),
         ),
       ],
     );
