@@ -305,6 +305,18 @@ class _QueueTabState extends State<QueueTab> {
         context.size?.width ?? MediaQuery.sizeOf(context).width;
     if (width < Console.compactBreakpoint) {
       _openDetailPage(capture);
+      return;
+    }
+    // Keep the view the user recorded from (usually Desk) when the new capture
+    // already shows in it; clear the filters only when they would hide it.
+    final List<Project> projects =
+        widget.projects?.projects ?? const <Project>[];
+    final String? effectiveProjectFilterId =
+        projects.any((Project project) => project.id == projectFilterId)
+        ? projectFilterId
+        : null;
+    if (_filter(<Recording>[capture], effectiveProjectFilterId).isNotEmpty) {
+      setState(() => focusedId = capture.id);
     } else {
       _selectUnfiltered(capture.id);
     }
