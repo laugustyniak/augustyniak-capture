@@ -200,4 +200,52 @@ void main() {
     expect(shownId(), isNot('old'));
     expect(shownId(), controller.recordings.first.id);
   });
+
+  testWidgets('a new voice note keeps the desk view it was recorded from', (
+    WidgetTester tester,
+  ) async {
+    tester.view.physicalSize = const Size(1400, 900);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+    final RecordingsController controller = RecordingsController(
+      repository: FakeRecordingsRepository(
+        appDir,
+        seed: <Recording>[
+          makeRecording(id: 'open', title: 'Open capture', transcript: 'x'),
+          makeRecording(
+            id: 'done',
+            title: 'Done capture',
+            transcript: 'y',
+            isProcessedByUser: true,
+          ),
+        ],
+      ),
+      transcriptionService: const DisabledTranscriptionService(),
+      recorder: _WritingRecorder(),
+      player: FakePlayer(),
+      audioConfig: const AudioConfig(sampleRate: 16000, bitRate: 64000),
+    );
+    addTearDown(controller.dispose);
+    await controller.initialize();
+    await tester.pumpWidget(
+      hostTab(() => QueueTab(controller: controller), listenable: controller),
+    );
+    await tester.pump();
+    expect(find.text('Done capture'), findsNothing);
+
+    await tester.runAsync(() async {
+      await controller.startRecording();
+      await controller.stopRecording();
+    });
+    await tester.pump();
+
+    expect(find.text('Done capture'), findsNothing);
+    expect(
+      tester
+          .widget<CaptureDetailPanel>(find.byType(CaptureDetailPanel))
+          .recording
+          .id,
+      controller.recordings.first.id,
+    );
+  });
 }
