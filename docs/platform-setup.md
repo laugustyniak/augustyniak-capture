@@ -197,6 +197,14 @@ are explained below. The whisper.cpp `FetchContent` clone in
 `native/CMakeLists.txt` can fail once on a flaky network; rerunning the build
 fixes it.
 
+**Linux on Wayland needs `wl-clipboard` at runtime** (`sudo apt-get install
+wl-clipboard`). The finished transcript and the REWRITE result are copied when
+the job ends, usually while another window has focus, and Mutter drops a GTK
+clipboard write from an unfocused client without an error. On a Wayland
+session `SystemClipboardSink` therefore pipes the text to `wl-copy` (#437).
+Without the binary it falls back to GTK, which works only while the app window
+is focused. X11 sessions are unaffected.
+
 **Linux builds need `keybinder-3.0` installed first.** `hotkey_manager` (global
 shortcuts) links against it, and without it `flutter build linux` aborts at
 _"Unable to generate build files"_ — this is a **build-time** failure, not a

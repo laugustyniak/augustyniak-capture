@@ -802,7 +802,7 @@ class RecordingsController extends ChangeNotifier {
       });
       if (!stored) return;
       _logSink.log('Instruction written.', recordingId: id);
-      await _copyToClipboard(item.type, written, id);
+      await _copyToClipboard(written, id);
     } on InstructionNotConfiguredException catch (exception) {
       _instructionErrors[id] = exception.toString();
     } catch (exception) {
@@ -4359,7 +4359,9 @@ class RecordingsController extends ChangeNotifier {
         final String transcript = _recordings[done].transcript ?? '';
         // Deliberately last: the item is already `completed` and persisted, so a
         // refusing clipboard cannot undo a successful capture.
-        await _copyToClipboard(recording.type, transcript, id);
+        if (recording.type != CaptureType.text) {
+          await _copyToClipboard(transcript, id);
+        }
         if (_cancelledProcessingIds.contains(id)) return;
         // Straight after the raw copy, before enrichment: the instruction is
         // what the user is waiting to paste, and it replaces the raw text on
@@ -4598,17 +4600,15 @@ class RecordingsController extends ChangeNotifier {
   }
 
   /// Hand freshly derived text to the clipboard so a clipboard manager records
-  /// it as a history entry. Text notes are skipped: their processor output is
-  /// the body the user just typed, so nothing was derived worth handing back.
+  /// it as a history entry. The transcript call site skips text notes: their
+  /// processor output is the body the user just typed, so nothing was derived
+  /// worth handing back. A rewrite is always derived, so it is never skipped
+  /// on the capture's type (#437).
   ///
   /// Swallows every error, on the same rule as logging — this runs after the
   /// item is already `completed` on disk and must never fail the pipeline.
-  Future<void> _copyToClipboard(
-    CaptureType type,
-    String text,
-    String id,
-  ) async {
-    if (type == CaptureType.text || text.trim().isEmpty) return;
+  Future<void> _copyToClipboard(String text, String id) async {
+    if (text.trim().isEmpty) return;
     try {
       await _clipboardSink.copy(text);
       _logSink.log('Result copied to clipboard.', recordingId: id);

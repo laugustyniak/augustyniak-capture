@@ -391,5 +391,52 @@ void main() {
         expect(clipboard.copies, isEmpty);
       },
     );
+
+    test('REWRITE of a note with a dictated fragment reaches the clipboard '
+        '(#437)', () async {
+      final Directory dir = await Directory.systemTemp.createTemp('instr');
+      addTearDown(() => dir.delete(recursive: true));
+      final DateTime at = DateTime(2026, 10, 8);
+      final _Clipboard clipboard = _Clipboard();
+      final RecordingsController c = RecordingsController(
+        repository: _FakeRepo(dir)
+          ..saved = <Recording>[
+            Recording(
+              id: 'a',
+              filePath: '${dir.path}/a.txt',
+              type: CaptureType.text,
+              createdAt: at,
+              durationMs: 0,
+              status: RecordingStatus.completed,
+              transcript: _raw,
+              segments: <CaptureSegment>[
+                CaptureSegment(
+                  index: 0,
+                  filePath: '${dir.path}/a.txt',
+                  type: CaptureType.text,
+                  createdAt: at,
+                ),
+                CaptureSegment(
+                  index: 1,
+                  filePath: '${dir.path}/a-1.m4a',
+                  type: CaptureType.audioRecording,
+                  createdAt: at,
+                ),
+              ],
+            ),
+          ],
+        transcriptionService: const DisabledTranscriptionService(),
+        enrichmentService: const DisabledEnrichmentService(),
+        clipboardSink: clipboard,
+      )..instructionWriter = _FakeWriter(_instruction);
+      addTearDown(c.dispose);
+      await c.initialize();
+      expect(RecordingsController.canCleanUp(c.recordings.single), isTrue);
+
+      await c.writeInstruction('a');
+
+      expect(c.recordings.single.instruction?.text, _instruction);
+      expect(clipboard.copies, <String>[_instruction]);
+    });
   });
 }
