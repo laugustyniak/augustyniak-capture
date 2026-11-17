@@ -124,6 +124,14 @@ void _writeFrontMatter(
   if (capture.tags.isNotEmpty) {
     buffer.writeln('tags: [${capture.tags.map(_yaml).join(', ')}]');
   }
+  // Absolute paths, so an agent can open the screenshot the OCR text was read
+  // from rather than trusting the text alone. Omitted when none is known, on
+  // the same absent-not-blank rule as the keys above.
+  if (capture.sourceFiles.isNotEmpty) {
+    buffer.writeln(
+      'source-files: [${capture.sourceFiles.map(_yaml).join(', ')}]',
+    );
+  }
   final String trimmedIntent = intent?.trim() ?? '';
   if (trimmedIntent.isNotEmpty) {
     buffer.writeln('intent: ${_yaml(trimmedIntent)}');

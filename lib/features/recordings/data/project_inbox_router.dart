@@ -86,6 +86,14 @@ class ProjectInboxRouter implements CaptureRouter {
       ..writeln('*${facts.join(' · ')}*')
       ..writeln();
 
+    // The original, not only what was read from it: OCR text is a lossy
+    // account of a screenshot, and whoever picks this entry up should be able
+    // to open the image itself.
+    for (final String source in capture.sourceFiles) {
+      buffer.writeln('Source: `${source.replaceAll('`', "'")}`');
+    }
+    if (capture.sourceFiles.isNotEmpty) buffer.writeln();
+
     final String summary = sanitizeUntrustedMarkdown(capture.summary ?? '');
     if (summary.isNotEmpty) {
       buffer

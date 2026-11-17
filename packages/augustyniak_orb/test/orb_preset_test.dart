@@ -29,6 +29,8 @@ void main() {
         'sweep': 2.0,
         'breath': 6.0,
         'gridScroll': 12.0,
+        'spokeCount': 72,
+        'dots': <int>[5, 7, 4],
       });
       expect(json['layers'], <String, Object?>{
         'grid': true,
@@ -62,6 +64,8 @@ void main() {
           sweep: 4,
           breath: 5,
           gridScroll: 6,
+          spokeCount: 120,
+          dots: <int>[0, 12, 24],
         ),
         layers: OrbLayers(grid: false, sweep: false),
       );
@@ -130,6 +134,88 @@ void main() {
       expect(p.tuning.period, 12.0);
       expect(p.tuning.rings, <double>[1, -2, 2]);
       expect(p.tuning.sweep, 3.0);
+    });
+
+    test('legacy tuning without spokeCount or dots parses as before', () {
+      final OrbPreset legacy = OrbPreset.fromJson(<String, Object?>{
+        'v': 1,
+        'tuning': <String, Object?>{
+          'speed': 1,
+          'period': 12,
+          'centerY': 0.44,
+          'radiusScale': 1,
+          'gridStep': 36,
+          'pulse': 3,
+          'spokeFast': 4,
+          'spokeSlow': 2,
+          'rings': <Object?>[1, -2, 2],
+          'sweep': 2,
+          'breath': 6,
+          'gridScroll': 12,
+        },
+      });
+      expect(legacy, OrbPreset.defaults);
+      expect(legacy.tuning.spokeCount, 72);
+      expect(legacy.tuning.dots, <int>[5, 7, 4]);
+    });
+
+    test('spokeCount clamps to 12..360 and degrades to 72', () {
+      int spokes(Object? v) =>
+          OrbTuning.fromJson(<String, Object?>{'spokeCount': v}).spokeCount;
+      expect(spokes(120), 120);
+      expect(spokes(12), 12);
+      expect(spokes(360), 360);
+      expect(spokes(120.0), 120);
+      expect(spokes(4), 12);
+      expect(spokes(-5), 12);
+      expect(spokes(1000), 360);
+      for (final Object? bad in <Object?>[
+        null,
+        'many',
+        true,
+        72.5,
+        double.nan,
+        double.infinity,
+        <Object?>[72],
+      ]) {
+        expect(spokes(bad), 72, reason: '$bad');
+      }
+    });
+
+    test('dots clamp to 0..24 and degrade per element', () {
+      List<int> dots(Object? v) =>
+          OrbTuning.fromJson(<String, Object?>{'dots': v}).dots;
+      expect(dots(<Object?>[1, 2, 3]), <int>[1, 2, 3]);
+      expect(dots(<Object?>[0, 24, 10.0]), <int>[0, 24, 10]);
+      expect(dots(<Object?>[-1, 30, 99]), <int>[0, 24, 24]);
+      expect(dots(<Object?>['x', 9, null]), <int>[5, 9, 4]);
+      expect(dots(<Object?>[2.5, double.nan, 6]), <int>[5, 7, 6]);
+      for (final Object? bad in <Object?>[
+        null,
+        3,
+        'dots',
+        <Object?>[1, 2],
+        <Object?>[1, 2, 3, 4],
+        <String, Object?>{'0': 1},
+      ]) {
+        expect(dots(bad), <int>[5, 7, 4], reason: '$bad');
+      }
+    });
+
+    test('toJson does not expose the live dots list', () {
+      const OrbTuning tuning = OrbTuning.defaults;
+      final List<int> dots = tuning.toJson()['dots']! as List<int>;
+      dots[0] = 99;
+      expect(tuning.dots, <int>[5, 7, 4]);
+    });
+
+    test('equality covers spokeCount and dots', () {
+      expect(const OrbTuning(spokeCount: 60), isNot(OrbTuning.defaults));
+      expect(const OrbTuning(dots: <int>[5, 7, 5]), isNot(OrbTuning.defaults));
+      expect(
+        const OrbTuning(dots: <int>[5, 7, 4]).hashCode,
+        OrbTuning.defaults.hashCode,
+      );
     });
 
     test('anything that is not a map yields the defaults', () {

@@ -31,7 +31,13 @@ enum ShortcutAction {
   toggleTimer,
 
   /// Open the clipboard history sheet.
-  toggleClipboardHistory;
+  toggleClipboardHistory,
+
+  /// Select a region or window of the screen and save it as an image capture.
+  screenshotCapture,
+
+  /// The same screenshot, then a spoken comment recorded into that capture.
+  screenshotWithVoiceComment;
 
   /// Unknown names come from a `settings.json` written by a different build.
   /// Unlike `CaptureType.fromName` there is no sensible legacy value to fall
@@ -49,6 +55,9 @@ enum ShortcutAction {
     ShortcutAction.uploadVideo => 'Upload video',
     ShortcutAction.toggleTimer => 'Start/pause focus timer',
     ShortcutAction.toggleClipboardHistory => 'Show clipboard history',
+    ShortcutAction.screenshotCapture => 'Screenshot',
+    ShortcutAction.screenshotWithVoiceComment =>
+      'Screenshot with voice comment',
   };
 
   /// Whether the action opens UI (a sheet or a file dialog) and therefore needs
@@ -71,8 +80,14 @@ enum ShortcutAction {
   /// A generic `present()` here would raise the whole application first and
   /// destroy both — the palette would already be the full app, and the paste
   /// target would already be us.
+  ///
+  /// The two screenshot actions are excluded because the window is the one
+  /// thing that must not be on screen yet: raising it first would photograph
+  /// the app instead of whatever the user pressed the key over.
   bool get needsWindow =>
       this != ShortcutAction.toggleRecording &&
       this != ShortcutAction.toggleTimer &&
-      this != ShortcutAction.toggleClipboardHistory;
+      this != ShortcutAction.toggleClipboardHistory &&
+      this != ShortcutAction.screenshotCapture &&
+      this != ShortcutAction.screenshotWithVoiceComment;
 }

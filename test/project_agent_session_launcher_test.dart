@@ -29,9 +29,13 @@ class _Invocation {
 }
 
 class _FakeProcessRunner implements ProcessRunner {
-  _FakeProcessRunner(this.results);
+  _FakeProcessRunner(this.results, {this.orElse});
 
   final List<CommandResult> results;
+
+  /// Answered once [results] runs out, so a poll that keeps asking is bounded
+  /// by the launcher rather than by how many answers a test wrote down.
+  final CommandResult? orElse;
   final List<_Invocation> invocations = <_Invocation>[];
 
   @override
@@ -41,6 +45,7 @@ class _FakeProcessRunner implements ProcessRunner {
     String? workingDirectory,
   }) async {
     invocations.add(_Invocation(executable, List<String>.of(arguments)));
+    if (results.isEmpty && orElse != null) return orElse!;
     return results.removeAt(0);
   }
 }
@@ -51,11 +56,24 @@ const CommandResult _success = CommandResult(
   stderr: '',
 );
 
+const String _codexSession = 'augustyniak-client-legal-pilot-550e8400-codex';
+
+/// `list-sessions` once [name] is running.
+CommandResult _listed(String name) =>
+    CommandResult(exitCode: 0, stdout: '$name\n', stderr: '');
+
+/// The terminal call: the last thing run that was not a `list-sessions` poll.
+_Invocation _opened(_FakeProcessRunner runner) => runner.invocations.lastWhere(
+  (_Invocation call) => !call.arguments.contains('list-sessions'),
+);
+
 void main() {
   late Directory repo;
   late Directory layouts;
+  late List<Duration> pollDelays;
 
   setUp(() {
+    pollDelays = <Duration>[];
     repo = Directory.systemTemp.createTempSync('augustyniak_capture_project_');
     layouts = Directory.systemTemp.createTempSync(
       'augustyniak_capture_layouts_',
@@ -79,6 +97,8 @@ void main() {
     executables: _FakeResolver(missing: missing),
     layoutDirectory: layouts,
     terminal: terminal ?? MacOsGhosttyTerminalLauncher(),
+    // Recorded, never slept: the poll's pacing is asserted, not waited out.
+    sessionPollDelay: (Duration delay) async => pollDelays.add(delay),
   );
 
   /// The layout Zellij will actually read, fetched the way Zellij fetches it —
@@ -111,11 +131,12 @@ void main() {
       final _FakeProcessRunner runner = _FakeProcessRunner(<CommandResult>[
         _success,
         _success,
+        _listed(_codexSession),
       ]);
 
       await build(runner).launch(request());
 
-      final List<String> arguments = runner.invocations.last.arguments;
+      final List<String> arguments = _opened(runner).arguments;
       final String path =
           arguments[arguments.indexOf('--new-session-with-layout') + 1];
       final Directory parent = File(path).parent;
@@ -132,6 +153,7 @@ void main() {
       final _FakeProcessRunner runner = _FakeProcessRunner(<CommandResult>[
         _success,
         _success,
+        _listed(_codexSession),
       ]);
       final ZellijAgentSessionLauncher launcher = build(runner);
 
@@ -153,7 +175,7 @@ void main() {
         '--short',
         '--no-formatting',
       ]);
-      final _Invocation open = runner.invocations.last;
+      final _Invocation open = _opened(runner);
       expect(open.executable, '/usr/bin/open');
       expect(open.arguments.take(6), <String>[
         '-na',
@@ -232,6 +254,7 @@ void main() {
     final _FakeProcessRunner runner = _FakeProcessRunner(<CommandResult>[
       _success,
       _success,
+      _listed('augustyniak-client-legal-pilot-550e8400-claude'),
     ]);
     final ZellijAgentSessionLauncher launcher = build(runner);
 
@@ -245,7 +268,7 @@ void main() {
     // KDL escapes it going in; Zellij unescapes it going out. Writing the
     // layout to a file is also what keeps a long capture off the command line
     // and therefore out of ARG_MAX.
-    final String layout = layoutFrom(runner.invocations.last.arguments);
+    final String layout = layoutFrom(_opened(runner).arguments);
     expect(
       layout,
       contains(r'"Fix the \"save\" button.\nIt drops the last edit."'),
@@ -260,16 +283,14 @@ void main() {
         stderr: 'No active zellij sessions found.',
       ),
       _success,
+      _listed(_codexSession),
     ]);
     final ZellijAgentSessionLauncher launcher = build(runner);
 
     final AgentSessionLaunchResult result = await launcher.launch(request());
 
     expect(result.attachedToExistingSession, isFalse);
-    expect(
-      runner.invocations.last.arguments,
-      contains('--new-session-with-layout'),
-    );
+    expect(_opened(runner).arguments, contains('--new-session-with-layout'));
   });
 
   test('sanitizes a project-configured session base and appends agent', () {
@@ -361,17 +382,124 @@ void main() {
     },
   );
 
+  group('a windowed launch is confirmed through list-sessions (#291)', () {
+    const CommandResult noSessions = CommandResult(
+      exitCode: 1,
+      stdout: '',
+      stderr: 'No active zellij sessions found.',
+    );
+
+    test(
+      'a terminal that exits 0 and starts no session is a failure',
+      () async {
+        // WezTerm on a host where it cannot create a window: `wezterm start`
+        // still exits 0, and no Zellij session ever appears.
+        final _FakeProcessRunner runner = _FakeProcessRunner(<CommandResult>[
+          noSessions,
+          _success,
+        ], orElse: noSessions);
+        final ZellijAgentSessionLauncher launcher = build(
+          runner,
+          terminal: LinuxTerminalLauncher(
+            executables: const _FakeResolver(),
+            candidates: const <LinuxTerminal>[LinuxTerminal.wezterm],
+          ),
+        );
+
+        await expectLater(
+          launcher.launch(request()),
+          throwsA(
+            isA<AgentSessionLaunchException>().having(
+              (AgentSessionLaunchException error) => error.message,
+              'message',
+              allOf(contains('wezterm'), contains(_codexSession)),
+            ),
+          ),
+        );
+        final List<_Invocation> polls = runner.invocations
+            .skip(2)
+            .toList(growable: false);
+        expect(
+          polls.map((_Invocation call) => call.arguments.first),
+          everyElement('list-sessions'),
+          reason: 'only list-sessions may run after the terminal',
+        );
+        // Bounded: about five seconds of polling, paced by the delay seam
+        // rather than by one long sleep.
+        expect(polls.length, greaterThan(1));
+        expect(pollDelays, hasLength(polls.length - 1));
+        final Duration waited = pollDelays.fold(
+          Duration.zero,
+          (Duration total, Duration delay) => total + delay,
+        );
+        expect(waited, greaterThanOrEqualTo(const Duration(seconds: 4)));
+        expect(waited, lessThanOrEqualTo(const Duration(seconds: 6)));
+      },
+    );
+
+    test('on macOS the failure names Ghostty, not `open`', () async {
+      final _FakeProcessRunner runner = _FakeProcessRunner(<CommandResult>[
+        noSessions,
+        _success,
+      ], orElse: noSessions);
+
+      await expectLater(
+        build(runner).launch(request()),
+        throwsA(
+          isA<AgentSessionLaunchException>().having(
+            (AgentSessionLaunchException error) => error.message,
+            'message',
+            startsWith('Ghostty exited without starting'),
+          ),
+        ),
+      );
+    });
+
+    test('a session that appears on the second poll is a success', () async {
+      final _FakeProcessRunner runner = _FakeProcessRunner(<CommandResult>[
+        noSessions,
+        _success,
+        noSessions,
+        _listed(_codexSession),
+      ]);
+
+      final AgentSessionLaunchResult result = await build(
+        runner,
+      ).launch(request());
+
+      expect(result.sessionName, _codexSession);
+      expect(result.attachedToExistingSession, isFalse);
+      expect(runner.invocations, hasLength(4));
+      expect(pollDelays, hasLength(1));
+    });
+
+    test('attaching to a running session is not polled for', () async {
+      final _FakeProcessRunner runner = _FakeProcessRunner(<CommandResult>[
+        _listed(_codexSession),
+        _success,
+      ]);
+
+      await build(runner).launch(request());
+
+      expect(runner.invocations, hasLength(2));
+      expect(pollDelays, isEmpty);
+    });
+  });
+
   test('maps each supported agent to its controlled executable', () async {
     for (final ProjectAgent agent in ProjectAgent.values) {
       final _FakeProcessRunner runner = _FakeProcessRunner(<CommandResult>[
         _success,
         _success,
+        _listed(
+          ZellijAgentSessionLauncher.buildSessionName(request(agent: agent)),
+        ),
       ]);
       final ZellijAgentSessionLauncher launcher = build(runner);
 
       await launcher.launch(request(agent: agent));
 
-      final String layout = layoutFrom(runner.invocations.last.arguments);
+      final String layout = layoutFrom(_opened(runner).arguments);
       expect(layout, contains('command="/opt/fake/bin/${agent.executable}"'));
     }
   });
@@ -407,6 +535,7 @@ void main() {
     final _FakeProcessRunner runner = _FakeProcessRunner(<CommandResult>[
       _success,
       _success,
+      _listed(_codexSession),
     ]);
     final ZellijAgentSessionLauncher launcher = build(
       runner,
@@ -422,7 +551,7 @@ void main() {
     final AgentSessionLaunchResult result = await launcher.launch(request());
 
     expect(result.attachedToExistingSession, isFalse);
-    final _Invocation open = runner.invocations.last;
+    final _Invocation open = _opened(runner);
     expect(open.executable, '/opt/fake/bin/kitty');
     expect(open.arguments.take(3), <String>[
       '--directory',

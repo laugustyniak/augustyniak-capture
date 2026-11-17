@@ -40,6 +40,16 @@ String buildEnrichmentSystemPrompt({
     ..writeln(
       '- "priorityReason": one sentence, max 160 characters, naming the goal '
       'or rule that decided the priority.',
+    )
+    ..writeln(
+      '- "commitments": a list of promises the speaker made or accepted '
+      '("I\'ll send the offer by Friday"), each {"text": what was promised, '
+      'max 200 characters, in the input language; "due": the deadline exactly '
+      'as stated, as an ISO date "YYYY-MM-DD" when a calendar date was named, '
+      'otherwise the phrase in English such as "friday", "tomorrow", '
+      '"next week" or "in 3 days", or null; "who": the other person involved, '
+      'or null}. Do not compute dates from relative phrases. Use [] when '
+      'there are none.',
     );
   if (hasProjects) {
     buffer.writeln(
@@ -185,6 +195,7 @@ void _appendContext(StringBuffer buffer, EnrichmentContext context) {
       'Also include "route", and pick its "kind" only from the route list.',
     );
   }
+  buffer.writeln('Also include "commitments", as a list (possibly empty).');
 }
 
 String _describeRoute(SuggestedRouteKind kind) => switch (kind) {

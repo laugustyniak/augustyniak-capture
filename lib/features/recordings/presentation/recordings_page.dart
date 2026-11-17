@@ -19,6 +19,7 @@ import '../../backup/data/file_picker_archive_location.dart';
 import '../../backup/data/zip_capture_archive.dart';
 import '../../backup/domain/capture_archive.dart';
 import '../../backup/presentation/backup_coordinator.dart';
+import '../../command/data/system_outcome_review.dart';
 import '../../clipboard/data/clipboard_repository.dart';
 import '../../clipboard/data/clipboard_capture_reader.dart';
 import '../../clipboard/data/xdotool_auto_paste.dart';
@@ -33,7 +34,11 @@ import '../../costs/domain/model_price.dart';
 import '../../costs/domain/price_book.dart';
 import '../../costs/domain/usage_event.dart';
 import '../../costs/domain/usage_model_keys.dart';
+import '../../connections/data/file_triage_log.dart';
 import '../../connections/data/http_daily_connections_service.dart';
+import '../../connections/data/http_daily_triage_service.dart';
+import '../../connections/presentation/daily_triage_controller.dart';
+import '../../connections/presentation/daily_triage_dialog.dart';
 import '../../enrichment/domain/transcript_cleaner.dart';
 import '../../enrichment/domain/instruction_writer.dart';
 import '../../enrichment/data/composed_enrichment_context_source.dart';
@@ -65,12 +70,15 @@ import '../../settings/presentation/config_tab.dart';
 import '../../settings/presentation/models_tab.dart';
 import '../../settings/presentation/settings_controller.dart';
 import '../../sync/data/e2ee_service.dart';
+import '../../sync/presentation/sync_binding_controller.dart';
 import '../../shortcuts/data/linux_hotkey_registrar.dart';
 import '../../shortcuts/data/system_hotkey_registrar.dart';
 import '../../shortcuts/data/system_window_presenter.dart';
 import '../../shortcuts/domain/hotkey_registrar.dart';
 import '../../shortcuts/domain/shortcut_action.dart';
+import '../../shortcuts/domain/shortcut_link_source.dart';
 import '../../shortcuts/domain/window_presenter.dart';
+import '../../shortcuts/presentation/shortcut_link_dispatcher.dart';
 import '../../shortcuts/presentation/shortcuts_coordinator.dart';
 import '../../timer/data/asset_alarm_player.dart';
 import '../../momentum/data/file_closure_log.dart';
@@ -97,11 +105,13 @@ import '../data/inbox_drainer.dart';
 import '../data/media_picker.dart';
 import '../data/markdown_note_vault.dart';
 import '../domain/capture_session.dart';
+import '../domain/screenshot_taker.dart';
 import '../data/plugin_capture_sender.dart';
 import '../data/project_agent_handoff.dart';
 import '../data/command_router.dart';
 import '../data/project_inbox_router.dart';
 import '../data/recordings_repository.dart';
+import '../data/system_screenshot_taker.dart';
 import '../data/system_clipboard_sink.dart';
 import '../data/revisions_repository.dart';
 import '../data/system_media_opener.dart';
@@ -133,6 +143,9 @@ class RecordingsPage extends StatefulWidget {
     this.syncTransportResolver,
     this.mediaStoreResolver,
     this.e2eeService,
+    this.launchArguments = const <String>[],
+    this.shortcutLinkSource = const NoopShortcutLinkSource(),
+    this.syncBinding,
   });
 
   /// Where the shell publishes the persisted theme so `AugustyniakCaptureApp`,
@@ -169,6 +182,20 @@ class RecordingsPage extends StatefulWidget {
   /// sync status can say whether rows left sealed or in plaintext. Null
   /// under the same condition as [syncTransportResolver].
   final E2eeService? e2eeService;
+
+  /// The process arguments. A shortcut URL among them is a cold start from the
+  /// desktop's own keybinding, and runs once `_bootstrap()` has loaded.
+  final List<String> launchArguments;
+
+  /// Shortcut URLs (`ai.augustyniak.capture://shortcut/<action>`) forwarded to
+  /// the running instance — how GNOME Wayland, where no app may grab a key,
+  /// reaches the same `ShortcutsCoordinator.handle` a hotkey does.
+  final ShortcutLinkSource shortcutLinkSource;
+
+  /// Which account this device's library belongs to (#206): its gate runs
+  /// before every Supabase run, and the Account card shows and changes it.
+  /// Null under the same condition as [syncTransportResolver].
+  final SyncBindingController? syncBinding;
 
   @override
   State<RecordingsPage> createState() => _RecordingsPageState();
@@ -224,6 +251,8 @@ class _RecordingsPageState extends State<RecordingsPage>
   late final RecordingUsageSink usageSink;
   late final SettingsController settings;
   late final HttpDailyConnectionsService dailyConnectionsService;
+  late final HttpDailyTriageService dailyTriageService;
+  late final DailyTriageController dailyTriage;
   final LiteLlmPriceService priceService = LiteLlmPriceService();
   late final LogStore logs;
   late final GamificationController gamification;
@@ -243,6 +272,7 @@ class _RecordingsPageState extends State<RecordingsPage>
   /// which needs dated events a cumulative counter cannot be run backwards into.
   late final MomentumController momentum;
   late final ShortcutsCoordinator shortcuts;
+  late final ShortcutLinkDispatcher shortcutLinks;
   late final ClipboardWatcherService clipboardWatcher;
 
   /// Held rather than passed straight into the coordinator: the clipboard
@@ -403,6 +433,11 @@ class _RecordingsPageState extends State<RecordingsPage>
     controller = RecordingsController(
       repository: repository,
       gamificationController: gamification,
+      // Desktop only, like the hotkeys that drive it; a phone has its own
+      // screenshot gesture and an image upload already takes its result.
+      screenshotTaker: _isDesktop
+          ? SystemScreenshotTaker()
+          : const UnavailableScreenshotTaker(),
       // The durable record of what was finished, one appended line per capture.
       // Deliberately not derived from `recordings.json`: that index is
       // rewritten wholesale and shrinks on delete, so a history read from it
@@ -455,6 +490,12 @@ class _RecordingsPageState extends State<RecordingsPage>
       // directory: the address can change in Config at any moment and the next
       // tap on an outcome must follow it.
       commandBaseUrl: () => settings.settings.commandBaseUrl,
+      // Spoken review of agent outcomes (#252): the desktop's own speech
+      // engine and notification tool, found per host. On a phone both answer
+      // unavailable until a plugin backs them, which hides Listen and leaves
+      // the card's outcome line as the whole feature.
+      outcomeNotifier: SystemOutcomeNotifier(),
+      outcomeSpeaker: SystemOutcomeSpeaker(),
       captureRouter: ProjectCaptureRouter(
         command: CommandRouter(
           projectById: _projectById,
@@ -526,6 +567,7 @@ class _RecordingsPageState extends State<RecordingsPage>
       syncTransportResolver: widget.syncTransportResolver,
       mediaStoreResolver: widget.mediaStoreResolver,
       authGateway: widget.authGateway,
+      syncBindingGate: widget.syncBinding?.gate,
       projectsRepository: ProjectsRepository(),
       clipboardRepository: clipboardRepository,
       appVersion: () => _appVersion,
@@ -537,6 +579,22 @@ class _RecordingsPageState extends State<RecordingsPage>
       // drop what sync just wrote. See `docs/architecture/sync.md`.
       applySyncedProjects: projects.applySyncedProjects,
       applySyncedProjectDelete: projects.applySyncedProjectDelete,
+    );
+    // Read-only proposals over the open captures. Accepting one goes through
+    // `controller`'s own entry points; running one never touches the index.
+    dailyTriageService = HttpDailyTriageService(
+      activeProfile: () => settings.activeEnrichmentProfile,
+      recordUsage: usageSink.recordTriage,
+    );
+    dailyTriage = DailyTriageController(
+      service: dailyTriageService,
+      log: FileTriageLog(),
+      recordings: () => controller.recordings,
+      actions: RecordingsTriageActions(controller),
+      projectNames: () => <String, String>{
+        for (final Project project in projects.projects)
+          project.id: project.name,
+      },
     );
     // Its own `AudioPlayer` inside `AssetAlarmPlayer`, never the recordings
     // controller's: an alarm must not stop a clip being reviewed, and a review
@@ -613,6 +671,14 @@ class _RecordingsPageState extends State<RecordingsPage>
       windowPresenter: windowPresenter,
       logSink: logs,
     );
+    // Started now so a URL arriving during bootstrap is held rather than lost;
+    // `_bootstrap()` releases it once the queue has loaded.
+    shortcutLinks = ShortcutLinkDispatcher(
+      source: widget.shortcutLinkSource,
+      handle: shortcuts.handle,
+      launchArguments: widget.launchArguments,
+      logSink: logs,
+    )..start();
 
     settings.addListener(_applySettings);
     projects.addListener(_applyActiveProject);
@@ -825,9 +891,16 @@ class _RecordingsPageState extends State<RecordingsPage>
     // to the developer's own disk.
     await controller.loadClosures();
     await momentum.initialize();
+    // Not awaited: a model call must never hold up start-up. Loads the log
+    // first, so the launch run sees yesterday's rejections.
+    unawaited(_startTriage());
     // Explicit rather than relying on the notification `initialize` emits, so
     // the hotkeys are guaranteed live once bootstrap returns.
     await _applyShortcuts();
+    // Last of the loading steps the shortcut actions depend on: a shortcut URL
+    // from a cold start, or one sent while this ran, acts on a loaded queue.
+    // Not awaited: a held note action resolves only when its sheet closes.
+    if (mounted) unawaited(shortcutLinks.markReady());
 
     final Directory directory = await repository.recordingsDirectory();
     if (!mounted) return;
@@ -1179,7 +1252,13 @@ class _RecordingsPageState extends State<RecordingsPage>
       unawaited(controller.refreshCommandOutcomes());
       unawaited(controller.resumeInterruptedProcessing());
       unawaited(_drainInbox());
+      unawaited(dailyTriage.runIfDue());
     }
+  }
+
+  Future<void> _startTriage() async {
+    await dailyTriage.load();
+    await dailyTriage.runIfDue();
   }
 
   @override
@@ -1190,6 +1269,7 @@ class _RecordingsPageState extends State<RecordingsPage>
     // The OS keeps a registration until it is told otherwise. This cannot be
     // awaited here, so the coordinator sets its `_disposed` flag synchronously
     // and refuses presses landing in the gap before the unregister completes.
+    unawaited(shortcutLinks.dispose());
     unawaited(shortcuts.dispose());
     clipboardWatcher.dispose();
     controller.dispose();
@@ -1197,6 +1277,8 @@ class _RecordingsPageState extends State<RecordingsPage>
     timer.dispose();
     momentum.dispose();
     dailyConnectionsService.close();
+    dailyTriage.dispose();
+    dailyTriageService.close();
     priceService.close();
     settings.dispose();
     logs.dispose();
@@ -1317,6 +1399,7 @@ class _RecordingsPageState extends State<RecordingsPage>
                                 QueueTab(
                                   controller: controller,
                                   dailyConnectionsService: dailyConnectionsService,
+                                  dailyTriage: dailyTriage,
                                   projects: projects,
                                   initialProjectId:
                                       activeQueueProjectFilterId,
@@ -1457,6 +1540,7 @@ class _RecordingsPageState extends State<RecordingsPage>
                                     controller: settings,
                                     authController: widget.authController,
                                     e2ee: widget.e2eeService,
+                                    syncBinding: widget.syncBinding,
                                     recordingsController: controller,
                                     storagePath: storagePath,
                                     recordingsCount:
@@ -1638,9 +1722,8 @@ class _RecordingsPageState extends State<RecordingsPage>
   /// `setState(() => navigationIndex = …)` in this file.
   Widget _buildRail() {
     final int total = controller.recordings.length;
-    final int reviewed = controller.recordings
-        .where((Recording item) => item.isProcessedByUser)
-        .length;
+    // Off the desk, the same count the queue's chip shows (#383).
+    final int reviewed = countOffDesk(controller.recordings, DateTime.now());
     return ConsoleNavRail(
       selectedIndex: navigationIndex,
       onSelected: (int value) => setState(() => navigationIndex = value),
@@ -1815,50 +1898,56 @@ class _CaptureMenuSheet extends StatelessWidget {
           right: BorderSide(color: Console.borderStrong),
         ),
       ),
-      child: SafeArea(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: <Widget>[
-            const SizedBox(height: 12),
-            Container(
-              width: 40,
-              height: 4,
-              decoration: BoxDecoration(
-                color: Console.borderStrong,
-                borderRadius: BorderRadius.circular(2),
+      // The rows are ListTiles, which paint their ink on the nearest Material.
+      // Without one of their own that is the sheet's, underneath this
+      // container's fill — so the splash is hidden and debug builds assert.
+      child: Material(
+        type: MaterialType.transparency,
+        child: SafeArea(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: <Widget>[
+              const SizedBox(height: 12),
+              Container(
+                width: 40,
+                height: 4,
+                decoration: BoxDecoration(
+                  color: Console.borderStrong,
+                  borderRadius: BorderRadius.circular(2),
+                ),
               ),
-            ),
-            const SizedBox(height: 8),
-            _row(
-              context,
-              Icons.description_outlined,
-              'New text note',
-              'typed · passthrough',
-              _CaptureAction.textNote,
-            ),
-            _row(
-              context,
-              Icons.audio_file_outlined,
-              'Upload audio',
-              'transcribed',
-              _CaptureAction.audioUpload,
-            ),
-            _row(
-              context,
-              Icons.image_outlined,
-              'Upload image',
-              'OCR',
-              _CaptureAction.imageUpload,
-            ),
-            _row(
-              context,
-              Icons.movie_outlined,
-              'Upload video',
-              'audio track · transcribed',
-              _CaptureAction.videoUpload,
-            ),
-            const SizedBox(height: 8),
-          ],
+              const SizedBox(height: 8),
+              _row(
+                context,
+                Icons.description_outlined,
+                'New text note',
+                'typed · passthrough',
+                _CaptureAction.textNote,
+              ),
+              _row(
+                context,
+                Icons.audio_file_outlined,
+                'Upload audio',
+                'transcribed',
+                _CaptureAction.audioUpload,
+              ),
+              _row(
+                context,
+                Icons.image_outlined,
+                'Upload image',
+                'OCR',
+                _CaptureAction.imageUpload,
+              ),
+              _row(
+                context,
+                Icons.movie_outlined,
+                'Upload video',
+                'audio track · transcribed',
+                _CaptureAction.videoUpload,
+              ),
+              const SizedBox(height: 8),
+            ],
+          ),
         ),
       ),
     );

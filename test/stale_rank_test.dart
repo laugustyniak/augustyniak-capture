@@ -8,6 +8,7 @@ Recording _item(
   CapturePriority? priority,
   String? basis,
   bool done = false,
+  DateTime? resurfaceAt,
 }) => Recording(
   id: id,
   filePath: '/tmp/$id.txt',
@@ -17,6 +18,7 @@ Recording _item(
   priority: priority,
   priorityBasis: basis,
   isProcessedByUser: done,
+  resurfaceAt: resurfaceAt,
 );
 
 void main() {
@@ -71,5 +73,28 @@ void main() {
     ], current);
 
     expect(set.map((Recording r) => r.id), <String>['desk']);
+  });
+
+  test('a capture waiting for a date is left out until it returns', () {
+    final DateTime now = DateTime(2026, 11, 6, 10);
+    final List<Recording> items = <Recording>[
+      _item(
+        'waiting',
+        priority: CapturePriority.p2,
+        basis: 'old00000',
+        resurfaceAt: now.add(const Duration(days: 1)),
+      ),
+      _item(
+        'due',
+        priority: CapturePriority.p2,
+        basis: 'old00000',
+        resurfaceAt: now.subtract(const Duration(days: 1)),
+      ),
+    ];
+
+    expect(
+      staleRanks(items, current, now: now).map((Recording r) => r.id),
+      <String>['due'],
+    );
   });
 }

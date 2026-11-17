@@ -18,7 +18,8 @@ class ResolvedTerminal {
   const ResolvedTerminal({
     required this.executable,
     required this.argumentsFor,
-  });
+    String? name,
+  }) : _name = name;
 
   /// Absolute path, never a bare name — see [ExecutableResolver] for why a
   /// bundled app cannot rely on `PATH`.
@@ -26,6 +27,13 @@ class ResolvedTerminal {
 
   final List<String> Function(String workingDirectory, List<String> command)
   argumentsFor;
+
+  final String? _name;
+
+  /// What a failure message calls this terminal. The executable's own name
+  /// unless that names a dispatcher rather than the terminal (`open` on
+  /// macOS, which only hands the window to Ghostty).
+  String get name => _name ?? executable.split(RegExp(r'[/\\]')).last;
 }
 
 /// Opens a terminal window in a directory, running one command in it.
@@ -90,6 +98,7 @@ class MacOsGhosttyTerminalLauncher implements TerminalLauncher {
   @override
   Future<ResolvedTerminal?> resolve() async => ResolvedTerminal(
     executable: '/usr/bin/open',
+    name: 'Ghostty',
     argumentsFor: (String workingDirectory, List<String> command) => <String>[
       '-na',
       'Ghostty.app',

@@ -10,6 +10,7 @@ import 'package:augustyniak_capture/features/recordings/data/media_picker.dart';
 import 'package:augustyniak_capture/features/recordings/data/recordings_repository.dart';
 import 'package:augustyniak_capture/features/recordings/domain/capture_type.dart';
 import 'package:augustyniak_capture/features/recordings/domain/recording.dart';
+import 'package:augustyniak_capture/features/recordings/domain/screenshot_taker.dart';
 import 'package:augustyniak_capture/features/recordings/presentation/recordings_controller.dart';
 import 'package:augustyniak_capture/features/shortcuts/domain/hotkey_binding.dart';
 import 'package:augustyniak_capture/features/shortcuts/domain/hotkey_registrar.dart';
@@ -139,6 +140,27 @@ class _CountingPresenter implements WindowPresenter {
   @override
   Future<void> exitOverlay() async {
     await Future<void>.delayed(Duration.zero);
+  }
+}
+
+/// Writes a PNG where the platform tool would, and notes how many times the
+/// window had been raised by then — a screenshot hotkey that raises the app
+/// first photographs the app.
+class _ShotTaker implements ScreenshotTaker {
+  _ShotTaker(this.presenter);
+
+  final _CountingPresenter presenter;
+  int? presentsAtCapture;
+  bool cancel = false;
+
+  @override
+  bool get isAvailable => true;
+
+  @override
+  Future<void> capture(File destination) async {
+    presentsAtCapture = presenter.presents;
+    await Future<void>.delayed(Duration.zero);
+    if (!cancel) await destination.writeAsBytes(<int>[0x89, 0x50, 1, 2]);
   }
 }
 
@@ -560,6 +582,103 @@ void main() {
       await coordinator.dispose();
 
       expect(registrar.unregisterCount, greaterThan(0));
+    });
+  });
+
+  group('screenshot', () {
+    late _ShotTaker taker;
+    late RecordingsController shooting;
+
+    ShortcutsCoordinator buildWith(RecordingsController controller) =>
+        ShortcutsCoordinator(
+          recordings: controller,
+          composeTextNote: () async => noteCalls++,
+          revealQueue: () async {
+            await Future<void>.delayed(Duration.zero);
+            queueReveals++;
+          },
+          registrar: registrar,
+          windowPresenter: presenter,
+        );
+
+    setUp(() async {
+      taker = _ShotTaker(presenter);
+      shooting = RecordingsController(
+        repository: repository,
+        transcriptionService: const DisabledTranscriptionService(),
+        mediaPicker: picker,
+        screenshotTaker: taker,
+        recorder: _GrantingRecorder(),
+        player: _FakePlayer(),
+      );
+      await shooting.initialize();
+    });
+
+    tearDown(() => shooting.dispose());
+
+    test('neither screenshot action raises the window before it runs', () {
+      expect(ShortcutAction.screenshotCapture.needsWindow, isFalse);
+      expect(ShortcutAction.screenshotWithVoiceComment.needsWindow, isFalse);
+    });
+
+    test('screenshotCapture saves an image capture without raising the '
+        'window', () async {
+      await buildWith(shooting).handle(ShortcutAction.screenshotCapture);
+
+      expect(taker.presentsAtCapture, 0);
+      expect(shooting.recordings.single.type, CaptureType.image);
+      expect(shooting.isRecording, isFalse);
+      // The capture is persisted; pulling the app forward would interrupt
+      // whatever the user went back to, exactly as a recording stop does.
+      expect(presenter.presents, 0);
+    });
+
+    test('a cancelled screenshot leaves the queue unchanged', () async {
+      taker.cancel = true;
+
+      await buildWith(
+        shooting,
+      ).handle(ShortcutAction.screenshotWithVoiceComment);
+
+      expect(shooting.recordings, isEmpty);
+      expect(shooting.isRecording, isFalse);
+      expect(presenter.presents, 0);
+      expect(queueReveals, 0);
+    });
+
+    test('screenshotWithVoiceComment starts the comment and then surfaces '
+        'the queue', () async {
+      await buildWith(
+        shooting,
+      ).handle(ShortcutAction.screenshotWithVoiceComment);
+
+      expect(taker.presentsAtCapture, 0);
+      expect(shooting.isRecording, isTrue);
+      // Raised only once the microphone is open, for the same reason a
+      // recording hotkey is: the running SAVE control lives on the Queue tab.
+      expect(presenter.presents, 1);
+      expect(queueReveals, 1);
+
+      await shooting.stopRecording();
+      expect(shooting.recordings.single.segments, hasLength(2));
+    });
+
+    test('both screenshot actions are listed and named for the Config tab', () {
+      expect(
+        ShortcutAction.fromName('screenshotCapture'),
+        ShortcutAction.screenshotCapture,
+      );
+      expect(ShortcutAction.screenshotCapture.label, 'Screenshot');
+      expect(
+        ShortcutAction.screenshotWithVoiceComment.label,
+        'Screenshot with voice comment',
+      );
+      // Unbound by default, like the uploads: every plausible combination
+      // already belongs to the desktop's own screenshot tool.
+      expect(
+        ShortcutDefaults.bindings.containsKey(ShortcutAction.screenshotCapture),
+        isFalse,
+      );
     });
   });
 }

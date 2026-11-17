@@ -222,6 +222,30 @@ void main() {
     expect(bare.containsKey('project'), isFalse);
   });
 
+  test(
+    'get_capture carries a schedule and repeat, and omits them when unset',
+    () async {
+      fx.insert(
+        rec('c3', title: 'Weekly review').copyWith(
+          resurfaceAt: DateTime.utc(2026, 11, 7, 9),
+          repeatEveryDays: 7,
+        ),
+      );
+      final List<Map<String, dynamic>> out = await run(<String>[
+        call(1, 'get_capture', <String, dynamic>{'id': 'c3'}),
+        call(2, 'get_capture', <String, dynamic>{'id': 'c2'}),
+      ]);
+      final Map<String, dynamic> scheduled =
+          payload(out[0])['data'] as Map<String, dynamic>;
+      expect(scheduled['resurfaceAt'], '2026-11-07T09:00:00.000Z');
+      expect(scheduled['repeatEveryDays'], 7);
+      final Map<String, dynamic> bare =
+          payload(out[1])['data'] as Map<String, dynamic>;
+      expect(bare.containsKey('resurfaceAt'), isFalse);
+      expect(bare.containsKey('repeatEveryDays'), isFalse);
+    },
+  );
+
   test('get_capture on an unknown id is a tool error', () async {
     final Map<String, dynamic> p = payload(
       (await run(<String>[

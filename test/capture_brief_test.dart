@@ -32,6 +32,7 @@ RoutedCapture _capture({
   CaptureCategory? category = CaptureCategory.agentTask,
   List<String> tags = const <String>['backend', 'migration'],
   CaptureType type = CaptureType.audioRecording,
+  List<String> sourceFiles = const <String>[],
 }) => RoutedCapture(
   id: id,
   projectId: 'p1',
@@ -41,6 +42,7 @@ RoutedCapture _capture({
   category: category,
   tags: tags,
   type: type,
+  sourceFiles: sourceFiles,
   capturedAt: DateTime.utc(2026, 8, 5, 14, 32, 11, 482),
 );
 
@@ -122,6 +124,45 @@ void main() {
       expect(fields.containsKey('tags'), isFalse);
       expect(fields.containsKey('intent'), isFalse);
       expect(fields['capture-id'], 'cap-1');
+    });
+
+    test('an image capture names the file it was read from', () {
+      // OCR text alone cannot answer "what did the screen look like": the
+      // agent reading the brief must be able to open the screenshot itself.
+      final String brief = renderCaptureBrief(
+        captureId: 'shot-1',
+        capture: _capture(
+          type: CaptureType.image,
+          sourceFiles: const <String>[
+            '/home/u/Documents/recordings/shot-1.png',
+            '/home/u/Documents/recordings/shot-1-1.m4a',
+          ],
+        ),
+        at: DateTime.utc(2026, 8, 5, 14, 40),
+        includeHeader: true,
+        resultPath: '.agent-tasks/shot-1-result.md',
+      );
+
+      final Map<String, String> fields = _parse(brief)!.fields;
+      expect(
+        fields['source-files'],
+        '["/home/u/Documents/recordings/shot-1.png", '
+        '"/home/u/Documents/recordings/shot-1-1.m4a"]',
+      );
+    });
+
+    test('a capture with no known source writes no source-files key', () {
+      final Map<String, String> fields = _parse(
+        renderCaptureBrief(
+          captureId: 'cap-1',
+          capture: _capture(),
+          at: DateTime.utc(2026, 8, 5, 14, 40),
+          includeHeader: true,
+          resultPath: '.agent-tasks/cap-1-result.md',
+        ),
+      )!.fields;
+
+      expect(fields.containsKey('source-files'), isFalse);
     });
 
     test('a later section carries no front matter of its own', () {

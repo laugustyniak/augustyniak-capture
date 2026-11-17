@@ -8,8 +8,10 @@ import 'package:window_manager/window_manager.dart';
 import 'app/app.dart';
 import 'features/auth/data/secure_auth_storage.dart';
 import 'features/auth/domain/supabase_config.dart';
+import 'features/shortcuts/data/app_links_shortcut_link_source.dart';
+import 'features/shortcuts/domain/shortcut_link_source.dart';
 
-Future<void> main() async {
+Future<void> main(List<String> args) async {
   WidgetsFlutterBinding.ensureInitialized();
 
   if (Platform.isWindows || Platform.isLinux || Platform.isMacOS) {
@@ -57,5 +59,18 @@ Future<void> main() async {
     if (issue != null) debugPrint('Supabase is not initialised: $issue');
   }
 
-  runApp(AugustyniakCaptureApp(supabaseClient: supabaseClient));
+  runApp(
+    AugustyniakCaptureApp(
+      supabaseClient: supabaseClient,
+      // A cold start from a desktop keybinding carries its shortcut URL here;
+      // the Linux runner strips it from the command line so `app_links` does
+      // not deliver it a second time.
+      launchArguments: args,
+      // Linux only: GNOME Wayland is where the desktop has to own the key and
+      // reach the app through a URL. Elsewhere the hotkey registrars work.
+      shortcutLinkSource: Platform.isLinux
+          ? AppLinksShortcutLinkSource()
+          : const NoopShortcutLinkSource(),
+    ),
+  );
 }

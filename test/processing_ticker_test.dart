@@ -32,8 +32,14 @@ class _FakeRepository extends RecordingsRepository {
 class _GatedTranscriptionService implements TranscriptionService {
   final Completer<void> gate = Completer<void>();
 
+  /// Completed once the job is inside [transcribe]. `transcribing` is set
+  /// earlier than that, and the steps between (poster, segment re-measure)
+  /// still notify the controller.
+  final Completer<void> entered = Completer<void>();
+
   @override
   Future<String> transcribe(File audioFile) async {
+    if (!entered.isCompleted) entered.complete();
     await gate.future;
     return 'TRANSCRIPT';
   }
@@ -103,12 +109,18 @@ void main() {
       await controller.initialize();
       await controller.addUpload(CaptureType.audioUpload);
 
-      // Wait until the job is parked inside the transcriber.
+      // Wait until the job is parked inside the transcriber — not merely
+      // marked `transcribing`, which happens before the last notifying step —
+      // and until the upload's content hash has landed. That hash is computed
+      // unawaited beside the job and writes the row when it finishes, a
+      // legitimate notification that would otherwise race the listener below.
+      await gate.entered.future.timeout(const Duration(seconds: 10));
       await _until(
         () =>
             controller.recordings.isNotEmpty &&
             controller.recordings.first.status ==
                 RecordingStatus.transcribing &&
+            controller.recordings.first.contentHash != null &&
             controller.processingElapsedFor(controller.recordings.first.id) !=
                 null,
       );

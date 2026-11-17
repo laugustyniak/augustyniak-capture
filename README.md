@@ -66,6 +66,16 @@ The app is fully usable with **no** API key. Recording, notes, uploads, storage,
 search, projects and hand-off all work offline. Only transcription, OCR and AI
 titling need an endpoint, and you add that in the UI.
 
+On **GNOME Wayland** no app can grab a key system-wide, so the global hotkeys
+never fire there. Install the app with `tool/deploy.sh`, then let GNOME own the
+keys instead:
+
+```bash
+tool/gnome-shortcuts.sh   # Ctrl+Alt+A/R/N/V -> xdg-open ai.augustyniak.capture://shortcut/<action>
+```
+
+It is safe to run again and leaves your other custom keybindings alone.
+
 <details>
 <summary><b>If <code>flutter run</code> complains about the platform scaffolding</b></summary>
 

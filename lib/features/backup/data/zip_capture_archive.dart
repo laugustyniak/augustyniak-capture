@@ -96,7 +96,7 @@ class ZipCaptureArchive implements CaptureArchive {
 
   /// Merged line by line: append-only stores where a line is the whole record.
   ///
-  /// All three of the repo's append-only stores belong here. `closures.jsonl`
+  /// All four of the repo's append-only stores belong here. `closures.jsonl`
   /// was missing while it was still being *exported* as a payload member, so a
   /// restore silently dropped the momentum history — the file that exists
   /// precisely because no other store can answer "how many did I close last
@@ -106,6 +106,9 @@ class ZipCaptureArchive implements CaptureArchive {
     'revisions.jsonl',
     'focus-sessions.jsonl',
     'closures.jsonl',
+    // Without a merge a restore would bring every rejected triage proposal
+    // back, which is the one thing a rejection is recorded to prevent.
+    'triage.jsonl',
   };
 
   /// Never archived.
@@ -700,10 +703,13 @@ class ZipCaptureArchive implements CaptureArchive {
       projectId: recording.projectId,
       projectAuto: recording.projectAuto,
       suggestedRoute: recording.suggestedRoute,
+      commitments: recording.commitments,
       error: recording.error,
       isProcessedByUser: recording.isProcessedByUser,
       processedAt: recording.processedAt,
       routes: recording.routes,
+      resurfaceAt: recording.resurfaceAt,
+      repeatEveryDays: recording.repeatEveryDays,
       // Artifact paths belong to the machine that produced the archive; the
       // viewer reads whatever they name, so an archive never supplies them.
       artifacts: const [],

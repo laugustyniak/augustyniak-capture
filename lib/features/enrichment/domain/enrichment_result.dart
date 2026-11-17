@@ -1,5 +1,6 @@
 import '../../recordings/domain/capture_category.dart';
 import '../../recordings/domain/capture_priority.dart';
+import '../../recordings/domain/commitment.dart';
 import '../../recordings/domain/suggested_route.dart';
 
 /// What the enrichment model returned, after validation.
@@ -21,6 +22,7 @@ class EnrichmentResult {
     this.routeKind,
     this.routeReason,
     bool? routeAnswered,
+    this.commitments,
   }) : projectAnswered = projectAnswered ?? projectId != null,
        routeAnswered = routeAnswered ?? routeKind != null;
 
@@ -66,4 +68,10 @@ class EnrichmentResult {
   /// explicit null (meaning none). A missing key or an invented kind says
   /// nothing and must not touch a stored suggestion.
   final bool routeAnswered;
+
+  /// Promises the model found, with their due phrases still unresolved — the
+  /// caller resolves them against the capture's `createdAt`. Null when the
+  /// reply carried no usable `commitments` list, which must leave a stored
+  /// list alone; an empty list is the answer "none".
+  final List<CommitmentDraft>? commitments;
 }

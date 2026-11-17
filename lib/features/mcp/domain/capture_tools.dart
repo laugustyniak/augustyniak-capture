@@ -261,6 +261,8 @@ class CaptureTools {
       'priority': ?r.priority?.name,
       'priorityReason': ?r.priorityReason,
       'category': ?r.category?.name,
+      'resurfaceAt': ?r.resurfaceAt?.toUtc().toIso8601String(),
+      'repeatEveryDays': ?r.repeatEveryDays,
       if (project != null)
         'project': <String, dynamic>{'id': project.id, 'name': project.name},
       'routes': <Map<String, dynamic>>[

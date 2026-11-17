@@ -10,6 +10,8 @@ import '../../../core/sync/cloud_sync_coordinator.dart';
 import '../../settings/domain/app_settings.dart';
 import '../../connections/domain/daily_connections.dart';
 import '../../connections/presentation/daily_connections_dialog.dart';
+import '../../connections/presentation/daily_triage_controller.dart';
+import '../../connections/presentation/daily_triage_dialog.dart';
 import '../../costs/data/usage_repository.dart';
 import '../../costs/domain/price_book.dart';
 import '../../costs/domain/usage_event.dart';
@@ -23,13 +25,17 @@ import '../../sync/presentation/e2ee_passphrase_dialog.dart';
 import '../domain/agent_artifact.dart';
 import '../domain/capture_category.dart';
 import '../domain/capture_priority.dart';
+import '../data/plugin_commitment_exporter.dart';
 import '../domain/capture_type.dart';
+import '../domain/commitment.dart';
+import '../domain/commitment_list.dart';
 import '../domain/recording.dart';
 import '../domain/route_record.dart';
 import '../domain/suggested_route.dart';
 import 'agent_artifact_viewer_modal.dart';
 import 'capture_focus_view.dart';
 import 'card_parts.dart';
+import 'commitments_dialog.dart';
 import 'compact_queue_header.dart';
 import 'handoff_sheet.dart';
 import 'queue_list_row.dart';
@@ -89,6 +95,8 @@ class QueueTab extends StatefulWidget {
     this.density = QueueDensity.compact,
     this.onDensityChanged,
     this.dailyConnectionsService,
+    this.exportCommitment = exportCommitmentWithPlugins,
+    this.dailyTriage,
     this.e2ee,
     this.splitRatio = AppSettings.defaultQueueSplitRatio,
     this.onSplitRatioChanged,
@@ -137,6 +145,14 @@ class QueueTab extends StatefulWidget {
 
   final RecordingsController controller;
   final DailyConnectionsService? dailyConnectionsService;
+
+  /// Hands one commitment to the user's calendar. The plugin-backed share or
+  /// save by default; a test passes a fake so no platform channel is touched.
+  final Future<void> Function(Recording recording, Commitment commitment)
+  exportCommitment;
+
+  /// Null hides the TRIAGE action.
+  final DailyTriageController? dailyTriage;
   final ProjectsController? projects;
   final String? initialProjectId;
 
@@ -340,6 +356,39 @@ class _QueueTabState extends State<QueueTab> {
     );
   }
 
+  Future<void> _openCommitments() async {
+    final RecordingsController controller = widget.controller;
+    await showDialog<void>(
+      context: context,
+      builder: (BuildContext context) => CommitmentsDialog(
+        listenable: controller,
+        captures: () => controller.recordings,
+        onSetState: (String id, Commitment commitment, CommitmentState state) =>
+            controller.setCommitmentState(id, commitment.key, state),
+        onExport: (Recording recording, Commitment commitment) =>
+            controller.exportCommitment(
+              recording.id,
+              commitment,
+              widget.exportCommitment,
+            ),
+        onOpenCapture: _revealCapture,
+      ),
+    );
+  }
+
+  Future<void> _openDailyTriage() async {
+    final DailyTriageController? triage = widget.dailyTriage;
+    if (triage == null) return;
+    await showDialog<void>(
+      context: context,
+      builder: (BuildContext context) => DailyTriageDialog(
+        triage: triage,
+        captures: () => widget.controller.recordings,
+        onOpenCapture: _revealCapture,
+      ),
+    );
+  }
+
   /// Desktop completion feedback has to outlive the card: the default Desk
   /// filter removes a capture the moment its durable review write lands. The
   /// in-card spinner covers the write; this small overlay carries the result
@@ -349,6 +398,36 @@ class _QueueTabState extends State<QueueTab> {
   _DoneFeedbackState? doneFeedback;
   int _doneFeedbackSequence = 0;
   Timer? _doneFeedbackTimer;
+
+  /// One-shot rebuild at the soonest future `resurfaceAt` (#383), so a
+  /// scheduled capture returns to the desk at its moment rather than at the
+  /// next unrelated repaint. It only wakes the build — which reads the date
+  /// from the clock — and never counts anything down itself.
+  Timer? _resurfaceTimer;
+
+  /// The instant the current build filtered the desk at.
+  DateTime _now = DateTime.now();
+
+  /// Long waits are re-armed rather than held, so a laptop that slept through
+  /// a date still wakes within a bounded span of it.
+  static const Duration _maxResurfaceWait = Duration(hours: 1);
+
+  void _armResurfaceTimer(List<Recording> all, DateTime now) {
+    _resurfaceTimer?.cancel();
+    _resurfaceTimer = null;
+    DateTime? soonest;
+    for (final Recording item in all) {
+      final DateTime? at = item.resurfaceAt;
+      if (item.isProcessedByUser || at == null || !at.isAfter(now)) continue;
+      if (soonest == null || at.isBefore(soonest)) soonest = at;
+    }
+    if (soonest == null) return;
+    Duration wait = soonest.difference(now) + const Duration(seconds: 1);
+    if (wait > _maxResurfaceWait) wait = _maxResurfaceWait;
+    _resurfaceTimer = Timer(wait, () {
+      if (mounted) setState(() {});
+    });
+  }
 
   /// Whether the compact header's two panels are open *by the user's hand*.
   ///
@@ -464,6 +543,7 @@ class _QueueTabState extends State<QueueTab> {
     widget.controller.addedCapture.removeListener(_focusAddedCapture);
     _syncStatusTimer?.cancel();
     _doneFeedbackTimer?.cancel();
+    _resurfaceTimer?.cancel();
     searchController.dispose();
     searchFocus.dispose();
     listFocus.dispose();
@@ -508,6 +588,23 @@ class _QueueTabState extends State<QueueTab> {
     });
   }
 
+  /// Reads [recording]'s outcome aloud. The controller answers false rather
+  /// than throwing when there is nothing to say or nothing to say it with, so
+  /// the keyboard path can call this on any row.
+  void _listenToOutcome(Recording recording) {
+    if (!widget.controller.canListenToOutcome) return;
+    if (!widget.controller.hasOutcome(recording.id)) return;
+    unawaited(widget.controller.listenToOutcome(recording.id));
+  }
+
+  /// Starts a spoken reply onto [recording] — `startRecording(appendTo:)`
+  /// through the controller, nothing else.
+  void _replyToOutcome(Recording recording) {
+    if (widget.controller.isRecording) return;
+    if (!widget.controller.hasOutcome(recording.id)) return;
+    unawaited(widget.controller.replyToOutcome(recording.id));
+  }
+
   /// The row the master–detail layout shows: the user's choice while it is
   /// still visible, otherwise the first row — so the panel is never empty
   /// while the list is not.
@@ -523,6 +620,8 @@ class _QueueTabState extends State<QueueTab> {
   Widget build(BuildContext context) {
     final RecordingsController controller = widget.controller;
     final List<Recording> all = controller.recordings;
+    _now = DateTime.now();
+    _armResurfaceTimer(all, _now);
     // Resolved once here, not once per card: `totalsByCapture()` is a single
     // grouped query, and a thousand-row queue must not turn into a thousand
     // repository reads on every pipeline tick.
@@ -541,9 +640,9 @@ class _QueueTabState extends State<QueueTab> {
       queueSort,
     );
     _visible = visible;
-    final int reviewedCount = all
-        .where((Recording item) => item.isProcessedByUser)
-        .length;
+    // Everything not on the desk: handed off, and waiting for a date.
+    final int reviewedCount = countOffDesk(all, _now);
+    final int openCommitmentCount = openCommitments(all).length;
     return LayoutBuilder(
       builder: (BuildContext context, BoxConstraints constraints) {
         final bool compact = constraints.maxWidth < Console.compactBreakpoint;
@@ -610,6 +709,8 @@ class _QueueTabState extends State<QueueTab> {
             searchFocus.requestFocus();
           },
           onOpen: () => onSelected(_openFocus),
+          onListenOutcome: () => onSelected(_listenToOutcome),
+          onReplyOutcome: () => onSelected(_replyToOutcome),
           onClearFocus: () => setState(() => focusedId = null),
           child: Stack(
             children: <Widget>[
@@ -825,17 +926,60 @@ class _QueueTabState extends State<QueueTab> {
                               : const <Widget>[],
                         ),
                       ),
-                    if (widget.dailyConnectionsService != null)
+                    if (widget.dailyConnectionsService != null ||
+                        openCommitmentCount > 0 ||
+                        widget.dailyTriage != null)
                       Align(
                         alignment: Alignment.centerRight,
                         child: Padding(
                           padding: EdgeInsets.symmetric(
                             horizontal: compact ? 12 : 20,
                           ),
-                          child: TextButton.icon(
-                            onPressed: _openDailyConnections,
-                            icon: const Icon(Icons.hub_outlined, size: 18),
-                            label: const Text('REVIEW CONNECTIONS'),
+                          child: Wrap(
+                            alignment: WrapAlignment.end,
+                            spacing: 8,
+                            children: <Widget>[
+                              if (openCommitmentCount > 0)
+                                TextButton.icon(
+                                  onPressed: _openCommitments,
+                                  icon: const Icon(
+                                    Icons.event_available_outlined,
+                                    size: 18,
+                                  ),
+                                  label: Text(
+                                    'COMMITMENTS ($openCommitmentCount)',
+                                  ),
+                                ),
+                              if (widget.dailyTriage
+                                  case final DailyTriageController triage)
+                                ListenableBuilder(
+                                  listenable: triage,
+                                  builder: (BuildContext context, _) {
+                                    final int pending = triage.proposals.length;
+                                    return TextButton.icon(
+                                      onPressed: _openDailyTriage,
+                                      icon: const Icon(
+                                        Icons.rule_outlined,
+                                        size: 18,
+                                      ),
+                                      label: Text(
+                                        pending == 0
+                                            ? 'TRIAGE'
+                                            : 'TRIAGE ($pending)',
+                                      ),
+                                    );
+                                  },
+                                ),
+                              if (widget.dailyConnectionsService != null)
+                                TextButton.icon(
+                                  onPressed: _openDailyConnections,
+                                  icon: const Icon(
+                                    Icons.hub_outlined,
+                                    size: 18,
+                                  ),
+                                  label: const Text('REVIEW CONNECTIONS'),
+                                ),
+                            ],
                           ),
                         ),
                       ),
@@ -1053,7 +1197,7 @@ class _QueueTabState extends State<QueueTab> {
       // settles, otherwise the default Desk filter removes the very spinner
       // that tells the user the Done action is still in progress.
       if (markingDoneIds.contains(item.id)) return true;
-      if (!_matchesReview(reviewFilter, item)) return false;
+      if (!_matchesReview(reviewFilter, item, _now)) return false;
       if (!_matches(selectedFilter, item)) return false;
       if (!_matchesType(selectedTypeFilter, item)) return false;
       if (!matchesPriority(priorityFilter, item)) return false;
@@ -1104,6 +1248,14 @@ class _QueueTabState extends State<QueueTab> {
       onOpenOutcome: controller.openCommandOutcome,
       canOpenOutcome: (RouteOutcome outcome) =>
           controller.commandOutcomeUrl(outcome) != null,
+      // Spoken review (#252): offered on the outcome line only, so a capture
+      // with no outcome never carries either control.
+      onListenOutcome: controller.canListenToOutcome
+          ? () => _listenToOutcome(recording)
+          : null,
+      onReplyOutcome: controller.isRecording
+          ? null
+          : () => _replyToOutcome(recording),
       // Offered wherever a session can be launched at all; a session that has
       // since ended is refused by name, through the controller's error.
       onAttachSession: controller.canHandoff(recording)
@@ -1764,11 +1916,15 @@ bool _matches(RecordingFilter filter, Recording item) => switch (filter) {
 
 /// Single definition of the review axis, for the same reason [_matches] is one:
 /// the chip counts and the list must be answering the same question.
-bool _matchesReview(ReviewFilter filter, Recording item) => switch (filter) {
-  ReviewFilter.all => true,
-  ReviewFilter.desk => !item.isProcessedByUser,
-  ReviewFilter.handedOff => item.isProcessedByUser,
-};
+///
+/// A capture scheduled for later (#383) is off the desk until its date, so
+/// OFF DESK lists what is waiting beside what was handed off.
+bool _matchesReview(ReviewFilter filter, Recording item, DateTime now) =>
+    switch (filter) {
+      ReviewFilter.all => true,
+      ReviewFilter.desk => item.isOnDeskAt(now),
+      ReviewFilter.handedOff => !item.isOnDeskAt(now),
+    };
 
 /// Single definition of the capture type axis, matching [_matches] and [_matchesReview].
 bool _matchesType(CaptureTypeFilter filter, Recording item) => switch (filter) {
@@ -1800,6 +1956,8 @@ class _QueueShortcuts extends StatelessWidget {
     required this.onPrevious,
     required this.onOpen,
     required this.onSearch,
+    required this.onListenOutcome,
+    required this.onReplyOutcome,
     required this.onClearFocus,
     required this.child,
   });
@@ -1809,6 +1967,8 @@ class _QueueShortcuts extends StatelessWidget {
   final VoidCallback onPrevious;
   final VoidCallback onOpen;
   final VoidCallback onSearch;
+  final VoidCallback onListenOutcome;
+  final VoidCallback onReplyOutcome;
   final VoidCallback onClearFocus;
   final Widget child;
 
@@ -1833,6 +1993,29 @@ class _QueueShortcuts extends StatelessWidget {
         // Both spellings: control on Linux/Windows, meta on macOS.
         const SingleActivator(LogicalKeyboardKey.keyF, control: true): onSearch,
         const SingleActivator(LogicalKeyboardKey.keyF, meta: true): onSearch,
+        // Spoken review of the selected row's agent outcome (#252). Chords,
+        // not letters: single-key actions were taken out of this layer (#219),
+        // and Shift keeps them clear of the app's Ctrl/Cmd bindings.
+        const SingleActivator(
+          LogicalKeyboardKey.keyL,
+          control: true,
+          shift: true,
+        ): onListenOutcome,
+        const SingleActivator(
+          LogicalKeyboardKey.keyL,
+          meta: true,
+          shift: true,
+        ): onListenOutcome,
+        const SingleActivator(
+          LogicalKeyboardKey.keyR,
+          control: true,
+          shift: true,
+        ): onReplyOutcome,
+        const SingleActivator(
+          LogicalKeyboardKey.keyR,
+          meta: true,
+          shift: true,
+        ): onReplyOutcome,
       },
       child: Focus(
         focusNode: focusNode,

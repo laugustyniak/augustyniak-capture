@@ -10,6 +10,7 @@ import 'package:uuid/uuid.dart';
 
 import '../../costs/domain/usage_event.dart';
 import '../../command/domain/command_client.dart';
+import '../../command/domain/outcome_review.dart';
 import '../../costs/domain/usage_sink.dart';
 import '../../enrichment/domain/embedding_service.dart';
 import '../../enrichment/domain/enrichment_context.dart';
@@ -27,11 +28,13 @@ import '../../../core/database/app_database.dart';
 import '../../../core/sync/cloud_sync_coordinator.dart';
 import '../../../core/sync/sync_path_policy.dart';
 import '../../auth/domain/auth_gateway.dart';
+import '../../auth/domain/auth_identity.dart';
 import '../../clipboard/data/clipboard_repository.dart';
 import '../../settings/domain/audio_config.dart';
 import '../../sync/data/repository_sync_applier.dart';
 import '../../sync/data/sync_rows_store.dart';
 import '../../sync/domain/media_sync.dart';
+import '../../sync/domain/sync_binding.dart';
 import '../../sync/domain/sync_engine.dart';
 import '../../sync/domain/sync_row_codec.dart';
 import '../../sync/domain/sync_snapshot.dart';
@@ -60,6 +63,7 @@ import '../domain/capture_priority.dart';
 import '../domain/stale_rank.dart';
 import '../domain/capture_segment.dart';
 import '../domain/capture_instruction.dart';
+import '../domain/commitment.dart';
 import '../domain/cleanup_proposal.dart';
 import '../domain/related_captures.dart';
 import '../domain/capture_type.dart';
@@ -71,6 +75,7 @@ import '../domain/media_opener.dart';
 import '../domain/capture_session.dart';
 import '../domain/note_vault.dart';
 import '../domain/recording.dart';
+import '../domain/screenshot_taker.dart';
 import '../domain/upload_grouping.dart';
 import '../domain/recording_revision.dart';
 import '../domain/recording_tag.dart';
@@ -116,12 +121,15 @@ class RecordingsController extends ChangeNotifier {
     RevisionsRepository? revisionsRepository,
     ProcessorRegistry? processorRegistry,
     MediaPicker? mediaPicker,
+    ScreenshotTaker screenshotTaker = const UnavailableScreenshotTaker(),
     AudioRecorder? recorder,
     AudioPlayer? player,
     GamificationController? gamificationController,
     ClosureLog closureLog = const NoopClosureLog(),
     CommandClient commandClient = const DisabledCommandClient(),
     String? Function()? commandBaseUrl,
+    OutcomeNotifier outcomeNotifier = const NoopOutcomeNotifier(),
+    OutcomeSpeaker outcomeSpeaker = const UnavailableOutcomeSpeaker(),
     // The Supabase sync seam — a resolver, never a snapshot, so a Config
     // change only affects a run started afterwards. All eight are null in
     // every existing call site and in every pure-Dart test, which is what
@@ -144,6 +152,15 @@ class RecordingsController extends ChangeNotifier {
     // Supabase Storage for capture media, built per run for the signed-in
     // user. Null keeps the media slot out entirely, like the seven above.
     MediaObjectStore Function(String ownerId)? mediaStoreResolver,
+    // Which account this device's library belongs to (#206). Asked at the
+    // top of every Supabase run, before either resolver above, so a paused
+    // run makes no push, pull or Storage call. Null leaves runs ungated —
+    // every pure-Dart test that predates the binding.
+    Future<SyncGateDecision> Function(
+      AuthIdentity identity, {
+      required bool libraryIsEmpty,
+    })?
+    syncBindingGate,
     Duration recorderTimeout = const Duration(seconds: 8),
     // How long a hand edit waits before it is pushed, so a burst of field
     // edits is one sync run rather than one per blur.
@@ -153,6 +170,8 @@ class RecordingsController extends ChangeNotifier {
        _repository = repository,
        _commandClient = commandClient,
        _commandBaseUrl = commandBaseUrl,
+       _outcomeNotifier = outcomeNotifier,
+       _outcomeSpeaker = outcomeSpeaker,
        _revisionsRepository = revisionsRepository,
        _syncTransportResolver = syncTransportResolver,
        _authGateway = authGateway,
@@ -164,6 +183,7 @@ class RecordingsController extends ChangeNotifier {
        _applySyncedProjects = applySyncedProjects,
        _applySyncedProjectDelete = applySyncedProjectDelete,
        _mediaStoreResolver = mediaStoreResolver,
+       _syncBindingGate = syncBindingGate,
        _history = CaptureHistory(
          revisionsRepository: revisionsRepository,
          closureLog: closureLog,
@@ -195,6 +215,7 @@ class RecordingsController extends ChangeNotifier {
        _contentHasher = contentHasher,
        _mediaPicker = mediaPicker ?? const FilePickerMediaPicker(),
        _importer = MediaImporter(repository),
+       _screenshotTaker = screenshotTaker,
        _recorder = recorder ?? AudioRecorder(),
        _player = player ?? AudioPlayer(),
        _gamificationController = gamificationController {
@@ -254,6 +275,11 @@ class RecordingsController extends ChangeNotifier {
   final Future<void> Function(List<Project> upserts)? _applySyncedProjects;
   final Future<void> Function(String id)? _applySyncedProjectDelete;
   final MediaObjectStore Function(String ownerId)? _mediaStoreResolver;
+  final Future<SyncGateDecision> Function(
+    AuthIdentity identity, {
+    required bool libraryIsEmpty,
+  })?
+  _syncBindingGate;
 
   /// What every mutation overwrote, and when each capture left the desk. Both
   /// are driven from [_update] and nowhere else — see [CaptureHistory] for why
@@ -303,6 +329,22 @@ class RecordingsController extends ChangeNotifier {
   /// pull-to-refresh land together often enough to matter, and two sweeps would
   /// both write the index.
   bool _refreshingOutcomes = false;
+
+  /// Where a change into an attention state is announced — a best-effort
+  /// sink, see `_announceOutcome`.
+  final OutcomeNotifier _outcomeNotifier;
+
+  /// Reads an outcome summary aloud for [listenToOutcome].
+  final OutcomeSpeaker _outcomeSpeaker;
+
+  /// Announcements still in flight, so a test can wait for them rather than
+  /// sleep. Teardown never waits on them.
+  final Set<Future<void>> _outcomeAnnouncements = <Future<void>>{};
+
+  /// Whether [_outcomeSpeaker] answered available when [initialize] asked.
+  /// False until then and whenever the probe fails, which hides the Listen
+  /// control rather than offering one that can only fail.
+  bool _canListenToOutcome = false;
   final AgentHandoff _agentHandoff;
   final CaptureSender _captureSender;
   final NoteVault _noteVault;
@@ -322,6 +364,7 @@ class RecordingsController extends ChangeNotifier {
   final SourceContentHasher _contentHasher;
   final MediaPicker _mediaPicker;
   final MediaImporter _importer;
+  final ScreenshotTaker _screenshotTaker;
   late final ProcessorRegistry _registry;
 
   // All swappable at runtime from the Models/Config tabs. A swap only affects
@@ -446,6 +489,13 @@ class RecordingsController extends ChangeNotifier {
   DateTime? _processingStartTime;
   Timer? _processingTickerTimer;
   final Set<String> _cancelledProcessingIds = <String>{};
+
+  /// Ids asked to be processed again while their job was already running —
+  /// a fragment appended mid-job. That job listed its pending segments before
+  /// the fragment existed, so dropping the request as a duplicate would leave
+  /// the fragment unprocessed under a `completed` capture. The drain re-queues
+  /// these once the running job ends.
+  final Set<String> _rerunAfterCurrent = <String>{};
   Future<void>? _saveInFlight; // serializes saveAll (shared temp file)
 
   /// Tail of the queue waiting for the ambient usage scope, or null when it is
@@ -1138,6 +1188,7 @@ class RecordingsController extends ChangeNotifier {
     );
 
     await _history.loadRevisions();
+    await _probeOutcomeSpeaker();
 
     notifyListeners();
 
@@ -1343,7 +1394,8 @@ class RecordingsController extends ChangeNotifier {
     // which this gate backs up rather than relies on alone.
     // A snapshot taken before initialize() is [] for the same reason an
     // unreadable index is, and the engine's fuse covers `recordings` only.
-    final String? ownerId = _authGateway?.currentIdentity?.id;
+    final AuthIdentity? identity = _authGateway?.currentIdentity;
+    final String? ownerId = identity?.id;
     final bool hasSupabase =
         _initialized &&
         !_indexUnreadable &&
@@ -1367,7 +1419,15 @@ class RecordingsController extends ChangeNotifier {
     SyncTransport? transport;
     MediaObjectStore? mediaStore;
     String? resolveFailure;
-    if (hasSupabase) {
+    // The account binding (#206) is asked before either resolver: a paused
+    // run resolves neither, so it cannot reach the server or the bucket. A
+    // gate that throws pauses the run too — it never fails `syncCloud`.
+    final String? bindingFailure = hasSupabase
+        ? await _checkSyncBinding(identity!)
+        : null;
+    if (hasSupabase && bindingFailure != null) {
+      resolveFailure = bindingFailure;
+    } else if (hasSupabase) {
       try {
         transport = _syncTransportResolver(ownerId, _logSink);
         mediaStore = _mediaStoreResolver?.call(ownerId);
@@ -1432,7 +1492,8 @@ class RecordingsController extends ChangeNotifier {
       // After the metadata slot: its pull is what adds the rows whose media
       // this fetches. Reads `_recordings` at call time, not the snapshot the
       // metadata slot captured before its pull.
-      syncMedia: hasSupabase && resolvedMediaStore != null
+      syncMedia:
+          hasSupabase && bindingFailure == null && resolvedMediaStore != null
           ? () async {
               await _rerootSyncedPaths();
               // The media counterpart of the #377 row rule: an object that
@@ -1476,6 +1537,29 @@ class RecordingsController extends ChangeNotifier {
     );
     if (!_disposed) notifyListeners();
     return _lastCloudSyncReport!;
+  }
+
+  /// Asks the account-binding gate whether this run may proceed; null when
+  /// it may, the slot's failure reason when it is paused.
+  Future<String?> _checkSyncBinding(AuthIdentity identity) async {
+    final gate = _syncBindingGate;
+    if (gate == null) return null;
+    try {
+      // Only what this run would actually push counts: clipboard items stay
+      // local while clipboard sync is off.
+      final bool libraryIsEmpty =
+          _recordings.isEmpty &&
+          (await _projectsRepository!.loadAll()).isEmpty &&
+          (!(_syncClipboard?.call() ?? false) ||
+              (await _clipboardRepository!.getItems()).isEmpty);
+      final SyncGateDecision decision = await gate(
+        identity,
+        libraryIsEmpty: libraryIsEmpty,
+      );
+      return decision.reason;
+    } catch (_) {
+      return 'sync paused: the account binding could not be checked';
+    }
   }
 
   /// Bring source files with no index row back into the queue.
@@ -2861,6 +2945,129 @@ class RecordingsController extends ChangeNotifier {
     }
   }
 
+  /// Whether [captureScreenshot] has a platform tool behind it.
+  bool get canCaptureScreenshot => _screenshotTaker.isAvailable;
+
+  /// Take a region or window screenshot as a new image capture, optionally
+  /// followed by a spoken comment recorded into the same capture.
+  ///
+  /// The five capture steps, with the platform tool as step 1: it writes the
+  /// PNG straight to `<id>.png` in the recordings directory, the file is
+  /// verified present and non-empty, the row is built `saved`, persisted, and
+  /// only then queued for OCR. An OCR failure therefore leaves the image where
+  /// it is, `failed` and retryable.
+  ///
+  /// A cancelled selection — no file, or an empty one — is not an error: the
+  /// queue is left untouched, nothing is logged as a failure, and an empty file
+  /// is removed so it is not adopted as an orphan on the next launch.
+  ///
+  /// With [withVoiceComment] the microphone opens only after the image row is
+  /// persisted, through the ordinary append path, so the comment lands as the
+  /// capture's second segment and is transcribed beside the OCR text.
+  ///
+  /// Returns the new capture's id, or null when nothing was captured.
+  Future<String?> captureScreenshot({bool withVoiceComment = false}) async {
+    // Before the first load the list is empty, not right: persisting now would
+    // overwrite recordings.json with just this capture (see addTextNote).
+    if (!_initialized) {
+      if (!_indexUnreadable) {
+        _error = 'Captures are still loading — try again.';
+        notifyListeners();
+      }
+      return null;
+    }
+    if (_isRecording || _isBusy) return null;
+    _isBusy = true;
+    _error = null;
+    notifyListeners();
+
+    String? captured;
+    File? destination;
+    try {
+      final String id = const Uuid().v4();
+      const String mimeType = 'image/png';
+      destination = await _repository.createSourceFile(
+        id,
+        RecordingsRepository.extensionFor(
+          CaptureType.image,
+          sourceMimeType: mimeType,
+        ),
+      );
+      await _screenshotTaker.capture(destination);
+
+      final int sizeBytes = await destination.exists()
+          ? await destination.length()
+          : 0;
+      if (sizeBytes == 0) {
+        await _removeEmptyScreenshot(destination);
+        _logSink.log('Screenshot cancelled.');
+        return null;
+      }
+
+      final Recording saved = Recording(
+        id: id,
+        filePath: destination.path,
+        createdAt: DateTime.now(),
+        durationMs: 0,
+        sizeBytes: sizeBytes,
+        status: RecordingStatus.saved,
+        type: CaptureType.image,
+        sourceMimeType: mimeType,
+        projectId: activeProjectId,
+        projectAuto: activeProjectId != null,
+      );
+
+      // Critical invariant: index only after the source is verified.
+      _recordings = <Recording>[saved, ..._recordings];
+      await _persistAll();
+      captured = id;
+      unawaited(_computeContentHash(id));
+      unawaited(_gamificationController?.onCaptureCreated(_recordings.length));
+      _logSink.log('Screenshot saved · $sizeBytes B', recordingId: id);
+
+      await _enqueueProcessing(id);
+    } catch (exception) {
+      if (captured == null) {
+        if (destination != null) await _removeEmptyScreenshot(destination);
+        _error = exception.toString();
+        _logSink.log('Screenshot failed: $exception', level: LogLevel.error);
+      } else {
+        // The capture exists and is on disk; only queuing it failed. Saying
+        // "Screenshot failed" here would tell the user the image is gone when
+        // it is in the queue, `saved`, waiting for a retry.
+        _error =
+            'Screenshot saved, but it could not be queued for '
+            'processing: $exception';
+        _logSink.log(
+          'Screenshot saved but not queued for processing: $exception',
+          level: LogLevel.error,
+          recordingId: captured,
+        );
+      }
+    } finally {
+      _isBusy = false;
+      notifyListeners();
+    }
+
+    if (captured != null && withVoiceComment) {
+      await startRecording(appendTo: captured);
+    }
+    return captured;
+  }
+
+  /// Deletes [file] only when it holds nothing. A non-empty file is a
+  /// screenshot that landed — if indexing it failed, it stays on disk for
+  /// `recoverOrphans()` rather than being destroyed here.
+  Future<void> _removeEmptyScreenshot(File file) async {
+    try {
+      if (await file.exists() && await file.length() == 0) {
+        await file.delete();
+      }
+    } catch (_) {
+      // Best-effort: a zero-byte file is skipped by `findOrphans` anyway.
+    }
+  }
+
   /// Direct file import (e.g. from clipboard image or system drop).
   Future<void> addImportedFile(
     File file,
@@ -3060,6 +3267,61 @@ class RecordingsController extends ChangeNotifier {
     );
   }
 
+  /// Record the user's answer to one of a capture's commitments, found by its
+  /// [key] (`Commitment.keyFor`). `done` and `dismissed` are user-owned: a
+  /// later enrichment run keeps them. [CommitmentState.open] reopens one. An
+  /// unknown capture or key is a no-op.
+  Future<void> setCommitmentState(
+    String id,
+    String key,
+    CommitmentState state,
+  ) async {
+    final String wanted = Commitment.keyFor(key);
+    final Recording? current = _recordings
+        .where((Recording item) => item.id == id)
+        .firstOrNull;
+    final List<Commitment>? list = current?.commitments;
+    if (list == null ||
+        !list.any((Commitment c) => c.key == wanted && c.state != state)) {
+      return;
+    }
+    await _update(
+      id,
+      (Recording item) => item.copyWith(
+        commitments: <Commitment>[
+          for (final Commitment c in item.commitments ?? const <Commitment>[])
+            c.key == wanted ? c.copyWith(state: state) : c,
+        ],
+      ),
+      source: RevisionSource.user,
+    );
+    _logSink.log('Commitment ${state.name}.', recordingId: id);
+  }
+
+  /// Run [exporter] (an `.ics` share or save) for one commitment and log the
+  /// outcome. Read-only towards the capture: nothing here writes the row, and
+  /// a failing export is a log line, never an exception into the UI.
+  Future<void> exportCommitment(
+    String id,
+    Commitment commitment,
+    Future<void> Function(Recording recording, Commitment commitment) exporter,
+  ) async {
+    final Recording? item = _recordings
+        .where((Recording r) => r.id == id)
+        .firstOrNull;
+    if (item == null) return;
+    try {
+      await exporter(item, commitment);
+      _logSink.log('Commitment exported.', recordingId: id);
+    } catch (exception) {
+      _logSink.log(
+        'Commitment export failed: $exception',
+        level: LogLevel.warn,
+        recordingId: id,
+      );
+    }
+  }
+
   /// Overwrite the model's verdict. Null clears it back to "unclassified" — a
   /// wrong category is worse than none, because an export will read this field.
   Future<void> setCategory(String id, CaptureCategory? category) async {
@@ -3122,6 +3384,21 @@ class RecordingsController extends ChangeNotifier {
     final Recording recording = _recordings.firstWhere(
       (Recording item) => item.id == id,
     );
+    final int? every = recording.repeatEveryDays;
+    if (!recording.isProcessedByUser && every != null) {
+      // An occurrence counts only once it is due. DONE on one still waiting
+      // would log a closure for work that was not due yet and push the date
+      // further out, so it does nothing; ending the series is unschedule.
+      if (recording.isScheduledAt(DateTime.now())) {
+        _logSink.log(
+          'Not due yet · the next occurrence is still waiting.',
+          recordingId: id,
+        );
+        return;
+      }
+      await _completeOccurrence(recording, every);
+      return;
+    }
     final bool nextValue = !recording.isProcessedByUser;
 
     await _update(
@@ -3138,6 +3415,80 @@ class RecordingsController extends ChangeNotifier {
     );
     // The tally is raised inside `_update`, which is the only place that can
     // tell a first closure from a re-tick — see [CaptureHistory].
+  }
+
+  /// DONE on a repeating capture (#383): it stays open and goes back to wait,
+  /// [every] days from now, and this occurrence is logged as a closure.
+  ///
+  /// The next date is computed from the clock at the moment of DONE, never
+  /// accumulated: an occurrence finished late does not leave the next one
+  /// already overdue. Calendar days rather than a fixed `Duration`, so a
+  /// daily item keeps its hour across a DST change.
+  Future<void> _completeOccurrence(Recording recording, int every) async {
+    final DateTime now = DateTime.now();
+    final DateTime next = DateTime(
+      now.year,
+      now.month,
+      now.day + every,
+      now.hour,
+      now.minute,
+    );
+    await _update(
+      recording.id,
+      (Recording item) => item.copyWith(resurfaceAt: next),
+      source: RevisionSource.user,
+    );
+    // After the persist, like every closure: the log may only lag the index.
+    await _history.recordOccurrence(recording, _closureKindFor(recording), now);
+    _logSink.log(
+      'Occurrence done · returns ${next.toIso8601String()}.',
+      recordingId: recording.id,
+    );
+  }
+
+  /// Take a capture off the desk until [at] (#383), optionally repeating
+  /// every [repeatEveryDays] days after each DONE.
+  ///
+  /// Scheduling a capture that was already off the desk reopens it to wait:
+  /// a schedule is a promise to see it again, which a closed item cannot keep.
+  /// Nothing here touches `status`, a source file or the pipeline.
+  Future<void> schedule(String id, DateTime at, {int? repeatEveryDays}) async {
+    if (repeatEveryDays != null && repeatEveryDays <= 0) {
+      throw ArgumentError.value(
+        repeatEveryDays,
+        'repeatEveryDays',
+        'must be positive',
+      );
+    }
+    await _update(
+      id,
+      (Recording item) => item.copyWith(
+        resurfaceAt: at,
+        repeatEveryDays: repeatEveryDays,
+        clearRepeatEveryDays: repeatEveryDays == null,
+        isProcessedByUser: false,
+        clearProcessedAt: true,
+      ),
+      source: RevisionSource.user,
+    );
+    _logSink.log(
+      repeatEveryDays == null
+          ? 'Scheduled for ${at.toIso8601String()}.'
+          : 'Scheduled for ${at.toIso8601String()}, '
+                'repeating every $repeatEveryDays d.',
+      recordingId: id,
+    );
+  }
+
+  /// Drop a capture's schedule and repeat; it is back on the desk at once.
+  Future<void> unschedule(String id) async {
+    await _update(
+      id,
+      (Recording item) =>
+          item.copyWith(clearResurfaceAt: true, clearRepeatEveryDays: true),
+      source: RevisionSource.user,
+    );
+    _logSink.log('Schedule cleared.', recordingId: id);
   }
 
   /// Whether [route] has anywhere to send this capture. Synchronous because the
@@ -3295,6 +3646,9 @@ class RecordingsController extends ChangeNotifier {
     // fallback cascade — and never writes a uuid as a heading.
     title: displayNameFor(recording),
     body: recording.transcript ?? '',
+    sourceFiles: <String>[
+      for (final CaptureSegment segment in recording.segments) segment.filePath,
+    ],
     capturedAt: recording.createdAt,
     type: recording.type,
     summary: recording.summary,
@@ -3664,11 +4018,135 @@ class RecordingsController extends ChangeNotifier {
             ],
           ),
         );
+        // Only after the outcome is on disk, and only on a *change* into a
+        // state worth a look: asking again about a brief that is still `done`
+        // must not ring a second time.
+        if (next.state != known.state && outcomeNeedsAttention(next.state)) {
+          final Recording? saved = _recordingOrNull(id);
+          if (saved != null && saved.routes.isNotEmpty) {
+            _announceOutcome(id, saved.routes.last);
+          }
+        }
       }
     } finally {
       _refreshingOutcomes = false;
     }
     return updated;
+  }
+
+  /// Hands one outcome change to the notifier under the `ClipboardSink`
+  /// contract: after the persist, unawaited, every failure swallowed. A
+  /// notifier that answers false — no permission, no platform support — leaves
+  /// the outcome on the card, which is where it was always shown.
+  void _announceOutcome(String id, RouteRecord route) {
+    final RouteOutcome? outcome = route.outcome;
+    if (outcome == null) return;
+    final OutcomeAnnouncement announcement = OutcomeAnnouncement(
+      recordingId: id,
+      state: outcome.state,
+      summary: spokenOutcomeSummary(route),
+    );
+    late final Future<void> job;
+    job = _notifyOutcome(
+      id,
+      announcement,
+    ).whenComplete(() => _outcomeAnnouncements.remove(job));
+    _outcomeAnnouncements.add(job);
+  }
+
+  Future<void> _notifyOutcome(
+    String id,
+    OutcomeAnnouncement announcement,
+  ) async {
+    try {
+      await _outcomeNotifier.notify(announcement);
+    } catch (exception) {
+      _logSink.log(
+        'Could not announce the Command outcome: $exception',
+        level: LogLevel.warn,
+        recordingId: id,
+      );
+    }
+  }
+
+  /// Completes once every outcome announcement started so far has settled.
+  @visibleForTesting
+  Future<void> waitForOutcomeAnnouncements() async {
+    while (_outcomeAnnouncements.isNotEmpty) {
+      await Future.wait(_outcomeAnnouncements.toList(growable: false));
+    }
+  }
+
+  /// Asks the speaker once whether it can talk. A probe that throws reads as
+  /// "no speaker": the card is the whole feature without one.
+  Future<void> _probeOutcomeSpeaker() async {
+    try {
+      _canListenToOutcome = await _outcomeSpeaker.isAvailable();
+    } catch (exception) {
+      _canListenToOutcome = false;
+      _logSink.log(
+        'Text-to-speech is unavailable: $exception',
+        level: LogLevel.warn,
+      );
+    }
+  }
+
+  /// Whether the Listen control is offered at all — a property of the install,
+  /// not of a capture. Pair it with [hasOutcome] per row.
+  bool get canListenToOutcome => _canListenToOutcome;
+
+  /// Whether [id]'s latest delivery carries an outcome to listen or reply to.
+  bool hasOutcome(String id) => _outcomeRoute(id) != null;
+
+  /// The latest delivery of [id], when it carries an outcome.
+  RouteRecord? _outcomeRoute(String id) {
+    final Recording? item = _recordingOrNull(id);
+    if (item == null || item.routes.isEmpty) return null;
+    final RouteRecord route = item.routes.last;
+    return route.outcome == null ? null : route;
+  }
+
+  /// What [listenToOutcome] would say about [id], or null when it has no
+  /// outcome. Built from the outcome alone — never the capture's own text.
+  String? outcomeSummaryFor(String id) {
+    final RouteRecord? route = _outcomeRoute(id);
+    return route == null ? null : spokenOutcomeSummary(route);
+  }
+
+  /// Reads [id]'s outcome summary aloud.
+  ///
+  /// False when there is nothing to say or nothing to say it with — no
+  /// outcome, no text-to-speech, or the engine failed — and the card view,
+  /// which already shows the outcome, is then the whole feature.
+  Future<bool> listenToOutcome(String id) async {
+    final String? summary = outcomeSummaryFor(id);
+    if (summary == null) return false;
+    try {
+      if (!await _outcomeSpeaker.isAvailable()) return false;
+      await _outcomeSpeaker.speak(summary);
+      return true;
+    } catch (exception) {
+      _logSink.log(
+        'Could not read the Command outcome aloud: $exception',
+        level: LogLevel.warn,
+        recordingId: id,
+      );
+      return false;
+    }
+  }
+
+  /// Starts a spoken reply to [id]'s outcome.
+  ///
+  /// Nothing but [startRecording] with `appendTo`: the reply becomes a new
+  /// segment of the same capture through the one append path, so it is on
+  /// disk and verified before the parent row changes, and it re-opens the
+  /// capture for a follow-up handoff. Nothing is sent anywhere — acting on the
+  /// reply stays an explicit handoff. False when [id] has no outcome to reply
+  /// to or the recording did not start.
+  Future<bool> replyToOutcome(String id) async {
+    if (_outcomeRoute(id) == null) return false;
+    await startRecording(appendTo: id);
+    return _isRecording && _appendTargetId == id;
   }
 
   /// Opens a delivery's page on the control plane, or its pull request.
@@ -3822,6 +4300,7 @@ class RecordingsController extends ChangeNotifier {
     }
     if (_processingId == id) {
       _cancelledProcessingIds.add(id);
+      _rerunAfterCurrent.remove(id);
       _processingTickerTimer?.cancel();
       _processingTickerTimer = null;
       _processingStartTime = null;
@@ -4091,7 +4570,11 @@ class RecordingsController extends ChangeNotifier {
     // Idempotent: don't re-enqueue an item that is already queued or currently
     // running — that would process it twice (the UI only ever retries `failed`
     // items, so this is a defensive guard).
-    if (id == _processingId || _processingQueue.contains(id)) return;
+    if (_processingQueue.contains(id)) return;
+    if (id == _processingId) {
+      _rerunAfterCurrent.add(id);
+      return;
+    }
     final Recording? item = _recordings
         .where((Recording r) => r.id == id)
         .cast<Recording?>()
@@ -4174,6 +4657,22 @@ class RecordingsController extends ChangeNotifier {
         // The item could have been dropped between enqueue and now; skip it.
         if (!_recordings.any((Recording item) => item.id == id)) continue;
         await _processOne(id);
+        // Through the funnel, so the row goes back to `pendingTranscription`
+        // and the loop picks it up; segments that already have text are
+        // skipped by `_processOne`.
+        if (_rerunAfterCurrent.remove(id) && !_disposed) {
+          try {
+            await _enqueueProcessing(id);
+          } catch (exception) {
+            // This loop runs unawaited; a throw here would be unhandled. The
+            // row stays as the job left it and RETRY picks the fragment up.
+            _logSink.log(
+              'Could not re-queue an appended fragment: $exception',
+              level: LogLevel.error,
+              recordingId: id,
+            );
+          }
+        }
       }
     } finally {
       _isDraining = false;
@@ -4844,6 +5343,13 @@ class RecordingsController extends ChangeNotifier {
                 listOffered &&
                 chosenProject == null &&
                 offeredIds.contains(item.projectId),
+            // Due phrases resolve against when the capture was made, not when
+            // this run happens; the user's done/dismissed answers survive.
+            commitments: mergeCommitments(
+              existing: item.commitments,
+              extracted: result.commitments,
+              anchor: item.createdAt,
+            ),
           ),
           result,
           offeredRoutes,

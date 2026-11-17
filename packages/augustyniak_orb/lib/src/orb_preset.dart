@@ -92,6 +92,8 @@ class OrbTuning {
     this.sweep = 2,
     this.breath = 6,
     this.gridScroll = 12,
+    this.spokeCount = 72,
+    this.dots = const <int>[5, 7, 4],
   });
 
   static const OrbTuning defaults = OrbTuning();
@@ -121,9 +123,18 @@ class OrbTuning {
   /// Grid cells scrolled per period.
   final double gridScroll;
 
+  /// Spectrum spokes around the core, 12..360.
+  final int spokeCount;
+
+  /// Particles on each of the three rings, inner to outer, each 0..24.
+  final List<int> dots;
+
   /// Degrades: a missing, non-numeric or non-finite value takes its default;
   /// so does a `period` or `gridStep` that is not positive and a `rings`
-  /// list that is not exactly three numbers.
+  /// list that is not exactly three numbers. `spokeCount` and `dots` are
+  /// optional v1 keys: a whole number is clamped (`spokeCount` to 12..360,
+  /// each dot count to 0..24), anything else takes its default, and `dots`
+  /// degrades per element once it is a list of exactly three.
   factory OrbTuning.fromJson(Object? json) {
     final Map<Object?, Object?> m = json is Map
         ? json
@@ -142,6 +153,20 @@ class OrbTuning {
         r.every((Object? e) => e is num && e.isFinite)) {
       rings = <double>[for (final Object? e in r) (e! as num).toDouble()];
     }
+    int? whole(Object? v, int min, int max) {
+      if (v is! num || !v.isFinite || v != v.roundToDouble()) return null;
+      return v.toInt().clamp(min, max);
+    }
+
+    final int spokeCount =
+        whole(m['spokeCount'], 12, 360) ?? defaults.spokeCount;
+    List<int> dots = defaults.dots;
+    final Object? d = m['dots'];
+    if (d is List && d.length == 3) {
+      dots = <int>[
+        for (int i = 0; i < 3; i++) whole(d[i], 0, 24) ?? defaults.dots[i],
+      ];
+    }
     return OrbTuning(
       speed: pick('speed', defaults.speed),
       period: pick('period', defaults.period, positive: true),
@@ -155,6 +180,8 @@ class OrbTuning {
       sweep: pick('sweep', defaults.sweep),
       breath: pick('breath', defaults.breath),
       gridScroll: pick('gridScroll', defaults.gridScroll),
+      spokeCount: spokeCount,
+      dots: dots,
     );
   }
 
@@ -171,6 +198,8 @@ class OrbTuning {
     'sweep': sweep,
     'breath': breath,
     'gridScroll': gridScroll,
+    'spokeCount': spokeCount,
+    'dots': List<int>.of(dots),
   };
 
   @override
@@ -187,7 +216,9 @@ class OrbTuning {
       listEquals(other.rings, rings) &&
       other.sweep == sweep &&
       other.breath == breath &&
-      other.gridScroll == gridScroll;
+      other.gridScroll == gridScroll &&
+      other.spokeCount == spokeCount &&
+      listEquals(other.dots, dots);
 
   @override
   int get hashCode => Object.hash(
@@ -203,6 +234,8 @@ class OrbTuning {
     sweep,
     breath,
     gridScroll,
+    spokeCount,
+    Object.hashAll(dots),
   );
 }
 

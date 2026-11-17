@@ -40,16 +40,29 @@ class ZellijAgentSessionLauncher implements AgentSessionLauncher {
     ExecutableResolver? executables,
     Directory? layoutDirectory,
     TerminalLauncher? terminal,
+    Future<void> Function(Duration delay)? sessionPollDelay,
   }) : _processRunner = processRunner,
        _executables =
            executables ?? PathExecutableResolver(processRunner: processRunner),
        _layoutDirectory = layoutDirectory,
-       _terminal = terminal ?? TerminalLauncher.forCurrentPlatform();
+       _terminal = terminal ?? TerminalLauncher.forCurrentPlatform(),
+       _sessionPollDelay = sessionPollDelay ?? Future<void>.delayed;
+
+  /// How long a windowed launch waits for its session to appear after the
+  /// terminal returns, and how often it asks. The terminal returns long before
+  /// Zellij has started (`open` and the desktop terminals fork and exit), so a
+  /// single check would fail a launch that is merely slow.
+  static const Duration sessionConfirmTimeout = Duration(seconds: 5);
+  static const Duration sessionPollInterval = Duration(milliseconds: 250);
 
   final ProcessRunner _processRunner;
   final ExecutableResolver _executables;
   final Directory? _layoutDirectory;
   final TerminalLauncher _terminal;
+
+  /// The pause between two `list-sessions` polls — a seam so a test records
+  /// the pacing instead of waiting it out.
+  final Future<void> Function(Duration delay) _sessionPollDelay;
 
   @override
   Future<AgentSessionLaunchResult> launch(
@@ -85,7 +98,12 @@ class ZellijAgentSessionLauncher implements AgentSessionLauncher {
       // caller surfaces the attach the same way it does for a terminal launch
       // — the agent inside never received this prompt.
       if (!exists) {
-        await _startInBackground(request, zellij, sessionName, canonicalRepoPath);
+        await _startInBackground(
+          request,
+          zellij,
+          sessionName,
+          canonicalRepoPath,
+        );
       }
       return AgentSessionLaunchResult(
         sessionName: sessionName,
@@ -132,11 +150,37 @@ class ZellijAgentSessionLauncher implements AgentSessionLauncher {
         'The terminal failed to open: ${_errorText(result)}',
       );
     }
+    // An exit code of 0 from a terminal is not proof a session started: WezTerm
+    // that cannot create a window still exits 0 (#291). Only `list-sessions`
+    // tells the truth. Attaching skips this — that session already existed.
+    if (!exists && !await _awaitSession(zellij, sessionName)) {
+      throw AgentSessionLaunchException(
+        '${terminal.name} exited without starting Zellij session '
+        '`$sessionName`. Check that ${terminal.name} can open a window on this '
+        'machine, then hand the capture off again.',
+      );
+    }
 
     return AgentSessionLaunchResult(
       sessionName: sessionName,
       attachedToExistingSession: exists,
     );
+  }
+
+  /// Polls `list-sessions` for [sessionName] for about
+  /// [sessionConfirmTimeout], pausing [sessionPollInterval] between polls.
+  /// Bounded by a count rather than a clock, so the answer does not depend on
+  /// how slow the machine is to run each poll.
+  Future<bool> _awaitSession(String zellij, String sessionName) async {
+    final int polls =
+        sessionConfirmTimeout.inMicroseconds ~/
+            sessionPollInterval.inMicroseconds +
+        1;
+    for (int poll = 0; poll < polls; poll++) {
+      if (poll > 0) await _sessionPollDelay(sessionPollInterval);
+      if (await _sessionExists(zellij, sessionName)) return true;
+    }
+    return false;
   }
 
   @override
@@ -234,9 +278,10 @@ class ZellijAgentSessionLauncher implements AgentSessionLauncher {
   /// race `open`, which returns long before Ghostty has execed anything.
   Future<String> _writeLayout(String sessionName, String layout) async {
     try {
-      final Directory directory = await (_layoutDirectory ??
-              Directory.systemTemp)
-          .createTemp('augustyniak-capture-');
+      final Directory directory =
+          await (_layoutDirectory ?? Directory.systemTemp).createTemp(
+            'augustyniak-capture-',
+          );
       await restrictDirectoryToOwner(directory.path);
       final File file = File(p.join(directory.path, '$sessionName.kdl'));
       await refuseSymlink(file.path);

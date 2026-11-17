@@ -105,18 +105,37 @@ class RecordingUsageSink implements UsageSink {
     required String model,
     required MeasuredUsage usage,
   }) {
-    final DateTime localDay = day.toLocal();
-    final String date =
-        '${localDay.year.toString().padLeft(4, '0')}-'
-        '${localDay.month.toString().padLeft(2, '0')}-'
-        '${localDay.day.toString().padLeft(2, '0')}';
     _recordFor(
-      captureId: 'daily-connections:$date',
+      captureId: 'daily-connections:${_localDate(day)}',
       stage: UsageStage.connections,
       provider: provider,
       model: model,
       usage: usage,
     );
+  }
+
+  /// A daily triage run, filed like [recordConnections] under a synthetic
+  /// `daily-triage:<date>` id so it charges no capture's COST panel.
+  void recordTriage({
+    required DateTime day,
+    required String provider,
+    required String model,
+    required MeasuredUsage usage,
+  }) {
+    _recordFor(
+      captureId: 'daily-triage:${_localDate(day)}',
+      stage: UsageStage.triage,
+      provider: provider,
+      model: model,
+      usage: usage,
+    );
+  }
+
+  static String _localDate(DateTime day) {
+    final DateTime local = day.toLocal();
+    return '${local.year.toString().padLeft(4, '0')}-'
+        '${local.month.toString().padLeft(2, '0')}-'
+        '${local.day.toString().padLeft(2, '0')}';
   }
 
   void _recordFor({

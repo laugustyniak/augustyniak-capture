@@ -36,6 +36,9 @@ dependencies:
   package_info_plus: ^9.0.1
   url_launcher: ^6.3.2
   supabase_flutter: ^2.17.2
+  # Already resolved through supabase_flutter; declared because the shortcut
+  # URL listener imports it directly.
+  app_links: ^7.2.1
   # ^12, not 13: share_plus 13 needs win32 ^6 and file_picker ^11 needs win32 ^5.
   share_plus: ^12.0.2
 
@@ -45,6 +48,9 @@ dev_dependencies:
   integration_test:
     sdk: flutter
   flutter_lints: ^6.0.0
+  # The end-to-end capture test points path_provider at a throwaway directory
+  # so it never reaches the real library on the host running it.
+  path_provider_platform_interface: ^2.1.2
 
 # The published record_linux never reads the stderr of the ffmpeg it spawns:
 # once the pipe buffer fills, ffmpeg blocks, the take stops growing mid-recording

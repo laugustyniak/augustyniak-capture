@@ -240,7 +240,22 @@ String metaLineFor(Recording recording, String filename) {
       formatDuration(Duration(milliseconds: recording.totalDurationMs)),
     extension,
     formatDateTime(recording.createdAt),
+    ?scheduleLabelFor(recording, DateTime.now()),
   ].join(' · ');
+}
+
+/// `Returns 2026-11-07 09:00 · every 7 d` while a capture waits for its date,
+/// `Repeats every 7 d` once a repeating one is back, null otherwise (#383).
+String? scheduleLabelFor(Recording recording, DateTime now) {
+  final int? every = recording.repeatEveryDays;
+  final String? repeat = every == null ? null : 'every $every d';
+  if (recording.isScheduledAt(now)) {
+    return <String>[
+      'Returns ${formatDateTime(recording.resurfaceAt!)}',
+      ?repeat,
+    ].join(' · ');
+  }
+  return repeat == null ? null : 'Repeats $repeat';
 }
 
 /// What a capture is doing right now, drawn while it does it: a moving glyph, a

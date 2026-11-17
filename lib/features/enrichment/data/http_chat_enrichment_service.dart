@@ -10,6 +10,7 @@ import '../../costs/domain/usage_parsing.dart';
 import '../../costs/domain/usage_sink.dart';
 import '../../recordings/domain/capture_category.dart';
 import '../../recordings/domain/capture_priority.dart';
+import '../../recordings/domain/commitment.dart';
 import '../../recordings/domain/connection_reasoner.dart';
 import '../../recordings/domain/suggested_route.dart';
 import '../domain/enrichment_context.dart';
@@ -447,7 +448,40 @@ class HttpChatEnrichmentService
       routeAnswered: route.answered,
       routeKind: route.kind,
       routeReason: route.reason,
+      commitments: _parseCommitments(decoded),
     );
+  }
+
+  /// At most this many commitments are kept from one reply: a transcript that
+  /// yields more is a list of minutes, not of promises.
+  static const int maxCommitments = 10;
+
+  /// `commitments` is a list of `{text, due?, who?}`. A missing key or a
+  /// non-list says nothing (null). Entries without a usable `text` are dropped
+  /// one at a time; the due phrase is kept raw for the caller to resolve.
+  static List<CommitmentDraft>? _parseCommitments(
+    Map<String, dynamic> decoded,
+  ) {
+    final Object? raw = decoded['commitments'];
+    if (raw is! List) return null;
+    final List<CommitmentDraft> drafts = <CommitmentDraft>[];
+    for (final Object? entry in raw) {
+      if (drafts.length >= maxCommitments) break;
+      if (entry is! Map) continue;
+      final String? text = _cleanText(
+        entry['text'],
+        limit: Commitment.maxTextChars,
+      );
+      if (text == null) continue;
+      drafts.add(
+        CommitmentDraft(
+          text: text,
+          due: _cleanText(entry['due'], limit: 60),
+          who: _cleanText(entry['who'], limit: Commitment.maxWhoChars),
+        ),
+      );
+    }
+    return drafts;
   }
 
   /// `route` is `null` (leave it on the desk) or `{kind, reason}`. Anything

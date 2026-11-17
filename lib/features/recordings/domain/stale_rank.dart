@@ -20,14 +20,22 @@ bool isStaleRank(Recording item, String? currentBasis) =>
     item.priorityBasis != null &&
     item.priorityBasis != currentBasis;
 
-/// The captures a re-rank would touch: stale, and still on the desk. A capture
-/// already handed off no longer needs a rank, and paying a model call for it
-/// would buy nothing.
-List<Recording> staleRanks(Iterable<Recording> items, String? currentBasis) =>
-    <Recording>[
-      for (final Recording item in items)
-        if (!item.isProcessedByUser && isStaleRank(item, currentBasis)) item,
-    ];
+/// The captures a re-rank would touch: stale, and still on the desk at [now]
+/// (the clock when omitted). A capture already handed off no longer needs a
+/// rank, and paying a model call for it would buy nothing. One waiting for a
+/// date (#383) is left until it returns — the soul may change again before
+/// then, and the first pass after it is back on the desk picks it up.
+List<Recording> staleRanks(
+  Iterable<Recording> items,
+  String? currentBasis, {
+  DateTime? now,
+}) {
+  final DateTime at = now ?? DateTime.now();
+  return <Recording>[
+    for (final Recording item in items)
+      if (item.isOnDeskAt(at) && isStaleRank(item, currentBasis)) item,
+  ];
+}
 
 /// Where a running re-rank is. [done] counts every item the pass has finished
 /// with, whatever the outcome, so the bar reaches [total] even on failures.

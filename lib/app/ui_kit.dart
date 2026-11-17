@@ -1735,10 +1735,17 @@ class StatusPill extends StatelessWidget {
     required this.color,
     this.pulse = false,
     this.outlined = false,
+    this.tooltip,
   });
 
   final String label;
   final Color color;
+
+  /// Shown on hover or long press. Pass the full text for a pill that carries
+  /// free-form user text (a project name): the label ellipsizes when the pill
+  /// is given less width than it needs, and this is where the rest stays
+  /// reachable.
+  final String? tooltip;
 
   /// Prefixes a pulsing dot — reserved for a state that is actively changing
   /// (transcribing, recording), never for a resting one.
@@ -1756,7 +1763,11 @@ class StatusPill extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Container(
+    // The label is Flexible inside a min-size Row: unbounded (the wide card's
+    // pill row) it lays out at its natural width exactly as before, and only a
+    // bounded parent — a Wrap run narrower than the label — makes it ellipsize
+    // rather than overflow.
+    final Widget pill = Container(
       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
       decoration: BoxDecoration(
         color: outlined ? null : color.withValues(alpha: .1),
@@ -1772,10 +1783,19 @@ class StatusPill extends StatelessWidget {
             PulseDot(color: color),
             const SizedBox(width: 6),
           ],
-          Text(label, style: ConsoleText.pill.copyWith(color: color)),
+          Flexible(
+            child: Text(
+              label,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              softWrap: false,
+              style: ConsoleText.pill.copyWith(color: color),
+            ),
+          ),
         ],
       ),
     );
+    return tooltip == null ? pill : Tooltip(message: tooltip, child: pill);
   }
 }
 

@@ -78,6 +78,21 @@ void main() {
     expect(repository.totalAll().amountUsd, closeTo(2.80, 1e-9));
   });
 
+  test('daily triage enters overall costs under its own stage', () {
+    sink.recordTriage(
+      day: DateTime(2026, 10, 3, 9),
+      provider: 'api.openai.com',
+      model: 'gpt-5.6-luna',
+      usage: const MeasuredUsage(inputTokens: 1000000, outputTokens: 1000000),
+    );
+
+    final UsageEvent triage =
+        repository.forCapture('daily-triage:2026-10-03').single;
+    expect(triage.stage, UsageStage.triage);
+    expect(triage.costUsd, closeTo(1.40, 1e-9));
+    expect(UsageStage.triage.label, 'DAILY TRIAGE');
+  });
+
   test('a transcription with no reported duration falls back to the capture', () {
     sink.beginJob(
       'cap-2',

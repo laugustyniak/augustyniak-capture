@@ -8,6 +8,7 @@ enum UsageStage {
   ocr,
   enrichment,
   connections,
+  triage,
   cleanup,
   embedding,
   instruction;
@@ -21,6 +22,7 @@ enum UsageStage {
     UsageStage.ocr => 'OCR',
     UsageStage.enrichment => 'ENRICHMENT',
     UsageStage.connections => 'DAILY CONNECTIONS',
+    UsageStage.triage => 'DAILY TRIAGE',
     UsageStage.cleanup => 'CLEAN-UP',
     UsageStage.embedding => 'EMBEDDING',
     UsageStage.instruction => 'INSTRUCTION',

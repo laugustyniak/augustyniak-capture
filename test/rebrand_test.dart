@@ -80,6 +80,7 @@ void main() {
     for (final String path in <String>[
       'tool/deploy.sh',
       'tool/deploy-mcp.sh',
+      'tool/gnome-shortcuts.sh',
     ]) {
       for (final String literal in <String>[
         applicationId,

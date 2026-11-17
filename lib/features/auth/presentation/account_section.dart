@@ -2,7 +2,9 @@ import 'package:flutter/material.dart';
 
 import '../../../app/ui_kit.dart';
 import '../../sync/data/e2ee_service.dart';
+import '../../sync/domain/sync_binding.dart';
 import '../../sync/presentation/e2ee_passphrase_dialog.dart';
+import '../../sync/presentation/sync_binding_controller.dart';
 import '../domain/auth_identity.dart';
 import '../domain/supabase_config.dart';
 import 'auth_controller.dart';
@@ -12,6 +14,7 @@ class AccountSection extends StatelessWidget {
     super.key,
     this.controller,
     this.e2ee,
+    this.binding,
     this.configIssue,
   });
 
@@ -21,6 +24,10 @@ class AccountSection extends StatelessWidget {
   /// configured: the card shows whether this device holds it and offers
   /// the passphrase flow, LOCK and FORGET KEY. Null hides the whole block.
   final E2eeService? e2ee;
+
+  /// Which account this device's library is bound to (#206), with the
+  /// upload and unbind actions. Null hides the block.
+  final SyncBindingController? binding;
 
   /// Why the build's Supabase values were refused, for tests. Null reads
   /// `SupabaseConfig.environmentIssue()`, which is a compile-time constant.
@@ -37,7 +44,7 @@ class AccountSection extends StatelessWidget {
           AnimatedBuilder(
             animation: auth,
             builder: (BuildContext context, Widget? _) =>
-                _AccountCard(auth, e2ee: e2ee),
+                _AccountCard(auth, e2ee: e2ee, binding: binding),
           )
         else
           _UnavailableCard(
@@ -49,10 +56,11 @@ class AccountSection extends StatelessWidget {
 }
 
 class _AccountCard extends StatelessWidget {
-  const _AccountCard(this.controller, {this.e2ee});
+  const _AccountCard(this.controller, {this.e2ee, this.binding});
 
   final AuthController controller;
   final E2eeService? e2ee;
+  final SyncBindingController? binding;
 
   @override
   Widget build(BuildContext context) {
@@ -85,6 +93,12 @@ class _AccountCard extends StatelessWidget {
             ),
             InfoRow(label: 'ACCOUNT', value: identity.email),
             InfoRow(label: 'OWNER ID', value: identity.id, monospace: true),
+            if (binding case final SyncBindingController binding)
+              ListenableBuilder(
+                listenable: binding,
+                builder: (BuildContext context, Widget? _) =>
+                    _LibraryRows(binding: binding, identity: identity),
+              ),
             if (e2ee case final E2eeService e2ee)
               ListenableBuilder(
                 listenable: e2ee,
@@ -146,11 +160,15 @@ class _EncryptionRows extends StatelessWidget {
     final (String value, Color color) = switch (e2ee) {
       E2eeService(isUnlocked: true) => ('END-TO-END, UNLOCKED', Console.green),
       _ when !settled => ('CHECKING…', Console.muted),
-      E2eeService(isLocked: true, keyOnServer: null) =>
-        ('LOCKED, SERVER NOT REACHED', Console.red),
+      E2eeService(isLocked: true, keyOnServer: null) => (
+        'LOCKED, SERVER NOT REACHED',
+        Console.red,
+      ),
       E2eeService(isLocked: true) => ('LOCKED ON THIS DEVICE', Console.red),
-      E2eeService(isPlaintextUnconfirmed: true) =>
-        ('NOT SET UP, SYNC PAUSED', Console.red),
+      E2eeService(isPlaintextUnconfirmed: true) => (
+        'NOT SET UP, SYNC PAUSED',
+        Console.red,
+      ),
       _ => ('NOT SET UP', Console.red),
     };
     return Column(
@@ -206,6 +224,102 @@ class _EncryptionRows extends StatelessWidget {
       // locked either way; a keyring that refuses the delete is the next
       // launch's problem, and this card has no error slot of its own.
     }
+  }
+}
+
+/// LIBRARY row (#206): which account this device's library syncs with.
+/// UPLOAD THIS LIBRARY binds an unbound device to the signed-in account;
+/// UNBIND THIS DEVICE forgets the binding and the sync ledger. Both ask
+/// first, and neither touches a local capture.
+class _LibraryRows extends StatelessWidget {
+  _LibraryRows({required this.binding, required this.identity});
+
+  final SyncBindingController binding;
+  final AuthIdentity identity;
+
+  static const String unbindWarning =
+      'This device forgets which account its library syncs with, and what it '
+      'has already pushed and pulled. Recordings, projects, clipboard items '
+      'and files stay on this device. The next sync asks which account to '
+      'upload the library to.';
+
+  @override
+  Widget build(BuildContext context) {
+    final SyncBindingState state = binding.state;
+    final (String value, Color color) = switch (state.status) {
+      SyncBindingStatus.bound => ('BOUND TO THIS ACCOUNT', Console.green),
+      SyncBindingStatus.unbound => ('NOT BOUND', Console.amber),
+      SyncBindingStatus.awaitingConfirmation => (
+        'NOT BOUND, SYNC PAUSED',
+        Console.red,
+      ),
+      SyncBindingStatus.mismatch => (
+        'BOUND TO ${state.boundEmail?.isNotEmpty == true ? state.boundEmail : 'ANOTHER ACCOUNT'}, SYNC PAUSED',
+        Console.red,
+      ),
+      SyncBindingStatus.unreadable => (
+        'BINDING UNREADABLE, SYNC PAUSED',
+        Console.red,
+      ),
+      SyncBindingStatus.signedOut => ('CHECKING…', Console.muted),
+    };
+    final bool canUpload =
+        state.status == SyncBindingStatus.unbound ||
+        state.status == SyncBindingStatus.awaitingConfirmation;
+    final bool canUnbind =
+        state.status == SyncBindingStatus.bound ||
+        state.status == SyncBindingStatus.mismatch ||
+        state.status == SyncBindingStatus.unreadable;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: <Widget>[
+        InfoRow(label: 'LIBRARY', value: value, valueColor: color),
+        if (canUpload || canUnbind)
+          Wrap(
+            spacing: 4,
+            children: <Widget>[
+              if (canUpload)
+                TextButton.icon(
+                  onPressed: () => _upload(context),
+                  icon: const Icon(Icons.cloud_upload_outlined, size: 16),
+                  label: const Text('UPLOAD THIS LIBRARY'),
+                ),
+              if (canUnbind)
+                TextButton.icon(
+                  onPressed: () => _unbind(context),
+                  icon: const Icon(Icons.link_off_rounded, size: 16),
+                  label: const Text('UNBIND THIS DEVICE'),
+                  style: TextButton.styleFrom(foregroundColor: Console.red),
+                ),
+            ],
+          ),
+      ],
+    );
+  }
+
+  Future<void> _upload(BuildContext context) async {
+    final bool confirmed = await confirmDestructive(
+      context,
+      title: 'Upload this library to ${identity.email}?',
+      message:
+          "Every capture, project and revision on this device will sync to "
+          '${identity.email}, and this device will only sync with that '
+          'account from now on.',
+      confirmLabel: 'UPLOAD THIS LIBRARY',
+    );
+    if (!confirmed) return;
+    await binding.confirmUpload();
+  }
+
+  Future<void> _unbind(BuildContext context) async {
+    final bool confirmed = await confirmDestructive(
+      context,
+      title: 'Unbind this device?',
+      message: unbindWarning,
+      confirmLabel: 'UNBIND THIS DEVICE',
+    );
+    if (!confirmed) return;
+    await binding.unbind();
   }
 }
 

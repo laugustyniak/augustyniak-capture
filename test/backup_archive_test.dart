@@ -9,6 +9,8 @@ import 'package:path/path.dart' as p;
 import 'package:augustyniak_capture/features/backup/data/file_picker_archive_location.dart';
 import 'package:augustyniak_capture/features/backup/data/zip_capture_archive.dart';
 import 'package:augustyniak_capture/features/backup/domain/capture_archive.dart';
+import 'package:augustyniak_capture/features/connections/data/file_triage_log.dart';
+import 'package:augustyniak_capture/features/connections/domain/daily_triage.dart';
 import 'package:augustyniak_capture/features/projects/data/projects_repository.dart';
 import 'package:augustyniak_capture/features/projects/domain/project.dart';
 import 'package:augustyniak_capture/features/recordings/data/recordings_repository.dart';
@@ -809,6 +811,24 @@ void main() {
     },
   );
 
+  test('a schedule and its repeat survive a round trip (#383)', () async {
+    final Recording scheduled = capture(
+      'a',
+    ).copyWith(resurfaceAt: DateTime.utc(2026, 11, 7, 9), repeatEveryDays: 7);
+    final Recording plain = capture('b');
+    await seed(source, <Recording>[scheduled, plain]);
+
+    await archiveFor(source).exportTo(zipPath());
+    await archiveFor(target).importFrom(zipPath());
+
+    final List<Recording> rows = await repositoryFor(target).loadAll();
+    Recording row(String id) => rows.firstWhere((Recording r) => r.id == id);
+    expect(row('a').resurfaceAt, DateTime.utc(2026, 11, 7, 9));
+    expect(row('a').repeatEveryDays, 7);
+    expect(row('b').resurfaceAt, isNull);
+    expect(row('b').repeatEveryDays, isNull);
+  });
+
   test('the closure history survives a restore', () async {
     await seed(source, <Recording>[capture('a')]);
     // One closure, written the way `FileClosureLog` appends them.
@@ -825,6 +845,53 @@ void main() {
     final File merged = File(p.join(target.path, 'closures.jsonl'));
     expect(merged.existsSync(), isTrue);
     expect(merged.readAsStringSync(), contains('"recordingId":"a"'));
+  });
+
+  test('a triage rejection survives a restore', () async {
+    await seed(source, <Recording>[capture('a')]);
+    await FileTriageLog(directory: () async => source).appendDecision(
+      TriageDecision(
+        key: 'close:a',
+        outcome: TriageOutcome.rejected,
+        at: DateTime(2026, 8, 5, 13),
+      ),
+    );
+
+    await archiveFor(source).exportTo(zipPath());
+    await archiveFor(target).importFrom(zipPath());
+
+    // Carried and never merged back would bring every rejected proposal
+    // back after a reinstall — the one thing a rejection exists to prevent.
+    final TriageHistory history = await FileTriageLog(
+      directory: () async => target,
+    ).load();
+    expect(history.rejected, contains('close:a'));
+  });
+
+  test('a triage rejection is merged into an existing local log', () async {
+    await seed(source, <Recording>[capture('a')]);
+    await FileTriageLog(directory: () async => source).appendDecision(
+      TriageDecision(
+        key: 'close:a',
+        outcome: TriageOutcome.rejected,
+        at: DateTime(2026, 8, 5, 13),
+      ),
+    );
+    await FileTriageLog(directory: () async => target).appendDecision(
+      TriageDecision(
+        key: 'stale:b',
+        outcome: TriageOutcome.rejected,
+        at: DateTime(2026, 8, 6, 9),
+      ),
+    );
+
+    await archiveFor(source).exportTo(zipPath());
+    await archiveFor(target).importFrom(zipPath());
+
+    final TriageHistory history = await FileTriageLog(
+      directory: () async => target,
+    ).load();
+    expect(history.rejected, containsAll(<String>['close:a', 'stale:b']));
   });
 
   test('an agent artifact path is not carried across an import', () async {
