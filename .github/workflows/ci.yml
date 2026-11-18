@@ -29,6 +29,13 @@ on:
 permissions:
   contents: read
 
+# The Flutter every job installs. `channel: stable` alone took whatever stable
+# was current, and Flutter 3.50.0 deprecated `package:flutter/material.dart`:
+# 110 analyzer infos, a red gate on every pull request, no code change behind
+# it (#439). Raise this deliberately, together with the code it needs.
+env:
+  FLUTTER_VERSION: 3.44.7
+
 concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: true
@@ -111,6 +118,7 @@ jobs:
       - uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2 # v2.23.0
         with:
           channel: stable
+          flutter-version: ${{ env.FLUTTER_VERSION }}
           cache: true
 
       - run: flutter --version
@@ -146,6 +154,7 @@ jobs:
       - uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2 # v2.23.0
         with:
           channel: stable
+          flutter-version: ${{ env.FLUTTER_VERSION }}
           cache: true
 
       - run: flutter pub get
@@ -221,6 +230,7 @@ jobs:
       - uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2 # v2.23.0
         with:
           channel: stable
+          flutter-version: ${{ env.FLUTTER_VERSION }}
           cache: true
 
       - run: flutter pub get
@@ -276,6 +286,7 @@ jobs:
       - uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2 # v2.23.0
         with:
           channel: stable
+          flutter-version: ${{ env.FLUTTER_VERSION }}
           cache: true
 
       # The full list from docs/platform-setup.md: each missing package fails
