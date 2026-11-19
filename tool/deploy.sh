@@ -277,6 +277,16 @@ install_macos() {
   fi
 
   if [ "$skip_build" = 0 ]; then
+    # A signing identity lives in the login keychain, which an ssh session
+    # finds locked: codesign then dies with errSecInternalComponent, minutes
+    # into the build. Refused here instead, and not downgraded to ad-hoc — an
+    # ad-hoc bundle is a stranger to the keychain grant on the master key.
+    if [ -f "$signing" ] && ! security show-keychain-info >/dev/null 2>&1; then
+      echo "deploy: the login keychain is locked, so codesign cannot use the" >&2
+      echo "        identity in $signing. Unlock it, then rerun:" >&2
+      echo "          security unlock-keychain ~/Library/Keychains/login.keychain-db" >&2
+      exit 1
+    fi
     flutter build macos "${build_args[@]}"
   fi
   [ -d "$app" ] || {

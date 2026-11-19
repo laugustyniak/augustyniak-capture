@@ -143,10 +143,13 @@ tool/deploy.sh --android  # release APK onto every adb device, `install -r`
 **`tool/deploy-all.sh` (and the `/deploy` project command that runs it) does
 every target in turn**: this host, every attached Android device, and, from
 Linux, the Mac over ssh (`DEPLOY_MAC_HOST`, default `macbook-pro`;
-`DEPLOY_MAC_REPO` for its clone). Each target ends as OK, SKIP or FAIL, so an
+`DEPLOY_MAC_REPO` for its clone, default `~/github/apps/augustyniak-capture`). Each target ends as OK, SKIP or FAIL, so an
 asleep Mac or an absent phone does not stop the others. The Mac builds the
 commit, not the working tree: `HEAD` has to be on `origin`, and it is checked
 out in `.worktrees/deploy` on the Mac so that clone's own checkout never moves.
+A signing config there means the login keychain must be unlocked — an ssh
+session finds it locked, and `tool/deploy.sh` refuses before building:
+`security unlock-keychain ~/Library/Keychains/login.keychain-db` on the Mac.
 **The Android step never uninstalls.** A phone holding a build signed with a
 different key answers `INSTALL_FAILED_UPDATE_INCOMPATIBLE`, and the only way
 past that is an uninstall, which deletes the container and the recordings in it.
