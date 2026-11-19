@@ -216,7 +216,7 @@ class _HeaderButton extends StatelessWidget {
 
 /// Copy that answers: the app uses no snackbars, so the label says `Copied`.
 class _CopyButton extends StatefulWidget {
-  const _CopyButton({required this.text});
+  _CopyButton({required this.text});
 
   final String text;
 
