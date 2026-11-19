@@ -1385,6 +1385,7 @@ class _QueueTabState extends State<QueueTab> {
                 ? null
                 : (CaptureType type) =>
                     widget.onAppendUpload!(selected.id, type),
+            onConfirmSuggestedRoute: () => _confirmSuggestedRoute(selected),
             onToggleProcessed: () => _toggleProcessed(selected),
             isMarkingDone: markingDoneIds.contains(selected.id),
             onConfigureModels: widget.onConfigureModels,
@@ -1520,6 +1521,7 @@ class _QueueTabState extends State<QueueTab> {
                       ? null
                       : (CaptureType type) =>
                           widget.onAppendUpload!(item.id, type),
+                  onConfirmSuggestedRoute: () => _confirmSuggestedRoute(item),
                   onToggleProcessed: () => _toggleProcessed(item),
                   isMarkingDone: markingDoneIds.contains(item.id),
                   onConfigureModels: widget.onConfigureModels == null

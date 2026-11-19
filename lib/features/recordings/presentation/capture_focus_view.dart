@@ -18,6 +18,7 @@ import '../domain/recording.dart';
 import 'audio_waveform_visualizer.dart';
 import 'agent_artifact_viewer_modal.dart';
 import 'capture_text_tabs.dart';
+import 'capture_result_header.dart';
 import 'card_parts.dart';
 import 'processing_hero.dart';
 import 'handoff_sheet.dart';
@@ -1109,6 +1110,7 @@ class CaptureDetailPanel extends StatefulWidget {
     this.onAppendRecording,
     this.onAppendNote,
     this.onAppendUpload,
+    this.onConfirmSuggestedRoute,
     this.isMarkingDone = false,
     this.onConfigureModels,
     this.costUsd,
@@ -1139,6 +1141,10 @@ class CaptureDetailPanel extends StatefulWidget {
   final VoidCallback? onAppendRecording;
   final VoidCallback? onAppendNote;
   final ValueChanged<CaptureType>? onAppendUpload;
+
+  /// Runs the queue's suggested-route handler; null hides the result header's
+  /// primary action.
+  final VoidCallback? onConfirmSuggestedRoute;
 
   /// Routed through the queue rather than straight to the controller, so the
   /// panel's Mark done gets the same saving/done feedback the card's does.
@@ -1268,6 +1274,17 @@ class _CaptureDetailPanelState extends State<CaptureDetailPanel> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: <Widget>[
+          if (CaptureResultHeader.appliesTo(recording)) ...<Widget>[
+            CaptureResultHeader(
+              controller: controller,
+              recording: recording,
+              onConfirmSuggestedRoute: widget.onConfirmSuggestedRoute,
+              onAppendRecording: onAppendRecording,
+              onAppendNote: onAppendNote,
+              onAppendUpload: onAppendUpload,
+            ),
+            const SizedBox(height: 16),
+          ],
           _PanelBadges(
             controller: controller,
             recording: recording,
@@ -1918,9 +1935,11 @@ class _PanelActions extends StatelessWidget {
           semanticLabel: 'Sync to Obsidian vault',
           onPressed: () => controller.retryVaultMirror(recording.id),
         ),
-      if (onAppendRecording != null ||
-          onAppendNote != null ||
-          onAppendUpload != null)
+      // The result header carries this action while the capture is open.
+      if (!CaptureResultHeader.appliesTo(recording) &&
+          (onAppendRecording != null ||
+              onAppendNote != null ||
+              onAppendUpload != null))
         _PanelButton(
           icon: Icons.add_rounded,
           label: '+ Fragment',
