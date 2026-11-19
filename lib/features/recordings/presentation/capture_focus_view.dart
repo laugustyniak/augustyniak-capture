@@ -1144,7 +1144,7 @@ class CaptureDetailPanel extends StatefulWidget {
 
   /// Runs the queue's suggested-route handler; null hides the result header's
   /// primary action.
-  final VoidCallback? onConfirmSuggestedRoute;
+  final Future<void> Function()? onConfirmSuggestedRoute;
 
   /// Routed through the queue rather than straight to the controller, so the
   /// panel's Mark done gets the same saving/done feedback the card's does.

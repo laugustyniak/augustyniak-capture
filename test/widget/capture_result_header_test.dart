@@ -13,6 +13,7 @@ import 'package:augustyniak_capture/features/recordings/presentation/queue_tab.d
 import 'package:augustyniak_capture/features/recordings/presentation/recordings_controller.dart';
 import 'package:augustyniak_capture/features/settings/domain/audio_config.dart';
 import 'package:augustyniak_capture/features/transcription/data/transcription_service.dart';
+import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -50,6 +51,9 @@ class _SlowTranscription implements TranscriptionService {
 
 class _FileRouter implements CaptureRouter {
   final List<String?> routed = <String?>[];
+
+  /// When set, a delivery stays in flight until it completes.
+  Completer<void>? hold;
   @override
   bool canRoute(String? projectId) => true;
   @override
@@ -57,6 +61,7 @@ class _FileRouter implements CaptureRouter {
   @override
   Future<RouteRecord> route(RoutedCapture capture) async {
     routed.add(capture.projectId);
+    await hold?.future;
     return RouteRecord(
       at: DateTime.utc(2026, 11, 20),
       kind: RouteKind.file,
@@ -88,6 +93,36 @@ void main() {
     addTearDown(controller.dispose);
     await controller.initialize();
     return controller;
+  }
+
+  /// Polls real time for [condition]; a fixed sleep would encode a guess about
+  /// how busy the machine is.
+  Future<void> until(WidgetTester tester, bool Function() condition) async {
+    await tester.runAsync(() async {
+      for (int i = 0; i < 200 && !condition(); i++) {
+        await Future<void>.delayed(const Duration(milliseconds: 10));
+      }
+    });
+    await tester.pump();
+    expect(condition(), isTrue, reason: 'condition not reached in time');
+  }
+
+  Future<void> pumpHeader(
+    WidgetTester tester,
+    RecordingsController controller,
+    Recording recording, {
+    VoidCallback? onAppendRecording,
+  }) async {
+    await tester.pumpWidget(
+      hostTab(
+        () => CaptureResultHeader(
+          controller: controller,
+          recording: recording,
+          onAppendRecording: onAppendRecording,
+        ),
+      ),
+    );
+    await tester.pump();
   }
 
   Future<void> pumpQueue(
@@ -131,24 +166,27 @@ void main() {
     await tester.runAsync(() async {
       await controller.startRecording();
       await controller.stopRecording();
-      await Future<void>.delayed(const Duration(milliseconds: 50));
+      for (
+        int i = 0;
+        i < 200 &&
+            controller.recordings.first.status != RecordingStatus.transcribing;
+        i++
+      ) {
+        await Future<void>.delayed(const Duration(milliseconds: 10));
+      }
     });
     await tester.pump();
+    expect(controller.recordings, isNotEmpty);
 
     expect(find.byType(CaptureResultHeader), findsOneWidget);
     expect(find.text('SAVED · 3 B'), findsOneWidget);
     expect(find.text(CaptureResultHeader.doneLabel), findsNothing);
 
-    await tester.runAsync(() async {
-      slow.gate.complete();
-      for (int i = 0; i < 60; i++) {
-        if (controller.recordings.first.status == RecordingStatus.completed) {
-          break;
-        }
-        await Future<void>.delayed(const Duration(milliseconds: 20));
-      }
-    });
-    await tester.pump();
+    await tester.runAsync(() async => slow.gate.complete());
+    await until(
+      tester,
+      () => controller.recordings.first.status == RecordingStatus.completed,
+    );
 
     expect(find.text('SAVED · 3 B'), findsOneWidget);
     expect(find.text(CaptureResultHeader.doneLabel), findsOneWidget);
@@ -174,15 +212,35 @@ void main() {
     );
 
     await tester.tap(primary);
-    await tester.runAsync(
-      () => Future<void>.delayed(const Duration(milliseconds: 50)),
-    );
-    await tester.pump();
+    await until(tester, () => controller.recordings.single.routes.isNotEmpty);
 
     expect(router.routed, hasLength(1));
     final Recording after = controller.recordings.single;
     expect(after.routes, hasLength(1));
     expect(after.isProcessedByUser, isTrue);
+  });
+
+  testWidgets('a second tap while the route is in flight delivers once', (
+    WidgetTester tester,
+  ) async {
+    final _FileRouter router = _FileRouter()..hold = Completer<void>();
+    final RecordingsController controller = await controllerFor(<Recording>[
+      suggested(),
+    ], router: router);
+    await pumpQueue(tester, controller);
+    await tester.tap(find.text('Plan the launch').first);
+    await tester.pump();
+
+    final Finder primary = find.byKey(CaptureResultHeader.routeButtonKey);
+    await tester.tap(primary);
+    await tester.pump();
+    await tester.tap(primary, warnIfMissed: false);
+    await tester.pump();
+    expect(router.routed, hasLength(1));
+
+    router.hold!.complete();
+    await until(tester, () => controller.recordings.single.routes.isNotEmpty);
+    expect(router.routed, hasLength(1));
   });
 
   testWidgets('no suggestion means no primary route button', (
@@ -221,7 +279,7 @@ void main() {
           showMetaColumn: false,
           onEdit: () {},
           onToggleProcessed: () {},
-          onConfirmSuggestedRoute: () {},
+          onConfirmSuggestedRoute: () async {},
         ),
       ),
     );
@@ -231,11 +289,51 @@ void main() {
     expect(find.byType(CaptureResultHeader), findsNothing);
   });
 
-  testWidgets('renders the header to a PNG when asked', (
+  testWidgets('+ Fragment opens the append menu when callbacks are present', (
     WidgetTester tester,
   ) async {
-    final String? out = Platform.environment['CAPTURE_HEADER_PNG'];
-    if (out == null) return;
+    final RecordingsController controller = await controllerFor(<Recording>[]);
+    int appended = 0;
+    await pumpHeader(
+      tester,
+      controller,
+      suggested(),
+      onAppendRecording: () => appended++,
+    );
+
+    await tester.tap(find.text('+ Fragment'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.widgetWithText(ListTile, 'RECORDING'));
+    await tester.pumpAndSettle();
+
+    expect(appended, 1);
+  });
+
+  testWidgets('+ Fragment is absent without append callbacks', (
+    WidgetTester tester,
+  ) async {
+    final RecordingsController controller = await controllerFor(<Recording>[]);
+    await pumpHeader(tester, controller, suggested());
+
+    expect(find.text('+ Fragment'), findsNothing);
+  });
+
+  testWidgets('a failed capture shows FAILED', (WidgetTester tester) async {
+    final RecordingsController controller = await controllerFor(<Recording>[]);
+    await pumpHeader(
+      tester,
+      controller,
+      makeRecording(id: 'f', status: RecordingStatus.failed, sizeBytes: 3),
+    );
+
+    expect(find.text(CaptureResultHeader.failedLabel), findsOneWidget);
+    expect(find.text(CaptureResultHeader.doneLabel), findsNothing);
+  });
+
+  final String? out = Platform.environment['CAPTURE_HEADER_PNG'];
+  testWidgets('renders the header to a PNG when asked', skip: out == null, (
+    WidgetTester tester,
+  ) async {
     // The test binding draws text as boxes; load the real faces so the
     // render shows words. Icons come from the SDK when FLUTTER_ROOT is set.
     await tester.runAsync(() async {
@@ -283,7 +381,7 @@ void main() {
       final ByteData? bytes = await image.toByteData(
         format: ui.ImageByteFormat.png,
       );
-      File(out).writeAsBytesSync(bytes!.buffer.asUint8List());
+      File(out!).writeAsBytesSync(bytes!.buffer.asUint8List());
     });
   });
 }

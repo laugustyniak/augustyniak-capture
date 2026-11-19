@@ -34,7 +34,7 @@ class CaptureResultHeader extends StatelessWidget {
   final Recording recording;
 
   /// Executes the suggested route; null hides the primary action.
-  final VoidCallback? onConfirmSuggestedRoute;
+  final Future<void> Function()? onConfirmSuggestedRoute;
   final VoidCallback? onAppendRecording;
   final VoidCallback? onAppendNote;
   final ValueChanged<CaptureType>? onAppendUpload;
@@ -122,15 +122,11 @@ class CaptureResultHeader extends StatelessWidget {
                 runSpacing: 8,
                 children: <Widget>[
                   if (route != null)
-                    Tooltip(
-                      message: route.reason ?? '',
-                      child: _HeaderButton(
-                        key: routeButtonKey,
-                        icon: Icons.outbound_outlined,
-                        label: routeLabelFor(route),
-                        primary: true,
-                        onPressed: onConfirmSuggestedRoute,
-                      ),
+                    _RouteButton(
+                      key: routeButtonKey,
+                      label: routeLabelFor(route),
+                      reason: route.reason,
+                      onConfirm: onConfirmSuggestedRoute!,
                     ),
                   if (text.isNotEmpty) _CopyButton(text: text),
                   if (canAppend)
@@ -175,6 +171,50 @@ class CaptureResultHeader extends StatelessWidget {
         color: Console.red,
       ),
     };
+  }
+}
+
+/// The primary action. It stays disabled until the handler's future completes:
+/// `route()` records the route only after the delivery returns, so until then
+/// the capture still looks unrouted and a second tap would deliver it again.
+class _RouteButton extends StatefulWidget {
+  const _RouteButton({
+    super.key,
+    required this.label,
+    required this.reason,
+    required this.onConfirm,
+  });
+
+  final String label;
+  final String? reason;
+  final Future<void> Function() onConfirm;
+
+  @override
+  State<_RouteButton> createState() => _RouteButtonState();
+}
+
+class _RouteButtonState extends State<_RouteButton> {
+  bool _routing = false;
+
+  Future<void> _confirm() async {
+    setState(() => _routing = true);
+    try {
+      await widget.onConfirm();
+    } finally {
+      if (mounted) setState(() => _routing = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final Widget button = _HeaderButton(
+      icon: Icons.outbound_outlined,
+      label: widget.label,
+      primary: true,
+      onPressed: _routing ? null : _confirm,
+    );
+    final String? reason = widget.reason;
+    return reason == null ? button : Tooltip(message: reason, child: button);
   }
 }
 
