@@ -178,7 +178,7 @@ class CaptureResultHeader extends StatelessWidget {
 /// `route()` records the route only after the delivery returns, so until then
 /// the capture still looks unrouted and a second tap would deliver it again.
 class _RouteButton extends StatefulWidget {
-  const _RouteButton({
+  _RouteButton({
     super.key,
     required this.label,
     required this.reason,
