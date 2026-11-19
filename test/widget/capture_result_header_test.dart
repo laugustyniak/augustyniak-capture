@@ -1,6 +1,5 @@
 import 'dart:async';
 import 'dart:io';
-import 'dart:typed_data';
 import 'dart:ui' as ui;
 
 import 'package:augustyniak_capture/features/recordings/domain/capture_category.dart';
@@ -15,6 +14,7 @@ import 'package:augustyniak_capture/features/recordings/presentation/recordings_
 import 'package:augustyniak_capture/features/settings/domain/audio_config.dart';
 import 'package:augustyniak_capture/features/transcription/data/transcription_service.dart';
 import 'package:flutter/rendering.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:record/record.dart';
 
@@ -136,7 +136,7 @@ void main() {
     await tester.pump();
 
     expect(find.byType(CaptureResultHeader), findsOneWidget);
-    expect(find.text('SAVED ✓ · 3 B'), findsOneWidget);
+    expect(find.text('SAVED · 3 B'), findsOneWidget);
     expect(find.text(CaptureResultHeader.doneLabel), findsNothing);
 
     await tester.runAsync(() async {
@@ -150,7 +150,7 @@ void main() {
     });
     await tester.pump();
 
-    expect(find.text('SAVED ✓ · 3 B'), findsOneWidget);
+    expect(find.text('SAVED · 3 B'), findsOneWidget);
     expect(find.text(CaptureResultHeader.doneLabel), findsOneWidget);
   });
 
@@ -236,6 +236,38 @@ void main() {
   ) async {
     final String? out = Platform.environment['CAPTURE_HEADER_PNG'];
     if (out == null) return;
+    // The test binding draws text as boxes; load the real faces so the
+    // render shows words. Icons come from the SDK when FLUTTER_ROOT is set.
+    await tester.runAsync(() async {
+      Future<void> load(String family, List<String> paths) async {
+        final FontLoader loader = FontLoader(family);
+        for (final String path in paths) {
+          if (!File(path).existsSync()) continue;
+          final Uint8List bytes = File(path).readAsBytesSync();
+          loader.addFont(Future<ByteData>.value(ByteData.sublistView(bytes)));
+        }
+        await loader.load();
+      }
+
+      const List<String> weights = <String>[
+        'Regular',
+        'Medium',
+        'SemiBold',
+        'Bold',
+      ];
+      await load('SpaceGrotesk', <String>[
+        for (final String w in weights) 'assets/fonts/SpaceGrotesk-$w.ttf',
+      ]);
+      await load('JetBrainsMono', <String>[
+        for (final String w in weights) 'assets/fonts/JetBrainsMono-$w.ttf',
+      ]);
+      final String? root = Platform.environment['FLUTTER_ROOT'];
+      if (root != null) {
+        await load('MaterialIcons', <String>[
+          '$root/bin/cache/artifacts/material_fonts/MaterialIcons-Regular.otf',
+        ]);
+      }
+    });
     final RecordingsController controller = await controllerFor(<Recording>[
       suggested(),
     ], router: _FileRouter());

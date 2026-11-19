@@ -52,10 +52,12 @@ class CaptureResultHeader extends StatelessWidget {
   static const Key copyButtonKey = Key('result-header-copy');
   static const Key boundaryKey = Key('result-header');
 
-  /// `SAVED ✓ · 6.8 MB`; the size is dropped for a row that never recorded it.
+  /// `SAVED · 6.8 MB` across every segment, like the card footer; the size is
+  /// dropped for a row that never recorded it. No `✓`: the mono face has no
+  /// glyph for it, and the green pill already says the file is verified.
   static String savedLabelFor(Recording recording) {
-    final String? size = formatBytes(recording.sizeBytes);
-    return size == null ? 'SAVED ✓' : 'SAVED ✓ · $size';
+    final String? size = formatBytes(recording.totalSizeBytes);
+    return size == null ? 'SAVED' : 'SAVED · $size';
   }
 
   static String routeLabelFor(SuggestedRouteAction action) =>
