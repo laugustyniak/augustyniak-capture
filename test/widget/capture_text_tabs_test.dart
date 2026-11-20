@@ -2,7 +2,7 @@ import 'package:augustyniak_capture/features/recordings/domain/capture_instructi
 import 'package:augustyniak_capture/features/recordings/domain/cleanup_proposal.dart';
 import 'package:augustyniak_capture/features/recordings/domain/recording.dart';
 import 'package:augustyniak_capture/features/recordings/presentation/capture_text_tabs.dart';
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 import '../support/harness.dart';

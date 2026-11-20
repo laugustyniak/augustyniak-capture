@@ -7,7 +7,7 @@ import 'package:augustyniak_capture/features/projects/domain/agent_session_launc
 import 'package:augustyniak_capture/features/projects/domain/project.dart';
 import 'package:augustyniak_capture/features/projects/presentation/projects_controller.dart';
 import 'package:augustyniak_capture/features/projects/presentation/projects_tab.dart';
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 /// Waits for real filesystem work started inside the fake-async zone by asking

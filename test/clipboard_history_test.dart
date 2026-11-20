@@ -7,7 +7,7 @@ import 'package:augustyniak_capture/features/clipboard/domain/auto_paste.dart';
 import 'package:augustyniak_capture/features/clipboard/domain/clipboard_item.dart';
 import 'package:augustyniak_capture/features/clipboard/domain/clipboard_watcher_service.dart';
 import 'package:augustyniak_capture/features/clipboard/presentation/clipboard_history_sheet.dart';
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 

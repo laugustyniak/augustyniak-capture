@@ -4,7 +4,7 @@ import 'package:augustyniak_capture/features/costs/domain/model_price.dart';
 import 'package:augustyniak_capture/features/costs/domain/price_book.dart';
 import 'package:augustyniak_capture/features/costs/domain/usage_event.dart';
 import 'package:augustyniak_capture/features/costs/presentation/pricing_section.dart';
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 Widget _host(Widget child) =>

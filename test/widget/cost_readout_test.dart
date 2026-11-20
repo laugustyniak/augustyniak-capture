@@ -7,7 +7,7 @@ import 'package:augustyniak_capture/features/recordings/domain/recording.dart';
 import 'package:augustyniak_capture/features/recordings/domain/recording_revision.dart';
 import 'package:augustyniak_capture/features/recordings/presentation/card_parts.dart';
 import 'package:augustyniak_capture/features/recordings/presentation/recording_editor.dart';
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 Widget _host(Widget child) => MaterialApp(home: Scaffold(body: child));
