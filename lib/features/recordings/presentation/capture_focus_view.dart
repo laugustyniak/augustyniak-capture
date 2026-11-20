@@ -19,6 +19,7 @@ import 'audio_waveform_visualizer.dart';
 import 'agent_artifact_viewer_modal.dart';
 import 'capture_text_tabs.dart';
 import 'capture_result_header.dart';
+import 'capture_thread.dart';
 import 'card_parts.dart';
 import 'processing_hero.dart';
 import 'handoff_sheet.dart';
@@ -1526,6 +1527,18 @@ class _CaptureDetailPanelState extends State<CaptureDetailPanel> {
                   ),
                 ),
               ],
+            ),
+          ],
+          if (CaptureThread.appliesTo(
+            CaptureThread.entriesFor(
+              recording,
+              controller.revisionsFor(recording.id),
+            ),
+          )) ...<Widget>[
+            const SizedBox(height: 24),
+            CaptureThread(
+              recording: recording,
+              revisions: controller.revisionsFor(recording.id),
             ),
           ],
         ],
