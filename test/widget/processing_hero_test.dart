@@ -5,7 +5,9 @@ import 'package:augustyniak_capture/features/recordings/presentation/capture_foc
 import 'package:augustyniak_capture/features/recordings/presentation/processing_hero.dart';
 import 'package:augustyniak_capture/features/recordings/presentation/queue_tab.dart';
 import 'package:augustyniak_capture/features/recordings/presentation/recordings_controller.dart';
+import 'package:augustyniak_capture/features/settings/domain/animation_speed.dart';
 import 'package:augustyniak_capture/features/settings/domain/audio_config.dart';
+import 'package:augustyniak_capture/features/settings/presentation/animation_speed_scope.dart';
 import 'package:augustyniak_capture/features/transcription/data/transcription_service.dart';
 import 'package:augustyniak_orb/augustyniak_orb.dart';
 import 'package:flutter/material.dart';
@@ -131,6 +133,25 @@ void main() {
     expect(state.debugSeconds as double, isNot(paused));
   });
 
+  testWidgets('the scene runs at the speed chosen above the navigator', (
+    WidgetTester tester,
+  ) async {
+    double speedOf() =>
+        tester.widget<OrbScene>(find.byType(OrbScene)).preset.tuning.speed;
+    Widget scene() =>
+        ProcessingScene(height: 240, semanticsLabel: 'Transcribing in progress');
+
+    await tester.pumpWidget(hostTab(scene));
+    await tester.pump();
+    expect(speedOf(), AnimationSpeed.calm.factor);
+
+    await tester.pumpWidget(
+      AnimationSpeedScope(speed: AnimationSpeed.drift, child: hostTab(scene)),
+    );
+    await tester.pump();
+    expect(speedOf(), AnimationSpeed.drift.factor);
+  });
+
   testWidgets('reduced motion renders a stable processing scene', (
     WidgetTester tester,
   ) async {
@@ -155,7 +176,8 @@ void main() {
 
     await tester.pump(const Duration(milliseconds: 500));
 
-    expect(before, closeTo(0.18 * 12, 1e-9));
+    // The same still frame at any speed: t = seconds * speed / period.
+    expect(before, closeTo(0.18 * 12 / AnimationSpeed.calm.factor, 1e-9));
     expect(state.debugSeconds as double, before);
   });
 

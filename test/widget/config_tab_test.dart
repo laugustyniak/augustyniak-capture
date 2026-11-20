@@ -7,6 +7,7 @@ import 'package:augustyniak_capture/features/auth/domain/auth_identity.dart';
 import 'package:augustyniak_capture/features/auth/presentation/auth_controller.dart';
 import 'package:augustyniak_capture/features/projects/domain/project.dart';
 import 'package:augustyniak_capture/app/ui_kit.dart';
+import 'package:augustyniak_capture/features/settings/domain/animation_speed.dart';
 import 'package:augustyniak_capture/features/settings/domain/app_theme_mode.dart';
 import 'package:augustyniak_capture/features/settings/domain/audio_config.dart';
 import 'package:augustyniak_capture/features/settings/presentation/config_tab.dart';
@@ -112,6 +113,24 @@ void main() {
     // Persisted like every other setting: the whole `settings.json` is
     // rewritten, so the choice survives a restart rather than the session.
     expect(controller.settings.themeMode, AppThemeMode.light);
+  });
+
+  testWidgets('the animation speed picker starts on CALM and persists a choice', (
+    WidgetTester tester,
+  ) async {
+    final SettingsController controller = buildSettingsController();
+    await controller.initialize();
+    await pumpConfig(tester, controller);
+
+    expect(find.text('ANIMATION SPEED'), findsOneWidget);
+    expect(controller.animationSpeed, AnimationSpeed.calm);
+
+    await tester.ensureVisible(find.text('DRIFT ×0.2'));
+    await tester.tap(find.text('DRIFT ×0.2'));
+    await tester.pumpAndSettle();
+
+    expect(controller.animationSpeed, AnimationSpeed.drift);
+    expect(controller.settings.animationSpeed, AnimationSpeed.drift);
   });
 
   testWidgets('picking a sample rate persists it through the controller', (
