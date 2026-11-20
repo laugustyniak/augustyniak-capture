@@ -25,7 +25,7 @@
 #
 # Environment:
 #   DEPLOY_MAC_HOST   ssh host of the Mac            (default: macbook-pro)
-#   DEPLOY_MAC_REPO   path of the clone on the Mac   (default: ~/github/tools/augustyniak-capture)
+#   DEPLOY_MAC_REPO   path of the clone on the Mac   (default: ~/github/apps/augustyniak-capture)
 set -uo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -49,7 +49,7 @@ while [ $# -gt 0 ]; do
 done
 
 mac_host="${DEPLOY_MAC_HOST:-macbook-pro}"
-mac_repo="${DEPLOY_MAC_REPO:-~/github/tools/augustyniak-capture}"
+mac_repo="${DEPLOY_MAC_REPO:-~/github/apps/augustyniak-capture}"
 
 wanted() { case ",$only," in *",$1,"*) return 0 ;; *) return 1 ;; esac; }
 
