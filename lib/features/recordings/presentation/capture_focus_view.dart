@@ -15,6 +15,7 @@ import '../domain/capture_type.dart';
 import '../domain/agent_artifact.dart';
 import '../domain/note_vault.dart';
 import '../domain/recording.dart';
+import '../domain/recording_revision.dart';
 import 'audio_waveform_visualizer.dart';
 import 'agent_artifact_viewer_modal.dart';
 import 'capture_text_tabs.dart';
@@ -1240,6 +1241,9 @@ class _CaptureDetailPanelState extends State<CaptureDetailPanel> {
   Widget build(BuildContext context) {
     final Recording recording = widget.recording;
     final RecordingsController controller = widget.controller;
+    final List<RecordingRevision> revisions = controller.revisionsFor(
+      recording.id,
+    );
     final String? projectName = widget.projectName;
     final List<Project> projects = widget.projects;
     final List<String> tagSuggestions = widget.tagSuggestions;
@@ -1530,16 +1534,10 @@ class _CaptureDetailPanelState extends State<CaptureDetailPanel> {
             ),
           ],
           if (CaptureThread.appliesTo(
-            CaptureThread.entriesFor(
-              recording,
-              controller.revisionsFor(recording.id),
-            ),
+            CaptureThread.entriesFor(recording, revisions),
           )) ...<Widget>[
             const SizedBox(height: 24),
-            CaptureThread(
-              recording: recording,
-              revisions: controller.revisionsFor(recording.id),
-            ),
+            CaptureThread(recording: recording, revisions: revisions),
           ],
         ],
       ),
