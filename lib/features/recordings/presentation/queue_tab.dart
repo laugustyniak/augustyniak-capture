@@ -312,10 +312,11 @@ class _QueueTabState extends State<QueueTab> {
     });
   }
 
-  /// Moves focus to a voice note the moment it is saved, wherever the user was
-  /// looking, so the processing animation and then the transcript appear
-  /// without a click. Unlike [_revealCapture] it never opens the editor: that
-  /// would hide the animation behind a form.
+  /// Keeps the user where they recorded from when a voice note is saved: the
+  /// list, with the new row on top showing its own processing bar. It opens
+  /// nothing — no detail page on a phone, and in master–detail the selection
+  /// stays on what it was, so the processing hero does not take the panel.
+  /// Filters are cleared only when they would hide the new row (#435).
   void _focusAddedCapture() {
     final added = widget.controller.addedCapture.value;
     if (added == null || !mounted) return;
@@ -325,23 +326,38 @@ class _QueueTabState extends State<QueueTab> {
     if (capture == null) return;
     final double width =
         context.size?.width ?? MediaQuery.sizeOf(context).width;
-    if (width < Console.compactBreakpoint) {
-      _openDetailPage(capture);
-      return;
-    }
-    // Keep the view the user recorded from (usually Desk) when the new capture
-    // already shows in it; clear the filters only when they would hide it.
     final List<Project> projects =
         widget.projects?.projects ?? const <Project>[];
     final String? effectiveProjectFilterId =
         projects.any((Project project) => project.id == projectFilterId)
         ? projectFilterId
         : null;
-    if (_filter(<Recording>[capture], effectiveProjectFilterId).isNotEmpty) {
-      setState(() => focusedId = capture.id);
-    } else {
-      _selectUnfiltered(capture.id);
-    }
+    final bool hidden = _filter(<Recording>[
+      capture,
+    ], effectiveProjectFilterId).isEmpty;
+    setState(() {
+      // With no explicit selection the panel falls back to the first row,
+      // which is about to be the new capture: pin the one it showed instead.
+      if (width >= Console.masterDetailBreakpoint && focusedId == null) {
+        focusedId = _visible
+            .where((Recording item) => item.id != capture.id)
+            .firstOrNull
+            ?.id;
+      }
+      if (hidden) {
+        reviewFilter = ReviewFilter.all;
+        selectedFilter = RecordingFilter.all;
+        selectedTypeFilter = CaptureTypeFilter.all;
+        projectFilterId = null;
+        searchQuery = '';
+        searchController.clear();
+      }
+    });
+    if (queueSort != QueueSort.newest) return;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted || !_masterScroll.hasClients) return;
+      _masterScroll.jumpTo(_masterScroll.position.minScrollExtent);
+    });
   }
 
   Future<void> _openDailyConnections() async {

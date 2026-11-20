@@ -1,5 +1,7 @@
+import 'dart:async';
 import 'dart:io';
 
+import 'package:augustyniak_capture/app/ui_kit.dart';
 import 'package:augustyniak_capture/features/recordings/domain/recording.dart';
 import 'package:augustyniak_capture/features/recordings/presentation/capture_focus_view.dart';
 import 'package:augustyniak_capture/features/recordings/presentation/card_parts.dart';
@@ -32,6 +34,25 @@ class _WritingRecorder implements AudioRecorder {
 
   @override
   dynamic noSuchMethod(Invocation invocation) async => null;
+}
+
+class _GatedTranscription implements TranscriptionService {
+  final Completer<void> started = Completer<void>();
+  final Completer<String> release = Completer<String>();
+
+  /// Polls rather than awaits: if the drain never reaches the service the
+  /// test fails on its assertions instead of hanging.
+  Future<void> waitStarted() async {
+    for (int i = 0; i < 100 && !started.isCompleted; i++) {
+      await Future<void>.delayed(const Duration(milliseconds: 20));
+    }
+  }
+
+  @override
+  Future<String> transcribe(File audioFile) {
+    if (!started.isCompleted) started.complete();
+    return release.future;
+  }
 }
 
 void main() {
@@ -162,20 +183,27 @@ void main() {
     expect(state.debugSeconds as double, before);
   });
 
-  testWidgets('a new voice note takes the focus and shows the hero', (
+  testWidgets('a new voice note stays on the desk list, selection kept', (
     WidgetTester tester,
   ) async {
     tester.view.physicalSize = const Size(1400, 900);
     tester.view.devicePixelRatio = 1;
     addTearDown(tester.view.reset);
+    final _GatedTranscription gate = _GatedTranscription();
     final RecordingsController controller = RecordingsController(
       repository: FakeRecordingsRepository(
         appDir,
         seed: <Recording>[
           makeRecording(id: 'old', title: 'Older capture', transcript: 'x'),
+          makeRecording(
+            id: 'done',
+            title: 'Done capture',
+            transcript: 'y',
+            isProcessedByUser: true,
+          ),
         ],
       ),
-      transcriptionService: const DisabledTranscriptionService(),
+      transcriptionService: gate,
       recorder: _WritingRecorder(),
       player: FakePlayer(),
       audioConfig: const AudioConfig(sampleRate: 16000, bitRate: 64000),
@@ -197,33 +225,42 @@ void main() {
     await tester.runAsync(() async {
       await controller.startRecording();
       await controller.stopRecording();
+      await gate.waitStarted();
     });
     await tester.pump();
 
-    expect(shownId(), isNot('old'));
-    expect(shownId(), controller.recordings.first.id);
+    final String added = controller.recordings.first.id;
+    // The desk filter held and the previous selection stayed.
+    expect(find.text('Done capture'), findsNothing);
+    expect(shownId(), 'old');
+    expect(find.byType(ProcessingHero), findsNothing);
+    // The new row is in the list and shows its own processing indicator.
+    final Finder row = find.byKey(ValueKey<String>(added));
+    expect(row, findsOneWidget);
+    expect(
+      find.descendant(of: row, matching: find.byType(ScanLine)),
+      findsOneWidget,
+    );
+    gate.release.complete('hello');
+    await tester.runAsync(() => Future<void>.delayed(Duration.zero));
+    await tester.pump();
   });
 
-  testWidgets('a new voice note keeps the desk view it was recorded from', (
+  testWidgets('a phone stays on the queue after a new voice note', (
     WidgetTester tester,
   ) async {
-    tester.view.physicalSize = const Size(1400, 900);
+    tester.view.physicalSize = const Size(400, 800);
     tester.view.devicePixelRatio = 1;
     addTearDown(tester.view.reset);
+    final _GatedTranscription gate = _GatedTranscription();
     final RecordingsController controller = RecordingsController(
       repository: FakeRecordingsRepository(
         appDir,
         seed: <Recording>[
-          makeRecording(id: 'open', title: 'Open capture', transcript: 'x'),
-          makeRecording(
-            id: 'done',
-            title: 'Done capture',
-            transcript: 'y',
-            isProcessedByUser: true,
-          ),
+          makeRecording(id: 'old', title: 'Older capture', transcript: 'x'),
         ],
       ),
-      transcriptionService: const DisabledTranscriptionService(),
+      transcriptionService: gate,
       recorder: _WritingRecorder(),
       player: FakePlayer(),
       audioConfig: const AudioConfig(sampleRate: 16000, bitRate: 64000),
@@ -234,22 +271,31 @@ void main() {
       hostTab(() => QueueTab(controller: controller), listenable: controller),
     );
     await tester.pump();
-    expect(find.text('Done capture'), findsNothing);
 
     await tester.runAsync(() async {
       await controller.startRecording();
       await controller.stopRecording();
+      await gate.waitStarted();
     });
     await tester.pump();
+    await tester.pump(const Duration(milliseconds: 400));
 
-    expect(find.text('Done capture'), findsNothing);
     expect(
-      tester
-          .widget<CaptureDetailPanel>(find.byType(CaptureDetailPanel))
-          .recording
-          .id,
-      controller.recordings.first.id,
+      Navigator.of(tester.element(find.byType(QueueTab))).canPop(),
+      isFalse,
     );
+    expect(find.byType(ProcessingHero), findsNothing);
+    final Finder row = find.byKey(
+      ValueKey<String>(controller.recordings.first.id),
+    );
+    expect(row, findsOneWidget);
+    expect(
+      find.descendant(of: row, matching: find.byType(ScanLine)),
+      findsOneWidget,
+    );
+    gate.release.complete('hello');
+    await tester.runAsync(() => Future<void>.delayed(Duration.zero));
+    await tester.pump();
   });
 
   testWidgets('the capture view offers RECORD for a new, unrelated capture', (
