@@ -172,7 +172,7 @@ void main() {
         'Fragment 1 · image',
         'Command · launch',
       ]);
-      expect(find.text('show all'), findsNothing);
+      expect(find.textContaining('show all'), findsNothing);
     },
   );
 
@@ -268,7 +268,7 @@ void main() {
       // The panel overflows by a few pixels under the test binding's fallback
       // font even with no thread on the row (verified); that is not what this
       // test is about, so the layout error is drained.
-      while (tester.takeException() != null) {}
+      _drainKnownOverflow(tester);
     }
 
     await pumpPanel();
@@ -276,7 +276,7 @@ void main() {
 
     await tester.runAsync(() => controller.setTitle('t', 'Renamed'));
     await tester.pump();
-    while (tester.takeException() != null) {}
+    _drainKnownOverflow(tester);
     expect(controller.revisionsFor('t'), isNotEmpty);
     expect(find.byKey(CaptureThread.entryKey), findsNWidgets(4));
     expect(find.text('title changed'), findsOneWidget);
@@ -351,4 +351,13 @@ void main() {
       File(out!).writeAsBytesSync(bytes!.buffer.asUint8List());
     });
   });
+}
+
+/// Drains only the panel's known overflow (54 px under the test font, present
+/// with no thread on the row); any other layout error still fails the test.
+void _drainKnownOverflow(WidgetTester tester) {
+  Object? error;
+  while ((error = tester.takeException()) != null) {
+    expect(error.toString(), contains('overflowed by 54'));
+  }
 }

@@ -6,6 +6,7 @@ import '../domain/capture_type.dart';
 import '../domain/recording.dart';
 import '../domain/recording_revision.dart';
 import '../domain/route_record.dart';
+import 'card_parts.dart';
 
 enum ThreadEntryKind { segment, route, revision }
 
@@ -109,7 +110,7 @@ class CaptureThread extends StatefulWidget {
       kind: ThreadEntryKind.route,
       at: route.at,
       title: route.target,
-      status: state == null ? null : _stateLabel(state),
+      status: state == null ? null : commandStateLabel(state),
       statusColor: state == null ? null : () => _stateColor(state),
     );
   }
@@ -121,15 +122,6 @@ class CaptureThread extends StatefulWidget {
     status: revision.source.label,
     statusColor: () => Console.muted,
   );
-
-  static String _stateLabel(CommandState state) => switch (state) {
-    CommandState.submitted => 'SUBMITTED',
-    CommandState.planned => 'PLANNED',
-    CommandState.inProgress => 'IN PROGRESS',
-    CommandState.done => 'DONE',
-    CommandState.blocked => 'BLOCKED',
-    CommandState.needsReview => 'NEEDS REVIEW',
-  };
 
   static Color _stateColor(CommandState state) => switch (state) {
     CommandState.done => Console.green,
