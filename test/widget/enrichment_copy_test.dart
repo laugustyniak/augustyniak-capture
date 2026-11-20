@@ -55,6 +55,10 @@ void main() {
   );
 
   Future<void> tapCopy(WidgetTester tester, Finder button) async {
+    // The focus view puts the text first (#451), so summary and tags can sit
+    // below the dialog's first screen.
+    await tester.ensureVisible(button);
+    await tester.pump();
     await tester.tap(button);
     await tester.pump();
     // Drain the "copied" feedback timer so the test ends with none pending.
