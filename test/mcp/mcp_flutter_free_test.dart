@@ -3,12 +3,13 @@ import 'dart:io';
 import 'package:flutter_test/flutter_test.dart';
 
 /// The server is built with `dart build cli`, which cannot link `dart:ui`.
-/// One transitive `package:flutter` or `dart:ui` import breaks the build, and
+/// One transitive `package:flutter`, `package:material_ui` (it re-exports
+/// Flutter) or `dart:ui` import breaks the build, and
 /// `core/database/app_database.dart` (debugPrint) is the easy one to reach for.
 /// Every quoted URI of an import/export statement counts, so the targets of a
 /// conditional import (`if (dart.library.io) 'x.dart'`) are followed too.
 void main() {
-  test('bin/capture_mcp.dart has no transitive package:flutter import', () {
+  test('bin/capture_mcp.dart has no flutter or material_ui import', () {
     final Set<String> seen = <String>{};
     final List<File> queue = <File>[
       File('bin/capture_mcp.dart'),
@@ -34,7 +35,9 @@ void main() {
           statementMatch.group(0)!,
         )) {
           final String target = m.group(1)!;
-          if (target.startsWith('package:flutter') || target == 'dart:ui') {
+          if (target.startsWith('package:flutter') ||
+              target.startsWith('package:material_ui') ||
+              target == 'dart:ui') {
             offenders.add('${file.path} -> $target');
           } else if (target.startsWith('package:augustyniak_capture/')) {
             queue.add(

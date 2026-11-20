@@ -2,7 +2,7 @@ import 'package:augustyniak_capture/app/ui_kit.dart';
 import 'package:augustyniak_capture/features/settings/domain/app_settings.dart';
 import 'package:augustyniak_capture/features/settings/presentation/command_section.dart';
 import 'package:augustyniak_capture/features/settings/presentation/settings_controller.dart';
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 import '../support/harness.dart';

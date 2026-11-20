@@ -5,7 +5,7 @@ import 'package:augustyniak_capture/features/connections/presentation/daily_conn
 import 'package:augustyniak_capture/features/recordings/domain/capture_type.dart';
 import 'package:augustyniak_capture/features/recordings/domain/recording.dart';
 import 'package:augustyniak_capture/features/recordings/presentation/queue_tab.dart';
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 import '../support/harness.dart';

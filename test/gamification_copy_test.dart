@@ -1,6 +1,6 @@
 import 'package:augustyniak_capture/features/gamification/domain/milestone.dart';
 import 'package:augustyniak_capture/features/gamification/presentation/milestone_copy.dart';
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {

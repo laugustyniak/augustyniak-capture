@@ -34,7 +34,7 @@ permissions:
 # 110 analyzer infos, a red gate on every pull request, no code change behind
 # it (#439). Raise this deliberately, together with the code it needs.
 env:
-  FLUTTER_VERSION: 3.44.7
+  FLUTTER_VERSION: 3.50.1
 
 concurrency:
   group: ci-${{ github.ref }}

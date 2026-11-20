@@ -11,7 +11,7 @@ import 'package:augustyniak_capture/features/recordings/presentation/queue_tab.d
 import 'package:augustyniak_capture/features/recordings/presentation/recording_card.dart';
 import 'package:augustyniak_capture/features/recordings/presentation/recording_row.dart';
 import 'package:augustyniak_capture/features/recordings/presentation/recordings_controller.dart';
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 import '../support/harness.dart';

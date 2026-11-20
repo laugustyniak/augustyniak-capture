@@ -11,7 +11,7 @@ import 'package:augustyniak_capture/features/recordings/domain/recording.dart';
 import 'package:augustyniak_capture/features/recordings/domain/route_record.dart';
 import 'package:augustyniak_capture/features/recordings/presentation/handoff_sheet.dart';
 import 'package:augustyniak_capture/features/recordings/presentation/recordings_controller.dart';
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 import '../support/harness.dart';
