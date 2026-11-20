@@ -38,6 +38,7 @@ import 'card_parts.dart';
 import 'commitments_dialog.dart';
 import 'compact_queue_header.dart';
 import 'handoff_sheet.dart';
+import 'smart_route_action.dart';
 import 'queue_list_row.dart';
 import 'queue_priority.dart';
 import 'queue_toolbar.dart';
@@ -1239,6 +1240,9 @@ class _QueueTabState extends State<QueueTab> {
       canHandoff:
           controller.canHandoff(recording) || controller.canSend(recording),
       onHandoff: () => _openHandoff(recording),
+      canSmartRoute: controller.canSmartRoute(recording),
+      smartRouting: controller.isSmartRouting(recording.id),
+      onSmartRoute: () => runSmartRoute(context, controller, recording.id),
       // Re-checked here, every build, against the item as it is now: the
       // destination may have been unbound since the model proposed it.
       suggestedRoute: controller.suggestedRouteAction(recording),
