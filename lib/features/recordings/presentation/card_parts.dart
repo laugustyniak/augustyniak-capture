@@ -385,7 +385,7 @@ IconData typeIconFor(CaptureType type) => switch (type) {
 /// are different facts and the whole reason a failed refresh keeps the previous
 /// answer instead of clearing it.
 String outcomeLineFor(RouteOutcome outcome) {
-  final StringBuffer buffer = StringBuffer(_stateLabel(outcome.state));
+  final StringBuffer buffer = StringBuffer(commandStateLabel(outcome.state));
   if (outcome.issues.isNotEmpty) {
     final String numbers = outcome.issues
         .take(3)
@@ -400,7 +400,9 @@ String outcomeLineFor(RouteOutcome outcome) {
   return buffer.toString();
 }
 
-String _stateLabel(CommandState state) => switch (state) {
+/// The one label for a Command outcome state: the card line and the THREAD
+/// both read it, so a new state cannot be named two ways.
+String commandStateLabel(CommandState state) => switch (state) {
   CommandState.submitted => 'SUBMITTED',
   CommandState.planned => 'PLANNED',
   CommandState.inProgress => 'IN PROGRESS',
