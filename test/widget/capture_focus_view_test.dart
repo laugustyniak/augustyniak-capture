@@ -323,6 +323,12 @@ void main() {
     ) async {
       final RecordingsController controller = await openOnPhone(tester);
 
+      // The result header above the title pushes the transcript below the
+      // phone's first screen.
+      await tester.ensureVisible(
+        inPanel(find.text('Ring the joiner about the worktop.')),
+      );
+      await tester.pump();
       await tester.tap(
         inPanel(find.text('Ring the joiner about the worktop.')),
       );

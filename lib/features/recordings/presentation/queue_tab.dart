@@ -1385,6 +1385,7 @@ class _QueueTabState extends State<QueueTab> {
                 ? null
                 : (CaptureType type) =>
                     widget.onAppendUpload!(selected.id, type),
+            onConfirmSuggestedRoute: () => _confirmSuggestedRoute(selected),
             onToggleProcessed: () => _toggleProcessed(selected),
             isMarkingDone: markingDoneIds.contains(selected.id),
             onConfigureModels: widget.onConfigureModels,
@@ -1520,6 +1521,7 @@ class _QueueTabState extends State<QueueTab> {
                       ? null
                       : (CaptureType type) =>
                           widget.onAppendUpload!(item.id, type),
+                  onConfirmSuggestedRoute: () => _confirmSuggestedRoute(item),
                   onToggleProcessed: () => _toggleProcessed(item),
                   isMarkingDone: markingDoneIds.contains(item.id),
                   onConfigureModels: widget.onConfigureModels == null
@@ -1681,7 +1683,7 @@ class _QueueTabState extends State<QueueTab> {
   /// control uses. A file or Command kind goes straight to `route`, delivery
   /// first and state second. An agent opens the handoff sheet and stops there:
   /// the prompt is reviewed by a human before anything is launched.
-  void _confirmSuggestedRoute(Recording recording) {
+  Future<void> _confirmSuggestedRoute(Recording recording) async {
     final SuggestedRouteAction? action = widget.controller.suggestedRouteAction(
       recording,
     );
@@ -1689,7 +1691,7 @@ class _QueueTabState extends State<QueueTab> {
     if (action.kind == SuggestedRouteKind.agent) {
       _openHandoff(recording);
     } else {
-      widget.controller.route(recording.id);
+      await widget.controller.route(recording.id);
     }
   }
 
