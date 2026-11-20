@@ -90,6 +90,7 @@ class QueueTab extends StatefulWidget {
     this.usageRepository,
     this.storagePrice = StoragePrice.defaults,
     this.onAppendRecording,
+    this.onRecordNew,
     this.onAppendNote,
     this.onAppendUpload,
     this.density = QueueDensity.compact,
@@ -165,6 +166,11 @@ class QueueTab extends StatefulWidget {
   final ValueChanged<String>? onAppendRecording;
   final ValueChanged<String>? onAppendNote;
   final void Function(String id, CaptureType type)? onAppendUpload;
+
+  /// Starts a new, unrelated recording from the capture view's RECORD button.
+  /// The shell's own entry point, the one the capture dock calls; null on a
+  /// host that cannot record, which hides the button.
+  final VoidCallback? onRecordNew;
 
   /// Whether audio captured here has anywhere to be transcribed.
   ///
@@ -1381,6 +1387,7 @@ class _QueueTabState extends State<QueueTab> {
             onAppendNote: widget.onAppendNote == null
                 ? null
                 : () => widget.onAppendNote!(selected.id),
+            onRecordNew: widget.onRecordNew,
             onAppendUpload: widget.onAppendUpload == null
                 ? null
                 : (CaptureType type) =>
@@ -1521,6 +1528,14 @@ class _QueueTabState extends State<QueueTab> {
                       ? null
                       : (CaptureType type) =>
                           widget.onAppendUpload!(item.id, type),
+                  // Popped first, like the append path above: the recording
+                  // screen belongs to the shell, under this page.
+                  onRecordNew: widget.onRecordNew == null
+                      ? null
+                      : () {
+                          Navigator.of(context).pop();
+                          widget.onRecordNew!();
+                        },
                   onConfirmSuggestedRoute: () => _confirmSuggestedRoute(item),
                   onToggleProcessed: () => _toggleProcessed(item),
                   isMarkingDone: markingDoneIds.contains(item.id),

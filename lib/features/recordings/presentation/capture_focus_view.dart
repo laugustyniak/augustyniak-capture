@@ -1112,6 +1112,7 @@ class CaptureDetailPanel extends StatefulWidget {
     this.onAppendRecording,
     this.onAppendNote,
     this.onAppendUpload,
+    this.onRecordNew,
     this.onConfirmSuggestedRoute,
     this.isMarkingDone = false,
     this.onConfigureModels,
@@ -1143,6 +1144,14 @@ class CaptureDetailPanel extends StatefulWidget {
   final VoidCallback? onAppendRecording;
   final VoidCallback? onAppendNote;
   final ValueChanged<CaptureType>? onAppendUpload;
+
+  /// Starts a new recording that has nothing to do with this capture — the
+  /// next thought, right after correcting this one (#452). Unlike
+  /// [onAppendRecording] it adds no fragment here. Null hides the button.
+  final VoidCallback? onRecordNew;
+
+  /// Semantics label of the RECORD button, for tests and screen readers.
+  static const String recordNewLabel = 'Record a new capture';
 
   /// Runs the queue's suggested-route handler; null hides the result header's
   /// primary action.
@@ -1349,6 +1358,7 @@ class _CaptureDetailPanelState extends State<CaptureDetailPanel> {
             onAppendRecording: onAppendRecording,
             onAppendNote: onAppendNote,
             onAppendUpload: onAppendUpload,
+            onRecordNew: widget.onRecordNew,
             onToggleProcessed: onToggleProcessed,
             isMarkingDone: isMarkingDone,
           ),
@@ -1849,6 +1859,7 @@ class _PanelActions extends StatelessWidget {
     this.onAppendRecording,
     this.onAppendNote,
     this.onAppendUpload,
+    this.onRecordNew,
     required this.onToggleProcessed,
     required this.isMarkingDone,
   });
@@ -1860,6 +1871,7 @@ class _PanelActions extends StatelessWidget {
   final VoidCallback? onAppendRecording;
   final VoidCallback? onAppendNote;
   final ValueChanged<CaptureType>? onAppendUpload;
+  final VoidCallback? onRecordNew;
   final VoidCallback onToggleProcessed;
   final bool isMarkingDone;
 
@@ -1877,7 +1889,15 @@ class _PanelActions extends StatelessWidget {
     final bool isEnriching = controller.isEnriching(recording.id);
     final bool isPlaying = controller.playingId == recording.id;
 
+    final VoidCallback? recordNew = onRecordNew;
     final List<Widget> leading = <Widget>[
+      if (recordNew != null)
+        _PanelButton(
+          icon: Icons.mic_rounded,
+          label: 'Record',
+          semanticLabel: CaptureDetailPanel.recordNewLabel,
+          onPressed: recordNew,
+        ),
       if (canCancel)
         _PanelButton(
           icon: Icons.close_rounded,

@@ -2,6 +2,7 @@ import 'dart:io';
 
 import 'package:augustyniak_capture/features/recordings/domain/recording.dart';
 import 'package:augustyniak_capture/features/recordings/presentation/capture_focus_view.dart';
+import 'package:augustyniak_capture/features/recordings/presentation/card_parts.dart';
 import 'package:augustyniak_capture/features/recordings/presentation/processing_hero.dart';
 import 'package:augustyniak_capture/features/recordings/presentation/queue_tab.dart';
 import 'package:augustyniak_capture/features/recordings/presentation/recordings_controller.dart';
@@ -82,7 +83,7 @@ void main() {
     });
   });
 
-  testWidgets('the hero fills at least half of the screen height', (
+  testWidgets('the hero is a compact banner, not a screen-filling scene', (
     WidgetTester tester,
   ) async {
     tester.view.physicalSize = const Size(1400, 900);
@@ -97,8 +98,10 @@ void main() {
 
     expect(
       tester.getSize(find.byType(ProcessingHero)).height,
-      greaterThanOrEqualTo(450),
+      lessThanOrEqualTo(ProcessingHero.height),
     );
+    expect(ProcessingHero.height, lessThanOrEqualTo(140));
+    expect(find.text(ProcessingStrip.transcribingLabel), findsOneWidget);
   });
 
   testWidgets('pausing and resuming the scene controls its clock', (
@@ -246,6 +249,78 @@ void main() {
           .recording
           .id,
       controller.recordings.first.id,
+    );
+  });
+
+  testWidgets('the capture view offers RECORD for a new, unrelated capture', (
+    WidgetTester tester,
+  ) async {
+    tester.view.physicalSize = const Size(1400, 900);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+    final RecordingsController controller = RecordingsController(
+      repository: FakeRecordingsRepository(
+        appDir,
+        seed: <Recording>[
+          makeRecording(id: 'open', title: 'Open capture', transcript: 'x'),
+        ],
+      ),
+      transcriptionService: const DisabledTranscriptionService(),
+      recorder: _WritingRecorder(),
+      player: FakePlayer(),
+      audioConfig: const AudioConfig(sampleRate: 16000, bitRate: 64000),
+    );
+    addTearDown(controller.dispose);
+    await controller.initialize();
+    int recordTaps = 0;
+    await tester.pumpWidget(
+      hostTab(
+        () => QueueTab(controller: controller, onRecordNew: () => recordTaps++),
+        listenable: controller,
+      ),
+    );
+    await tester.pump();
+    final Finder record = find.descendant(
+      of: find.byType(CaptureDetailPanel),
+      matching: find.bySemanticsLabel(CaptureDetailPanel.recordNewLabel),
+    );
+    expect(record, findsOneWidget);
+
+    await tester.tap(record);
+    await tester.pump();
+
+    expect(recordTaps, 1);
+  });
+
+  testWidgets('no RECORD button when the host cannot start a recording', (
+    WidgetTester tester,
+  ) async {
+    tester.view.physicalSize = const Size(1400, 900);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+    final RecordingsController controller = RecordingsController(
+      repository: FakeRecordingsRepository(
+        appDir,
+        seed: <Recording>[
+          makeRecording(id: 'open', title: 'Open capture', transcript: 'x'),
+        ],
+      ),
+      transcriptionService: const DisabledTranscriptionService(),
+      recorder: _WritingRecorder(),
+      player: FakePlayer(),
+      audioConfig: const AudioConfig(sampleRate: 16000, bitRate: 64000),
+    );
+    addTearDown(controller.dispose);
+    await controller.initialize();
+    await tester.pumpWidget(
+      hostTab(() => QueueTab(controller: controller), listenable: controller),
+    );
+    await tester.pump();
+
+    expect(find.byType(CaptureDetailPanel), findsOneWidget);
+    expect(
+      find.bySemanticsLabel(CaptureDetailPanel.recordNewLabel),
+      findsNothing,
     );
   });
 }
