@@ -1425,6 +1425,7 @@ class _RecordingsPageState extends State<RecordingsPage>
                                     onDensityChanged: settings.setQueueDensity,
                                   onAppendRecording: (String id) =>
                                       _startRecording(appendTo: id),
+                                  onRecordNew: _startRecording,
                                   onAppendNote: (String id) =>
                                       _composeTextNote(context, appendTo: id),
                                   onAppendUpload:
