@@ -148,6 +148,13 @@ class QueueListRow extends StatelessWidget {
                                 color: failed ? Console.redSoft : Console.muted,
                               ),
                             ),
+                            // The one running stage a row can show without
+                            // opening the capture: the pulse dot says it is
+                            // moving, this says it is the row to watch.
+                            if (processing) ...<Widget>[
+                              const SizedBox(height: 6),
+                              ScanLine(height: 2),
+                            ],
                           ],
                         ),
                       ),
