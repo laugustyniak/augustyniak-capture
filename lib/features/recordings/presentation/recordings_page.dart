@@ -62,6 +62,7 @@ import '../../settings/data/file_master_key_store.dart';
 import '../../settings/data/migrating_master_key_store.dart';
 import '../../settings/data/secure_storage_master_key_store.dart';
 import '../../settings/data/settings_repository.dart';
+import '../../settings/domain/animation_speed.dart';
 import '../../settings/domain/app_settings.dart';
 import '../../settings/domain/app_theme_mode.dart';
 import '../../projects/presentation/projects_controller.dart';
@@ -138,6 +139,7 @@ class RecordingsPage extends StatefulWidget {
     super.key,
     this.themeMode,
     this.textScale,
+    this.animationSpeed,
     this.authController,
     this.authGateway,
     this.syncTransportResolver,
@@ -159,6 +161,10 @@ class RecordingsPage extends StatefulWidget {
   /// Where the shell publishes the persisted text and font scale so
   /// `AugustyniakCaptureApp` can apply it to `MediaQuery.textScaler`.
   final ValueNotifier<double>? textScale;
+
+  /// Where the shell publishes the processing-scene speed, applied above the
+  /// navigator so pushed routes see it too.
+  final ValueNotifier<AnimationSpeed>? animationSpeed;
 
   final AuthController? authController;
 
@@ -1063,6 +1069,7 @@ class _RecordingsPageState extends State<RecordingsPage>
     // not about the theme.
     widget.themeMode?.value = settings.themeMode;
     widget.textScale?.value = settings.textScale;
+    widget.animationSpeed?.value = settings.animationSpeed;
     // Fire-and-forget: an unchanged binding map short-circuits inside the
     // coordinator, so this does not churn the OS hotkey table on every
     // unrelated settings change.

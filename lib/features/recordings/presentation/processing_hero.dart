@@ -3,6 +3,7 @@ import 'package:flutter/foundation.dart' show ValueListenable;
 import 'package:flutter/material.dart';
 
 import '../../../app/ui_kit.dart';
+import '../../settings/presentation/animation_speed_scope.dart';
 import '../domain/capture_type.dart';
 import '../domain/recording.dart';
 import 'card_parts.dart';
@@ -121,7 +122,7 @@ class ProcessingHero extends StatelessWidget {
 /// A thin frame around [OrbScene] (package `augustyniak_orb`): it builds the
 /// preset from the theme in force on every build, so a theme swap repaints.
 /// [paused] freezes the current frame so pausing a recording also pauses its
-/// motion. The platform reduced-motion setting uses a deliberate still frame
+/// motion. Its speed is the user's [AnimationSpeedScope] choice. The platform reduced-motion setting uses a deliberate still frame
 /// at t = [stillFrame].
 class ProcessingScene extends StatelessWidget {
   ProcessingScene({
@@ -150,6 +151,7 @@ class ProcessingScene extends StatelessWidget {
         grid: Console.border,
         backdrop: Console.surfaceDeep,
       ),
+      tuning: OrbTuning(speed: AnimationSpeedScope.of(context).factor),
     );
     final bool reduceMotion = MediaQuery.disableAnimationsOf(context);
     return Semantics(
