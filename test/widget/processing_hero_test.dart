@@ -150,6 +150,12 @@ void main() {
     );
     await tester.pump();
     expect(speedOf(), AnimationSpeed.drift.factor);
+
+    await tester.pumpWidget(
+      AnimationSpeedScope(speed: AnimationSpeed.original, child: hostTab(scene)),
+    );
+    await tester.pump();
+    expect(speedOf(), 1);
   });
 
   testWidgets('reduced motion renders a stable processing scene', (

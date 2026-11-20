@@ -124,6 +124,10 @@ void main() {
 
     expect(find.text('ANIMATION SPEED'), findsOneWidget);
     expect(controller.animationSpeed, AnimationSpeed.calm);
+    for (final AnimationSpeed speed in AnimationSpeed.values) {
+      expect(find.text(speed.label), findsOneWidget);
+    }
+    expect(find.text('ORIGINAL ×1'), findsOneWidget);
 
     await tester.ensureVisible(find.text('DRIFT ×0.2'));
     await tester.tap(find.text('DRIFT ×0.2'));

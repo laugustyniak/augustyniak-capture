@@ -457,10 +457,20 @@ void main() {
       );
     });
 
-    test('every animation speed is slower than the original orb', () {
-      expect(AnimationSpeed.values, hasLength(4));
+    test('the original speed round-trips and every speed is usable', () {
+      const AppSettings original = AppSettings(
+        animationSpeed: AnimationSpeed.original,
+      );
+      expect(
+        AppSettings.fromJson(original.toJson()).animationSpeed,
+        AnimationSpeed.original,
+      );
+      expect(AnimationSpeed.original.factor, 1);
+      expect(AnimationSpeed.original.label, 'ORIGINAL ×1');
+      expect(AnimationSpeed.values.first, AnimationSpeed.original);
+      expect(AnimationSpeed.values, hasLength(5));
       for (final AnimationSpeed speed in AnimationSpeed.values) {
-        expect(speed.factor, lessThan(1));
+        expect(speed.factor, lessThanOrEqualTo(1));
         expect(speed.factor, greaterThan(0));
       }
     });
