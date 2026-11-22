@@ -60,7 +60,7 @@ context files (vault)         → ContextFacts  {priorities, active projects}
 device settings               → Environment   {primaryAgent, dispatcherDevice}
 
 decide(CaptureFacts, ContextFacts, Environment, Project) → Decision?   // pure, no IO
-Decision {ruleId, action: none|inbox|command|agent|assistant, agent?, mode: readOnly|write,
+Decision {ruleId, action: SuggestedRouteKind (file|command|agent|none), agent?, mode: readOnly|write,
           autonomy: suggest|auto, reason, facts}
 ```
 
@@ -68,7 +68,10 @@ Decision {ruleId, action: none|inbox|command|agent|assistant, agent?, mode: read
 - **Example rules:**
   - `R10`: `agentTask` on a Command-bound project → `command`
   - `R20`: `agentTask` on a project with a repo → `agent(primaryAgent, readOnly)`
+  - `R80`: the model's own `suggestedRoute`, when it is an offered route → that kind (an explicit rule, so every proposal still carries a `ruleId`)
   - `R90`: default → `none`
+- **Vocabulary.** `action` reuses the existing `SuggestedRouteKind`, so `file` is the inbox exit. The decision feeds the existing `suggestedRoute` and its card chip, so a card never shows two proposals. A suggestion the user dismissed (`auto=false`) is never overwritten.
+- **One predicate.** R10 calls the same check `ProjectCaptureRouter` uses to choose Command, so the chip and `route()` cannot disagree.
 - **What determinism covers.** Determinism is over **facts**, not over the raw capture. Re-running enrichment can change `category`, so the log stores the facts themselves, not a hash, and a decision can be replayed.
 - **Absent is not empty.** `category == null` (enrichment never ran) yields **no** decision, not `none`.
 - **The reason comes from the rule.** It is a template filled with the facts the rule matched on. The model only supplies facts it already produces, such as `category` and `priorityReason`.
