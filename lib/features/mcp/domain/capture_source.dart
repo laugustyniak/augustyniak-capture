@@ -10,6 +10,11 @@ abstract class CaptureSource {
   /// Newest first. Throws when no store can be found or read at all.
   Future<List<Recording>> recordings();
 
+  /// Same rows and order as [recordings], each with the `json_payload` string
+  /// it was read from. A row with no stored string (index path, rebuilt row)
+  /// carries `jsonEncode(recording.toJson())` instead.
+  Future<List<({Recording recording, String payload})>> recordingsWithPayload();
+
   Future<List<Project>> projects();
 }
 

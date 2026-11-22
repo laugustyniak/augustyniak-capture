@@ -1,5 +1,7 @@
 import 'dart:convert';
 
+import 'package:crypto/crypto.dart';
+
 import '../../projects/domain/project.dart';
 import '../../recordings/domain/recording.dart';
 import '../../recordings/domain/route_record.dart';
@@ -27,6 +29,7 @@ class CaptureTools {
   final void Function(String) _log;
 
   static const int _defaultLimit = 20;
+  static const int _nextOpenDefaultLimit = 10;
   static const int _maxLimit = 100;
   static const int _snippetLength = 300;
 
@@ -103,6 +106,34 @@ class CaptureTools {
         <String>['project'],
       ),
     },
+    <String, dynamic>{
+      'name': 'next_open_captures',
+      'description':
+          'The work queue: completed captures the user has not marked '
+          'processed, oldest first, with full transcript and enrichment. '
+          'Each carries a version (sha256 of its stored payload). Pass the '
+          'returned next as after for the following page; next is absent on '
+          'the last page. Read-only.',
+      'inputSchema': _schema(<String, dynamic>{
+        'limit': <String, dynamic>{
+          'type': 'integer',
+          'minimum': 1,
+          'maximum': _maxLimit,
+          'default': _nextOpenDefaultLimit,
+          'description':
+              'Maximum results (default $_nextOpenDefaultLimit, '
+              'max $_maxLimit).',
+        },
+        'after': <String, dynamic>{
+          'type': 'string',
+          'description': 'Opaque cursor: the next value of the previous page.',
+        },
+        'project': <String, dynamic>{
+          'type': 'string',
+          'description': _projectDescription,
+        },
+      }, <String>[]),
+    },
   ];
 
   Future<Map<String, dynamic>> call(
@@ -117,6 +148,8 @@ class CaptureTools {
         handler = _get;
       case 'list_project_captures':
         handler = _listProject;
+      case 'next_open_captures':
+        handler = _nextOpen;
       default:
         throw InvalidParams('Unknown tool: $name');
     }
@@ -200,6 +233,79 @@ class CaptureTools {
             (status == null || r.status.name == status))
           _capture(r, projects, snippet: true),
     ].take(limit).toList();
+  }
+
+  Future<Object> _nextOpen(Map<String, dynamic> args) async {
+    final int limit = _limit(args, defaultLimit: _nextOpenDefaultLimit);
+    final String? afterRaw = _string(args, 'after');
+    final ({int ms, String id})? cursor = afterRaw == null
+        ? null
+        : _decodeCursor(afterRaw);
+    final String? projectRef = _string(args, 'project');
+    final List<Project> projects = await _source.projects();
+    final Project? project = projectRef == null
+        ? null
+        : _resolve(projects, projectRef);
+    final List<({Recording recording, String payload})> rows =
+        <({Recording recording, String payload})>[
+          for (final ({Recording recording, String payload}) e
+              in await _source.recordingsWithPayload())
+            if (e.recording.status == RecordingStatus.completed &&
+                !e.recording.isProcessedByUser &&
+                (project == null || e.recording.projectId == project.id))
+              e,
+        ];
+    int byOrder(
+      ({Recording recording, String payload}) a,
+      ({Recording recording, String payload}) b,
+    ) {
+      final int c = a.recording.createdAt.millisecondsSinceEpoch.compareTo(
+        b.recording.createdAt.millisecondsSinceEpoch,
+      );
+      return c != 0 ? c : a.recording.id.compareTo(b.recording.id);
+    }
+
+    rows.sort(byOrder);
+    final List<({Recording recording, String payload})> page =
+        <({Recording recording, String payload})>[
+          for (final ({Recording recording, String payload}) e in rows)
+            if (cursor == null ||
+                e.recording.createdAt.millisecondsSinceEpoch > cursor.ms ||
+                (e.recording.createdAt.millisecondsSinceEpoch == cursor.ms &&
+                    e.recording.id.compareTo(cursor.id) > 0))
+              e,
+        ];
+    final bool more = page.length > limit;
+    final List<({Recording recording, String payload})> taken = page
+        .take(limit)
+        .toList();
+    return <String, dynamic>{
+      'captures': <Map<String, dynamic>>[
+        for (final ({Recording recording, String payload}) e in taken)
+          <String, dynamic>{
+            ..._capture(e.recording, projects),
+            'version': sha256.convert(utf8.encode(e.payload)).toString(),
+          },
+      ],
+      if (more)
+        'next': base64Url.encode(
+          utf8.encode(
+            '${taken.last.recording.createdAt.millisecondsSinceEpoch}:'
+            '${taken.last.recording.id}',
+          ),
+        ),
+    };
+  }
+
+  ({int ms, String id}) _decodeCursor(String raw) {
+    try {
+      final String decoded = utf8.decode(base64Url.decode(raw));
+      final int sep = decoded.indexOf(':');
+      final int? ms = sep < 0 ? null : int.tryParse(decoded.substring(0, sep));
+      final String id = sep < 0 ? '' : decoded.substring(sep + 1);
+      if (ms != null && id.isNotEmpty) return (ms: ms, id: id);
+    } catch (_) {}
+    throw InvalidParams('after is not a valid cursor');
   }
 
   DateTime? _parseSince(String raw) {
@@ -297,9 +403,9 @@ class CaptureTools {
     return value;
   }
 
-  int _limit(Map<String, dynamic> args) {
+  int _limit(Map<String, dynamic> args, {int defaultLimit = _defaultLimit}) {
     final Object? value = args['limit'];
-    if (value == null) return _defaultLimit;
+    if (value == null) return defaultLimit;
     if (value is! int) throw InvalidParams('limit must be an integer');
     return value.clamp(1, _maxLimit);
   }

@@ -8,7 +8,7 @@ It is a separate binary, not part of the Flutter app: the agent host launches it
 
 - `bin/capture_mcp.dart` — flags, wiring, stdio. Protocol JSON goes to **stdout and nothing else**; diagnostics go to stderr.
 - `features/mcp/domain/mcp_server.dart` — newline-delimited JSON-RPC 2.0 over a `Stream<String>` and a sink, so tests drive it without a process. `initialize`, `notifications/*` (no reply), `ping`, `tools/list`, `tools/call`. Unknown method is -32601, bad params or unknown tool -32602, an unparseable line -32700 — and the loop carries on.
-- `features/mcp/domain/capture_tools.dart` — the three tools and their JSON Schemas. A failure *inside* a tool (no database, unknown id or project) is a result with `isError: true`, so the model can read it.
+- `features/mcp/domain/capture_tools.dart` — the four tools and their JSON Schemas. A failure *inside* a tool (no database, unknown id or project) is a result with `isError: true`, so the model can read it.
 - `features/mcp/data/sqlite_capture_source.dart` — the reader. `default_paths.dart` — where the files are.
 
 **No `package:flutter` anywhere in that graph, transitively.** The binary is built with plain `dart`, which cannot link `dart:ui`. That is why the reader does not reuse `RecordingsRepository` (it reaches `core/database/app_database.dart`, which calls `debugPrint`) and re-implements the read rules by hand; it does reuse the pure `Recording` and `Project` domain classes. `test/mcp/mcp_flutter_free_test.dart` walks the import graph (including conditional-import targets) and fails on the first `package:flutter` or `dart:ui`.
@@ -34,6 +34,9 @@ Errors that reach the agent are fixed, generic messages (`Capture store unavaila
 | `search_captures` | `query` (required), `project?`, `since?` (ISO date), `limit?` (default 20, max 100) | Case-insensitive substring over title, summary, transcript and tags; transcripts cut to ~300 characters |
 | `get_capture` | `id` | One capture, full transcript |
 | `list_project_captures` | `project`, `status?`, `limit?` | Newest first; `status` is a `RecordingStatus` name |
+| `next_open_captures` | `limit?` (default 10, max 100), `after?`, `project?` | Completed captures not marked processed, oldest first (`createdAt`, then `id`), full transcript and enrichment as in `get_capture`, plus `version`; `next` cursor, absent on the last page |
+
+`next_open_captures` is the work queue and is read-only. `after` is an opaque cursor (base64url of `createdAtMs:id`); a malformed one is invalid params. `version` is the sha256 of the row's stored `json_payload`; on the JSON-index path, and for a row rebuilt from columns, there is no stored string, so it hashes `jsonEncode(toJson())` instead. Pages are not a snapshot: a row edited between calls changes its `version`, one inserted before the cursor is missed on that walk.
 
 `project` is an id or a case-insensitive name.
 
