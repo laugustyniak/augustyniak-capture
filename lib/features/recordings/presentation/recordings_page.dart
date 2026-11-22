@@ -513,7 +513,6 @@ class _RecordingsPageState extends State<RecordingsPage>
           client: settings.commandClient,
         ),
         fallback: ProjectInboxRouter(projectById: _projectById),
-        commandCategories: defaultCommandCategories,
       ),
       // Proposes the next step for each enriched capture and logs why; the
       // card only suggests it, nothing launches (`docs/plans/2026-11-22-switchboard.md`).
