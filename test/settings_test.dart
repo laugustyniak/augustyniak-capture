@@ -1,6 +1,7 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:augustyniak_capture/features/settings/data/settings_repository.dart';
 import 'package:augustyniak_capture/features/settings/domain/app_settings.dart';
+import 'package:augustyniak_capture/features/settings/domain/animation_speed.dart';
 import 'package:augustyniak_capture/features/settings/domain/app_theme_mode.dart';
 import 'package:augustyniak_capture/features/settings/domain/audio_config.dart';
 import 'package:augustyniak_capture/features/settings/domain/provider_profile.dart';
@@ -423,6 +424,55 @@ void main() {
         original.copyWith(themeMode: AppThemeMode.dark).queueDensity,
         QueueDensity.comfortable,
       );
+    });
+
+    test('animation speed survives a round-trip and defaults to calm', () {
+      const AppSettings original = AppSettings(
+        animationSpeed: AnimationSpeed.drift,
+      );
+
+      expect(
+        AppSettings.fromJson(original.toJson()).animationSpeed,
+        AnimationSpeed.drift,
+      );
+      // The default is not written, so a file that never touched the choice
+      // serialises exactly as it did before the field existed.
+      expect(
+        const AppSettings().toJson().containsKey('animationSpeed'),
+        isFalse,
+      );
+      expect(
+        AppSettings.fromJson(<String, dynamic>{}).animationSpeed,
+        AnimationSpeed.calm,
+      );
+      expect(
+        AppSettings.fromJson(<String, dynamic>{
+          'animationSpeed': 'warp',
+        }).animationSpeed,
+        AnimationSpeed.calm,
+      );
+      expect(
+        original.copyWith(themeMode: AppThemeMode.dark).animationSpeed,
+        AnimationSpeed.drift,
+      );
+    });
+
+    test('the original speed round-trips and every speed is usable', () {
+      const AppSettings original = AppSettings(
+        animationSpeed: AnimationSpeed.original,
+      );
+      expect(
+        AppSettings.fromJson(original.toJson()).animationSpeed,
+        AnimationSpeed.original,
+      );
+      expect(AnimationSpeed.original.factor, 1);
+      expect(AnimationSpeed.original.label, 'ORIGINAL ×1');
+      expect(AnimationSpeed.values.first, AnimationSpeed.original);
+      expect(AnimationSpeed.values, hasLength(5));
+      for (final AnimationSpeed speed in AnimationSpeed.values) {
+        expect(speed.factor, lessThanOrEqualTo(1));
+        expect(speed.factor, greaterThan(0));
+      }
     });
 
     test('rail expansion survives a round-trip and defaults to collapsed', () {

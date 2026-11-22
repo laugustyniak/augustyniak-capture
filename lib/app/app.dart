@@ -10,7 +10,9 @@ import '../features/auth/data/supabase_auth_gateway.dart';
 import '../features/auth/presentation/auth_controller.dart';
 import '../features/logs/domain/log_event.dart';
 import '../features/recordings/presentation/recordings_page.dart';
+import '../features/settings/domain/animation_speed.dart';
 import '../features/settings/domain/app_settings.dart';
+import '../features/settings/presentation/animation_speed_scope.dart';
 import '../features/settings/domain/app_theme_mode.dart';
 import '../features/shortcuts/domain/shortcut_link_source.dart';
 import '../features/sync/data/e2ee_service.dart';
@@ -60,6 +62,8 @@ class _AugustyniakCaptureAppState extends State<AugustyniakCaptureApp> {
   final ValueNotifier<double> _textScale = ValueNotifier<double>(
     AppSettings.defaultTextScale,
   );
+  final ValueNotifier<AnimationSpeed> _animationSpeed =
+      ValueNotifier<AnimationSpeed>(AnimationSpeed.calm);
   AuthController? _authController;
 
   /// Held separately from [_authController] — which only exposes the
@@ -115,6 +119,7 @@ class _AugustyniakCaptureAppState extends State<AugustyniakCaptureApp> {
     _syncBinding?.dispose();
     _themeMode.dispose();
     _textScale.dispose();
+    _animationSpeed.dispose();
     super.dispose();
   }
 
@@ -163,7 +168,15 @@ class _AugustyniakCaptureAppState extends State<AugustyniakCaptureApp> {
                       data: mediaQuery.copyWith(
                         textScaler: TextScaler.linear(effectiveScale),
                       ),
-                      child: innerChild!,
+                      child: ValueListenableBuilder<AnimationSpeed>(
+                        valueListenable: _animationSpeed,
+                        builder:
+                            (BuildContext _, AnimationSpeed speed, Widget? _) =>
+                                AnimationSpeedScope(
+                                  speed: speed,
+                                  child: innerChild!,
+                                ),
+                      ),
                     );
                   },
               child: child,
@@ -172,6 +185,7 @@ class _AugustyniakCaptureAppState extends State<AugustyniakCaptureApp> {
           home: RecordingsPage(
             themeMode: _themeMode,
             textScale: _textScale,
+            animationSpeed: _animationSpeed,
             authController: _authController,
             authGateway: _authGateway,
             // Same condition that built `_authController` above: Supabase was

@@ -6,6 +6,7 @@ import '../../shortcuts/domain/hotkey_binding.dart';
 import '../../shortcuts/domain/shortcut_action.dart';
 import '../../timer/domain/alarm_sound.dart';
 import '../../timer/domain/timer_defaults.dart';
+import 'animation_speed.dart';
 import 'app_theme_mode.dart';
 import 'audio_config.dart';
 import 'provider_profile.dart';
@@ -27,6 +28,7 @@ class AppSettings {
     this.themeMode = AppThemeMode.system,
     this.textScale = defaultTextScale,
     this.queueDensity = QueueDensity.compact,
+    this.animationSpeed = AnimationSpeed.calm,
     this.navRailExpanded = false,
     this.navRailWidth = defaultNavRailWidth,
     this.queueSplitRatio = defaultQueueSplitRatio,
@@ -168,6 +170,10 @@ class AppSettings {
   /// Row height in the Queue's master list. Written only when it is not the
   /// default, so a file that never touched it serialises exactly as before.
   final QueueDensity queueDensity;
+
+  /// Speed of the processing scene. Written only when it is not the default,
+  /// so a file that never touched it serialises exactly as before.
+  final AnimationSpeed animationSpeed;
 
   /// Whether the wide shell's rail shows labels (220 px) or icons only
   /// (64 px, the default). Written only when expanded.
@@ -314,6 +320,7 @@ class AppSettings {
     double? textScale,
     bool resetTextScale = false,
     QueueDensity? queueDensity,
+    AnimationSpeed? animationSpeed,
     bool? navRailExpanded,
     double? navRailWidth,
     bool resetNavRailWidth = false,
@@ -380,6 +387,7 @@ class AppSettings {
           ? defaultTextScale
           : (textScale != null ? clampTextScale(textScale) : this.textScale),
       queueDensity: queueDensity ?? this.queueDensity,
+      animationSpeed: animationSpeed ?? this.animationSpeed,
       navRailExpanded: navRailExpanded ?? this.navRailExpanded,
       navRailWidth: resetNavRailWidth
           ? defaultNavRailWidth
@@ -448,6 +456,8 @@ class AppSettings {
       if (textScale != defaultTextScale) 'textScale': textScale,
       if (queueDensity != QueueDensity.compact)
         'queueDensity': queueDensity.name,
+      if (animationSpeed != AnimationSpeed.calm)
+        'animationSpeed': animationSpeed.name,
       if (navRailExpanded) 'navRailExpanded': true,
       if (navRailWidth != defaultNavRailWidth) 'navRailWidth': navRailWidth,
       if (queueSplitRatio != defaultQueueSplitRatio)
@@ -565,6 +575,11 @@ class AppSettings {
           : AppSettings.defaultTextScale,
       queueDensity: QueueDensity.fromName(
         json['queueDensity'] is String ? json['queueDensity'] as String : null,
+      ),
+      animationSpeed: AnimationSpeed.fromName(
+        json['animationSpeed'] is String
+            ? json['animationSpeed'] as String
+            : null,
       ),
       navRailExpanded: json['navRailExpanded'] == true,
       navRailWidth: json['navRailWidth'] is num
