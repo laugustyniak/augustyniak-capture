@@ -377,6 +377,64 @@ void main() {
       );
     });
 
+    testWidgets('a queued capture offers Cancel in the bar', (
+      WidgetTester tester,
+    ) async {
+      await openFull(tester, status: RecordingStatus.pendingTranscription);
+      final Finder bar = find.byKey(CaptureDetailPanel.barKey);
+      expect(
+        find.descendant(of: bar, matching: find.text('Cancel')),
+        findsOneWidget,
+      );
+    });
+
+    testWidgets('desktop keeps its actions open and reads text before summary', (
+      WidgetTester tester,
+    ) async {
+      final RecordingsController controller = await buildRecordingsController(
+        appDir,
+        seed: <Recording>[
+          makeRecording(
+            id: 'desk',
+            title: 'Kitchen rebuild',
+            summary: 'Chase the worktop.',
+            tags: const <String>['kitchen'],
+            transcript: body,
+          ),
+        ],
+      );
+      tester.view.physicalSize = const Size(1200, 900);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+      await tester.pumpWidget(
+        hostTab(
+          () => CaptureDetailPanel(
+            controller: controller,
+            recording: controller.recordings.single,
+            projectName: null,
+            showMetaColumn: false,
+            onEdit: () {},
+            onToggleProcessed: () {},
+          ),
+          listenable: controller,
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      expect(find.byKey(CaptureDetailPanel.barKey), findsNothing);
+      expect(find.byKey(CaptureDetailPanel.detailsToggleKey), findsNothing);
+      expect(find.text('Enrich'), findsOneWidget);
+      expect(
+        tester.getRect(find.text(body)).top,
+        lessThan(tester.getRect(find.textContaining('Chase the worktop.')).top),
+      );
+      expect(
+        tester.getRect(find.text(body)).top,
+        lessThan(tester.getRect(find.text('#kitchen')).top),
+      );
+    });
+
     testWidgets('the bar fits a 360 px phone', (WidgetTester tester) async {
       await openFull(tester, surface: const Size(360, 800));
       expect(tester.takeException(), isNull);
@@ -592,6 +650,37 @@ void main() {
 
     expect(find.byType(CaptureDetailPanel), findsNothing);
     expect(find.text('Nothing captured yet.'), findsOneWidget);
+  });
+
+  testWidgets('the focus view reads the text before summary and tags (#451)', (
+    WidgetTester tester,
+  ) async {
+    const String body = 'Ring the joiner about the worktop before Friday.';
+    final RecordingsController controller = await buildRecordingsController(
+      appDir,
+      seed: <Recording>[
+        makeRecording(
+          id: 'dialog',
+          title: 'Kitchen rebuild',
+          summary: 'Chase the worktop.',
+          tags: const <String>['kitchen'],
+          transcript: body,
+        ),
+      ],
+    );
+    await pumpFocusView(tester, controller, 'dialog');
+
+    final double textTop = tester.getRect(inFocusView(find.text(body))).top;
+    expect(
+      textTop,
+      lessThan(
+        tester.getRect(inFocusView(find.textContaining('Chase the worktop.'))).top,
+      ),
+    );
+    expect(
+      textTop,
+      lessThan(tester.getRect(inFocusView(find.text('#kitchen'))).top),
+    );
   });
 
   testWidgets('the focus view renders the capture as markdown', (

@@ -1406,7 +1406,7 @@ class _CaptureDetailPanelState extends State<CaptureDetailPanel> {
         semanticLabel: 'Edit summary',
         hintText: 'Summary / paraphrase',
         multiline: true,
-        fontSize: 15,
+        fontSize: 16,
         onCommit: (String value) => controller.setSummary(recording.id, value),
         display: summary.isEmpty
             ? Text(
@@ -1419,9 +1419,9 @@ class _CaptureDetailPanelState extends State<CaptureDetailPanel> {
             : SimpleMarkdown(
                 text: summary,
                 baseStyle: ConsoleText.body.copyWith(
-                  fontSize: 15,
+                  fontSize: 16,
                   height: 1.6,
-                  color: Console.textSoft,
+                  color: Console.text,
                 ),
                 accentColor: Console.accent,
                 mutedColor: Console.muted,
@@ -1754,9 +1754,6 @@ class _PanelSectionLabel extends StatelessWidget {
   }
 }
 
-/// Category first — it is the one coloured label, and the only place besides
-/// the list's dot that the category colour is spent — then the project, then
-/// whatever the pipeline is doing.
 /// What the folded DETAILS section holds, in a few words, so a phone knows
 /// whether it is worth opening: `TASK · summary · 3 tags`.
 String _detailsHint(Recording recording) => <String>[
@@ -1827,8 +1824,8 @@ class _DetailsToggle extends StatelessWidget {
   }
 }
 
-/// The phone's bottom bar: the moves worth one tap while reading — retry or
-/// play, copy, done — and the DETAILS fold for everything else. Each fires
+/// The phone's bottom bar: the moves worth one tap while reading — cancel,
+/// retry, play or open, copy, done — and the DETAILS fold for everything else. Each fires
 /// the same entry point the full action bar does; no capture logic here.
 class _PhoneBar extends StatelessWidget {
   _PhoneBar({
@@ -1855,8 +1852,19 @@ class _PhoneBar extends StatelessWidget {
         recording.awaitsProcessing;
     final bool reviewed = recording.isProcessedByUser;
     final String text = recording.displayText.trim();
+    final bool canCancel =
+        recording.status == RecordingStatus.transcribing ||
+        recording.status == RecordingStatus.pendingTranscription;
     final bool isPlaying = controller.playingId == recording.id;
+    final bool openable =
+        recording.type == CaptureType.video ||
+        recording.type == CaptureType.file;
 
+    // Out of the way while the keyboard is up for an inline edit: four
+    // buttons pinned above it would cost the field it is editing.
+    if (MediaQuery.viewInsetsOf(context).bottom > 0) {
+      return const SizedBox.shrink();
+    }
     return Container(
       decoration: BoxDecoration(
         color: Console.background,
@@ -1868,7 +1876,14 @@ class _PhoneBar extends StatelessWidget {
           padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
           child: Row(
             children: <Widget>[
-              if (canRetry)
+              if (canCancel)
+                _BarButton(
+                  icon: Icons.close_rounded,
+                  label: 'Cancel',
+                  semanticLabel: 'Cancel processing',
+                  onPressed: () => controller.cancelProcessing(recording.id),
+                )
+              else if (canRetry)
                 _BarButton(
                   icon: Icons.refresh_rounded,
                   label: 'Retry',
@@ -1882,6 +1897,15 @@ class _PhoneBar extends StatelessWidget {
                   label: isPlaying ? 'Stop' : 'Play',
                   semanticLabel: isPlaying ? 'Stop playback' : 'Play recording',
                   onPressed: () => controller.togglePlayback(recording.id),
+                )
+              else if (openable && recording.filePath.isNotEmpty)
+                _BarButton(
+                  icon: Icons.open_in_new_rounded,
+                  label: 'Open',
+                  semanticLabel: recording.type == CaptureType.file
+                      ? RecordingCard.openFileLabel
+                      : RecordingCard.openVideoLabel,
+                  onPressed: () => controller.openSource(recording.id),
                 ),
               if (text.isNotEmpty) _BarCopyButton(text: text),
               _BarButton(
@@ -2003,6 +2027,9 @@ class _BarCopyButtonState extends State<_BarCopyButton> {
   }
 }
 
+/// Category first — it is the one coloured label, and the only place besides
+/// the list's dot that the category colour is spent — then the project, then
+/// whatever the pipeline is doing.
 class _PanelBadges extends StatelessWidget {
   _PanelBadges({
     required this.controller,
