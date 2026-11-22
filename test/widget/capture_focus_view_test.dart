@@ -4,6 +4,7 @@ import 'package:material_ui/material_ui.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:augustyniak_capture/app/ui_kit.dart';
+import 'package:augustyniak_capture/features/recordings/domain/capture_category.dart';
 import 'package:augustyniak_capture/features/recordings/domain/capture_type.dart';
 import 'package:augustyniak_capture/features/recordings/domain/agent_artifact.dart';
 import 'package:augustyniak_capture/features/recordings/domain/note_vault.dart';
@@ -78,6 +79,9 @@ void main() {
     await tester.tap(find.text('Voice note'));
     await tester.pumpAndSettle();
     expect(find.byType(RecordingEditor), findsNothing);
+    // The result header is folded under DETAILS on a phone (#451).
+    await tester.tap(find.byKey(CaptureDetailPanel.detailsToggleKey));
+    await tester.pumpAndSettle();
     await tester.tap(find.text('+ Fragment'));
     await tester.pumpAndSettle();
     await tester.tap(find.widgetWithText(ListTile, 'RECORDING'));
@@ -243,11 +247,195 @@ void main() {
       // The keyboard legend is a desktop thing.
       expect(find.textContaining('j / k'), findsNothing);
 
+      // The action bar is folded under DETAILS on a phone (#451).
+      await tester.tap(find.byKey(CaptureDetailPanel.detailsToggleKey));
+      await tester.pumpAndSettle();
+      await tester.ensureVisible(find.text('Edit'));
+      await tester.pumpAndSettle();
       await tester.tap(find.bySemanticsLabel('Edit title and text'));
       await tester.pumpAndSettle();
       expect(find.byType(RecordingEditor), findsOneWidget);
     },
   );
+
+  group('text first on a phone (#451)', () {
+    const String body = 'Ring the joiner about the worktop before Friday.';
+
+    Future<RecordingsController> openFull(
+      WidgetTester tester, {
+      Size surface = const Size(393, 852),
+      RecordingStatus status = RecordingStatus.completed,
+      String text = body,
+    }) async {
+      final RecordingsController controller = await buildRecordingsController(
+        appDir,
+        seed: <Recording>[
+          // Every field filled and not yet reviewed, so the result header,
+          // the badges, the player and the whole action bar all apply.
+          makeRecording(
+            id: 'full',
+            title: 'Kitchen rebuild',
+            status: status,
+            category: CaptureCategory.task,
+            summary: 'Chase the worktop.\nThen the tiles.\nThen the sink.',
+            tags: const <String>['kitchen', 'joiner', 'worktop'],
+            transcript: status == RecordingStatus.completed ? text : null,
+            error: status == RecordingStatus.failed ? 'Model missing' : null,
+            sizeBytes: 6800000,
+          ),
+        ],
+      );
+      await pumpQueue(tester, controller, surface: surface);
+      await tester.tap(find.text('Kitchen rebuild'));
+      if (status == RecordingStatus.pendingTranscription) {
+        // ProcessingHero repeats forever: pump past the page route instead.
+        await tester.pump();
+        await tester.pump(const Duration(milliseconds: 600));
+      } else {
+        await tester.pumpAndSettle();
+      }
+      return controller;
+    }
+
+    Finder inPanel(Finder matching) =>
+        find.descendant(of: find.byType(CaptureDetailPanel), matching: matching);
+
+    testWidgets('the transcript is on the first screen without scrolling', (
+      WidgetTester tester,
+    ) async {
+      await openFull(tester);
+
+      final Finder text = inPanel(find.text(body));
+      expect(text, findsOneWidget);
+      final Rect bar = tester.getRect(find.byKey(CaptureDetailPanel.barKey));
+      expect(tester.getRect(text).top, lessThan(bar.top));
+    });
+
+    testWidgets('details stay collapsed until asked for', (
+      WidgetTester tester,
+    ) async {
+      await openFull(tester);
+
+      expect(inPanel(find.text('Chase the worktop.')), findsNothing);
+      expect(inPanel(find.text('Enrich')), findsNothing);
+      expect(inPanel(find.textContaining('#kitchen')), findsNothing);
+
+      await tester.tap(find.byKey(CaptureDetailPanel.detailsToggleKey));
+      await tester.pumpAndSettle();
+
+      expect(inPanel(find.text('Enrich')), findsOneWidget);
+      expect(inPanel(find.textContaining('Chase the worktop.')), findsOneWidget);
+      expect(inPanel(find.text('#kitchen')), findsOneWidget);
+    });
+
+    testWidgets('copy and mark done need no expanding', (
+      WidgetTester tester,
+    ) async {
+      final RecordingsController controller = await openFull(tester);
+      final Finder bar = find.byKey(CaptureDetailPanel.barKey);
+
+      expect(
+        find.descendant(of: bar, matching: find.text('Copy')),
+        findsOneWidget,
+      );
+      await tester.tap(find.descendant(of: bar, matching: find.text('Done')));
+      await tester.runAsync(
+        () => Future<void>.delayed(const Duration(milliseconds: 50)),
+      );
+      await tester.pump();
+      expect(controller.recordings.single.isProcessedByUser, isTrue);
+    });
+
+    testWidgets('a failed capture keeps its reason and Retry on screen', (
+      WidgetTester tester,
+    ) async {
+      await openFull(tester, status: RecordingStatus.failed);
+      final Finder bar = find.byKey(CaptureDetailPanel.barKey);
+
+      expect(inPanel(find.textContaining('Model missing')), findsOneWidget);
+      expect(
+        find.descendant(of: bar, matching: find.text('Retry')),
+        findsOneWidget,
+      );
+    });
+
+    testWidgets('Details in the bar opens the fold where it can be seen', (
+      WidgetTester tester,
+    ) async {
+      // Long enough that the fold starts well below the first screen.
+      await openFull(
+        tester,
+        surface: const Size(393, 520),
+        text: List<String>.filled(40, body).join(' '),
+      );
+      final Finder bar = find.byKey(CaptureDetailPanel.barKey);
+
+      await tester.tap(find.descendant(of: bar, matching: find.text('Details')));
+      await tester.pumpAndSettle();
+
+      final Rect toggle = tester.getRect(
+        find.byKey(CaptureDetailPanel.detailsToggleKey),
+      );
+      expect(toggle.bottom, lessThan(tester.getRect(bar).top));
+      expect(
+        find.descendant(of: bar, matching: find.text('Less')),
+        findsOneWidget,
+      );
+    });
+
+    testWidgets('a queued capture offers Cancel in the bar', (
+      WidgetTester tester,
+    ) async {
+      await openFull(tester, status: RecordingStatus.pendingTranscription);
+      final Finder bar = find.byKey(CaptureDetailPanel.barKey);
+      expect(
+        find.descendant(of: bar, matching: find.text('Cancel')),
+        findsOneWidget,
+      );
+    });
+
+    testWidgets('desktop keeps its actions open and reads text before summary', (
+      WidgetTester tester,
+    ) async {
+      final RecordingsController controller = await buildRecordingsController(
+        appDir,
+        seed: <Recording>[
+          makeRecording(
+            id: 'desk',
+            title: 'Kitchen rebuild',
+            summary: 'Chase the worktop.',
+            tags: const <String>['kitchen'],
+            transcript: body,
+          ),
+        ],
+      );
+      // Master-detail, the panel beside the list.
+      await pumpQueue(tester, controller, surface: const Size(1400, 900));
+      await tester.pumpAndSettle();
+      expect(find.byType(CaptureDetailPanel), findsOneWidget);
+
+      expect(find.byKey(CaptureDetailPanel.barKey), findsNothing);
+      expect(find.byKey(CaptureDetailPanel.detailsToggleKey), findsNothing);
+      expect(inPanel(find.text('Enrich')), findsOneWidget);
+      final double textTop = tester.getRect(inPanel(find.text(body))).top;
+      expect(
+        textTop,
+        lessThan(
+          tester.getRect(inPanel(find.textContaining('Chase the worktop.'))).top,
+        ),
+      );
+      expect(
+        textTop,
+        lessThan(tester.getRect(inPanel(find.text('#kitchen'))).top),
+      );
+    });
+
+    testWidgets('the bar fits a 360 px phone', (WidgetTester tester) async {
+      await openFull(tester, surface: const Size(360, 800));
+      expect(tester.takeException(), isNull);
+      expect(find.byKey(CaptureDetailPanel.barKey), findsOneWidget);
+    });
+  });
 
   group('inline edit in the open capture', () {
     Future<RecordingsController> openOnPhone(WidgetTester tester) async {
@@ -291,8 +479,9 @@ void main() {
       await tester.enterText(field, 'Bathroom rebuild');
       expect(controller.recordings.single.title, 'Kitchen rebuild');
 
-      // A click anywhere outside the field is the blur that writes it.
-      await tester.tap(inPanel(find.text('SUMMARY')));
+      // A click anywhere outside the field is the blur that writes it. The
+      // transcript's label sits under the title on a phone (#451).
+      await tester.tap(inPanel(find.textContaining('TRANSCRIPT')));
       await tester.pump();
       await settleWrite(tester);
 
@@ -306,6 +495,11 @@ void main() {
     ) async {
       final RecordingsController controller = await openOnPhone(tester);
 
+      // The summary is folded under DETAILS on a phone (#451).
+      await tester.tap(find.byKey(CaptureDetailPanel.detailsToggleKey));
+      await tester.pumpAndSettle();
+      await tester.ensureVisible(inPanel(find.text('Chase the worktop.')));
+      await tester.pump();
       await tester.tap(inPanel(find.text('Chase the worktop.')));
       await tester.pump();
       await tester.pump();
@@ -323,19 +517,13 @@ void main() {
     ) async {
       final RecordingsController controller = await openOnPhone(tester);
 
-      // The result header above the title pushes the transcript below the
-      // phone's first screen.
-      await tester.ensureVisible(
-        inPanel(find.text('Ring the joiner about the worktop.')),
-      );
-      await tester.pump();
       await tester.tap(
         inPanel(find.text('Ring the joiner about the worktop.')),
       );
       await tester.pump();
       await tester.pump();
       await tester.enterText(inPanel(find.byType(TextField)), '   ');
-      await tester.tap(inPanel(find.text('SUMMARY')));
+      await tester.tap(inPanel(find.textContaining('TRANSCRIPT')));
       await tester.pump();
       await settleWrite(tester);
 
@@ -457,6 +645,37 @@ void main() {
 
     expect(find.byType(CaptureDetailPanel), findsNothing);
     expect(find.text('Nothing captured yet.'), findsOneWidget);
+  });
+
+  testWidgets('the focus view reads the text before summary and tags (#451)', (
+    WidgetTester tester,
+  ) async {
+    const String body = 'Ring the joiner about the worktop before Friday.';
+    final RecordingsController controller = await buildRecordingsController(
+      appDir,
+      seed: <Recording>[
+        makeRecording(
+          id: 'dialog',
+          title: 'Kitchen rebuild',
+          summary: 'Chase the worktop.',
+          tags: const <String>['kitchen'],
+          transcript: body,
+        ),
+      ],
+    );
+    await pumpFocusView(tester, controller, 'dialog');
+
+    final double textTop = tester.getRect(inFocusView(find.text(body))).top;
+    expect(
+      textTop,
+      lessThan(
+        tester.getRect(inFocusView(find.textContaining('Chase the worktop.'))).top,
+      ),
+    );
+    expect(
+      textTop,
+      lessThan(tester.getRect(inFocusView(find.text('#kitchen'))).top),
+    );
   });
 
   testWidgets('the focus view renders the capture as markdown', (

@@ -207,6 +207,90 @@ class _FocusBody extends StatelessWidget {
               child: ListView(
                 padding: const EdgeInsets.only(top: 14),
                 children: <Widget>[
+                  // The text leads (#451); sources, summary and tags follow.
+                  if (recording.error != null) ...<Widget>[
+                    _ErrorBox(
+                      error: recording.error!,
+                      // Leaves first: the Models tab is behind this dialog.
+                      onConfigureModels: onConfigureModels == null
+                          ? null
+                          : () {
+                              Navigator.of(context).pop();
+                              onConfigureModels!();
+                            },
+                    ),
+                    const SizedBox(height: 14),
+                  ],
+                  _SectionLabel(
+                    label: transcript.isEmpty
+                        ? 'NO TEXT YET'
+                        : '$wordCount words · ${transcript.length} characters',
+                    trailing: transcript.isEmpty
+                        ? null
+                        : CopyButton(
+                            text: recording.displayText.trim(),
+                            tooltip: 'Copy full text',
+                            semanticLabel: 'Copy full text to clipboard',
+                          ),
+                  ),
+                  const SizedBox(height: 8),
+                  CaptureTextTabs(
+                    key: ValueKey<String>('text-tabs-${recording.id}'),
+                    recording: recording,
+                    writing: controller.isWritingInstruction(recording.id),
+                    error: controller.instructionError(recording.id),
+                    onRewrite: RecordingsController.canCleanUp(recording)
+                        ? () => controller.writeInstruction(recording.id)
+                        : null,
+                    instructionBody: (String text) => Container(
+                      width: double.infinity,
+                      padding: const EdgeInsets.all(14),
+                      decoration: BoxDecoration(
+                        color: Console.surfaceRaised,
+                        borderRadius: BorderRadius.circular(12),
+                        border: Border.all(color: Console.border),
+                      ),
+                      child: SimpleMarkdown(
+                        text: text,
+                        baseStyle: ConsoleText.body.copyWith(
+                          fontSize: 14,
+                          height: 1.55,
+                          color: Console.text,
+                        ),
+                        accentColor: Console.accent,
+                        mutedColor: Console.muted,
+                        borderColor: Console.border,
+                      ),
+                    ),
+                    raw: Container(
+                    width: double.infinity,
+                    padding: const EdgeInsets.all(14),
+                    decoration: BoxDecoration(
+                      color: Console.surfaceRaised,
+                      borderRadius: BorderRadius.circular(12),
+                      border: Border.all(color: Console.border),
+                    ),
+                    child: transcript.isEmpty
+                        ? Text(
+                            _emptyTextFor(recording),
+                            style: ConsoleText.cardMeta.copyWith(
+                              color: Console.muted,
+                            ),
+                          )
+                        : SimpleMarkdown(
+                            text: transcript,
+                            baseStyle: ConsoleText.body.copyWith(
+                              fontSize: 14,
+                              height: 1.55,
+                              color: Console.text,
+                            ),
+                            accentColor: Console.accent,
+                            mutedColor: Console.muted,
+                            borderColor: Console.border,
+                          ),
+                  ),
+                  ),
+                  const SizedBox(height: 14),
                   if (recording.type == CaptureType.file &&
                       recording.filePath.isNotEmpty) ...<Widget>[
                     _SectionLabel(
@@ -356,89 +440,6 @@ class _FocusBody extends StatelessWidget {
                     ]),
                     const SizedBox(height: 14),
                   ],
-                  if (recording.error != null) ...<Widget>[
-                    _ErrorBox(
-                      error: recording.error!,
-                      // Leaves first: the Models tab is behind this dialog.
-                      onConfigureModels: onConfigureModels == null
-                          ? null
-                          : () {
-                              Navigator.of(context).pop();
-                              onConfigureModels!();
-                            },
-                    ),
-                    const SizedBox(height: 14),
-                  ],
-                  _SectionLabel(
-                    label: transcript.isEmpty
-                        ? 'NO TEXT YET'
-                        : '$wordCount words · ${transcript.length} characters',
-                    trailing: transcript.isEmpty
-                        ? null
-                        : CopyButton(
-                            text: recording.displayText.trim(),
-                            tooltip: 'Copy full text',
-                            semanticLabel: 'Copy full text to clipboard',
-                          ),
-                  ),
-                  const SizedBox(height: 8),
-                  CaptureTextTabs(
-                    key: ValueKey<String>('text-tabs-${recording.id}'),
-                    recording: recording,
-                    writing: controller.isWritingInstruction(recording.id),
-                    error: controller.instructionError(recording.id),
-                    onRewrite: RecordingsController.canCleanUp(recording)
-                        ? () => controller.writeInstruction(recording.id)
-                        : null,
-                    instructionBody: (String text) => Container(
-                      width: double.infinity,
-                      padding: const EdgeInsets.all(14),
-                      decoration: BoxDecoration(
-                        color: Console.surfaceRaised,
-                        borderRadius: BorderRadius.circular(12),
-                        border: Border.all(color: Console.border),
-                      ),
-                      child: SimpleMarkdown(
-                        text: text,
-                        baseStyle: ConsoleText.body.copyWith(
-                          fontSize: 14,
-                          height: 1.55,
-                          color: Console.text,
-                        ),
-                        accentColor: Console.accent,
-                        mutedColor: Console.muted,
-                        borderColor: Console.border,
-                      ),
-                    ),
-                    raw: Container(
-                    width: double.infinity,
-                    padding: const EdgeInsets.all(14),
-                    decoration: BoxDecoration(
-                      color: Console.surfaceRaised,
-                      borderRadius: BorderRadius.circular(12),
-                      border: Border.all(color: Console.border),
-                    ),
-                    child: transcript.isEmpty
-                        ? Text(
-                            _emptyTextFor(recording),
-                            style: ConsoleText.cardMeta.copyWith(
-                              color: Console.muted,
-                            ),
-                          )
-                        : SimpleMarkdown(
-                            text: transcript,
-                            baseStyle: ConsoleText.body.copyWith(
-                              fontSize: 14,
-                              height: 1.55,
-                              color: Console.text,
-                            ),
-                            accentColor: Console.accent,
-                            mutedColor: Console.muted,
-                            borderColor: Console.border,
-                          ),
-                  ),
-                  ),
-                  const SizedBox(height: 14),
                   if (recording.routes.isNotEmpty) ...<Widget>[
                     Row(
                       children: <Widget>[
@@ -1165,8 +1166,8 @@ class CaptureDetailPanel extends StatefulWidget {
   final double? costUsd;
   final ScrollController? scrollController;
 
-  /// The phone's full-screen page: tighter gutters and a smaller title, the
-  /// same content in the same order.
+  /// The phone's full-screen page: the text first, everything else folded
+  /// behind a DETAILS toggle, and the main moves in a bottom bar.
   final bool compact;
 
   /// Maximum width of the reading column.
@@ -1181,6 +1182,12 @@ class CaptureDetailPanel extends StatefulWidget {
   /// Called when the metadata column is resized via drag.
   final ValueChanged<double>? onDetailMetaWidthChanged;
 
+  /// The phone's bottom bar of quick actions.
+  static const Key barKey = Key('detail-phone-bar');
+
+  /// The phone's DETAILS toggle under the text.
+  static const Key detailsToggleKey = Key('detail-details-toggle');
+
   /// The reading measure: about 72 characters of 15 px text.
   static const double readingWidth = 680;
 
@@ -1189,6 +1196,28 @@ class CaptureDetailPanel extends StatefulWidget {
 }
 
 class _CaptureDetailPanelState extends State<CaptureDetailPanel> {
+  /// Phone only: whether the folded section under the text is open. Per panel
+  /// state, and the page keys the panel by capture id, so every capture opens
+  /// folded again.
+  bool _detailsOpen = false;
+  final GlobalKey _detailsAnchor = GlobalKey();
+
+  /// Opening scrolls the fold to the top of the page: tapped from the bottom
+  /// bar under a long transcript, it would otherwise open off screen.
+  void _toggleDetails() {
+    setState(() => _detailsOpen = !_detailsOpen);
+    if (!_detailsOpen) return;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      final BuildContext? anchor = _detailsAnchor.currentContext;
+      if (anchor == null || !anchor.mounted) return;
+      Scrollable.ensureVisible(
+        anchor,
+        duration: const Duration(milliseconds: 250),
+        curve: Curves.easeOutCubic,
+      );
+    });
+  }
+
   double? _localReadingMaxWidth;
   double? _localMetaWidth;
 
@@ -1283,273 +1312,323 @@ class _CaptureDetailPanelState extends State<CaptureDetailPanel> {
       enriching: enriching,
     );
 
+    // Every field below is edited where it is read: a click turns it into a
+    // field, and leaving the field writes it through the same controller
+    // method the editor uses.
+    final Widget title = InlineEditText(
+      value: recording.title ?? '',
+      semanticLabel: 'Edit title',
+      hintText: File(recording.filePath).uri.pathSegments.last,
+      fontSize: compact ? 18 : 22,
+      onCommit: (String value) => controller.setTitle(recording.id, value),
+      display: Text(
+        displayNameFor(recording),
+        style: ConsoleText.cardTitle.copyWith(
+          fontSize: compact ? 19 : 26,
+          height: 1.2,
+        ),
+      ),
+    );
+    final Widget metaLine = Text(
+      metaLineFor(recording, File(recording.filePath).uri.pathSegments.last),
+      style: ConsoleText.cardMeta.copyWith(fontSize: compact ? 12 : 13),
+    );
+    final List<Widget> resultHeader = <Widget>[
+      if (CaptureResultHeader.appliesTo(recording)) ...<Widget>[
+        CaptureResultHeader(
+          controller: controller,
+          recording: recording,
+          onConfirmSuggestedRoute: widget.onConfirmSuggestedRoute,
+          onAppendRecording: onAppendRecording,
+          onAppendNote: onAppendNote,
+          onAppendUpload: onAppendUpload,
+        ),
+        const SizedBox(height: 16),
+      ],
+    ];
+    final Widget badges = _PanelBadges(
+      controller: controller,
+      recording: recording,
+      projectName: projectName,
+      projects: projects,
+    );
+    final List<Widget> media = <Widget>[
+      if (recording.type.isPlayableAudio &&
+          recording.filePath.isNotEmpty) ...<Widget>[
+        _AudioPlaybackBar(controller: controller, recording: recording),
+        const SizedBox(height: 16),
+      ],
+      if (recording.type == CaptureType.video &&
+          recording.filePath.isNotEmpty) ...<Widget>[
+        InlineVideoPlayer.forRecording(
+          recording: recording,
+          onOpenExternal: () => controller.openSource(recording.id),
+        ),
+        const SizedBox(height: 16),
+      ],
+      if (recording.type == CaptureType.image &&
+          recording.filePath.isNotEmpty) ...<Widget>[
+        _SourceImagePreview(file: File(recording.filePath)),
+        const SizedBox(height: 16),
+      ],
+    ];
+    final Widget actions = _PanelActions(
+      controller: controller,
+      recording: recording,
+      projectName: projectName,
+      onEdit: onEdit,
+      onAppendRecording: onAppendRecording,
+      onAppendNote: onAppendNote,
+      onAppendUpload: onAppendUpload,
+      onToggleProcessed: onToggleProcessed,
+      isMarkingDone: isMarkingDone,
+      onRecordNew: widget.onRecordNew,
+    );
+    // Why there is no text yet stays above the text on every form factor: a
+    // failed capture with its reason folded away reads as an empty one.
+    final List<Widget> status = <Widget>[
+      if (recording.error != null) ...<Widget>[
+        _ErrorBox(error: recording.error!, onConfigureModels: onConfigureModels),
+        const SizedBox(height: 22),
+      ],
+      if (showsHero)
+        const SizedBox.shrink()
+      else if (controller.isEnriching(recording.id)) ...<Widget>[
+        ProcessingStrip(enriching: true, type: recording.type),
+        const SizedBox(height: 22),
+      ] else if (recording.status == RecordingStatus.transcribing) ...<Widget>[
+        ProcessingStrip(
+          enriching: false,
+          type: recording.type,
+          processingTicker:
+              controller.processingElapsedFor(recording.id) != null
+              ? controller.processingTicker
+              : null,
+        ),
+        const SizedBox(height: 22),
+      ],
+    ];
+    final List<Widget> summarySection = <Widget>[
+      _PanelSectionLabel(label: 'Summary'),
+      const SizedBox(height: 8),
+      InlineEditText(
+        value: summary,
+        semanticLabel: 'Edit summary',
+        hintText: 'Summary / paraphrase',
+        multiline: true,
+        fontSize: 16,
+        onCommit: (String value) => controller.setSummary(recording.id, value),
+        display: summary.isEmpty
+            ? Text(
+                'Add a summary',
+                style: ConsoleText.body.copyWith(
+                  fontSize: 15,
+                  color: Console.muted,
+                ),
+              )
+            : SimpleMarkdown(
+                text: summary,
+                baseStyle: ConsoleText.body.copyWith(
+                  fontSize: 16,
+                  height: 1.6,
+                  color: Console.text,
+                ),
+                accentColor: Console.accent,
+                mutedColor: Console.muted,
+                borderColor: Console.border,
+              ),
+      ),
+    ];
+    // The capture's text is what the view is for, so it is drawn at the
+    // primary colour and the largest body size on the page.
+    final TextStyle textStyle = ConsoleText.body.copyWith(
+      fontSize: 16,
+      height: 1.65,
+      color: Console.text,
+    );
+    final List<Widget> textSection = <Widget>[
+      _PanelSectionLabel(
+        label: transcript.isEmpty ? 'Transcript' : 'Transcript · $wordCount words',
+      ),
+      const SizedBox(height: 8),
+      CaptureTextTabs(
+        key: ValueKey<String>('text-tabs-${recording.id}'),
+        recording: recording,
+        writing: controller.isWritingInstruction(recording.id),
+        error: controller.instructionError(recording.id),
+        onRewrite: RecordingsController.canCleanUp(recording)
+            ? () => controller.writeInstruction(recording.id)
+            : null,
+        instructionBody: (String text) => SimpleMarkdown(
+          text: text,
+          baseStyle: textStyle,
+          accentColor: Console.accent,
+          mutedColor: Console.muted,
+          borderColor: Console.border,
+        ),
+        raw: InlineEditText(
+          value: transcript,
+          semanticLabel: 'Edit transcript',
+          hintText: 'Transcript / OCR text / note',
+          multiline: true,
+          allowEmpty: false,
+          onCommit: (String value) =>
+              controller.editTranscript(recording.id, value),
+          display: transcript.isEmpty
+              ? Text(
+                  _emptyTextFor(recording),
+                  style: ConsoleText.body.copyWith(
+                    fontSize: 15,
+                    color: Console.muted,
+                  ),
+                )
+              : SimpleMarkdown(
+                  text: transcript,
+                  baseStyle: textStyle,
+                  accentColor: Console.accent,
+                  mutedColor: Console.muted,
+                  borderColor: Console.border,
+                ),
+        ),
+      ),
+    ];
+    final Widget tags = InlineEditTags(
+      editor: TagEditor(
+        tags: recording.tags,
+        suggestions: tagSuggestions,
+        onChanged: (List<String> values) =>
+            controller.setTags(recording.id, values),
+      ),
+      display: Wrap(
+        spacing: 6,
+        runSpacing: 6,
+        crossAxisAlignment: WrapCrossAlignment.center,
+        children: <Widget>[
+          for (final String tag in recording.tags)
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 3),
+              decoration: BoxDecoration(
+                color: Console.surfaceRaised,
+                borderRadius: BorderRadius.circular(6),
+              ),
+              child: Text(
+                '#$tag',
+                style: ConsoleText.body.copyWith(
+                  fontSize: 12,
+                  color: Console.muted,
+                ),
+              ),
+            ),
+          if (recording.tags.isEmpty)
+            Text(
+              'Add tags',
+              style: ConsoleText.body.copyWith(
+                fontSize: 13,
+                color: Console.muted,
+              ),
+            )
+          else
+            CopyButton(
+              text: tagsClipboardText(recording.tags),
+              tooltip: 'Copy tags',
+              semanticLabel: 'Copy tags to clipboard',
+              size: 26,
+              iconSize: 13,
+            ),
+        ],
+      ),
+    );
+    final List<Widget> trail = <Widget>[
+      if (recording.routes.isNotEmpty) ...<Widget>[
+        const SizedBox(height: 18),
+        Row(
+          children: <Widget>[
+            Icon(
+              Icons.subdirectory_arrow_right_rounded,
+              size: 14,
+              color: Console.green,
+            ),
+            const SizedBox(width: 6),
+            Expanded(
+              child: Text(
+                recording.routes.last.target,
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+                style: ConsoleText.micro.copyWith(color: Console.green),
+              ),
+            ),
+          ],
+        ),
+      ],
+      if (CaptureThread.appliesTo(
+        CaptureThread.entriesFor(recording, revisions),
+      )) ...<Widget>[
+        const SizedBox(height: 24),
+        CaptureThread(recording: recording, revisions: revisions),
+      ],
+    ];
+
+    // Text first on every form factor. On a desktop the rest stays open, as
+    // there is room for it beside the list; on a phone it folds behind one
+    // DETAILS toggle and the moves that matter most ride the bottom bar, so
+    // the first screen is the capture's text rather than its controls (#451).
+    final List<Widget> articleChildren = compact
+        ? <Widget>[
+            title,
+            const SizedBox(height: 6),
+            metaLine,
+            const SizedBox(height: 16),
+            ...status,
+            ...textSection,
+            const SizedBox(height: 20),
+            KeyedSubtree(
+              key: _detailsAnchor,
+              child: _DetailsToggle(
+                key: CaptureDetailPanel.detailsToggleKey,
+                open: _detailsOpen,
+                hint: _detailsHint(recording),
+                onTap: _toggleDetails,
+              ),
+            ),
+            if (_detailsOpen) ...<Widget>[
+              const SizedBox(height: 16),
+              ...resultHeader,
+              badges,
+              const SizedBox(height: 16),
+              ...media,
+              actions,
+              const SizedBox(height: 24),
+              ...summarySection,
+              const SizedBox(height: 24),
+              tags,
+              ...trail,
+            ],
+          ]
+        : <Widget>[
+            ...resultHeader,
+            badges,
+            const SizedBox(height: 14),
+            title,
+            const SizedBox(height: 8),
+            metaLine,
+            const SizedBox(height: 20),
+            ...media,
+            actions,
+            const SizedBox(height: 24),
+            ...status,
+            ...textSection,
+            const SizedBox(height: 24),
+            ...summarySection,
+            const SizedBox(height: 24),
+            tags,
+            ...trail,
+          ];
+
     final Widget article = ConstrainedBox(
       constraints: BoxConstraints(maxWidth: effectiveReadingWidth),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
-        children: <Widget>[
-          if (CaptureResultHeader.appliesTo(recording)) ...<Widget>[
-            CaptureResultHeader(
-              controller: controller,
-              recording: recording,
-              onConfirmSuggestedRoute: widget.onConfirmSuggestedRoute,
-              onAppendRecording: onAppendRecording,
-              onAppendNote: onAppendNote,
-              onAppendUpload: onAppendUpload,
-            ),
-            const SizedBox(height: 16),
-          ],
-          _PanelBadges(
-            controller: controller,
-            recording: recording,
-            projectName: projectName,
-            projects: projects,
-          ),
-          const SizedBox(height: 14),
-          // Every field below is edited where it is read: a click turns it
-          // into a field, and leaving the field writes it through the same
-          // controller method the editor uses.
-          InlineEditText(
-            value: recording.title ?? '',
-            semanticLabel: 'Edit title',
-            hintText: File(recording.filePath).uri.pathSegments.last,
-            fontSize: compact ? 20 : 22,
-            onCommit: (String value) => controller.setTitle(recording.id, value),
-            display: Text(
-              displayNameFor(recording),
-              style: ConsoleText.cardTitle.copyWith(
-                fontSize: compact ? 22 : 26,
-                height: 1.2,
-              ),
-            ),
-          ),
-          const SizedBox(height: 8),
-          Text(
-            metaLineFor(
-              recording,
-              File(recording.filePath).uri.pathSegments.last,
-            ),
-            style: ConsoleText.cardMeta.copyWith(fontSize: 13),
-          ),
-          const SizedBox(height: 20),
-          if (recording.type.isPlayableAudio &&
-              recording.filePath.isNotEmpty) ...<Widget>[
-            _AudioPlaybackBar(controller: controller, recording: recording),
-            const SizedBox(height: 16),
-          ],
-          if (recording.type == CaptureType.video &&
-              recording.filePath.isNotEmpty) ...<Widget>[
-            InlineVideoPlayer.forRecording(
-              recording: recording,
-              onOpenExternal: () => controller.openSource(recording.id),
-            ),
-            const SizedBox(height: 16),
-          ],
-          if (recording.type == CaptureType.image &&
-              recording.filePath.isNotEmpty) ...<Widget>[
-            _SourceImagePreview(file: File(recording.filePath)),
-            const SizedBox(height: 16),
-          ],
-          _PanelActions(
-            controller: controller,
-            recording: recording,
-            projectName: projectName,
-            onEdit: onEdit,
-            onAppendRecording: onAppendRecording,
-            onAppendNote: onAppendNote,
-            onAppendUpload: onAppendUpload,
-            onRecordNew: widget.onRecordNew,
-            onToggleProcessed: onToggleProcessed,
-            isMarkingDone: isMarkingDone,
-          ),
-          const SizedBox(height: 24),
-          if (recording.error != null) ...<Widget>[
-            _ErrorBox(
-              error: recording.error!,
-              onConfigureModels: onConfigureModels,
-            ),
-            const SizedBox(height: 22),
-          ],
-          if (showsHero)
-            const SizedBox.shrink()
-          else if (controller.isEnriching(recording.id)) ...<Widget>[
-            ProcessingStrip(enriching: true, type: recording.type),
-            const SizedBox(height: 22),
-          ] else if (recording.status ==
-              RecordingStatus.transcribing) ...<Widget>[
-            ProcessingStrip(
-              enriching: false,
-              type: recording.type,
-              processingTicker:
-                  controller.processingElapsedFor(recording.id) != null
-                  ? controller.processingTicker
-                  : null,
-            ),
-            const SizedBox(height: 22),
-          ],
-          _PanelSectionLabel(label: 'Summary'),
-          const SizedBox(height: 8),
-          InlineEditText(
-            value: summary,
-            semanticLabel: 'Edit summary',
-            hintText: 'Summary / paraphrase',
-            multiline: true,
-            fontSize: 16,
-            onCommit: (String value) =>
-                controller.setSummary(recording.id, value),
-            display: summary.isEmpty
-                ? Text(
-                    'Add a summary',
-                    style: ConsoleText.body.copyWith(
-                      fontSize: 15,
-                      color: Console.muted,
-                    ),
-                  )
-                : SimpleMarkdown(
-                    text: summary,
-                    baseStyle: ConsoleText.body.copyWith(
-                      fontSize: 16,
-                      height: 1.6,
-                      color: Console.text,
-                    ),
-                    accentColor: Console.accent,
-                    mutedColor: Console.muted,
-                    borderColor: Console.border,
-                  ),
-          ),
-          const SizedBox(height: 24),
-          _PanelSectionLabel(
-            label: transcript.isEmpty
-                ? 'Transcript'
-                : 'Transcript · $wordCount words',
-          ),
-          const SizedBox(height: 8),
-          CaptureTextTabs(
-            key: ValueKey<String>('text-tabs-${recording.id}'),
-            recording: recording,
-            writing: controller.isWritingInstruction(recording.id),
-            error: controller.instructionError(recording.id),
-            onRewrite: RecordingsController.canCleanUp(recording)
-                ? () => controller.writeInstruction(recording.id)
-                : null,
-            instructionBody: (String text) => SimpleMarkdown(
-              text: text,
-              baseStyle: ConsoleText.body.copyWith(
-                fontSize: 15,
-                height: 1.65,
-                color: Console.text,
-              ),
-              accentColor: Console.accent,
-              mutedColor: Console.muted,
-              borderColor: Console.border,
-            ),
-            raw: InlineEditText(
-            value: transcript,
-            semanticLabel: 'Edit transcript',
-            hintText: 'Transcript / OCR text / note',
-            multiline: true,
-            allowEmpty: false,
-            onCommit: (String value) =>
-                controller.editTranscript(recording.id, value),
-            display: transcript.isEmpty
-                ? Text(
-                    _emptyTextFor(recording),
-                    style: ConsoleText.body.copyWith(
-                      fontSize: 15,
-                      color: Console.muted,
-                    ),
-                  )
-                : SimpleMarkdown(
-                    text: transcript,
-                    baseStyle: ConsoleText.body.copyWith(
-                      fontSize: 15,
-                      height: 1.65,
-                      color: Console.textSoft,
-                    ),
-                    accentColor: Console.accent,
-                    mutedColor: Console.muted,
-                    borderColor: Console.border,
-                  ),
-          ),
-          ),
-          const SizedBox(height: 24),
-          InlineEditTags(
-            editor: TagEditor(
-              tags: recording.tags,
-              suggestions: tagSuggestions,
-              onChanged: (List<String> values) =>
-                  controller.setTags(recording.id, values),
-            ),
-            display: Wrap(
-              spacing: 6,
-              runSpacing: 6,
-              crossAxisAlignment: WrapCrossAlignment.center,
-              children: <Widget>[
-                for (final String tag in recording.tags)
-                  Container(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 9,
-                      vertical: 3,
-                    ),
-                    decoration: BoxDecoration(
-                      color: Console.surfaceRaised,
-                      borderRadius: BorderRadius.circular(6),
-                    ),
-                    child: Text(
-                      '#$tag',
-                      style: ConsoleText.body.copyWith(
-                        fontSize: 12,
-                        color: Console.muted,
-                      ),
-                    ),
-                  ),
-                if (recording.tags.isEmpty)
-                  Text(
-                    'Add tags',
-                    style: ConsoleText.body.copyWith(
-                      fontSize: 13,
-                      color: Console.muted,
-                    ),
-                  )
-                else
-                  CopyButton(
-                    text: tagsClipboardText(recording.tags),
-                    tooltip: 'Copy tags',
-                    semanticLabel: 'Copy tags to clipboard',
-                    size: 26,
-                    iconSize: 13,
-                  ),
-              ],
-            ),
-          ),
-          if (recording.routes.isNotEmpty) ...<Widget>[
-            const SizedBox(height: 18),
-            Row(
-              children: <Widget>[
-                Icon(
-                  Icons.subdirectory_arrow_right_rounded,
-                  size: 14,
-                  color: Console.green,
-                ),
-                const SizedBox(width: 6),
-                Expanded(
-                  child: Text(
-                    recording.routes.last.target,
-                    maxLines: 2,
-                    overflow: TextOverflow.ellipsis,
-                    style: ConsoleText.micro.copyWith(color: Console.green),
-                  ),
-                ),
-              ],
-            ),
-          ],
-          if (CaptureThread.appliesTo(
-            CaptureThread.entriesFor(recording, revisions),
-          )) ...<Widget>[
-            const SizedBox(height: 24),
-            CaptureThread(recording: recording, revisions: revisions),
-          ],
-        ],
+        children: articleChildren,
       ),
     );
 
@@ -1560,7 +1639,7 @@ class _CaptureDetailPanelState extends State<CaptureDetailPanel> {
       showKeys: !compact,
     );
 
-    return SelectionArea(
+    final Widget body = SelectionArea(
       child: ListView(
         controller: scrollController,
         padding: compact
@@ -1638,14 +1717,32 @@ class _CaptureDetailPanelState extends State<CaptureDetailPanel> {
                 ],
               ),
             ),
-            const SizedBox(height: 32),
-            ConstrainedBox(
-              constraints: BoxConstraints(maxWidth: effectiveReadingWidth),
-              child: meta,
-            ),
+            if (!compact || _detailsOpen) ...<Widget>[
+              const SizedBox(height: 32),
+              ConstrainedBox(
+                constraints: BoxConstraints(maxWidth: effectiveReadingWidth),
+                child: meta,
+              ),
+            ],
           ],
         ],
       ),
+    );
+    if (!compact) return body;
+    return Column(
+      children: <Widget>[
+        Expanded(child: body),
+        _PhoneBar(
+          key: CaptureDetailPanel.barKey,
+          controller: controller,
+          recording: recording,
+          detailsOpen: _detailsOpen,
+          onToggleDetails: _toggleDetails,
+          onToggleProcessed: onToggleProcessed,
+          isMarkingDone: isMarkingDone,
+          onRecordNew: widget.onRecordNew,
+        ),
+      ],
     );
   }
 }
@@ -1664,6 +1761,289 @@ class _PanelSectionLabel extends StatelessWidget {
         letterSpacing: 1.3,
         color: Console.muted,
       ),
+    );
+  }
+}
+
+/// What the folded DETAILS section holds, in a few words, so a phone knows
+/// whether it is worth opening: `TASK · summary · 3 tags`.
+String _detailsHint(Recording recording) => <String>[
+  if (recording.category != null) recording.category!.label,
+  if ((recording.summary ?? '').trim().isNotEmpty) 'summary',
+  if (recording.tags.isNotEmpty)
+    '${recording.tags.length} ${recording.tags.length == 1 ? 'tag' : 'tags'}',
+].join(' · ');
+
+/// The phone's single fold under the text: badges, actions, summary, tags,
+/// thread and file facts open and close together.
+class _DetailsToggle extends StatelessWidget {
+  _DetailsToggle({
+    super.key,
+    required this.open,
+    required this.hint,
+    required this.onTap,
+  });
+
+  final bool open;
+  final String hint;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return Semantics(
+      button: true,
+      expanded: open,
+      label: open ? 'Hide details' : 'Show details',
+      excludeSemantics: true,
+      onTap: onTap,
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(8),
+        child: Container(
+          padding: const EdgeInsets.symmetric(vertical: 10),
+          decoration: BoxDecoration(
+            border: Border(top: BorderSide(color: Console.border)),
+          ),
+          child: Row(
+            children: <Widget>[
+              Text(
+                'DETAILS',
+                style: ConsoleText.micro.copyWith(
+                  fontSize: 11,
+                  color: Console.dimText,
+                ),
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Text(
+                  hint,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: ConsoleText.cardMeta.copyWith(fontSize: 12),
+                ),
+              ),
+              Icon(
+                open ? Icons.expand_less_rounded : Icons.expand_more_rounded,
+                size: 20,
+                color: Console.muted,
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// The phone's bottom bar: the moves worth one tap while reading — cancel,
+/// retry, play or open, copy, record, done — and the DETAILS fold for everything else. Each fires
+/// the same entry point the full action bar does; no capture logic here.
+class _PhoneBar extends StatelessWidget {
+  _PhoneBar({
+    super.key,
+    required this.controller,
+    required this.recording,
+    required this.detailsOpen,
+    required this.onToggleDetails,
+    required this.onToggleProcessed,
+    required this.isMarkingDone,
+    this.onRecordNew,
+  });
+
+  final RecordingsController controller;
+  final Recording recording;
+  final VoidCallback? onRecordNew;
+  final bool detailsOpen;
+  final VoidCallback onToggleDetails;
+  final VoidCallback onToggleProcessed;
+  final bool isMarkingDone;
+
+  @override
+  Widget build(BuildContext context) {
+    final bool canRetry =
+        recording.status == RecordingStatus.failed ||
+        recording.awaitsProcessing;
+    final bool reviewed = recording.isProcessedByUser;
+    final String text = recording.displayText.trim();
+    final bool canCancel =
+        recording.status == RecordingStatus.transcribing ||
+        recording.status == RecordingStatus.pendingTranscription;
+    final bool isPlaying = controller.playingId == recording.id;
+    final bool openable =
+        recording.type == CaptureType.video ||
+        recording.type == CaptureType.file;
+
+    // Out of the way while the keyboard is up for an inline edit: four
+    // buttons pinned above it would cost the field it is editing.
+    if (MediaQuery.viewInsetsOf(context).bottom > 0) {
+      return const SizedBox.shrink();
+    }
+    return Container(
+      decoration: BoxDecoration(
+        color: Console.background,
+        border: Border(top: BorderSide(color: Console.border)),
+      ),
+      child: SafeArea(
+        top: false,
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
+          child: Row(
+            children: <Widget>[
+              if (canCancel)
+                _BarButton(
+                  icon: Icons.close_rounded,
+                  label: 'Cancel',
+                  semanticLabel: 'Cancel processing',
+                  onPressed: () => controller.cancelProcessing(recording.id),
+                )
+              else if (canRetry)
+                _BarButton(
+                  icon: Icons.refresh_rounded,
+                  label: 'Retry',
+                  semanticLabel: 'Retry processing',
+                  onPressed: () => controller.retryTranscription(recording.id),
+                )
+              else if (recording.type.isPlayableAudio &&
+                  recording.filePath.isNotEmpty)
+                _BarButton(
+                  icon: isPlaying ? Icons.stop_rounded : Icons.play_arrow_rounded,
+                  label: isPlaying ? 'Stop' : 'Play',
+                  semanticLabel: isPlaying ? 'Stop playback' : 'Play recording',
+                  onPressed: () => controller.togglePlayback(recording.id),
+                )
+              else if (openable && recording.filePath.isNotEmpty)
+                _BarButton(
+                  icon: Icons.open_in_new_rounded,
+                  label: 'Open',
+                  semanticLabel: recording.type == CaptureType.file
+                      ? RecordingCard.openFileLabel
+                      : RecordingCard.openVideoLabel,
+                  onPressed: () => controller.openSource(recording.id),
+                ),
+              if (text.isNotEmpty) _BarCopyButton(text: text),
+              // The next thought, right after reading this one (#452).
+              if (onRecordNew != null)
+                _BarButton(
+                  icon: Icons.mic_rounded,
+                  label: 'Record',
+                  semanticLabel: CaptureDetailPanel.recordNewLabel,
+                  onPressed: onRecordNew,
+                ),
+              _BarButton(
+                icon: reviewed
+                    ? Icons.check_circle_rounded
+                    : Icons.check_circle_outline_rounded,
+                label: reviewed ? 'Reopen' : 'Done',
+                semanticLabel: reviewed ? 'Reopen capture' : 'Mark reviewed',
+                onPressed: isMarkingDone ? null : onToggleProcessed,
+              ),
+              _BarButton(
+                icon: detailsOpen
+                    ? Icons.expand_less_rounded
+                    : Icons.more_horiz_rounded,
+                label: detailsOpen ? 'Less' : 'Details',
+                semanticLabel: detailsOpen ? 'Hide details' : 'Show details',
+                onPressed: onToggleDetails,
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// Icon over a short label, sharing the bar's width equally so all five fit
+/// a 360 px phone.
+class _BarButton extends StatelessWidget {
+  _BarButton({
+    required this.icon,
+    required this.label,
+    required this.semanticLabel,
+    required this.onPressed,
+  });
+
+  final IconData icon;
+  final String label;
+  final String semanticLabel;
+  final VoidCallback? onPressed;
+
+  @override
+  Widget build(BuildContext context) {
+    final Color color = onPressed == null ? Console.muted : Console.text;
+    return Expanded(
+      child: Semantics(
+        button: true,
+        label: semanticLabel,
+        enabled: onPressed != null,
+        excludeSemantics: true,
+        onTap: onPressed,
+        child: InkWell(
+          onTap: onPressed,
+          borderRadius: BorderRadius.circular(10),
+          child: Padding(
+            padding: const EdgeInsets.symmetric(vertical: 6),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: <Widget>[
+                Icon(icon, size: 20, color: color),
+                const SizedBox(height: 2),
+                Text(
+                  label,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: ConsoleText.body.copyWith(
+                    fontSize: 11,
+                    fontWeight: FontWeight.w600,
+                    color: color,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// The bar's Copy, answering with `Copied` like [_PanelCopyButton].
+class _BarCopyButton extends StatefulWidget {
+  _BarCopyButton({required this.text});
+
+  final String text;
+
+  @override
+  State<_BarCopyButton> createState() => _BarCopyButtonState();
+}
+
+class _BarCopyButtonState extends State<_BarCopyButton> {
+  bool _copied = false;
+  Timer? _reset;
+
+  @override
+  void dispose() {
+    _reset?.cancel();
+    super.dispose();
+  }
+
+  Future<void> _copy() async {
+    await Clipboard.setData(ClipboardData(text: widget.text));
+    if (!mounted) return;
+    setState(() => _copied = true);
+    _reset?.cancel();
+    _reset = Timer(const Duration(milliseconds: 1400), () {
+      if (mounted) setState(() => _copied = false);
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return _BarButton(
+      icon: _copied ? Icons.check_rounded : Icons.copy_rounded,
+      label: _copied ? 'Copied' : 'Copy',
+      semanticLabel: 'Copy full text to clipboard',
+      onPressed: _copy,
     );
   }
 }
