@@ -28,17 +28,18 @@ void main() {
         tags: <String>['Backend'],
         projectId: 'p-1',
         routes: <RouteRecord>[
-          RouteRecord(
-            at: DateTime.utc(2026, 3, 2),
-            kind: RouteKind.agent,
-            target: 'codex',
-            outcome: RouteOutcome(
+          RouteRecord.fromJson(<String, dynamic>{
+            'at': DateTime.utc(2026, 3, 2).toIso8601String(),
+            'kind': 'agent',
+            'target': 'codex',
+            'outcome': RouteOutcome(
               briefId: 'b',
               state: CommandState.done,
               checkedAt: DateTime.utc(2026, 3, 3),
               prUrl: 'https://github.com/x/y/pull/1',
-            ),
-          ),
+            ).toJson(),
+            'decision': <String, dynamic>{'ruleId': 'R20', 'reason': 'agent'},
+          })!,
         ],
       ),
     );
@@ -165,6 +166,22 @@ void main() {
       );
     },
   );
+
+  test('a route exposes its decision and still no file path', () async {
+    final Map<String, dynamic> p = payload(
+      (await run(<String>[
+        call(1, 'search_captures', <String, dynamic>{'query': 'EXPONENTIAL'}),
+      ])).single,
+    );
+    final Map<String, dynamic> route =
+        ((p['data'] as List).single['routes'] as List).single
+            as Map<String, dynamic>;
+    expect(route['decision'], <String, dynamic>{
+      'ruleId': 'R20',
+      'reason': 'agent',
+    });
+    expect(jsonEncode(p), isNot(contains('/secret/path')));
+  });
 
   test(
     'search matches title, tags; filters by project name and since',

@@ -111,4 +111,55 @@ void main() {
     expect(back.session, isNull);
     expect(back.withOutcome(null).agentJob?.id, job.id);
   });
+
+  Map<String, dynamic> withDecision(Object? decision) => <String, dynamic>{
+    'at': '2026-10-06T12:00:00.000Z',
+    'kind': 'command',
+    'target': 'host',
+    'decision': ?decision,
+  };
+
+  test('legacy JSON: a row without decision serialises byte for byte', () {
+    final Map<String, dynamic> legacy = withDecision(null);
+    final RouteRecord? record = RouteRecord.fromJson(legacy);
+    expect(record, isNotNull);
+    expect(jsonEncode(record!.toJson()), jsonEncode(legacy));
+    expect(record.toJson().containsKey('decision'), isFalse);
+  });
+
+  test('decision round-trips', () {
+    final Map<String, dynamic> json = withDecision(<String, dynamic>{
+      'ruleId': 'R10',
+      'reason': 'bound to Command',
+    });
+    final RouteRecord? record = RouteRecord.fromJson(json);
+    expect(record!.toJson()['decision'], <String, dynamic>{
+      'ruleId': 'R10',
+      'reason': 'bound to Command',
+    });
+    expect(jsonEncode(record.toJson()), jsonEncode(json));
+  });
+
+  test('withOutcome keeps decision', () {
+    final RouteRecord record = RouteRecord.fromJson(
+      withDecision(<String, dynamic>{'ruleId': 'R10', 'reason': 'why'}),
+    )!;
+    expect(record.withOutcome(null).toJson()['decision'], <String, dynamic>{
+      'ruleId': 'R10',
+      'reason': 'why',
+    });
+  });
+
+  test('decision without ruleId is dropped', () {
+    for (final Object bad in <Object>[
+      <String, dynamic>{'reason': 'orphan'},
+      <String, dynamic>{'ruleId': '  ', 'reason': 'blank'},
+      <String, dynamic>{'ruleId': 7},
+      'R10',
+    ]) {
+      final RouteRecord? record = RouteRecord.fromJson(withDecision(bad));
+      expect(record, isNotNull, reason: '$bad');
+      expect(record!.toJson().containsKey('decision'), isFalse, reason: '$bad');
+    }
+  });
 }

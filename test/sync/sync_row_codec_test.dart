@@ -55,6 +55,40 @@ void main() {
     expect(row.containsKey('updated_at'), isFalse);
   });
 
+  test('suggestedRoute.ruleId and routes[].decision survive the codec', () {
+    final Recording base = _recording();
+    final Recording decided = Recording.fromJson(<String, dynamic>{
+      ...base.toJson(),
+      'suggestedRoute': <String, dynamic>{
+        'kind': 'command',
+        'auto': true,
+        'ruleId': 'R10',
+      },
+      'routes': <Map<String, dynamic>>[
+        <String, dynamic>{
+          'at': '2026-09-21T08:00:00.000Z',
+          'kind': 'command',
+          'target': 'host',
+          'decision': <String, dynamic>{'ruleId': 'R10', 'reason': 'bound'},
+        },
+      ],
+    });
+    final Map<String, Object?> row = SyncRowCodec.recording(decided);
+    final Map<String, dynamic> back = SyncRowCodec.recordingFromRow(row)!
+        .toJson();
+    expect(back['suggestedRoute'], containsPair('ruleId', 'R10'));
+    expect(
+      ((back['routes'] as List).single as Map)['decision'],
+      <String, dynamic>{'ruleId': 'R10', 'reason': 'bound'},
+    );
+    // A row without them hashes as before: no new keys in the payload.
+    final Map<String, Object?> plain = SyncRowCodec.recording(base);
+    expect(
+      (plain['payload'] as Map<String, Object?>).containsKey('routes'),
+      isFalse,
+    );
+  });
+
   test('hash ignores version and deleted_at and key order', () {
     final Map<String, Object?> a = <String, Object?>{'id': 'x', 'title': 't', 'version': 1};
     final Map<String, Object?> b = <String, Object?>{'title': 't', 'id': 'x', 'version': 9, 'deleted_at': null};
