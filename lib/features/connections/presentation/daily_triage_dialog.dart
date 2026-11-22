@@ -1,4 +1,4 @@
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 
 import '../../recordings/domain/capture_priority.dart';
 import '../../recordings/domain/recording.dart';

@@ -1,10 +1,9 @@
-import 'dart:math' as math;
-
 import 'package:augustyniak_orb/augustyniak_orb.dart';
 import 'package:flutter/foundation.dart' show ValueListenable;
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 
 import '../../../app/ui_kit.dart';
+import '../../settings/presentation/animation_speed_scope.dart';
 import '../domain/capture_type.dart';
 import '../domain/recording.dart';
 import 'card_parts.dart';
@@ -15,8 +14,11 @@ import 'card_parts.dart';
 ///
 /// It replaces the small [ProcessingStrip] there, because a one-line strip is
 /// easy to miss at the exact moment the user has just stopped talking and
-/// wants to know the note was taken. Height is at least [minScreenFraction] of
-/// the screen; width is the panel's.
+/// wants to know the note was taken. It is a banner of fixed [height] — a
+/// small orb beside the stage and its timer — rather than a scene sized off
+/// the screen: at 60% of the height it pushed the editor and the actions below
+/// the fold right when the user wanted to correct the note (#452). The large
+/// scene belongs to live recording, `RecordingView`, which is unchanged.
 ///
 /// The animation repeats forever: a test pumping a screen with one of these on
 /// it must pump explicit frames, never `pumpAndSettle`. It stands still when
@@ -35,8 +37,8 @@ class ProcessingHero extends StatelessWidget {
   /// Running time of the current job, or null when there is none to show.
   final ValueListenable<Duration>? processingTicker;
 
-  /// Share of the screen's height the scene occupies, at minimum.
-  static const double minScreenFraction = 0.6;
+  /// The banner's height, which is also the orb's side.
+  static const double height = 96;
 
   /// Whether [recording] has nothing to read yet and should show the hero.
   /// [enriching] is true while the model works on it.
@@ -65,43 +67,51 @@ class ProcessingHero extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final double height = math.max(
-      360,
-      MediaQuery.sizeOf(context).height * ProcessingHero.minScreenFraction,
-    );
     final ValueListenable<Duration>? ticker = processingTicker;
     final TextStyle stageStyle = ConsoleText.micro.copyWith(
       color: Console.accent,
       fontSize: 15,
       letterSpacing: 4,
     );
-    return ProcessingScene(
+    return SizedBox(
       height: height,
-      semanticsLabel: '$_stage in progress',
-      child: Positioned(
-        left: 0,
-        right: 0,
-        bottom: 28,
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: <Widget>[
-            Text(_stage, style: stageStyle),
-            const SizedBox(height: 8),
-            if (ticker == null)
-              Text(
-                _caption,
-                style: ConsoleText.micro.copyWith(color: Console.muted),
-              )
-            else
-              ValueListenableBuilder<Duration>(
-                valueListenable: ticker,
-                builder: (BuildContext _, Duration elapsed, Widget? _) => Text(
-                  '$_caption · ${formatDuration(elapsed)}',
-                  style: ConsoleText.micro.copyWith(color: Console.muted),
-                ),
-              ),
-          ],
-        ),
+      child: Row(
+        children: <Widget>[
+          SizedBox(
+            width: height,
+            child: ProcessingScene(
+              height: height,
+              semanticsLabel: '$_stage in progress',
+            ),
+          ),
+          const SizedBox(width: 16),
+          Expanded(
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: <Widget>[
+                Text(_stage, style: stageStyle),
+                const SizedBox(height: 6),
+                if (ticker == null)
+                  Text(
+                    _caption,
+                    style: ConsoleText.micro.copyWith(color: Console.muted),
+                  )
+                else
+                  ValueListenableBuilder<Duration>(
+                    valueListenable: ticker,
+                    builder: (BuildContext _, Duration elapsed, Widget? _) =>
+                        Text(
+                          '$_caption · ${formatDuration(elapsed)}',
+                          style: ConsoleText.micro.copyWith(
+                            color: Console.muted,
+                          ),
+                        ),
+                  ),
+              ],
+            ),
+          ),
+        ],
       ),
     );
   }
@@ -112,7 +122,7 @@ class ProcessingHero extends StatelessWidget {
 /// A thin frame around [OrbScene] (package `augustyniak_orb`): it builds the
 /// preset from the theme in force on every build, so a theme swap repaints.
 /// [paused] freezes the current frame so pausing a recording also pauses its
-/// motion. The platform reduced-motion setting uses a deliberate still frame
+/// motion. Its speed is the user's [AnimationSpeedScope] choice. The platform reduced-motion setting uses a deliberate still frame
 /// at t = [stillFrame].
 class ProcessingScene extends StatelessWidget {
   ProcessingScene({
@@ -141,6 +151,7 @@ class ProcessingScene extends StatelessWidget {
         grid: Console.border,
         backdrop: Console.surfaceDeep,
       ),
+      tuning: OrbTuning(speed: AnimationSpeedScope.of(context).factor),
     );
     final bool reduceMotion = MediaQuery.disableAnimationsOf(context);
     return Semantics(

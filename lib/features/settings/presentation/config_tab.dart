@@ -1,4 +1,4 @@
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 
 import '../../../app/ui_kit.dart';
 import '../../../app/version_footer.dart';
@@ -19,6 +19,7 @@ import '../domain/app_settings.dart';
 import '../domain/app_theme_mode.dart';
 import '../domain/audio_config.dart';
 import '../domain/provider_profile.dart';
+import '../domain/animation_speed.dart';
 import '../domain/queue_density.dart';
 import '../domain/token_cipher.dart';
 import 'backup_section.dart';
@@ -369,6 +370,21 @@ class _ConfigTabState extends State<ConfigTab> {
             Text(
               'Row height in the wide Queue list. COMFORTABLE adds a second '
               'summary line. Also on the Queue toolbar.',
+              style: ConsoleText.hint,
+            ),
+            Divider(color: Console.border, height: 22),
+            _ChoiceRow<AnimationSpeed>(
+              label: 'ANIMATION SPEED',
+              value: widget.controller.animationSpeed,
+              options: AnimationSpeed.values,
+              labelFor: (AnimationSpeed speed) => speed.label,
+              onChanged: widget.controller.setAnimationSpeed,
+            ),
+            const SizedBox(height: 6),
+            Text(
+              'How fast the orb moves while you dictate and while a capture is '
+              'transcribed or analysed. Every option is slower than the '
+              'original ×1.',
               style: ConsoleText.hint,
             ),
             Divider(color: Console.border, height: 22),

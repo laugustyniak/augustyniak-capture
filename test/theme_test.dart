@@ -2,7 +2,7 @@ import 'dart:io';
 
 import 'package:augustyniak_capture/app/app.dart';
 import 'package:augustyniak_capture/app/ui_kit.dart';
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 /// WCAG contrast between two opaque colours.

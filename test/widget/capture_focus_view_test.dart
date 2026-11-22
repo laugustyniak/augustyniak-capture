@@ -1,6 +1,6 @@
 import 'dart:io';
 
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:augustyniak_capture/app/ui_kit.dart';
@@ -287,7 +287,13 @@ void main() {
       );
       await pumpQueue(tester, controller, surface: surface);
       await tester.tap(find.text('Kitchen rebuild'));
-      await tester.pumpAndSettle();
+      if (status == RecordingStatus.pendingTranscription) {
+        // ProcessingHero repeats forever: pump past the page route instead.
+        await tester.pump();
+        await tester.pump(const Duration(milliseconds: 600));
+      } else {
+        await tester.pumpAndSettle();
+      }
       return controller;
     }
 
@@ -403,35 +409,24 @@ void main() {
           ),
         ],
       );
-      tester.view.physicalSize = const Size(1200, 900);
-      tester.view.devicePixelRatio = 1;
-      addTearDown(tester.view.resetPhysicalSize);
-      addTearDown(tester.view.resetDevicePixelRatio);
-      await tester.pumpWidget(
-        hostTab(
-          () => CaptureDetailPanel(
-            controller: controller,
-            recording: controller.recordings.single,
-            projectName: null,
-            showMetaColumn: false,
-            onEdit: () {},
-            onToggleProcessed: () {},
-          ),
-          listenable: controller,
-        ),
-      );
+      // Master-detail, the panel beside the list.
+      await pumpQueue(tester, controller, surface: const Size(1400, 900));
       await tester.pumpAndSettle();
+      expect(find.byType(CaptureDetailPanel), findsOneWidget);
 
       expect(find.byKey(CaptureDetailPanel.barKey), findsNothing);
       expect(find.byKey(CaptureDetailPanel.detailsToggleKey), findsNothing);
-      expect(find.text('Enrich'), findsOneWidget);
+      expect(inPanel(find.text('Enrich')), findsOneWidget);
+      final double textTop = tester.getRect(inPanel(find.text(body))).top;
       expect(
-        tester.getRect(find.text(body)).top,
-        lessThan(tester.getRect(find.textContaining('Chase the worktop.')).top),
+        textTop,
+        lessThan(
+          tester.getRect(inPanel(find.textContaining('Chase the worktop.'))).top,
+        ),
       );
       expect(
-        tester.getRect(find.text(body)).top,
-        lessThan(tester.getRect(find.text('#kitchen')).top),
+        textTop,
+        lessThan(tester.getRect(inPanel(find.text('#kitchen'))).top),
       );
     });
 

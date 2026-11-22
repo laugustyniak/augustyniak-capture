@@ -3,7 +3,7 @@ import 'dart:io';
 import 'package:augustyniak_capture/features/projects/data/native_agent_jobs.dart';
 import 'package:augustyniak_capture/features/projects/domain/native_agent_types.dart';
 import 'package:augustyniak_capture/features/projects/presentation/agent_jobs_sheet.dart';
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {

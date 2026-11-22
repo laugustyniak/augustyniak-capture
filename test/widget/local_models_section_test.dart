@@ -8,7 +8,7 @@ import 'package:augustyniak_capture/features/settings/presentation/settings_cont
 import 'package:augustyniak_capture/features/transcription/data/whisper_model_store.dart';
 import 'package:augustyniak_capture/features/transcription/domain/local_transcription_engine.dart';
 import 'package:augustyniak_capture/features/transcription/domain/whisper_model.dart';
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 import '../support/harness.dart';

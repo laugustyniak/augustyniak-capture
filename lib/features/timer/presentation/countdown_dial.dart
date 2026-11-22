@@ -2,7 +2,7 @@ import 'dart:math' as math;
 
 // `ValueListenable` lives in foundation; material re-exports only a subset.
 import 'package:flutter/foundation.dart';
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 
 import '../../../app/ui_kit.dart';
 import 'focus_timer_controller.dart';
