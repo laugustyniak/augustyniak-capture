@@ -124,7 +124,7 @@ void main() {
     expect(out.single['id'], 2);
   });
 
-  test('tools/list lists the three tools with input schemas', () async {
+  test('tools/list lists the four tools with input schemas', () async {
     final Map<String, dynamic> r = (await run(<String>[
       req(1, 'tools/list'),
     ])).single;
@@ -133,6 +133,7 @@ void main() {
       'search_captures',
       'get_capture',
       'list_project_captures',
+      'next_open_captures', // AC-7
     ]);
     for (final dynamic t in tools) {
       expect((t as Map)['inputSchema'], isA<Map>());
@@ -462,6 +463,12 @@ class _Exploding implements CaptureSource {
   @override
   Future<List<Recording>> recordings() async =>
       throw StateError('boom at /secret/place');
+
+  // Does not exist on CaptureSource yet (#462): the compile error on this
+  // override is the expected RED reason for this file.
+  @override
+  Future<List<({Recording recording, String payload})>>
+  recordingsWithPayload() async => throw StateError('boom at /secret/place');
 
   @override
   Future<List<Project>> projects() async => <Project>[];
