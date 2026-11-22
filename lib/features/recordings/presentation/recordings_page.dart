@@ -39,6 +39,8 @@ import '../../connections/data/http_daily_connections_service.dart';
 import '../../connections/data/http_daily_triage_service.dart';
 import '../../connections/presentation/daily_triage_controller.dart';
 import '../../connections/presentation/daily_triage_dialog.dart';
+import '../../switchboard/data/file_decision_log.dart';
+import '../../switchboard/data/rule_table_capture_policy.dart';
 import '../../enrichment/domain/transcript_cleaner.dart';
 import '../../enrichment/domain/instruction_writer.dart';
 import '../../enrichment/data/composed_enrichment_context_source.dart';
@@ -511,7 +513,14 @@ class _RecordingsPageState extends State<RecordingsPage>
           client: settings.commandClient,
         ),
         fallback: ProjectInboxRouter(projectById: _projectById),
+        commandCategories: defaultCommandCategories,
       ),
+      // Proposes the next step for each enriched capture and logs why; the
+      // card only suggests it, nothing launches (`docs/plans/2026-11-22-switchboard.md`).
+      capturePolicy: const RuleTableCapturePolicy(
+        commandCategories: defaultCommandCategories,
+      ),
+      decisionLog: FileDecisionLog(),
       // The queue's other way out: a capture becomes an agent's opening task.
       // Disabled wherever no launcher exists, which hides the control rather
       // than offering one that can only fail.

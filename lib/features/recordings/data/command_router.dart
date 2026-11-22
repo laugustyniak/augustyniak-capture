@@ -135,6 +135,12 @@ class CommandSessionNotStartedException implements Exception {
       'Cause: $cause';
 }
 
+/// The categories that belong on a Command fleet. Shared by the router and by
+/// the Switchboard policy, so the two cannot disagree about what R10 means.
+const Set<CaptureCategory> defaultCommandCategories = <CaptureCategory>{
+  CaptureCategory.agentTask,
+};
+
 /// Chooses a destination per capture: the control plane for work an agent is
 /// meant to execute, the project's own inbox for everything else.
 ///
@@ -153,7 +159,7 @@ class ProjectCaptureRouter implements CaptureRouter {
   const ProjectCaptureRouter({
     required CaptureRouter command,
     required CaptureRouter fallback,
-    this.commandCategories = const <CaptureCategory>{CaptureCategory.agentTask},
+    this.commandCategories = defaultCommandCategories,
   }) : _command = command,
        _fallback = fallback;
 

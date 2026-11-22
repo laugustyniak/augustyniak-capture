@@ -271,6 +271,7 @@ class CaptureTools {
             'kind': route.kind.name,
             'target': route.target,
             'at': route.at.toUtc().toIso8601String(),
+            if (route.decision != null) 'decision': route.decision!.toJson(),
             if (route.outcome != null)
               'outcome': <String, dynamic>{
                 'state': route.outcome!.state.name,
