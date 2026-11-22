@@ -192,6 +192,35 @@ class RouteOutcome {
 bool isSafeSessionName(String name) =>
     RegExp(r'^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$').hasMatch(name);
 
+/// Which Switchboard rule proposed the destination a delivery followed, and
+/// why. Only these two travel with the row (and sync); the full facts the rule
+/// saw stay in the local `decisions.jsonl`.
+class RouteDecision {
+  const RouteDecision({required this.ruleId, required this.reason});
+
+  final String ruleId;
+  final String? reason;
+
+  Map<String, dynamic> toJson() => <String, dynamic>{
+    'ruleId': ruleId,
+    if (reason != null) 'reason': reason,
+  };
+
+  /// Null without a usable `ruleId`: a reason with no rule names nothing.
+  static RouteDecision? fromJson(Object? json) {
+    if (json is! Map) return null;
+    final Object? ruleId = json['ruleId'];
+    if (ruleId is! String || ruleId.trim().isEmpty) return null;
+    final Object? reason = json['reason'];
+    return RouteDecision(
+      ruleId: ruleId.trim(),
+      reason: reason is String && reason.trim().isNotEmpty
+          ? reason.trim()
+          : null,
+    );
+  }
+}
+
 /// One delivery. Append-only in practice: routing the same capture twice adds a
 /// second record rather than replacing the first, because both deliveries
 /// really happened and the second does not undo the first.
@@ -203,6 +232,7 @@ class RouteRecord {
     this.outcome,
     this.session,
     this.agentJob,
+    this.decision,
   });
 
   final DateTime at;
@@ -233,6 +263,11 @@ class RouteRecord {
   final String? session;
   final NativeAgentJobHandle? agentJob;
 
+  /// The Switchboard rule this delivery followed, when the user accepted its
+  /// automatic suggestion. Null on every other row, and the key stays out of
+  /// the JSON then.
+  final RouteDecision? decision;
+
   RouteRecord withOutcome(RouteOutcome? next) => RouteRecord(
     at: at,
     kind: kind,
@@ -240,6 +275,18 @@ class RouteRecord {
     outcome: next,
     session: session,
     agentJob: agentJob,
+    decision: decision,
+  );
+
+  /// This record carrying [next] as its decision.
+  RouteRecord withDecision(RouteDecision? next) => RouteRecord(
+    at: at,
+    kind: kind,
+    target: target,
+    outcome: outcome,
+    session: session,
+    agentJob: agentJob,
+    decision: next,
   );
 
   Map<String, dynamic> toJson() => <String, dynamic>{
@@ -249,6 +296,7 @@ class RouteRecord {
     if (outcome != null) 'outcome': outcome!.toJson(),
     if (session != null) 'session': session,
     if (agentJob != null) 'agentJob': agentJob!.toJson(),
+    if (decision != null) 'decision': decision!.toJson(),
   };
 
   /// Null when the row cannot be trusted, so the caller can drop exactly that
@@ -270,6 +318,7 @@ class RouteRecord {
       outcome: RouteOutcome.fromJson(json['outcome']),
       session: session is String && isSafeSessionName(session) ? session : null,
       agentJob: NativeAgentJobHandle.fromJson(json['agentJob']),
+      decision: RouteDecision.fromJson(json['decision']),
     );
   }
 
