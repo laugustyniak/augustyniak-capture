@@ -1,11 +1,8 @@
 import 'dart:async';
-import 'dart:convert';
 import 'dart:io';
 
 import 'package:audioplayers/audioplayers.dart';
-import 'package:augustyniak_capture/features/enrichment/data/http_chat_enrichment_service.dart';
 import 'package:augustyniak_capture/features/enrichment/domain/enrichment_context.dart';
-import 'package:augustyniak_capture/features/enrichment/domain/enrichment_prompt.dart';
 import 'package:augustyniak_capture/features/enrichment/domain/enrichment_result.dart';
 import 'package:augustyniak_capture/features/enrichment/domain/enrichment_service.dart';
 import 'package:augustyniak_capture/features/processing/domain/processor.dart';
@@ -16,7 +13,6 @@ import 'package:augustyniak_capture/features/recordings/domain/capture_segment.d
 import 'package:augustyniak_capture/features/recordings/domain/capture_type.dart';
 import 'package:augustyniak_capture/features/recordings/domain/recording.dart';
 import 'package:augustyniak_capture/features/recordings/presentation/recordings_controller.dart';
-import 'package:augustyniak_capture/features/sync/domain/sync_row_codec.dart';
 import 'package:augustyniak_capture/features/transcription/data/transcription_service.dart';
 import 'package:augustyniak_capture/features/recordings/domain/agent_handoff.dart';
 import 'package:augustyniak_capture/features/recordings/domain/capture_router.dart';
@@ -183,6 +179,10 @@ Recording _row({
   createdAt: DateTime.utc(2026, 9, 21, 8),
   durationMs: 1,
   status: RecordingStatus.completed,
+  // A valid SHA-256 (fromJson drops anything else), so initialize()'s
+  // content-hash backfill has nothing to write and the save-count assertions
+  // measure the enrichment write alone.
+  contentHash: 'a' * 64,
   projectId: noProject ? null : projectId,
   projectAuto: auto,
   suggestedRoute: suggestion,

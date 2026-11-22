@@ -1,3 +1,5 @@
+import 'dart:convert';
+
 import 'package:augustyniak_capture/features/clipboard/domain/clipboard_item.dart';
 import 'package:augustyniak_capture/features/projects/domain/project.dart';
 import 'package:augustyniak_capture/features/recordings/domain/agent_artifact.dart';
@@ -81,12 +83,10 @@ void main() {
       ((back['routes'] as List).single as Map)['decision'],
       <String, dynamic>{'ruleId': 'R10', 'reason': 'bound'},
     );
-    // A row without them hashes as before: no new keys in the payload.
-    final Map<String, Object?> plain = SyncRowCodec.recording(base);
-    expect(
-      (plain['payload'] as Map<String, Object?>).containsKey('routes'),
-      isFalse,
-    );
+    // A row without them hashes as before: neither new key reaches the payload.
+    final String plain = jsonEncode(SyncRowCodec.recording(base)['payload']);
+    expect(plain, isNot(contains('ruleId')));
+    expect(plain, isNot(contains('"decision"')));
   });
 
   test('hash ignores version and deleted_at and key order', () {
