@@ -13,7 +13,7 @@ import 'package:augustyniak_capture/features/settings/domain/audio_config.dart';
 import 'package:augustyniak_capture/features/settings/presentation/animation_speed_scope.dart';
 import 'package:augustyniak_capture/features/transcription/data/transcription_service.dart';
 import 'package:augustyniak_orb/augustyniak_orb.dart';
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:record/record.dart';
 

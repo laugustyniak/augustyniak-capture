@@ -4,7 +4,7 @@ import 'dart:io';
 // `setEquals` lives in foundation and is NOT among the handful of symbols
 // material re-exports from it.
 import 'package:flutter/foundation.dart';
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 import 'package:flutter/services.dart';
 import 'package:package_info_plus/package_info_plus.dart';
 import 'package:path/path.dart' as p;

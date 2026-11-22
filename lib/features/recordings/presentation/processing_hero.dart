@@ -1,6 +1,6 @@
 import 'package:augustyniak_orb/augustyniak_orb.dart';
 import 'package:flutter/foundation.dart' show ValueListenable;
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 
 import '../../../app/ui_kit.dart';
 import '../../settings/presentation/animation_speed_scope.dart';

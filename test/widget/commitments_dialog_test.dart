@@ -2,7 +2,7 @@ import 'package:augustyniak_capture/features/recordings/domain/capture_type.dart
 import 'package:augustyniak_capture/features/recordings/domain/commitment.dart';
 import 'package:augustyniak_capture/features/recordings/domain/recording.dart';
 import 'package:augustyniak_capture/features/recordings/presentation/commitments_dialog.dart';
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 Recording _capture(String id, String title, List<Commitment> commitments) =>

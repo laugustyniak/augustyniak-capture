@@ -10,7 +10,7 @@ import 'package:augustyniak_capture/features/recordings/presentation/recording_c
 import 'package:augustyniak_capture/features/recordings/presentation/recording_row.dart';
 import 'package:augustyniak_capture/features/recordings/presentation/recordings_controller.dart';
 import 'package:augustyniak_capture/features/transcription/data/transcription_service.dart';
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 import '../support/harness.dart';
