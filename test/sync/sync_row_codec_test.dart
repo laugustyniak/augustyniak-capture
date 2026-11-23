@@ -1,3 +1,5 @@
+import 'dart:convert';
+
 import 'package:augustyniak_capture/features/clipboard/domain/clipboard_item.dart';
 import 'package:augustyniak_capture/features/projects/domain/project.dart';
 import 'package:augustyniak_capture/features/recordings/domain/agent_artifact.dart';
@@ -53,6 +55,38 @@ void main() {
     expect(row['category'], 'idea');
     expect(row.containsKey('owner_id'), isFalse);
     expect(row.containsKey('updated_at'), isFalse);
+  });
+
+  test('suggestedRoute.ruleId and routes[].decision survive the codec', () {
+    final Recording base = _recording();
+    final Recording decided = Recording.fromJson(<String, dynamic>{
+      ...base.toJson(),
+      'suggestedRoute': <String, dynamic>{
+        'kind': 'command',
+        'auto': true,
+        'ruleId': 'R10',
+      },
+      'routes': <Map<String, dynamic>>[
+        <String, dynamic>{
+          'at': '2026-09-21T08:00:00.000Z',
+          'kind': 'command',
+          'target': 'host',
+          'decision': <String, dynamic>{'ruleId': 'R10', 'reason': 'bound'},
+        },
+      ],
+    });
+    final Map<String, Object?> row = SyncRowCodec.recording(decided);
+    final Map<String, dynamic> back = SyncRowCodec.recordingFromRow(row)!
+        .toJson();
+    expect(back['suggestedRoute'], containsPair('ruleId', 'R10'));
+    expect(
+      ((back['routes'] as List).single as Map)['decision'],
+      <String, dynamic>{'ruleId': 'R10', 'reason': 'bound'},
+    );
+    // A row without them hashes as before: neither new key reaches the payload.
+    final String plain = jsonEncode(SyncRowCodec.recording(base)['payload']);
+    expect(plain, isNot(contains('ruleId')));
+    expect(plain, isNot(contains('"decision"')));
   });
 
   test('hash ignores version and deleted_at and key order', () {

@@ -81,6 +81,10 @@ import '../domain/recording_revision.dart';
 import '../domain/recording_tag.dart';
 import '../domain/route_record.dart';
 import '../domain/suggested_route.dart';
+import '../../switchboard/domain/capture_facts.dart';
+import '../../switchboard/domain/capture_policy.dart';
+import '../../switchboard/domain/decision.dart';
+import '../../switchboard/domain/decision_log.dart';
 // Same layer, not a widget import: `displayNameFor` is the one definition of
 // what an untitled capture is called, and a destination heading must not be
 // allowed to drift from what the card shows.
@@ -107,6 +111,8 @@ class RecordingsController extends ChangeNotifier {
     MediaOpener mediaOpener = const NoopMediaOpener(),
     CaptureRouter captureRouter = const DisabledCaptureRouter(),
     AgentHandoff agentHandoff = const DisabledAgentHandoff(),
+    CapturePolicy capturePolicy = const DisabledCapturePolicy(),
+    DecisionLog decisionLog = const NoopDecisionLog(),
     this.agentJobs,
     CaptureSender captureSender = const DisabledCaptureSender(),
     NoteVault noteVault = const DisabledNoteVault(),
@@ -203,6 +209,8 @@ class RecordingsController extends ChangeNotifier {
        _mediaOpener = mediaOpener,
        _captureRouter = captureRouter,
        _agentHandoff = agentHandoff,
+       _capturePolicy = capturePolicy,
+       _decisionLog = decisionLog,
        _captureSender = captureSender,
        _noteVault = noteVault,
        _connectionReasoner = connectionReasoner,
@@ -345,6 +353,8 @@ class RecordingsController extends ChangeNotifier {
   /// False until then and whenever the probe fails, which hides the Listen
   /// control rather than offering one that can only fail.
   bool _canListenToOutcome = false;
+  final CapturePolicy _capturePolicy;
+  final DecisionLog _decisionLog;
   final AgentHandoff _agentHandoff;
   final CaptureSender _captureSender;
   final NoteVault _noteVault;
@@ -3535,7 +3545,7 @@ class RecordingsController extends ChangeNotifier {
     await _update(
       id,
       (Recording item) => item.copyWith(
-        routes: <RouteRecord>[...item.routes, record],
+        routes: <RouteRecord>[...item.routes, _stamped(item, record)],
         isProcessedByUser: true,
         processedAt: record.at,
       ),
@@ -3720,7 +3730,7 @@ class RecordingsController extends ChangeNotifier {
     await _update(
       id,
       (Recording item) => item.copyWith(
-        routes: <RouteRecord>[...item.routes, result.record],
+        routes: <RouteRecord>[...item.routes, _stamped(item, result.record)],
         isProcessedByUser: true,
         processedAt: result.record.at,
       ),
@@ -5306,9 +5316,10 @@ class RecordingsController extends ChangeNotifier {
           .normalized()
           .routeKinds
           .toSet();
+      ({Decision decision, bool applied, String? skipReason})? decided;
       await _update(
         id,
-        (Recording item) => _withSuggestedRoute(
+        (Recording item) => _withSwitchboard(
           item.copyWith(
             // User-editable fields are fill-only: a retry must not undo a manual
             // correction. Clearing a field asks enrichment to fill it again.
@@ -5353,12 +5364,29 @@ class RecordingsController extends ChangeNotifier {
           ),
           result,
           offeredRoutes,
+          (decision, applied, skipReason) => decided = (
+            decision: decision,
+            applied: applied,
+            skipReason: skipReason,
+          ),
         ),
         // The reason this feature exists: `summary` has no editor and is
         // refreshed wholesale on every re-run, so without a record the previous
         // one is simply gone.
         source: RevisionSource.enrichment,
       );
+      // Only after the persist, and never when it was refused: a log row for
+      // a suggestion that never reached the index would describe nothing.
+      if (decided != null && !_indexUnreadable) {
+        unawaited(
+          _logDecision(
+            id,
+            decided!.decision,
+            decided!.applied,
+            decided!.skipReason,
+          ),
+        );
+      }
       // The context source is named in the log because it is otherwise
       // invisible: a title that improved after a CLAUDE.md was written is not
       // something the queue can show, and this is the only place that says
@@ -5389,6 +5417,100 @@ class RecordingsController extends ChangeNotifier {
       _enrichingIds.remove(id);
       if (!_disposed) notifyListeners();
     }
+  }
+
+  /// Asks the [_capturePolicy] about [item], as enrichment left it, and writes
+  /// its proposal into `suggestedRoute`; [onDecided] receives the decision for
+  /// the log. Never throws: a policy that fails or decides nothing leaves
+  /// [_withSuggestedRoute] to apply the model's own answer, as before.
+  ///
+  /// Written only while the suggestion is still the policy's to write: no route
+  /// yet and no user dismissal. R90 (`none`, nothing matched) is logged only,
+  /// so a projectless capture gains no new key and an earlier model suggestion
+  /// is not erased.
+  Recording _withSwitchboard(
+    Recording item,
+    EnrichmentResult result,
+    Set<SuggestedRouteKind> offered,
+    void Function(Decision decision, bool applied, String? skipReason)
+    onDecided,
+  ) {
+    final Decision? decision;
+    try {
+      decision = _capturePolicy.decide(
+        CaptureFacts(
+          category: item.category,
+          projectId: item.projectId,
+          availableRouteKinds: availableRouteKinds(item),
+          modelRoute: result.routeAnswered ? result.routeKind : null,
+        ),
+      );
+    } catch (exception) {
+      _logSink.log(
+        'Capture policy failed: $exception',
+        level: LogLevel.warn,
+        recordingId: item.id,
+      );
+      return _withSuggestedRoute(item, result, offered);
+    }
+    if (decision == null) return _withSuggestedRoute(item, result, offered);
+
+    final String? skipReason = item.routes.isNotEmpty
+        ? 'routed'
+        : item.suggestedRoute?.auto == false
+        ? 'dismissed'
+        : decision.ruleId == 'R90'
+        ? 'none'
+        : null;
+    onDecided(decision, skipReason == null, skipReason);
+    if (skipReason != null) return item;
+    return item.copyWith(
+      suggestedRoute: SuggestedRoute(
+        kind: decision.kind,
+        reason: decision.reason,
+        ruleId: decision.ruleId,
+      ),
+    );
+  }
+
+  /// Best-effort, like every sink: the decision is already persisted.
+  Future<void> _logDecision(
+    String id,
+    Decision decision,
+    bool applied,
+    String? skipReason,
+  ) async {
+    try {
+      await _decisionLog.append(
+        at: DateTime.now(),
+        captureId: id,
+        decision: decision,
+        applied: applied,
+        skipReason: skipReason,
+      );
+    } catch (exception) {
+      _logSink.log(
+        'Decision log failed: $exception',
+        level: LogLevel.warn,
+        recordingId: id,
+      );
+    }
+  }
+
+  /// [record] carrying the Switchboard rule behind [item]'s suggestion, when
+  /// the user accepted exactly what it proposed: an automatic suggestion with
+  /// a rule, for the kind that was actually delivered.
+  RouteRecord _stamped(Recording item, RouteRecord record) {
+    final SuggestedRoute? suggestion = item.suggestedRoute;
+    if (suggestion == null ||
+        !suggestion.auto ||
+        suggestion.ruleId == null ||
+        suggestion.kind.name != record.kind.name) {
+      return record;
+    }
+    return record.withDecision(
+      RouteDecision(ruleId: suggestion.ruleId!, reason: suggestion.reason),
+    );
   }
 
   /// Applies the model's route answer to [item], already carrying this run's

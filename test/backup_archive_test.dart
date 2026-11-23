@@ -961,6 +961,39 @@ void main() {
     expect(row('c').suggestedRoute, isNull);
   });
 
+  test('ruleId and route decision survive an archive round trip', () async {
+    final Recording base = capture('a');
+    final Recording decided = Recording.fromJson(<String, dynamic>{
+      ...base.toJson(),
+      'suggestedRoute': <String, dynamic>{
+        'kind': 'command',
+        'auto': true,
+        'ruleId': 'R10',
+      },
+      'routes': <Map<String, dynamic>>[
+        <String, dynamic>{
+          'at': '2026-09-21T08:00:00.000Z',
+          'kind': 'command',
+          'target': 'host',
+          'decision': <String, dynamic>{'ruleId': 'R10', 'reason': 'bound'},
+        },
+      ],
+    });
+    await seed(source, <Recording>[decided]);
+
+    await archiveFor(source).exportTo(zipPath());
+    await archiveFor(target).importFrom(zipPath());
+
+    final Map<String, dynamic> row = (await repositoryFor(
+      target,
+    ).loadAll()).single.toJson();
+    expect(row['suggestedRoute'], containsPair('ruleId', 'R10'));
+    expect(((row['routes'] as List).single as Map)['decision'], <String, dynamic>{
+      'ruleId': 'R10',
+      'reason': 'bound',
+    });
+  });
+
   test('a mid-export index rewrite cannot invalidate the archive', () async {
     await seed(source, <Recording>[capture('a'), capture('b')]);
 

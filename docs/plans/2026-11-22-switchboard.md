@@ -64,14 +64,17 @@ Decision {ruleId, action: SuggestedRouteKind (file|command|agent|none), agent?, 
           autonomy: suggest|auto, reason, facts}
 ```
 
+v0 ships the subset `Decision {ruleId, kind, reason, facts}` (`CaptureFacts {category, projectId, availableRouteKinds, modelRoute}`). `agent`, `mode` and `autonomy` arrive with their producers in v1/v2 and are additive.
+
 - **Rule order.** Rules are ordered and the first match wins. They start in code. Later (v4) they can be loaded from an editable rules note.
 - **Example rules:**
-  - `R10`: `agentTask` on a Command-bound project → `command`
-  - `R20`: `agentTask` on a project with a repo → `agent(primaryAgent, readOnly)`
-  - `R80`: the model's own `suggestedRoute`, when it is an offered route → that kind (an explicit rule, so every proposal still carries a `ruleId`)
-  - `R90`: default → `none`
+  - `R10`: a command category (`agentTask`) whose project resolves to Command → `command`
+  - `R20`: a command category with an agent available → `agent` (v1: `agent(primaryAgent, readOnly)`)
+  - `R30`: a command category that can only be filed → `file` (the router's fallback branch)
+  - `R80`: the model's own answered kind, when it is available (an explicit `none` included) → that kind (an explicit rule, so every proposal still carries a `ruleId`)
+  - `R90`: default → `none`, logged only: `suggestedRoute` is left as it was
 - **Vocabulary.** `action` reuses the existing `SuggestedRouteKind`, so `file` is the inbox exit. The decision feeds the existing `suggestedRoute` and its card chip, so a card never shows two proposals. A suggestion the user dismissed (`auto=false`) is never overwritten.
-- **One predicate.** R10 calls the same check `ProjectCaptureRouter` uses to choose Command, so the chip and `route()` cannot disagree.
+- **One predicate.** R10 reads `availableRouteKinds`, which the controller derives from `ProjectCaptureRouter.resolvedKind`, so the chip and `route()` cannot disagree by construction; a parity test pins it.
 - **What determinism covers.** Determinism is over **facts**, not over the raw capture. Re-running enrichment can change `category`, so the log stores the facts themselves, not a hash, and a decision can be replayed.
 - **Absent is not empty.** `category == null` (enrichment never ran) yields **no** decision, not `none`.
 - **The reason comes from the rule.** It is a template filled with the facts the rule matched on. The model only supplies facts it already produces, such as `category` and `priorityReason`.
@@ -81,10 +84,10 @@ Decision {ruleId, action: SuggestedRouteKind (file|command|agent|none), agent?, 
 | Piece | Where | Change |
 |---|---|---|
 | Policy | new `lib/features/switchboard/` | `CapturePolicy` interface, `DisabledCapturePolicy` default, rule table in `data/` |
-| Current decision point | `recordings/data/command_router.dart:152` | its two branches become R10 / R20-equivalents |
+| Current decision point | `recordings/data/command_router.dart:152` | its two branches become R10 / R30-equivalents |
 | Suggestion | `recordings/domain/suggested_route.dart` | fed by `Decision` |
 | Decision log | new `decisions.jsonl` (append-only, like `triage.jsonl` / `closures.jsonl`) | every decision: none, rejected, shadow and executed |
-| Route record | `recordings/domain/route_record.dart` | optional `decision {ruleId, reason, autonomy}`; absent on legacy rows |
+| Route record | `recordings/domain/route_record.dart` | optional `decision {ruleId, reason}` (`autonomy` in v2); absent on legacy rows |
 | Executor | `projects/data/native_agent_jobs.dart` (prompt through the job's `stdin` file), `projects/domain/agent_session_launcher.dart` (`ProjectAgent`) | `ProjectAgent.opencode` with `promptArguments` and `skipPermissionsArguments` branches |
 | Environment | `AgentSettings` (per device, never synced) | `primaryAgent`, `dispatcherDevice`, a per-project override, read through a resolver |
 | Result | `.agent-tasks/<id>-result.md` + `AgentArtifactScanner` | the one result channel for every CLI. CLI JSON is used only for exit status and session id |

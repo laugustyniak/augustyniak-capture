@@ -87,7 +87,7 @@ CI is **live** (`.github/workflows/ci.yml`) and runs `flutter analyze` + `flutte
 
 ## Architecture
 
-Feature-first layout under `lib/features/<feature>/{domain,data,presentation}`. Twenty features: `recordings`, `projects`, `transcription`, `processing`, `enrichment`, `settings`, `costs`, `logs`, `shortcuts`, `timer`, `clipboard`, `gamification`, `momentum`, `backup`, `command`, `auth`, `sync`, `mcp`, `connections`, `work_dashboard`. No state-management or DI package — plain `ChangeNotifier` + constructor injection. The one thing that is not feature-scoped is `core/database/app_database.dart` — see Persistence.
+Feature-first layout under `lib/features/<feature>/{domain,data,presentation}`. Twenty-one features: `recordings`, `projects`, `transcription`, `processing`, `enrichment`, `settings`, `costs`, `logs`, `shortcuts`, `timer`, `clipboard`, `gamification`, `momentum`, `backup`, `command`, `auth`, `sync`, `mcp`, `connections`, `work_dashboard`, `switchboard`. No state-management or DI package — plain `ChangeNotifier` + constructor injection. The one thing that is not feature-scoped is `core/database/app_database.dart` — see Persistence.
 
 **Deep reference lives under `docs/`, one file per area.** This file carries the invariants — the ordering rules, the durability rules and the seams. Open the matching reference before changing anything in its area; each is written to be read whole.
 
@@ -147,7 +147,7 @@ Neither rule is weakened by the three removal paths (`discardRecording`, `delete
 
 ## The features
 
-Twenty features, eighteen lines — `timer`/`momentum` share one, and so do `connections`/`work_dashboard`. Read the pointer before changing anything in its area.
+Twenty-one features, nineteen lines — `timer`/`momentum` share one, and so do `connections`/`work_dashboard`. Read the pointer before changing anything in its area.
 
 - **`recordings`** — the queue, the capture screen, the editor, the controller that owns the pipeline. `docs/architecture/capture-pipeline.md`, `docs/architecture/ui.md`. External text captures (Siri intent, Android CREATE_NOTE) arrive through an inbox directory drained after load and on resume: `docs/architecture/capture-pipeline.md#inbox-external-capture`.
 - **`processing`** — `Processor` turns a segment's source into text. **The rule to enforce in review: a processor only ever reads the source — never writes, moves or deletes it.** `docs/architecture/processing.md`.
@@ -168,6 +168,7 @@ Twenty features, eighteen lines — `timer`/`momentum` share one, and so do `con
 - **`mcp`** — a separate, **read-only** stdio MCP server (`bin/capture_mcp.dart`) that lets coding agents search and read captures. SQLite opened `readOnly`, `recordings.db-stale` honoured, no file paths in output, and **no `package:flutter` in its import graph** (a test walks it). Writes belong behind `RecordingsController`, never here. `docs/architecture/mcp.md`.
 - **`connections`** — the REVIEW CONNECTIONS dialog: the active enrichment model reviews one local day of captures and suggests links. Read-only, ephemeral, costed through the usage sink. `docs/architecture/connections-work-dashboard.md`.
 - **`work_dashboard`** — the WORK tab: a read-only Todoist view beside Capture projects and focus sessions; the token is a read token in the OS keyring. `docs/architecture/connections-work-dashboard.md`.
+- **`switchboard`** — a pure `CapturePolicy` (ordered rule table R10/R20/R30/R80/R90) that runs after enrichment and writes the card's `suggestedRoute` with a `ruleId`, logging every decision to a local `decisions.jsonl`. Shadow mode: a suggestion never launches anything, a policy failure never fails a capture, and it never touches `status` or a source. `docs/architecture/agent-handoff.md`, `docs/plans/2026-11-22-switchboard.md`.
 
 Not feature-scoped: `core/database/app_database.dart` (see Persistence), `core/http/provider_failure.dart`, `core/sync/`.
 

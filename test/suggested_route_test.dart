@@ -258,6 +258,62 @@ void main() {
     });
   });
 
+  group('SuggestedRoute.ruleId', () {
+    test('legacy JSON: ruleId omitted when null, byte for byte', () {
+      final Map<String, dynamic> legacy = <String, dynamic>{
+        'kind': 'command',
+        'reason': 'needs an agent',
+        'auto': true,
+      };
+      final SuggestedRoute? loaded = SuggestedRoute.fromJson(legacy);
+      expect(jsonEncode(loaded!.toJson()), jsonEncode(legacy));
+      expect(loaded.toJson().containsKey('ruleId'), isFalse);
+    });
+
+    test('ruleId round-trips', () {
+      final Map<String, dynamic> json = <String, dynamic>{
+        'kind': 'command',
+        'reason': 'bound project',
+        'auto': true,
+        'ruleId': 'R10',
+      };
+      final SuggestedRoute? loaded = SuggestedRoute.fromJson(json);
+      expect(loaded!.toJson()['ruleId'], 'R10');
+      expect(jsonEncode(loaded.toJson()), jsonEncode(json));
+      // And through a whole row, as the index stores it.
+      final Map<String, dynamic> row = _row().toJson()
+        ..['suggestedRoute'] = json;
+      expect(
+        Recording.fromJson(row).toJson()['suggestedRoute'],
+        containsPair('ruleId', 'R10'),
+      );
+    });
+
+    test('dismissed() keeps ruleId', () {
+      final SuggestedRoute loaded = SuggestedRoute.fromJson(<String, dynamic>{
+        'kind': 'agent',
+        'auto': true,
+        'ruleId': 'R20',
+      })!;
+      final Map<String, dynamic> json = loaded.dismissed().toJson();
+      expect(json['ruleId'], 'R20');
+      expect(json['auto'], isFalse);
+    });
+
+    test('equality includes ruleId', () {
+      SuggestedRoute? build(String? ruleId) =>
+          SuggestedRoute.fromJson(<String, dynamic>{
+            'kind': 'file',
+            'auto': true,
+            'ruleId': ?ruleId,
+          });
+      expect(build('R30'), build('R30'));
+      expect(build('R30').hashCode, build('R30').hashCode);
+      expect(build('R30'), isNot(build('R80')));
+      expect(build('R30'), isNot(build(null)));
+    });
+  });
+
   group('prompt', () {
     test('lists the offered kinds in their own fenced block, with none', () {
       final String prompt = buildEnrichmentSystemPrompt(

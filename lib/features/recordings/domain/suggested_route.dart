@@ -36,7 +36,12 @@ enum SuggestedRouteKind {
 /// replace it, false once the user dismissed it, after which enrichment never
 /// writes it again.
 class SuggestedRoute {
-  const SuggestedRoute({required this.kind, this.reason, this.auto = true});
+  const SuggestedRoute({
+    required this.kind,
+    this.reason,
+    this.auto = true,
+    this.ruleId,
+  });
 
   static const int maxReasonChars = 200;
 
@@ -44,14 +49,21 @@ class SuggestedRoute {
   final String? reason;
   final bool auto;
 
+  /// The Switchboard rule that produced this suggestion (`R10`, ...), absent
+  /// for the model's own answer and on every row written before it existed;
+  /// the key stays out of the JSON then, so such a row serialises byte for
+  /// byte as before.
+  final String? ruleId;
+
   /// This suggestion after the user turned it down: same content, user-owned.
   SuggestedRoute dismissed() =>
-      SuggestedRoute(kind: kind, reason: reason, auto: false);
+      SuggestedRoute(kind: kind, reason: reason, auto: false, ruleId: ruleId);
 
   Map<String, dynamic> toJson() => <String, dynamic>{
     'kind': kind.name,
     if (reason != null) 'reason': reason,
     'auto': auto,
+    if (ruleId != null) 'ruleId': ruleId,
   };
 
   /// Null for anything unreadable, which reads as "never proposed". `auto`
@@ -62,12 +74,16 @@ class SuggestedRoute {
     final SuggestedRouteKind? kind = SuggestedRouteKind.fromName(json['kind']);
     if (kind == null) return null;
     final Object? reason = json['reason'];
+    final Object? ruleId = json['ruleId'];
     return SuggestedRoute(
       kind: kind,
       reason: reason is String && reason.trim().isNotEmpty
           ? reason.trim()
           : null,
       auto: json['auto'] == true,
+      ruleId: ruleId is String && ruleId.trim().isNotEmpty
+          ? ruleId.trim()
+          : null,
     );
   }
 
@@ -76,10 +92,11 @@ class SuggestedRoute {
       other is SuggestedRoute &&
       other.kind == kind &&
       other.reason == reason &&
-      other.auto == auto;
+      other.auto == auto &&
+      other.ruleId == ruleId;
 
   @override
-  int get hashCode => Object.hash(kind, reason, auto);
+  int get hashCode => Object.hash(kind, reason, auto, ruleId);
 }
 
 /// What the card may draw for a suggestion, after it was re-checked against the
