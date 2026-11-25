@@ -46,6 +46,7 @@ Recording rec(
   String? projectId,
   RecordingStatus status = RecordingStatus.completed,
   List<RouteRecord> routes = const <RouteRecord>[],
+  bool isProcessedByUser = false,
 }) => Recording(
   id: id,
   filePath: '/secret/path/$id.m4a',
@@ -60,6 +61,7 @@ Recording rec(
   priority: CapturePriority.p1,
   priorityReason: 'because',
   routes: routes,
+  isProcessedByUser: isProcessedByUser,
 );
 
 const Project projectA = Project(
@@ -85,7 +87,8 @@ class McpFixture {
   void insert(Recording r, {String? payload, bool useJson = true}) {
     db.execute(
       'INSERT INTO recordings (id, file_path, duration_ms, type, status, '
-      'tags_json, created_at, json_payload) VALUES (?,?,?,?,?,?,?,?)',
+      'tags_json, created_at, is_processed_by_user, json_payload) '
+      'VALUES (?,?,?,?,?,?,?,?,?)',
       <Object?>[
         r.id,
         r.filePath,
@@ -94,6 +97,7 @@ class McpFixture {
         r.status.name,
         '[]',
         r.createdAt.millisecondsSinceEpoch,
+        r.isProcessedByUser ? 1 : 0,
         payload ?? (useJson ? jsonEncode(r.toJson()) : null),
       ],
     );

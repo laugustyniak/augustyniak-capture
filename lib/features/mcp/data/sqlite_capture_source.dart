@@ -36,9 +36,18 @@ class SqliteCaptureSource implements CaptureSource {
   File get _stale => File(p.join(recordingsDir, 'recordings.db-stale'));
 
   @override
-  Future<List<Recording>> recordings() async {
+  Future<List<Recording>> recordings() async => <Recording>[
+    for (final ({Recording recording, String payload}) e
+        in await recordingsWithPayload())
+      e.recording,
+  ];
+
+  @override
+  Future<List<({Recording recording, String payload})>>
+  recordingsWithPayload() async {
     if (!_stale.existsSync()) {
-      final List<Recording>? fromDb = _fromDatabase();
+      final List<({Recording recording, String payload})>? fromDb =
+          _fromDatabase();
       if (fromDb != null && fromDb.isNotEmpty) return fromDb;
     }
     if (_index.existsSync()) return _fromJsonIndex();
@@ -48,7 +57,7 @@ class SqliteCaptureSource implements CaptureSource {
         '${_index.path}. Pass --db and --recordings-dir.',
       );
     }
-    return <Recording>[];
+    return <({Recording recording, String payload})>[];
   }
 
   /// Mirrors `RecordingsRepository._loadFromDatabase`: null (ask the JSON
@@ -57,7 +66,7 @@ class SqliteCaptureSource implements CaptureSource {
   /// skipped, and a table of nothing but such rows still answers — it does not
   /// fall through to the index. Rebuilt rows lack the transcript, so each is
   /// replaced by its JSON-index version when the index has one.
-  List<Recording>? _fromDatabase() {
+  List<({Recording recording, String payload})>? _fromDatabase() {
     final Database? db = _open();
     if (db == null) return null;
     try {
@@ -69,28 +78,36 @@ class SqliteCaptureSource implements CaptureSource {
         ORDER BY created_at DESC;
       ''');
       if (results.isEmpty) return null;
-      final List<Recording> rows = <Recording>[];
+      final List<({Recording recording, String payload})> rows =
+          <({Recording recording, String payload})>[];
       final Set<String> degraded = <String>{};
       for (final Row row in results) {
         final String? payload = row['json_payload'] as String?;
         if (payload != null && payload.isNotEmpty) {
           try {
-            rows.add(
-              Recording.fromJson(jsonDecode(payload) as Map<String, dynamic>),
-            );
+            rows.add((
+              recording: Recording.fromJson(
+                jsonDecode(payload) as Map<String, dynamic>,
+              ),
+              payload: payload,
+            ));
             continue;
           } catch (_) {}
         }
         degraded.add(row['id'] as String);
         _log('row ${row['id']} has no usable payload, rebuilt from columns');
-        rows.add(_fromColumns(row));
+        final Recording rebuilt = _fromColumns(row);
+        rows.add((recording: rebuilt, payload: jsonEncode(rebuilt.toJson())));
       }
       if (degraded.isNotEmpty) {
         final Map<String, Recording> indexed = _indexRowsById();
         for (int i = 0; i < rows.length; i++) {
-          final Recording? fromIndex = indexed[rows[i].id];
-          if (degraded.contains(rows[i].id) && fromIndex != null) {
-            rows[i] = fromIndex;
+          final Recording? fromIndex = indexed[rows[i].recording.id];
+          if (degraded.contains(rows[i].recording.id) && fromIndex != null) {
+            rows[i] = (
+              recording: fromIndex,
+              payload: jsonEncode(fromIndex.toJson()),
+            );
           }
         }
       }
@@ -164,11 +181,13 @@ class SqliteCaptureSource implements CaptureSource {
     }
   }
 
-  List<Recording> _fromJsonIndex() {
+  List<({Recording recording, String payload})> _fromJsonIndex() {
     final Object? decoded;
     try {
       final String raw = _index.readAsStringSync();
-      if (raw.trim().isEmpty) return <Recording>[];
+      if (raw.trim().isEmpty) {
+        return <({Recording recording, String payload})>[];
+      }
       decoded = jsonDecode(raw);
     } catch (e) {
       throw CaptureStoreUnavailable(
@@ -180,15 +199,22 @@ class SqliteCaptureSource implements CaptureSource {
         'Recordings index ${_index.path} is not a JSON list.',
       );
     }
-    final List<Recording> rows = <Recording>[];
+    final List<({Recording recording, String payload})> rows =
+        <({Recording recording, String payload})>[];
     for (final dynamic item in decoded) {
       try {
-        rows.add(Recording.fromJson(item as Map<String, dynamic>));
+        final Recording r = Recording.fromJson(item as Map<String, dynamic>);
+        rows.add((recording: r, payload: jsonEncode(r.toJson())));
       } catch (_) {
         _log('skipping unreadable JSON index row');
       }
     }
-    rows.sort((Recording a, Recording b) => b.createdAt.compareTo(a.createdAt));
+    rows.sort(
+      (
+        ({Recording recording, String payload}) a,
+        ({Recording recording, String payload}) b,
+      ) => b.recording.createdAt.compareTo(a.recording.createdAt),
+    );
     return rows;
   }
 
