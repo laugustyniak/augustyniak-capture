@@ -391,7 +391,61 @@ void main() {
       find.byKey(const ValueKey<String>('gemini-native-unavailable')),
       findsOneWidget,
     );
+    expect(
+      tester
+          .widget<Text>(
+            find.byKey(const ValueKey<String>('gemini-native-unavailable')),
+          )
+          .data,
+      contains('Gemini CLI background jobs are unavailable'),
+    );
     expect(find.text('LAUNCH SESSION'), findsOneWidget);
+  });
+
+  testWidgets('OpenCode explains the missing background mode and cannot launch', (
+    WidgetTester tester,
+  ) async {
+    final _FakeLauncher launcher = _FakeLauncher();
+    final RecordingsController controller = await controllerWith(
+      launcher,
+      defaultAgent: AgentKind.opencode,
+    );
+
+    await openSheet(tester, controller);
+
+    expect(find.text('OPENCODE'), findsOneWidget);
+    expect(
+      tester
+          .widget<Text>(
+            find.byKey(const ValueKey<String>('gemini-native-unavailable')),
+          )
+          .data,
+      contains('OpenCode background jobs are unavailable'),
+    );
+    await tester.tap(find.text('LAUNCH SESSION'), warnIfMissed: false);
+    // A launch that did start would land within these rounds.
+    await settleIo(tester);
+    expect(launcher.requests, isEmpty);
+  });
+
+  testWidgets('a codex default shows no notice and can launch', (
+    WidgetTester tester,
+  ) async {
+    final _FakeLauncher launcher = _FakeLauncher();
+    final RecordingsController controller = await controllerWith(
+      launcher,
+      defaultAgent: AgentKind.codex,
+    );
+
+    await openSheet(tester, controller);
+
+    expect(
+      find.byKey(const ValueKey<String>('gemini-native-unavailable')),
+      findsNothing,
+    );
+    await tester.tap(find.text('LAUNCH SESSION'));
+    await settleIo(tester, until: () => launcher.requests.isNotEmpty);
+    expect(launcher.requests, hasLength(1));
   });
 
   testWidgets('WINDOW · ZELLIJ launches through the terminal and closes', (

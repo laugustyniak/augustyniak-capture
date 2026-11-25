@@ -79,6 +79,10 @@ class _HandoffSheetState extends State<_HandoffSheet> {
   bool _busy = false;
   bool _launching = false;
 
+  String get _agentLabel => widget.agents
+      .firstWhere((HandoffAgent agent) => agent.id == _agentId)
+      .label;
+
   /// Agents whose CLI has no background (native) mode, only a window.
   bool get _backgroundUnavailable =>
       _agentId == AgentKind.geminiCli.name ||
@@ -382,8 +386,7 @@ class _HandoffSheetState extends State<_HandoffSheet> {
     if (_detached && _backgroundUnavailable) ...<Widget>[
       const SizedBox(height: 9),
       Text(
-        '${widget.agents.firstWhere((HandoffAgent a) => a.id == _agentId).label} '
-        'background jobs are unavailable. '
+        '$_agentLabel background jobs are unavailable. '
         'Choose WINDOW · ZELLIJ.',
         key: const ValueKey<String>('gemini-native-unavailable'),
         style: ConsoleText.micro.copyWith(color: Console.amber),

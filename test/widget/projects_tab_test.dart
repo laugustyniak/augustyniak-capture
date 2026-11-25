@@ -384,6 +384,61 @@ void main() {
     );
   });
 
+  testWidgets('OpenCode has no skip switch and no background launch', (
+    WidgetTester tester,
+  ) async {
+    await openEditor(tester);
+
+    await tester.scrollUntilVisible(
+      find.text('CODEX').last,
+      120,
+      scrollable: find.byType(Scrollable).last,
+    );
+    await tester.tap(find.text('CODEX').last);
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 300));
+    expect(
+      find.byKey(const ValueKey<String>('skip-permissions-codex')),
+      findsOneWidget,
+    );
+    await tester.scrollUntilVisible(
+      find.text('OPENCODE').last,
+      120,
+      scrollable: find.byType(Scrollable).last,
+    );
+    await tester.tap(find.text('OPENCODE').last);
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 300));
+    // The tile is open: its own argument field is there, the switch is not.
+    expect(
+      find.byKey(const ValueKey<String>('agent-arguments-opencode')),
+      findsOneWidget,
+    );
+    expect(
+      find.byKey(const ValueKey<String>('skip-permissions-opencode')),
+      findsNothing,
+    );
+    tester.state<NavigatorState>(find.byType(Navigator).first).pop();
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 300));
+
+    final Finder launch = find.byKey(
+      ValueKey<String>('launch-${controller.projects.single.id}-opencode'),
+    );
+    expect(
+      tester.widget<OutlinedButton>(launch).onPressed,
+      isNull,
+    );
+    expect(
+      tester
+          .widget<Tooltip>(
+            find.ancestor(of: launch, matching: find.byType(Tooltip)),
+          )
+          .message,
+      'OpenCode: long press to open in a window',
+    );
+  });
+
   testWidgets('skip permissions is a per-agent switch that saves', (
     WidgetTester tester,
   ) async {

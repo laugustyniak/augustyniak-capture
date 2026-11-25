@@ -197,7 +197,7 @@ void main() {
         isA<AgentSessionLaunchException>().having(
           (AgentSessionLaunchException error) => error.message,
           'message',
-          contains('not available'),
+          allOf(contains('not available'), contains('OpenCode'), contains('window')),
         ),
       ),
     );
