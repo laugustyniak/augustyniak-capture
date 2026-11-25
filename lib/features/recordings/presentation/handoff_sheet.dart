@@ -3,6 +3,7 @@ import 'package:material_ui/material_ui.dart';
 import '../../../app/ui_kit.dart';
 import '../../projects/domain/agent_session_launcher.dart'
     show attachCommandFor;
+import '../../projects/domain/project.dart' show AgentKind;
 import '../../projects/presentation/agent_jobs_sheet.dart';
 import '../domain/agent_handoff.dart';
 import '../domain/assistant_target.dart';
@@ -77,6 +78,11 @@ class _HandoffSheetState extends State<_HandoffSheet> {
   String _agentId = '';
   bool _busy = false;
   bool _launching = false;
+
+  /// Agents whose CLI has no background (native) mode, only a window.
+  bool get _backgroundUnavailable =>
+      _agentId == AgentKind.geminiCli.name ||
+      _agentId == AgentKind.opencode.name;
 
   /// Start the session in the background rather than in a terminal window.
   /// On by default: a handoff should not take the screen, and the window is
@@ -373,10 +379,12 @@ class _HandoffSheetState extends State<_HandoffSheet> {
         ),
       ],
     ),
-    if (_detached && _agentId == 'geminiCli') ...<Widget>[
+    if (_detached && _backgroundUnavailable) ...<Widget>[
       const SizedBox(height: 9),
       Text(
-        'Gemini CLI background jobs are unavailable. Choose WINDOW · ZELLIJ.',
+        '${widget.agents.firstWhere((HandoffAgent a) => a.id == _agentId).label} '
+        'background jobs are unavailable. '
+        'Choose WINDOW · ZELLIJ.',
         key: const ValueKey<String>('gemini-native-unavailable'),
         style: ConsoleText.micro.copyWith(color: Console.amber),
       ),
@@ -450,7 +458,7 @@ class _HandoffSheetState extends State<_HandoffSheet> {
       // again.
       label: _attached == null ? 'LAUNCH SESSION' : 'DONE',
       onTap: _busy ||
-              (_attached == null && _detached && _agentId == 'geminiCli')
+              (_attached == null && _detached && _backgroundUnavailable)
           ? null
           : _attached == null
           ? _launch

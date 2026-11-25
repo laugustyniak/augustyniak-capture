@@ -198,6 +198,7 @@ void main() {
         final String? introducer = switch (agent) {
           ProjectAgent.antigravity => '--prompt-interactive',
           ProjectAgent.gemini => '-i',
+          ProjectAgent.opencode => '--prompt',
           ProjectAgent.codex || ProjectAgent.claude => null,
         };
         if (introducer != null) expect(arguments.first, introducer);

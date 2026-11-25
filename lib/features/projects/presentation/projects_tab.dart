@@ -442,11 +442,12 @@ class _AgentButton extends StatelessWidget {
       }
     }
 
-    final bool backgroundAvailable = agent != AgentKind.geminiCli;
+    final bool backgroundAvailable =
+        agent != AgentKind.geminiCli && agent != AgentKind.opencode;
     return Tooltip(
       message: backgroundAvailable
           ? 'Tap: start in the background · Long press: open in a window'
-          : 'Gemini CLI: long press to open in a window',
+          : '${_agentLabel(agent)}: long press to open in a window',
       child: OutlinedButton.icon(
         key: ValueKey<String>('launch-${project.id}-${agent.name}'),
         onPressed: !controller.canLaunch || launching || !backgroundAvailable
@@ -712,23 +713,24 @@ class _ProjectEditorSheetState extends State<_ProjectEditorSheet> {
                     style: ConsoleText.micro,
                   ),
                   children: <Widget>[
-                    SwitchListTile(
-                      key: ValueKey<String>('skip-permissions-${agent.name}'),
-                      contentPadding: EdgeInsets.zero,
-                      title: Text(
-                        'Skip permission prompts',
-                        style: ConsoleText.body,
+                    if (agent != AgentKind.opencode)
+                      SwitchListTile(
+                        key: ValueKey<String>('skip-permissions-${agent.name}'),
+                        contentPadding: EdgeInsets.zero,
+                        title: Text(
+                          'Skip permission prompts',
+                          style: ConsoleText.body,
+                        ),
+                        subtitle: Text(
+                          'The agent runs tools without asking. A capture\'s '
+                          'text can steer it, so leave this off for imported, '
+                          'OCR and clipboard captures.',
+                          style: ConsoleText.micro,
+                        ),
+                        value: _skipPermissions[agent]!,
+                        onChanged: (bool value) =>
+                            setState(() => _skipPermissions[agent] = value),
                       ),
-                      subtitle: Text(
-                        'The agent runs tools without asking. A capture\'s '
-                        'text can steer it, so leave this off for imported, '
-                        'OCR and clipboard captures.',
-                        style: ConsoleText.micro,
-                      ),
-                      value: _skipPermissions[agent]!,
-                      onChanged: (bool value) =>
-                          setState(() => _skipPermissions[agent] = value),
-                    ),
                     TextFormField(
                       key: ValueKey<String>('agent-arguments-${agent.name}'),
                       controller: _arguments[agent],
@@ -930,6 +932,7 @@ String _agentLabel(AgentKind agent) => switch (agent) {
   AgentKind.claudeCode => 'Claude Code',
   AgentKind.antigravity => 'Antigravity',
   AgentKind.geminiCli => 'Gemini CLI',
+  AgentKind.opencode => 'OpenCode',
 };
 
 IconData _agentIcon(AgentKind agent) => switch (agent) {
@@ -937,6 +940,7 @@ IconData _agentIcon(AgentKind agent) => switch (agent) {
   AgentKind.claudeCode => Icons.terminal,
   AgentKind.antigravity => Icons.auto_awesome,
   AgentKind.geminiCli => Icons.diamond_outlined,
+  AgentKind.opencode => Icons.data_object,
 };
 
 void _showFailure(BuildContext context, Object exception) {
