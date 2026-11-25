@@ -5442,7 +5442,7 @@ class RecordingsController extends ChangeNotifier {
           category: item.category,
           projectId: item.projectId,
           availableRouteKinds: availableRouteKinds(item),
-          modelRoute: result.routeAnswered ? result.routeKind : null,
+          modelRoute: _offeredAnswer(result, offered),
         ),
       );
     } catch (exception) {
@@ -5471,6 +5471,20 @@ class RecordingsController extends ChangeNotifier {
         ruleId: decision.ruleId,
       ),
     );
+  }
+
+  /// The model's route answer, only when routes were offered and it named one
+  /// of them (`none` always counts), as [_withSuggestedRoute] requires. A kind
+  /// that became available after the offer was never the model's to choose.
+  SuggestedRouteKind? _offeredAnswer(
+    EnrichmentResult result,
+    Set<SuggestedRouteKind> offered,
+  ) {
+    final SuggestedRouteKind? kind = result.routeKind;
+    if (offered.isEmpty || !result.routeAnswered || kind == null) return null;
+    return kind == SuggestedRouteKind.none || offered.contains(kind)
+        ? kind
+        : null;
   }
 
   /// Best-effort, like every sink: the decision is already persisted.

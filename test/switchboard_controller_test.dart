@@ -281,6 +281,8 @@ void main() {
     CapturePolicy? policy,
     DecisionLog? log,
     bool omitPolicy = false,
+    _Router? router,
+    _Enrichment? enrichment,
   }) async {
     note = File(p.join(dir.path, 'rec-1.txt'))..writeAsStringSync('hello');
     repo.saved = <Recording>[
@@ -296,13 +298,15 @@ void main() {
       transcriptionService: const DisabledTranscriptionService(),
       recorder: _GrantingRecorder(),
       player: _FakePlayer(),
-      enrichmentService: _Enrichment(result),
+      enrichmentService: enrichment ?? _Enrichment(result),
       enrichmentContextSource: _Source(EnrichmentContext.none),
       projectById: (String id) => _projects[id],
-      captureRouter: _Router(<String?, RouteKind?>{
-        'a': RouteKind.command,
-        'b': RouteKind.file,
-      }),
+      captureRouter:
+          router ??
+          _Router(<String?, RouteKind?>{
+            'a': RouteKind.command,
+            'b': RouteKind.file,
+          }),
       agentHandoff: _Agents(<String?>{'a'}),
       processorRegistry: ProcessorRegistry(<CaptureType, Processor>{
         CaptureType.text: const _Echo(),
@@ -382,6 +386,44 @@ void main() {
       await reEnrich(c);
       expect(policy.seen.single.modelRoute, SuggestedRouteKind.none);
     });
+
+    test(
+      'a route kind the model answered but was not offered is withheld',
+      () async {
+        // Nothing is routable for 'n' when enrichment offers the routes, so
+        // none are offered; the inbox becomes available while the model is
+        // still answering, and the model names it anyway.
+        final _Router router = _Router(<String?, RouteKind?>{});
+        final _Enrichment enrichment = _Enrichment(
+          const EnrichmentResult(
+            category: CaptureCategory.note,
+            routeAnswered: true,
+            routeKind: SuggestedRouteKind.file,
+          ),
+        )..gate = Completer<void>();
+        final _Policy policy = _Policy((CaptureFacts f) => null);
+        final RecordingsController c = await seeded(
+          _row(projectId: 'n'),
+          policy: policy,
+          router: router,
+          enrichment: enrichment,
+        );
+        enrichment.started = Completer<void>();
+
+        final Future<void> done = reEnrich(c);
+        await enrichment.started.future;
+        expect(enrichment.lastContext!.routeKinds, isEmpty);
+        router.kinds['n'] = RouteKind.file;
+        enrichment.gate!.complete();
+        await done;
+
+        expect(policy.seen.single.availableRouteKinds, <SuggestedRouteKind>[
+          SuggestedRouteKind.file,
+        ]);
+        expect(policy.seen.single.modelRoute, isNull);
+        expect(c.recordings.single.suggestedRoute, isNull);
+      },
+    );
 
     test(
       'a dismissed suggestion is never overwritten, but the row is logged',
