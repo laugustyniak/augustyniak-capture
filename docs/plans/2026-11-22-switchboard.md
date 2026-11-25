@@ -71,7 +71,7 @@ v0 ships the subset `Decision {ruleId, kind, reason, facts}` (`CaptureFacts {cat
   - `R10`: a command category (`agentTask`) whose project resolves to Command → `command`
   - `R20`: a command category with an agent available → `agent` (v1: `agent(primaryAgent, readOnly)`)
   - `R30`: a command category that can only be filed → `file` (the router's fallback branch)
-  - `R80`: the model's own answered kind, when it is available (an explicit `none` included) → that kind (an explicit rule, so every proposal still carries a `ruleId`)
+  - `R80`: the model's own answered kind, when it was offered and is available (an explicit `none` included) → that kind (an explicit rule, so every proposal still carries a `ruleId`)
   - `R90`: default → `none`, logged only: `suggestedRoute` is left as it was
 - **Vocabulary.** `action` reuses the existing `SuggestedRouteKind`, so `file` is the inbox exit. The decision feeds the existing `suggestedRoute` and its card chip, so a card never shows two proposals. A suggestion the user dismissed (`auto=false`) is never overwritten.
 - **One predicate.** R10 reads `availableRouteKinds`, which the controller derives from `ProjectCaptureRouter.resolvedKind`, so the chip and `route()` cannot disagree by construction; a parity test pins it.

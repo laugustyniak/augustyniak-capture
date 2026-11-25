@@ -5541,17 +5541,15 @@ class RecordingsController extends ChangeNotifier {
     EnrichmentResult result,
     Set<SuggestedRouteKind> offered,
   ) {
-    final SuggestedRouteKind? kind = result.routeKind;
+    final SuggestedRouteKind? kind = _offeredAnswer(result, offered);
     final SuggestedRoute? current = item.suggestedRoute;
-    if (offered.isEmpty ||
-        !result.routeAnswered ||
-        kind == null ||
+    if (kind == null ||
         item.routes.isNotEmpty ||
         (current != null && !current.auto)) {
       return item;
     }
     if (kind != SuggestedRouteKind.none &&
-        !(offered.contains(kind) && availableRouteKinds(item).contains(kind))) {
+        !availableRouteKinds(item).contains(kind)) {
       return item;
     }
     return item.copyWith(
