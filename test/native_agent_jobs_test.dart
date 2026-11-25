@@ -126,6 +126,109 @@ printf '%s\n' "stderr: $prompt" >&2
     );
   });
 
+  test('approvalsOff follows the shared approval-control predicate', () async {
+    final File executable = await _fixtureExecutable(temp, r'''
+read prompt
+printf '%s\n' '{"type":"thread.started","thread_id":"thread-7"}'
+printf '%s\n' '{"type":"turn.started"}'
+printf '%s\n' '{"type":"turn.completed"}'
+''');
+    for (final (List<String> args, bool off) in <(List<String>, bool)>[
+      (<String>['--permission-mode', 'bypassPermissions'], true),
+      (<String>['--full-auto'], true),
+      (<String>['-c', 'sandbox_mode=x'], true),
+      (<String>['--dangerously-bypass-approvals-and-sandbox'], true),
+      (<String>['--profile', 'todoist'], true),
+      (<String>['-p', 'yolo'], true),
+      (<String>['--approval-mode=yolo'], true),
+      (<String>['--model', 'x'], false),
+    ]) {
+      final NativeAgentJobs jobs = manager(executable);
+      final NativeAgentJobHandle handle = await jobs.launch(
+        AgentSessionLaunchRequest(
+          projectId: 'project',
+          projectName: 'Project',
+          repoPath: workspace.path,
+          agent: ProjectAgent.codex,
+          arguments: args,
+          prompt: 'p',
+          detached: true,
+        ),
+      );
+      final NativeAgentJob job = await _pollJob(
+        jobs,
+        handle.id,
+        (NativeAgentJob v) => v.isTerminal,
+      );
+      expect(job.approvalsOff, off, reason: args.join(' '));
+    }
+  });
+
+  test('an absolute executable override runs instead of the resolver', () async {
+    final File argsFile = File(p.join(temp.path, 'args.txt'));
+    final File executable = await _fixtureExecutable(temp, '''
+printf '%s ' "\$@" > ${argsFile.path}
+read prompt
+printf '%s\\n' '{"type":"thread.started","thread_id":"thread-9"}'
+printf '%s\\n' '{"type":"turn.started"}'
+printf '%s\\n' '{"type":"turn.completed"}'
+''');
+    // The resolver would send this launch to a binary that does not exist.
+    final NativeAgentJobs jobs = NativeAgentJobs(
+      jobsRoot: () async => jobsRoot,
+      executables: _Resolver('/nonexistent/codex'),
+      startupTimeout: const Duration(seconds: 5),
+      pollInterval: const Duration(milliseconds: 20),
+    );
+
+    final NativeAgentJobHandle handle = await jobs.launch(
+      AgentSessionLaunchRequest(
+        projectId: 'project',
+        projectName: 'Project',
+        repoPath: workspace.path,
+        agent: ProjectAgent.codex,
+        arguments: const <String>['--profile', 'todoist'],
+        prompt: 'p',
+        detached: true,
+        executable: executable.path,
+      ),
+    );
+    await _pollJob(jobs, handle.id, (NativeAgentJob v) => v.isTerminal);
+
+    expect(argsFile.readAsStringSync().trim(), 'exec --profile todoist --json -');
+    expect(
+      await File(p.join(jobsRoot.path, handle.id, 'request.json')).readAsString(),
+      contains(executable.path),
+    );
+  });
+
+  test('a missing absolute executable is named, not resolved elsewhere', () async {
+    final NativeAgentJobs jobs = NativeAgentJobs(
+      jobsRoot: () async => jobsRoot,
+      executables: _Resolver('/bin/true'),
+    );
+    await expectLater(
+      jobs.launch(
+        AgentSessionLaunchRequest(
+          projectId: 'project',
+          projectName: 'Project',
+          repoPath: workspace.path,
+          agent: ProjectAgent.codex,
+          prompt: 'p',
+          detached: true,
+          executable: '/nonexistent/codex',
+        ),
+      ),
+      throwsA(
+        isA<AgentSessionLaunchException>().having(
+          (AgentSessionLaunchException e) => e.message,
+          'message',
+          contains('/nonexistent/codex'),
+        ),
+      ),
+    );
+  });
+
   test(
     'starting job uses the configured startup timeout before lost',
     () async {

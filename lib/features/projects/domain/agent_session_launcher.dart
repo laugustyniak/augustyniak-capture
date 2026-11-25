@@ -74,6 +74,7 @@ class AgentSessionLaunchRequest {
     this.arguments = const <String>[],
     this.prompt,
     this.detached = false,
+    this.executable,
   });
 
   final String projectId;
@@ -101,6 +102,12 @@ class AgentSessionLaunchRequest {
   /// whose terminal cannot open one (#291) and what keeps a capture from
   /// stealing the screen every time it is handed off.
   final bool detached;
+
+  /// The program to run instead of [agent]'s own executable name: a bare name
+  /// or an absolute path from a user-configured `AgentCommand`, with its
+  /// leading arguments in [arguments]. [agent] still decides the backend, so
+  /// this only changes which binary answers. Native background launches only.
+  final String? executable;
 }
 
 class AgentSessionLaunchResult {
