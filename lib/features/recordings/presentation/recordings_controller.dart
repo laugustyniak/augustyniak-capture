@@ -16,6 +16,7 @@ import '../../enrichment/domain/embedding_service.dart';
 import '../../enrichment/domain/enrichment_context.dart';
 import '../../enrichment/domain/enrichment_result.dart';
 import '../../enrichment/domain/enrichment_service.dart';
+import '../../enrichment/domain/priorities_note.dart';
 import '../../enrichment/domain/transcript_cleaner.dart';
 import '../../enrichment/domain/instruction_writer.dart';
 import '../../logs/domain/log_event.dart';
@@ -83,6 +84,7 @@ import '../domain/route_record.dart';
 import '../domain/suggested_route.dart';
 import '../../switchboard/domain/capture_facts.dart';
 import '../../switchboard/domain/capture_policy.dart';
+import '../../switchboard/domain/context_facts.dart';
 import '../../switchboard/domain/decision.dart';
 import '../../switchboard/domain/decision_log.dart';
 // Same layer, not a widget import: `displayNameFor` is the one definition of
@@ -5317,6 +5319,16 @@ class RecordingsController extends ChangeNotifier {
           .routeKinds
           .toSet();
       ({Decision decision, bool applied, String? skipReason})? decided;
+      // Mapped once, from the context already resolved: `_update` must do no
+      // IO, and enrichment never imports the switchboard, so this is the seam.
+      final PrioritiesNote? note = context.priorities;
+      final ContextFacts contextFacts = note == null
+          ? ContextFacts.none
+          : ContextFacts(
+              priorities: note.items,
+              tier: note.tier,
+              status: note.status,
+            );
       await _update(
         id,
         (Recording item) => _withSwitchboard(
@@ -5364,6 +5376,7 @@ class RecordingsController extends ChangeNotifier {
           ),
           result,
           offeredRoutes,
+          contextFacts,
           (decision, applied, skipReason) => decided = (
             decision: decision,
             applied: applied,
@@ -5432,6 +5445,7 @@ class RecordingsController extends ChangeNotifier {
     Recording item,
     EnrichmentResult result,
     Set<SuggestedRouteKind> offered,
+    ContextFacts contextFacts,
     void Function(Decision decision, bool applied, String? skipReason)
     onDecided,
   ) {
@@ -5444,6 +5458,7 @@ class RecordingsController extends ChangeNotifier {
           availableRouteKinds: availableRouteKinds(item),
           modelRoute: _offeredAnswer(result, offered),
         ),
+        contextFacts,
       );
     } catch (exception) {
       _logSink.log(

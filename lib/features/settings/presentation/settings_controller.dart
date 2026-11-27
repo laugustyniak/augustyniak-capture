@@ -760,6 +760,22 @@ class SettingsController extends ChangeNotifier {
     await _persist(_settings.copyWith(soulPath: trimmed));
   }
 
+  /// The user's priorities note, or null when none is configured.
+  String? get prioritiesPath => _settings.prioritiesPath;
+
+  /// Point the priorities at a file, or clear it with a blank value. Same
+  /// contract as [setSoulPath]: stored as typed, read per capture.
+  Future<void> setPrioritiesPath(String? value) async {
+    final String trimmed = value?.trim() ?? '';
+    if (trimmed.isEmpty) {
+      if (_settings.prioritiesPath == null) return;
+      await _persist(_settings.copyWith(clearPrioritiesPath: true));
+      return;
+    }
+    if (trimmed == _settings.prioritiesPath) return;
+    await _persist(_settings.copyWith(prioritiesPath: trimmed));
+  }
+
   /// Where captures are mirrored as markdown, or null when nothing is.
   String? get vaultPath => _settings.vaultPath;
   String get vaultFolder => _settings.vaultFolder;

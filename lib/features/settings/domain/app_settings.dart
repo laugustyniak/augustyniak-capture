@@ -20,6 +20,7 @@ class AppSettings {
     this.activeEnrichmentProfileId,
     String? enrichmentInstructions,
     this.soulPath,
+    this.prioritiesPath,
     this.autoCleanup = false,
     this.autoInstruction = true,
     this.asrGlossary = '',
@@ -141,6 +142,12 @@ class AppSettings {
   /// missing or unreadable the typed profile still stands in, so clearing this
   /// is never required to recover.
   final String? soulPath;
+
+  /// A markdown note of the user's current priorities, sent beside the soul and
+  /// recorded (as a count only) with each routing decision. Null means none is
+  /// configured. Device-local, like [soulPath]; only the path is stored, never
+  /// the note's text.
+  final String? prioritiesPath;
 
   /// Whether every finished speech or OCR capture gets a clean-up proposal
   /// (#258). Off by default — it is one more model call per capture — and
@@ -310,6 +317,8 @@ class AppSettings {
     bool resetEnrichmentInstructions = false,
     String? soulPath,
     bool clearSoulPath = false,
+    String? prioritiesPath,
+    bool clearPrioritiesPath = false,
     bool? autoCleanup,
     bool? autoInstruction,
     String? asrGlossary,
@@ -375,6 +384,9 @@ class AppSettings {
           ? null
           : (enrichmentInstructions ?? _enrichmentInstructions),
       soulPath: clearSoulPath ? null : (soulPath ?? this.soulPath),
+      prioritiesPath: clearPrioritiesPath
+          ? null
+          : (prioritiesPath ?? this.prioritiesPath),
       autoCleanup: autoCleanup ?? this.autoCleanup,
       autoInstruction: autoInstruction ?? this.autoInstruction,
       asrGlossary: asrGlossary ?? this.asrGlossary,
@@ -488,6 +500,7 @@ class AppSettings {
       if (_enrichmentInstructions != null)
         'enrichmentInstructions': _enrichmentInstructions,
       if (soulPath != null) 'soulPath': soulPath,
+      if (prioritiesPath != null) 'prioritiesPath': prioritiesPath,
       if (autoCleanup) 'autoCleanup': true,
       if (!autoInstruction) 'autoInstruction': false,
       if (asrGlossary.trim().isNotEmpty) 'asrGlossary': asrGlossary,
@@ -619,6 +632,9 @@ class AppSettings {
           : null,
       soulPath: json['soulPath'] is String
           ? json['soulPath'] as String
+          : null,
+      prioritiesPath: json['prioritiesPath'] is String
+          ? json['prioritiesPath'] as String
           : null,
       vaultPath: json['vaultPath'] is String
           ? json['vaultPath'] as String
