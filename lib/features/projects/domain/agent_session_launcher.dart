@@ -5,7 +5,8 @@ enum ProjectAgent {
   codex('codex'),
   claude('claude'),
   antigravity('agy'),
-  gemini('gemini');
+  gemini('gemini'),
+  opencode('opencode');
 
   const ProjectAgent(this.executable);
 
@@ -24,6 +25,7 @@ enum ProjectAgent {
     return switch (this) {
       ProjectAgent.antigravity => <String>['--prompt-interactive', safe],
       ProjectAgent.gemini => <String>['-i', safe],
+      ProjectAgent.opencode => <String>['--prompt', safe],
       ProjectAgent.codex || ProjectAgent.claude => <String>[safe],
     };
   }
@@ -40,6 +42,8 @@ enum ProjectAgent {
       '--dangerously-skip-permissions',
     ],
     ProjectAgent.gemini => const <String>['--yolo'],
+    // The OpenCode TUI has no skip flag.
+    ProjectAgent.opencode => const <String>[],
   };
 
   /// A prompt that would otherwise be read as an option, made positional.

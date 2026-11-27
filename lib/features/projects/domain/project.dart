@@ -10,7 +10,10 @@ enum AgentKind {
   /// before Antigravity had its own name, projects saved Google's agent as
   /// `gemini`, and [fromName] maps that spelling to [antigravity]. Reusing it
   /// for the CLI would silently turn every legacy row into a different program.
-  geminiCli;
+  geminiCli,
+
+  /// The OpenCode TUI (`opencode`), persisted as `opencode`.
+  opencode;
 
   /// Returns null for values written by a newer app version.
   ///

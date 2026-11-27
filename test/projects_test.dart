@@ -129,6 +129,35 @@ void main() {
       expect(ProjectAgent.gemini.skipPermissionsArguments, <String>['--yolo']);
     });
 
+    test('opencode is its own agent and legacy names keep their meaning', () {
+      expect(AgentKind.fromName('opencode'), AgentKind.opencode);
+      expect(AgentKind.fromName('gemini'), AgentKind.antigravity);
+      expect(AgentKind.fromName('geminiCli'), AgentKind.geminiCli);
+      expect(AgentKind.fromName('someFutureAgent'), isNull);
+
+      const Project project = Project(
+        id: 'o',
+        name: 'O',
+        repoPath: '/tmp/o',
+        defaultAgent: AgentKind.opencode,
+      );
+      final Project restored = Project.fromJson(project.toJson());
+      expect(restored.defaultAgent, AgentKind.opencode);
+    });
+
+    test('OpenCode prompt and skip flag spellings', () {
+      expect(ProjectAgent.opencode.executable, 'opencode');
+      expect(ProjectAgent.opencode.promptArguments('do it'), <String>[
+        '--prompt',
+        'do it',
+      ]);
+      expect(ProjectAgent.opencode.promptArguments('--yolo'), <String>[
+        '--prompt',
+        ' --yolo',
+      ]);
+      expect(ProjectAgent.opencode.skipPermissionsArguments, isEmpty);
+    });
+
     test('skip permissions round-trips and stays out of JSON when off', () {
       const AgentSettings on = AgentSettings(skipPermissions: true);
       expect(AgentSettings.fromJson(on.toJson()).skipPermissions, isTrue);

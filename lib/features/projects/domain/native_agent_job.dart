@@ -37,6 +37,9 @@ NativeAgentBackend nativeBackendFor(ProjectAgent agent) => switch (agent) {
   ProjectAgent.gemini => throw const AgentSessionLaunchException(
     'Gemini CLI background jobs are not available. Start it in a window.',
   ),
+  ProjectAgent.opencode => throw const AgentSessionLaunchException(
+    'OpenCode background jobs are not available. Start it in a window.',
+  ),
 };
 
 NativeAgentInvocation buildNativeAgentInvocation({

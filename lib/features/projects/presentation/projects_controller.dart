@@ -331,6 +331,7 @@ class ProjectsController extends ChangeNotifier {
     AgentKind.claudeCode => ProjectAgent.claude,
     AgentKind.antigravity => ProjectAgent.antigravity,
     AgentKind.geminiCli => ProjectAgent.gemini,
+    AgentKind.opencode => ProjectAgent.opencode,
   };
 
   static List<String> _launchArguments(

@@ -190,6 +190,19 @@ void main() {
     );
   });
 
+  test('OpenCode native background is explicit unavailable', () {
+    expect(
+      () => nativeBackendFor(ProjectAgent.opencode),
+      throwsA(
+        isA<AgentSessionLaunchException>().having(
+          (AgentSessionLaunchException error) => error.message,
+          'message',
+          allOf(contains('not available'), contains('OpenCode'), contains('window')),
+        ),
+      ),
+    );
+  });
+
   test('malformed persisted job handles degrade instead of throwing', () {
     expect(
       NativeAgentJobHandle.fromJson(<String, dynamic>{
