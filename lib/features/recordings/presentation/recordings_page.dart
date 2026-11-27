@@ -940,7 +940,7 @@ class _RecordingsPageState extends State<RecordingsPage>
     // healthy install it costs one listing and finds nothing.
     await controller.recoverOrphans();
     await _drainInbox();
-    await _drainDecisions();
+    unawaited(_drainDecisions());
     final Duration? poll = widget.decisionPollInterval;
     if (poll != null &&
         mounted &&
