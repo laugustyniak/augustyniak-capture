@@ -12,7 +12,6 @@ import 'package:augustyniak_capture/features/recordings/presentation/recordings_
 import 'package:augustyniak_capture/features/transcription/data/transcription_service.dart';
 import 'package:crypto/crypto.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:path/path.dart' as p;
 
 import 'harness.dart';
 
