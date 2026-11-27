@@ -300,6 +300,54 @@ void main() {
     expect(files(), isEmpty);
   });
 
+  final Map<String, Map<String, dynamic>> refusedByApp =
+      <String, Map<String, dynamic>>{
+        'blank reason': <String, dynamic>{'reason': '   '},
+        'newline-only reason': <String, dynamic>{'reason': '\n\t '},
+        'blank version': <String, dynamic>{'version': ' '},
+        'version of 129 chars': <String, dynamic>{'version': 'v' * 129},
+        'reason of 2001 chars': <String, dynamic>{'reason': 'r' * 2001},
+        'did of 2001 chars': <String, dynamic>{'did': 'd' * 2001},
+        'target of 2001 chars': <String, dynamic>{'target': 't' * 2001},
+      };
+  for (final MapEntry<String, Map<String, dynamic>> c in refusedByApp.entries) {
+    test(
+      '${c.key}: invalid params and no file, as fromJson refuses it',
+      () async {
+        // AC-2
+        Object? outcome;
+        try {
+          outcome = await tools(
+            allow: true,
+          ).call('submit_decision', args(more: c.value));
+        } on InvalidParams catch (e) {
+          outcome = e;
+        }
+        expect(outcome, isA<InvalidParams>(), reason: 'got $outcome');
+        expect(files(), isEmpty);
+      },
+    );
+  }
+
+  test('every file the tool writes parses with fromJson', () async {
+    // AC-2
+    // Boundary values the app accepts: exactly at each limit.
+    for (final Map<String, dynamic> ok in <Map<String, dynamic>>[
+      <String, dynamic>{'version': 'v' * 128},
+      <String, dynamic>{'reason': 'r' * 2000},
+      <String, dynamic>{'did': 'd' * 2000, 'target': 't' * 2000},
+    ]) {
+      await tools(allow: true).call('submit_decision', args(more: ok));
+    }
+    expect(files(), hasLength(3));
+    for (final File f in files()) {
+      expect(
+        AgentDecision.fromJson(jsonDecode(f.readAsStringSync())),
+        isNotNull,
+      );
+    }
+  });
+
   test(
     'a symlinked decisions directory is refused and its target untouched',
     () async {
