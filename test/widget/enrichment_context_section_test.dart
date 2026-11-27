@@ -48,6 +48,7 @@ void main() {
     WidgetTester tester, {
     required List<Project> projects,
     String? soulPath,
+    String? prioritiesPath,
     DirectoryPicker? picker,
     RecordingsController? recordings,
   }) async {
@@ -59,6 +60,9 @@ void main() {
     final SettingsController controller = buildSettingsController();
     await controller.initialize();
     if (soulPath != null) await controller.setSoulPath(soulPath);
+    if (prioritiesPath != null) {
+      await controller.setPrioritiesPath(prioritiesPath);
+    }
     await tester.pumpWidget(
       hostTab(
         () => EnrichmentContextSection(
@@ -192,6 +196,101 @@ void main() {
       expect(controller.soulPath, soulPath());
     });
   });
+  group('priorities note', () {
+    String notePath() => '${repo.path}${Platform.pathSeparator}PRIORITIES.md';
+    final Finder field = find.byWidgetPredicate(
+      (Widget w) =>
+          w is TextField &&
+          w.decoration?.hintText == '/Users/you/Notes/PRIORITIES.md',
+    );
+
+    // AC-1
+    testWidgets('settings controller trims, persists and clears the path', (
+      WidgetTester tester,
+    ) async {
+      final SettingsController controller = buildSettingsController();
+      await controller.initialize();
+      expect(controller.prioritiesPath, isNull);
+
+      await controller.setPrioritiesPath('  /a/PRIORITIES.md  ');
+      expect(controller.prioritiesPath, '/a/PRIORITIES.md');
+
+      int notified = 0;
+      controller.addListener(() => notified++);
+      await controller.setPrioritiesPath('/a/PRIORITIES.md');
+      expect(notified, 0, reason: 'the same value persists once');
+
+      await controller.setPrioritiesPath('   ');
+      expect(controller.prioritiesPath, isNull);
+    });
+
+    // AC-3
+    testWidgets('no path draws an empty field and no status claim', (
+      WidgetTester tester,
+    ) async {
+      await pumpSection(tester, projects: const <Project>[]);
+      await tester.pumpAndSettle();
+
+      expect(field, findsOneWidget);
+      expect(find.textContaining('USING PRIORITIES.md'), findsNothing);
+    });
+
+    // AC-1, AC-2
+    testWidgets('commits on blur and reports the items found', (
+      WidgetTester tester,
+    ) async {
+      File(notePath()).writeAsStringSync('- Ship the alpha\n- Renew it\n');
+      final SettingsController controller = await pumpSection(
+        tester,
+        projects: const <Project>[],
+      );
+
+      await tester.enterText(field, notePath());
+      // Moving focus to the soul field is the blur.
+      await tester.tap(
+        find.byWidgetPredicate(
+          (Widget w) =>
+              w is TextField &&
+              w.decoration?.hintText == '/Users/you/Notes/SOUL.md',
+        ),
+      );
+      await settleIo(tester);
+
+      expect(controller.prioritiesPath, notePath());
+      expect(find.text('USING PRIORITIES.md \u00b7 2 items'), findsOneWidget);
+    });
+
+    // AC-3
+    testWidgets('a missing file is named', (WidgetTester tester) async {
+      await pumpSection(
+        tester,
+        projects: const <Project>[],
+        prioritiesPath: notePath(),
+      );
+      await settleIo(tester);
+
+      expect(find.textContaining('PRIORITIES.md MISSING'), findsOneWidget);
+    });
+
+    // AC-1
+    testWidgets('browse names PRIORITIES.md in the chosen folder', (
+      WidgetTester tester,
+    ) async {
+      final SettingsController controller = await pumpSection(
+        tester,
+        projects: const <Project>[],
+        picker: _FakeDirectoryPicker(chosen: repo.path),
+      );
+
+      await tester.tap(
+        find.byTooltip('Choose the folder holding PRIORITIES.md'),
+      );
+      await settleIo(tester);
+
+      expect(controller.prioritiesPath, notePath());
+    });
+  });
+
   group('re-rank', () {
     const EnrichmentContext soul = EnrichmentContext(profile: 'Goal: beta.');
 

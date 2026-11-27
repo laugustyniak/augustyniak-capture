@@ -7,6 +7,7 @@ import 'package:augustyniak_capture/features/recordings/domain/suggested_route.d
 import 'package:augustyniak_capture/features/switchboard/data/rule_table_capture_policy.dart';
 import 'package:augustyniak_capture/features/switchboard/domain/capture_facts.dart';
 import 'package:augustyniak_capture/features/switchboard/domain/capture_policy.dart';
+import 'package:augustyniak_capture/features/switchboard/domain/context_facts.dart';
 import 'package:augustyniak_capture/features/switchboard/domain/decision.dart';
 import 'package:flutter_test/flutter_test.dart';
 
@@ -190,6 +191,62 @@ void main() {
         // ASCII-only is a cheap proxy for "no Polish diacritics slipped in".
         expect(reason, matches(RegExp(r'^[\x20-\x7E·—]+$')));
       }
+    });
+  });
+
+  group('ContextFacts', () {
+    const ContextFacts withNote = ContextFacts(
+      priorities: <String>['Ship the alpha', 'Renew the domain'],
+      tier: 1,
+      status: 'active',
+    );
+
+    // AC-5
+    test('Disabled still decides nothing when given a context', () {
+      const CapturePolicy policy = DisabledCapturePolicy();
+      expect(
+        policy.decide(
+          _facts(available: <SuggestedRouteKind>[_command]),
+          withNote,
+        ),
+        isNull,
+      );
+    });
+
+    // AC-5
+    test('no rule reads the priorities: ruleId, kind and reason are unchanged',
+        () {
+      final List<CaptureFacts> all = <CaptureFacts>[
+        _facts(available: <SuggestedRouteKind>[_command, _agent]),
+        _facts(available: <SuggestedRouteKind>[_file, _agent]),
+        _facts(available: <SuggestedRouteKind>[_file]),
+        _facts(
+          category: CaptureCategory.idea,
+          available: <SuggestedRouteKind>[_file],
+          model: _file,
+        ),
+        _facts(category: CaptureCategory.idea, model: _none),
+        _facts(category: CaptureCategory.idea),
+        _facts(category: null),
+      ];
+      for (final CaptureFacts facts in all) {
+        final Decision? without = _policy.decide(facts);
+        final Decision? with_ = _policy.decide(facts, withNote);
+        expect(with_?.ruleId, without?.ruleId);
+        expect(with_?.kind, without?.kind);
+        expect(with_?.reason, without?.reason);
+        expect(with_?.facts, without?.facts);
+      }
+    });
+
+    // AC-5
+    test('the decision carries the context it was given, none by default', () {
+      final CaptureFacts facts = _facts(
+        available: <SuggestedRouteKind>[_command],
+      );
+      expect(_policy.decide(facts, withNote)!.context, same(withNote));
+      expect(_policy.decide(facts)!.context.isEmpty, isTrue);
+      expect(_policy.decide(facts)!.context, ContextFacts.none);
     });
   });
 
