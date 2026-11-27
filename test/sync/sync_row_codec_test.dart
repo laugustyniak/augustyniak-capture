@@ -89,6 +89,36 @@ void main() {
     expect(plain, isNot(contains('"decision"')));
   });
 
+  test('an external route with an agent decision survives the codec', () {
+    // AC-5 (#474)
+    final Recording base = _recording();
+    final Map<String, dynamic> decision = <String, dynamic>{
+      'ruleId': 'agent',
+      'reason': 'F2: already filed',
+      'decidedBy': 'agent:codex',
+      'did': 'opened PR #12',
+      'decisionId': '123e4567-e89b-42d3-a456-426614174000',
+    };
+    final Recording decided = Recording.fromJson(<String, dynamic>{
+      ...base.toJson(),
+      'routes': <Map<String, dynamic>>[
+        <String, dynamic>{
+          'at': '2026-09-21T08:00:00.000Z',
+          'kind': 'external',
+          'target': 'codex',
+          'decision': decision,
+        },
+      ],
+    });
+    final Map<String, dynamic> back = SyncRowCodec.recordingFromRow(
+      SyncRowCodec.recording(decided),
+    )!.toJson();
+    final Map<String, dynamic> route =
+        (back['routes'] as List).single as Map<String, dynamic>;
+    expect(route['kind'], 'external');
+    expect(route['decision'], decision);
+  });
+
   test('hash ignores version and deleted_at and key order', () {
     final Map<String, Object?> a = <String, Object?>{'id': 'x', 'title': 't', 'version': 1};
     final Map<String, Object?> b = <String, Object?>{'title': 't', 'id': 'x', 'version': 9, 'deleted_at': null};
