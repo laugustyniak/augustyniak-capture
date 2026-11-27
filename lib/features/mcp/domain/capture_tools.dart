@@ -404,6 +404,14 @@ class CaptureTools {
       agent: agent,
       submittedAt: DateTime.now().toUtc(),
     );
+    // The app reads this file back through fromJson; refuse here whatever it
+    // would refuse there (blank reason or version, an overlong version).
+    if (AgentDecision.fromJson(decision.toJson()) == null) {
+      throw InvalidParams(
+        'version and reason must be non-blank; version is at most 128 '
+        'characters',
+      );
+    }
     try {
       await _decisions!.submit(decision);
     } on FileSystemException catch (e) {
