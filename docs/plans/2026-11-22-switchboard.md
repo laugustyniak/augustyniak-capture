@@ -139,7 +139,7 @@ The policy never touches `status` or a source file, and a policy failure never f
 | Stage | Scope | Autonomy | Acceptance |
 |---|---|---|---|
 | v0: shadow | policy, rule table, `decisions.jsonl`, `RouteRecord.decision`, card chip; accept through HandoffSheet | suggest | one test per rule; same facts give the same `ruleId`; null category gives no decision; legacy JSON loads |
-| v1: context + OpenCode | priorities note into `ContextFacts`; `ProjectAgent.opencode`; `primaryAgent` in Config | suggest | parser test on a fixture; OpenCode launched from HandoffSheet on the Linux host |
+| v1: context + OpenCode | priorities note into `ContextFacts` (done, #472); `ProjectAgent.opencode`; `primaryAgent` in Config | suggest | parser test on a fixture; OpenCode launched from HandoffSheet on the Linux host |
 | v2: auto for safe exits | inbox, Command brief, **read-only** agent on the dispatcher device. Read-only is not safe on its own: an injected capture can still ask to read `.env` or reach the network, so the run gets restricted tools and a network-less sandbox | auto, opt-in per project | dispatching twice yields one job; restart mid-dispatch; failure returns the capture to the desk |
 | v3: write-capable launch | agent in a worktree, `workspace-write` / `acceptEdits`, budget and timeout limits | auto, separate opt-in per project and per rule | `agent-handoff.md` updated; injection test against the capture-text fence |
 | v4: optional | rules in an editable note, ACP session view, Obsidian MCP for spawned agents | – | – |
