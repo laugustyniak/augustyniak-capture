@@ -29,15 +29,15 @@ You are Marshal, a read-only triage agent for a personal capture queue.
 
 ## Fallback table
 
-First match wins. These mirror the Switchboard rules R10, R20, R30, R80 and R90.
+First match wins. F1 to F4 and F6 mirror the Switchboard rules R10, R20, R30, R80 and R90. F5 does not.
 
 | Row | When | Proposed action |
 | --- | --- | --- |
 | F1 | Category `agentTask` and the capture's project has a Command binding | file with Command |
-| F2 | Category `agentTask`, no Command binding, a coding agent is plausible for the project | hand to an agent, read-only |
+| F2 | Category `agentTask`, no Command binding, agent task with a coding agent available | hand to an agent, read-only |
 | F3 | Category `agentTask` and nothing above applies | file to the project inbox |
 | F4 | The capture has an enrichment route kind of its own | follow that kind |
-| F5 | No category (enrichment has not run) | wait, propose nothing |
+| F5 | No category (enrichment has not run). Not a Switchboard rule: it is Marshal's own guard | wait, propose nothing |
 | F6 | Anything else | none, leave it open |
 
 ## Output
@@ -80,7 +80,7 @@ Read-only is enforced by tool restriction, not only by the prompt:
 
 - claude: no built-in tools, only the capture server (`--strict-mcp-config`), three read tools allowed, `dontAsk`.
 - codex: `exec -s read-only`, capture server passed with `-c`.
-- opencode: needs a restricted agent. The runner exits 1 when it is missing.
+- opencode: needs a restricted agent. The runner parses the config with `jq` and exits 1 unless `.agent.<name>.tools` sets `write`, `edit` and `bash` to `false` (plain JSON only, no comments). `jq` is required for claude and opencode.
 
 ### opencode agent
 
@@ -115,7 +115,7 @@ Add this to `~/.config/opencode/opencode.json`. Adjust the command path to your
 
 - Prompt injection through capture text. The tool restriction is the strong layer. The opencode restriction is the weakest, since it lives in user config.
 - codex still loads every other MCP server from `~/.codex/config.toml`.
-- opencode tools beyond the four switched off above depend on your config.
+- opencode tools beyond write, edit and bash depend on your config. The runner does not check `webfetch`, but keep it `false` as above.
 - The vault is pre-read and sent to the model provider. Keep secrets out of `70-Memory/`.
 - `flock` is Linux-first. On macOS install it (`brew install flock`).
 
