@@ -158,5 +158,14 @@ void main() {
         expect(note.items, isEmpty, reason: 'input: ${input.codeUnits}');
       }
     });
+
+    test('frontmatter values drop quotes and a trailing comment', () {
+      final PrioritiesNote note = PrioritiesNote.parse(
+        '---\ntier: 2 # this quarter\nstatus: "active"\n---\n- Ship the demo\n',
+      );
+      expect(note.tier, 2);
+      expect(note.status, 'active');
+      expect(note.items, <String>['Ship the demo']);
+    });
   });
 }

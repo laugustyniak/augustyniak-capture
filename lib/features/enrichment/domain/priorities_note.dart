@@ -40,7 +40,17 @@ class PrioritiesNote {
           final int colon = line.indexOf(':');
           if (colon <= 0 || line.startsWith(RegExp(r'\s'))) continue;
           final String key = line.substring(0, colon).trim();
-          final String value = line.substring(colon + 1).trim();
+          // A trailing ` # comment` and one pair of surrounding quotes are
+          // YAML spelling, not part of the value.
+          String value = line
+              .substring(colon + 1)
+              .replaceFirst(RegExp(r'\s+#.*$'), '')
+              .trim();
+          if (value.length >= 2 &&
+              (value[0] == '"' || value[0] == "'") &&
+              value[value.length - 1] == value[0]) {
+            value = value.substring(1, value.length - 1).trim();
+          }
           if (value.isEmpty || RegExp(r'[:\[\]{}]').hasMatch(value)) continue;
           if (key == 'tier') tier = int.tryParse(value);
           if (key == 'status') status = value;
