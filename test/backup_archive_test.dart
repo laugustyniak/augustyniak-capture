@@ -847,6 +847,33 @@ void main() {
     expect(merged.readAsStringSync(), contains('"recordingId":"a"'));
   });
 
+  test(
+    'the switchboard decision log merges on restore without duplicates',
+    () async {
+      await seed(source, <Recording>[capture('a')]);
+      // Two decisions, written the way `FileDecisionLog` appends them. The
+      // target already holds the first: a restore onto a device that made it.
+      final String shared =
+          '${jsonEncode(<String, dynamic>{'at': DateTime(2026, 11, 20, 9).toIso8601String(), 'captureId': 'a', 'ruleId': 'R10', 'kind': 'file'})}\n';
+      final String fresh =
+          '${jsonEncode(<String, dynamic>{'at': DateTime(2026, 11, 21, 9).toIso8601String(), 'captureId': 'a', 'ruleId': 'R90', 'kind': 'file'})}\n';
+      await File(
+        p.join(source.path, 'decisions.jsonl'),
+      ).writeAsString('$shared$fresh');
+      await File(p.join(target.path, 'decisions.jsonl')).writeAsString(shared);
+
+      await archiveFor(source).exportTo(zipPath());
+      await archiveFor(target).importFrom(zipPath());
+
+      // Carried in every archive, so it must be merged back, not discarded:
+      // it is the audit trail of what the switchboard suggested and why.
+      final List<String> lines = File(
+        p.join(target.path, 'decisions.jsonl'),
+      ).readAsLinesSync().where((String l) => l.isNotEmpty).toList();
+      expect(lines, <String>[shared.trim(), fresh.trim()]);
+    },
+  );
+
   test('a triage rejection survives a restore', () async {
     await seed(source, <Recording>[capture('a')]);
     await FileTriageLog(directory: () async => source).appendDecision(

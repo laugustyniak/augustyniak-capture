@@ -96,7 +96,7 @@ class ZipCaptureArchive implements CaptureArchive {
 
   /// Merged line by line: append-only stores where a line is the whole record.
   ///
-  /// All four of the repo's append-only stores belong here. `closures.jsonl`
+  /// All five of the repo's append-only stores belong here. `closures.jsonl`
   /// was missing while it was still being *exported* as a payload member, so a
   /// restore silently dropped the momentum history — the file that exists
   /// precisely because no other store can answer "how many did I close last
@@ -109,6 +109,11 @@ class ZipCaptureArchive implements CaptureArchive {
     // Without a merge a restore would bring every rejected triage proposal
     // back, which is the one thing a rejection is recorded to prevent.
     'triage.jsonl',
+    // The switchboard's audit trail of what it suggested and why. It was
+    // exported from the start and never merged — the `closures.jsonl` mistake
+    // a third time. Rows carry the note's item count, tier and status
+    // label, never its items.
+    'decisions.jsonl',
   };
 
   /// Never archived.
