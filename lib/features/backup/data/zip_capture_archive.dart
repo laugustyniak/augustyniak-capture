@@ -111,7 +111,8 @@ class ZipCaptureArchive implements CaptureArchive {
     'triage.jsonl',
     // The switchboard's audit trail of what it suggested and why. It was
     // exported from the start and never merged — the `closures.jsonl` mistake
-    // a third time. Rows carry counts and tiers, never note text.
+    // a third time. Rows carry the note's item count, tier and status
+    // label, never its items.
     'decisions.jsonl',
   };
 
