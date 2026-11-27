@@ -81,6 +81,7 @@ void main() {
       'tool/deploy.sh',
       'tool/deploy-mcp.sh',
       'tool/gnome-shortcuts.sh',
+      'tool/marshal.sh',
     ]) {
       for (final String literal in <String>[
         applicationId,
