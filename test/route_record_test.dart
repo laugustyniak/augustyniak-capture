@@ -162,4 +162,82 @@ void main() {
       expect(record!.toJson().containsKey('decision'), isFalse, reason: '$bad');
     }
   });
+
+  // --- #474: external kind and agent decision fields -----------------------
+
+  const String did0 = '123e4567-e89b-42d3-a456-426614174000';
+
+  test('an external route round-trips and is not dropped', () {
+    // AC-5
+    final RouteRecord? record = RouteRecord.fromJson(<String, dynamic>{
+      'at': '2026-11-27T12:00:00.000Z',
+      'kind': 'external',
+      'target': 'codex',
+    });
+    expect(record, isNotNull);
+    expect(record!.toJson()['kind'], 'external');
+    expect(RouteKind.fromName('external')?.name, 'external');
+  });
+
+  test('decision carries decidedBy, did and decisionId through JSON', () {
+    // AC-5
+    final Map<String, dynamic> decision = <String, dynamic>{
+      'ruleId': 'agent',
+      'reason': 'F2: already filed',
+      'decidedBy': 'agent:codex',
+      'did': 'opened PR #12',
+      'decisionId': did0,
+    };
+    final RouteRecord record = RouteRecord.fromJson(withDecision(decision))!;
+    expect(record.toJson()['decision'], decision);
+    // Carried across an outcome update like every other field.
+    expect(record.withOutcome(null).toJson()['decision'], decision);
+  });
+
+  test('legacy JSON: a decision without the new keys re-serialises byte for '
+      'byte and gains none', () {
+    // AC-7
+    final Map<String, dynamic> legacy = withDecision(<String, dynamic>{
+      'ruleId': 'R10',
+      'reason': 'bound to Command',
+    });
+    final RouteRecord record = RouteRecord.fromJson(legacy)!;
+    expect(jsonEncode(record.toJson()), jsonEncode(legacy));
+    final Map<String, dynamic> out =
+        record.toJson()['decision'] as Map<String, dynamic>;
+    expect(out.keys, <String>['ruleId', 'reason']);
+  });
+
+  test('blank or mistyped decidedBy/did/decisionId degrade to absent', () {
+    // AC-7
+    for (final Object? bad in <Object?>['  ', '', 7, true]) {
+      final RouteRecord? record = RouteRecord.fromJson(
+        withDecision(<String, dynamic>{
+          'ruleId': 'R10',
+          'reason': 'why',
+          'decidedBy': bad,
+          'did': bad,
+          'decisionId': bad,
+        }),
+      );
+      expect(record, isNotNull, reason: '$bad');
+      expect(record!.toJson()['decision'], <String, dynamic>{
+        'ruleId': 'R10',
+        'reason': 'why',
+      }, reason: '$bad');
+    }
+  });
+
+  test('an unknown kind is still dropped after external was added', () {
+    // AC-7
+    expect(RouteKind.fromName('externall'), isNull);
+    expect(
+      RouteRecord.fromJson(<String, dynamic>{
+        'at': '2026-11-27T12:00:00.000Z',
+        'kind': 'externall',
+        'target': 'x',
+      }),
+      isNull,
+    );
+  });
 }

@@ -466,6 +466,34 @@ void main() {
     expect(await since('2026-03-01'), hasLength(1));
     expect(await since('2026-03-02'), isEmpty);
   });
+
+  test('the read tools are the only ones listed by default', () async {
+    // AC-2 (#474)
+    final Map<String, dynamic> r = (await run(<String>[
+      req(1, 'tools/list'),
+    ])).single;
+    final List<dynamic> tools = (r['result'] as Map)['tools'] as List<dynamic>;
+    expect(tools.map((dynamic t) => (t as Map)['name']), <String>[
+      'search_captures',
+      'get_capture',
+      'list_project_captures',
+      'next_open_captures',
+    ]);
+  });
+
+  test('the version is described as canonical, not the stored payload', () async {
+    // AC-4 (#474): the token is sha256 of the app's own re-encoding.
+    final Map<String, dynamic> r = (await run(<String>[
+      req(1, 'tools/list'),
+    ])).single;
+    final Map<String, dynamic> next =
+        ((r['result'] as Map)['tools'] as List<dynamic>)
+            .cast<Map<String, dynamic>>()
+            .singleWhere(
+              (Map<String, dynamic> t) => t['name'] == 'next_open_captures',
+            );
+    expect(next['description'], isNot(contains('stored payload')));
+  });
 }
 
 class _Throwing extends CaptureTools {

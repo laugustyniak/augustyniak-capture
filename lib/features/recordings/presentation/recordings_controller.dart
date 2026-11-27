@@ -81,6 +81,8 @@ import '../domain/upload_grouping.dart';
 import '../domain/recording_revision.dart';
 import '../domain/recording_tag.dart';
 import '../domain/route_record.dart';
+import '../domain/agent_decision.dart';
+import '../domain/recording_version.dart';
 import '../domain/suggested_route.dart';
 import '../../switchboard/domain/capture_facts.dart';
 import '../../switchboard/domain/capture_policy.dart';
@@ -3436,7 +3438,15 @@ class RecordingsController extends ChangeNotifier {
   /// accumulated: an occurrence finished late does not leave the next one
   /// already overdue. Calendar days rather than a fixed `Duration`, so a
   /// daily item keeps its hour across a DST change.
-  Future<void> _completeOccurrence(Recording recording, int every) async {
+  ///
+  /// An agent's `done` passes the [route] that says so and the [closure] it
+  /// is logged under; the user's DONE passes neither.
+  Future<void> _completeOccurrence(
+    Recording recording,
+    int every, {
+    RouteRecord? route,
+    ClosureKind? closure,
+  }) async {
     final DateTime now = DateTime.now();
     final DateTime next = DateTime(
       now.year,
@@ -3447,11 +3457,20 @@ class RecordingsController extends ChangeNotifier {
     );
     await _update(
       recording.id,
-      (Recording item) => item.copyWith(resurfaceAt: next),
+      (Recording item) => item.copyWith(
+        resurfaceAt: next,
+        routes: route == null
+            ? item.routes
+            : <RouteRecord>[...item.routes, route],
+      ),
       source: RevisionSource.user,
     );
     // After the persist, like every closure: the log may only lag the index.
-    await _history.recordOccurrence(recording, _closureKindFor(recording), now);
+    await _history.recordOccurrence(
+      recording,
+      closure ?? _closureKindFor(recording),
+      now,
+    );
     _logSink.log(
       'Occurrence done · returns ${next.toIso8601String()}.',
       recordingId: recording.id,
@@ -3522,6 +3541,17 @@ class RecordingsController extends ChangeNotifier {
   /// the consequence of having done it, which is what lets the queue drain
   /// as a side effect of the work instead of as a separate pass over it.
   Future<void> route(String id) async {
+    await _deliverAndClose(id);
+  }
+
+  /// The core of [route], reusable by [applyAgentDecision]. Returns the
+  /// delivery error text, or null once the capture is routed and closed.
+  ///
+  /// The user path ([by] null) sets `_error`, logs and notifies, exactly as
+  /// [route] always did. The agent path touches none of the controller's
+  /// user-facing state: nobody pressed anything, so there is nobody to show
+  /// an error to. Its failure goes back to the caller as the return value.
+  Future<String?> _deliverAndClose(String id, {AgentDecision? by}) async {
     final Recording recording = _recordings.firstWhere(
       (Recording item) => item.id == id,
     );
@@ -3533,27 +3563,163 @@ class RecordingsController extends ChangeNotifier {
       // that must agree, and no reason they would notice when they stop.
       record = await _captureRouter.route(_routedCapture(recording));
     } catch (exception) {
-      _error = exception.toString();
       _logSink.log(
         'Routing failed: $exception',
         level: LogLevel.error,
         recordingId: id,
       );
-      notifyListeners();
-      return;
+      if (by == null) {
+        _error = exception.toString();
+        notifyListeners();
+      }
+      return exception.toString();
     }
 
-    _error = null;
+    if (by != null && !_recordings.any((Recording item) => item.id == id)) {
+      // `_update` would silently do nothing for a missing row. The delivery
+      // really happened, so say so rather than report a clean apply.
+      _logSink.log(
+        'Agent decision ${by.decisionId}: capture deleted during delivery '
+        '(already delivered to ${record.target}).',
+        level: LogLevel.warn,
+        recordingId: id,
+      );
+      return 'deleted during delivery';
+    }
+
+    if (by == null) _error = null;
     await _update(
       id,
       (Recording item) => item.copyWith(
-        routes: <RouteRecord>[...item.routes, _stamped(item, record)],
+        routes: <RouteRecord>[
+          ...item.routes,
+          by == null ? _stamped(item, record) : _agentStamped(item, record, by),
+        ],
         isProcessedByUser: true,
         processedAt: record.at,
       ),
       closure: ClosureKind.route,
     );
     _logSink.log('Routed to ${record.target}.', recordingId: id);
+    return null;
+  }
+
+  /// Applies a decision an external agent filed over MCP. The only writer of
+  /// agent decisions: everything goes through [_update], never a second path.
+  ///
+  /// Returns `applied` only after a persist that actually landed. When that
+  /// cannot be promised - not initialized, index unreadable (`_persistAll`
+  /// would return silently), or the repository throws - it throws, so the
+  /// drainer keeps the file and retries. A delivery that fails or is not
+  /// possible is a `rejected` outcome instead: retrying would not change it.
+  ///
+  /// If delivery succeeds and the persist then fails, the retry delivers
+  /// again. That window is accepted and documented.
+  Future<DecisionOutcome> applyAgentDecision(AgentDecision d) async {
+    if (!_initialized) {
+      throw StateError('Recordings are not loaded yet.');
+    }
+    if (_indexUnreadable) {
+      throw StateError('The recordings index is unreadable; not writing.');
+    }
+    final int index = _recordings.indexWhere(
+      (Recording item) => item.id == d.captureId,
+    );
+    if (index < 0) return const DecisionOutcome.rejected('capture not found');
+    final Recording recording = _recordings[index];
+
+    // Replay is idempotent by decision id, even if the user reopened it.
+    final bool seen = recording.routes.any(
+      (RouteRecord r) => r.decision?.decisionId == d.decisionId,
+    );
+    if (seen || recording.isProcessedByUser) {
+      return const DecisionOutcome.alreadyClosed();
+    }
+    if (d.version != recordingVersion(recording)) {
+      return const DecisionOutcome.rejected('stale version');
+    }
+    if (recording.isScheduledAt(DateTime.now())) {
+      return const DecisionOutcome.rejected('scheduled for later');
+    }
+
+    switch (d.action) {
+      case AgentDecisionAction.skip:
+        _logSink.log(
+          'Agent skipped (${d.agent}): ${d.reason}',
+          recordingId: recording.id,
+        );
+        return const DecisionOutcome.applied();
+      case AgentDecisionAction.done:
+        final RouteRecord route = RouteRecord(
+          at: DateTime.now(),
+          kind: RouteKind.external,
+          target: d.agent,
+          decision: _agentDecision('agent', d),
+        );
+        final int? every = recording.repeatEveryDays;
+        if (every != null) {
+          await _completeOccurrence(
+            recording,
+            every,
+            route: route,
+            closure: ClosureKind.agent,
+          );
+        } else {
+          await _update(
+            recording.id,
+            (Recording item) => item.copyWith(
+              routes: <RouteRecord>[...item.routes, route],
+              isProcessedByUser: true,
+              processedAt: route.at,
+            ),
+            closure: ClosureKind.agent,
+          );
+        }
+        _logSink.log(
+          'Closed by ${d.agent}: ${d.reason}',
+          recordingId: recording.id,
+        );
+        return const DecisionOutcome.applied();
+      case AgentDecisionAction.routeFile:
+      case AgentDecisionAction.routeCommand:
+        final RouteKind want = d.action == AgentDecisionAction.routeFile
+            ? RouteKind.file
+            : RouteKind.command;
+        if (_captureRouter.resolvedKind(_routedCapture(recording)) != want) {
+          return const DecisionOutcome.rejected('kind unavailable');
+        }
+        final String? error = await _deliverAndClose(recording.id, by: d);
+        return error == null
+            ? const DecisionOutcome.applied()
+            : DecisionOutcome.rejected(error);
+    }
+  }
+
+  RouteDecision _agentDecision(String ruleId, AgentDecision d) => RouteDecision(
+    ruleId: ruleId,
+    reason: d.reason,
+    decidedBy: 'agent:${d.agent}',
+    did: d.did,
+    decisionId: d.decisionId,
+  );
+
+  /// [record] carrying an agent's decision. The Switchboard rule is borrowed
+  /// only when the agent did exactly what it proposed (the [_stamped] test);
+  /// every other case is the agent's own call and says so.
+  RouteRecord _agentStamped(
+    Recording item,
+    RouteRecord record,
+    AgentDecision d,
+  ) {
+    final SuggestedRoute? suggestion = item.suggestedRoute;
+    final bool followed =
+        suggestion != null &&
+        suggestion.auto &&
+        suggestion.ruleId != null &&
+        suggestion.kind.name == record.kind.name;
+    return record.withDecision(
+      _agentDecision(followed ? suggestion.ruleId! : 'agent', d),
+    );
   }
 
   /// The destinations a suggestion for [recording] may name: what [route] would
@@ -5763,6 +5929,7 @@ class RecordingsController extends ChangeNotifier {
       RouteKind.agent ||
       RouteKind.command ||
       RouteKind.assistant => ClosureKind.handoff,
+      RouteKind.external => ClosureKind.agent,
     };
   }
 

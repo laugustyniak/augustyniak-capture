@@ -15,7 +15,10 @@ enum ClosureKind {
   route,
 
   /// Handed to a coding agent in a genuinely new session.
-  handoff;
+  handoff,
+
+  /// Closed by an external agent over MCP — `applyAgentDecision`.
+  agent;
 
   // `asNameMap()`, not `byName()`: the latter throws on an unknown name, and an
   // unrecognised value is exactly the case this has to absorb.

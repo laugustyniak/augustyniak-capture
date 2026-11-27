@@ -104,6 +104,7 @@ import '../../gamification/presentation/gamification_controller.dart';
 import '../../clipboard/data/sqlite_clipboard_repository.dart';
 import '../data/sqlite_embedding_store.dart';
 import '../data/foreground_capture_session.dart';
+import '../data/decision_drainer.dart';
 import '../data/inbox_drainer.dart';
 import '../data/media_picker.dart';
 import '../data/markdown_note_vault.dart';
@@ -150,7 +151,13 @@ class RecordingsPage extends StatefulWidget {
     this.launchArguments = const <String>[],
     this.shortcutLinkSource = const NoopShortcutLinkSource(),
     this.syncBinding,
+    this.decisionPollInterval = const Duration(seconds: 30),
   });
+
+  /// How often a desktop build drains `decisions/`; null turns the timer off.
+  /// Injectable so a widget test on a Linux host does not leave a periodic
+  /// timer pending.
+  final Duration? decisionPollInterval;
 
   /// Where the shell publishes the persisted theme so `AugustyniakCaptureApp`,
   /// which sits *above* this page, can read it. Write-only from here.
@@ -270,6 +277,11 @@ class _RecordingsPageState extends State<RecordingsPage>
   /// directory, which is only known asynchronously.
   InboxDrainer? _inboxDrainer;
   Future<void>? _drainFuture;
+
+  /// Same shape for the agent decisions an MCP server left in `decisions/`.
+  DecisionDrainer? _decisionDrainer;
+  Future<void>? _decisionDrainFuture;
+  Timer? _decisionTimer;
   late final ProjectsController projects;
   late final NativeAgentJobs agentJobs;
   late final FocusTimerController timer;
@@ -845,6 +857,34 @@ class _RecordingsPageState extends State<RecordingsPage>
     }
   }
 
+  /// Applies the decision files external agents left in `decisions/` (beside
+  /// the database, where the MCP server writes them). Guarded like
+  /// [_drainInbox]: a drain before the index is loaded, or over an unreadable
+  /// one, must not write. Concurrent calls share one run.
+  Future<void> _drainDecisions() {
+    if (!controller.isInitialized || controller.isIndexUnreadable) {
+      return Future<void>.value();
+    }
+    return _decisionDrainFuture ??= _runDecisionDrain().whenComplete(
+      () => _decisionDrainFuture = null,
+    );
+  }
+
+  Future<void> _runDecisionDrain() async {
+    try {
+      final DecisionDrainer drainer = _decisionDrainer ??= DecisionDrainer(
+        directory: Directory(
+          p.join((await getApplicationSupportDirectory()).path, 'decisions'),
+        ),
+        apply: controller.applyAgentDecision,
+        logSink: logs,
+      );
+      await drainer.drain();
+    } catch (exception) {
+      logs.log('Decision drain failed: $exception', level: LogLevel.warn);
+    }
+  }
+
   Future<void> _bootstrap() async {
     await logs.initialize();
     // Best-effort and unrelated to everything else here: a Supabase sync
@@ -900,6 +940,13 @@ class _RecordingsPageState extends State<RecordingsPage>
     // healthy install it costs one listing and finds nothing.
     await controller.recoverOrphans();
     await _drainInbox();
+    unawaited(_drainDecisions());
+    final Duration? poll = widget.decisionPollInterval;
+    if (poll != null &&
+        mounted &&
+        (Platform.isLinux || Platform.isMacOS || Platform.isWindows)) {
+      _decisionTimer = Timer.periodic(poll, (_) => unawaited(_drainDecisions()));
+    }
     // Both read real files, so they belong here for the same reason
     // `recoverOrphans` does: an in-memory repository fake cannot stand in for
     // them, and running either from `initialize` would send every widget test
@@ -1268,6 +1315,7 @@ class _RecordingsPageState extends State<RecordingsPage>
       unawaited(controller.refreshCommandOutcomes());
       unawaited(controller.resumeInterruptedProcessing());
       unawaited(_drainInbox());
+      unawaited(_drainDecisions());
       unawaited(dailyTriage.runIfDue());
     }
   }
@@ -1280,6 +1328,7 @@ class _RecordingsPageState extends State<RecordingsPage>
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
+    _decisionTimer?.cancel();
     settings.removeListener(_applySettings);
     projects.removeListener(_applyActiveProject);
     // The OS keeps a registration until it is told otherwise. This cannot be

@@ -1,10 +1,13 @@
 import 'dart:convert';
+import 'dart:io';
 
-import 'package:crypto/crypto.dart';
-
+import '../../../core/security/record_id.dart';
 import '../../projects/domain/project.dart';
+import '../../recordings/domain/agent_decision.dart';
 import '../../recordings/domain/recording.dart';
+import '../../recordings/domain/recording_version.dart';
 import '../../recordings/domain/route_record.dart';
+import '../data/decision_store.dart';
 import 'capture_source.dart';
 
 /// A malformed call: unknown tool, missing or mistyped argument. Surfaces as
@@ -22,10 +25,19 @@ class _ToolFailure implements Exception {
 }
 
 class CaptureTools {
-  CaptureTools(this._source, {void Function(String)? log})
-    : _log = log ?? ((String _) {});
+  CaptureTools(
+    this._source, {
+    DecisionStore? decisions,
+    this.allowDecisions = false,
+    void Function(String)? log,
+  }) : _decisions = decisions,
+       _log = log ?? ((String _) {});
 
   final CaptureSource _source;
+  final DecisionStore? _decisions;
+
+  /// Whether `submit_decision` is listed and callable (`--allow-decisions`).
+  final bool allowDecisions;
   final void Function(String) _log;
 
   static const int _defaultLimit = 20;
@@ -111,9 +123,11 @@ class CaptureTools {
       'description':
           'The work queue: completed captures the user has not marked '
           'processed, oldest first, with full transcript and enrichment. '
-          'Each carries a version (sha256 of its stored payload). Pass the '
-          'returned next as after for the following page; next is absent on '
-          'the last page. Read-only.',
+          'Each carries a version (sha256 of the capture\'s canonical JSON, the '
+          'token submit_decision expects). Captures with a decision waiting '
+          'for the app, and captures scheduled for later, are skipped. Pass '
+          'the returned next as after for the following page; next is absent '
+          'on the last page. Read-only.',
       'inputSchema': _schema(<String, dynamic>{
         'limit': <String, dynamic>{
           'type': 'integer',
@@ -134,6 +148,49 @@ class CaptureTools {
         },
       }, <String>[]),
     },
+    if (allowDecisions)
+      <String, dynamic>{
+        'name': 'submit_decision',
+        'description':
+            'Close a capture: record what you decided and why. The decision '
+            'is written to a file; the app applies it later and may reject it '
+            '(stale version, capture gone). Use the version from '
+            'next_open_captures. done: you already acted, did says what. '
+            'route_file / route_command: ask the app to deliver it. skip: '
+            'leave it open (only logged). Does not read or change the '
+            'capture database.',
+        'inputSchema': _schema(
+          <String, dynamic>{
+            'id': <String, dynamic>{'type': 'string'},
+            'version': <String, dynamic>{
+              'type': 'string',
+              'description': 'The version of the capture as you read it.',
+            },
+            'action': <String, dynamic>{
+              'type': 'string',
+              'enum': <String>[
+                for (final AgentDecisionAction a in AgentDecisionAction.values)
+                  a.wireName,
+              ],
+            },
+            'reason': <String, dynamic>{
+              'type': 'string',
+              'maxLength': AgentDecision.maxTextChars,
+            },
+            'did': <String, dynamic>{
+              'type': 'string',
+              'maxLength': AgentDecision.maxTextChars,
+              'description': 'What you did, for action done.',
+            },
+            'target': <String, dynamic>{'type': 'string'},
+            'agent': <String, dynamic>{
+              'type': 'string',
+              'description': 'Your name: letters, digits, . _ - (max 40).',
+            },
+          },
+          <String>['id', 'version', 'action', 'reason', 'agent'],
+        ),
+      },
   ];
 
   Future<Map<String, dynamic>> call(
@@ -150,6 +207,8 @@ class CaptureTools {
         handler = _listProject;
       case 'next_open_captures':
         handler = _nextOpen;
+      case 'submit_decision' when allowDecisions && _decisions != null:
+        handler = _submitDecision;
       default:
         throw InvalidParams('Unknown tool: $name');
     }
@@ -246,12 +305,19 @@ class CaptureTools {
     final Project? project = projectRef == null
         ? null
         : _resolve(projects, projectRef);
+    final Set<String> pending =
+        await _decisions?.pendingCaptureIds() ?? const <String>{};
+    final DateTime now = DateTime.now();
     final List<({Recording recording, String payload})> rows =
         <({Recording recording, String payload})>[
           for (final ({Recording recording, String payload}) e
               in await _source.recordingsWithPayload())
             if (e.recording.status == RecordingStatus.completed &&
                 !e.recording.isProcessedByUser &&
+                !pending.contains(e.recording.id) &&
+                // Parked until later: the desk does not show it yet, so an
+                // agent must not close it.
+                !(e.recording.resurfaceAt?.isAfter(now) ?? false) &&
                 (project == null || e.recording.projectId == project.id))
               e,
         ];
@@ -284,7 +350,7 @@ class CaptureTools {
         for (final ({Recording recording, String payload}) e in taken)
           <String, dynamic>{
             ..._capture(e.recording, projects),
-            'version': sha256.convert(utf8.encode(e.payload)).toString(),
+            'version': recordingVersion(e.recording),
           },
       ],
       if (more)
@@ -294,6 +360,68 @@ class CaptureTools {
             '${taken.last.recording.id}',
           ),
         ),
+    };
+  }
+
+  Future<Object> _submitDecision(Map<String, dynamic> args) async {
+    final String id = _string(args, 'id', required: true)!;
+    if (!isSafeRecordId(id)) {
+      throw InvalidParams('id is not a valid capture id');
+    }
+    final String version = _string(args, 'version', required: true)!;
+    final AgentDecisionAction? action = AgentDecisionAction.fromName(
+      args['action'],
+    );
+    if (action == null) {
+      throw InvalidParams(
+        'action must be one of '
+        '${AgentDecisionAction.values.map((AgentDecisionAction a) => a.wireName).join(', ')}',
+      );
+    }
+    final String reason = _string(args, 'reason', required: true)!;
+    final String agent = _string(args, 'agent', required: true)!;
+    if (!AgentDecision.isValidAgent(agent)) {
+      throw InvalidParams('agent must match [A-Za-z0-9._-]{1,40}');
+    }
+    final String? did = _string(args, 'did');
+    final String? target = _string(args, 'target');
+    for (final String? text in <String?>[reason, did, target]) {
+      if (text != null && text.length > AgentDecision.maxTextChars) {
+        throw InvalidParams(
+          'reason, did and target are at most '
+          '${AgentDecision.maxTextChars} characters',
+        );
+      }
+    }
+    final AgentDecision decision = AgentDecision(
+      decisionId: DecisionStore.newDecisionId(),
+      captureId: id,
+      version: version,
+      action: action,
+      reason: reason,
+      did: did,
+      target: target,
+      agent: agent,
+      submittedAt: DateTime.now().toUtc(),
+    );
+    // The app reads this file back through fromJson; refuse here whatever it
+    // would refuse there (blank reason or version, an overlong version).
+    if (AgentDecision.fromJson(decision.toJson()) == null) {
+      throw InvalidParams(
+        'version and reason must be non-blank; version is at most 128 '
+        'characters',
+      );
+    }
+    try {
+      await _decisions!.submit(decision);
+    } on FileSystemException catch (e) {
+      // Names a path: stderr only.
+      _log('submit_decision: $e');
+      throw _ToolFailure('Could not record the decision.');
+    }
+    return <String, dynamic>{
+      'decisionId': decision.decisionId,
+      'status': 'submitted',
     };
   }
 
@@ -371,6 +499,13 @@ class CaptureTools {
       'repeatEveryDays': ?r.repeatEveryDays,
       if (project != null)
         'project': <String, dynamic>{'id': project.id, 'name': project.name},
+      if (r.suggestedRoute != null)
+        'suggestedRoute': <String, dynamic>{
+          'kind': r.suggestedRoute!.kind.name,
+          'ruleId': ?r.suggestedRoute!.ruleId,
+          'reason': ?r.suggestedRoute!.reason,
+          'auto': r.suggestedRoute!.auto,
+        },
       'routes': <Map<String, dynamic>>[
         for (final RouteRecord route in r.routes)
           <String, dynamic>{

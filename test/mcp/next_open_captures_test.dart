@@ -176,27 +176,31 @@ void main() {
     expect((r['result'] as Map)['isError'], true);
   });
 
-  test('version is sha256 of json_payload and changes with it', () async {
-    // AC-4
-    final Recording r = rec('v', at: day(1), transcript: 'hello');
-    final String stored = '${jsonEncode(r.toJson())} ';
-    fx.insert(r, payload: stored);
-    final Map<String, dynamic> first =
-        (await next())['captures'].single as Map<String, dynamic>;
-    expect(first['version'], sha(stored));
+  test(
+    'version is the canonical sha256 of toJson and changes with it',
+    () async {
+      // AC-4 (#474): was sha256 of the stored payload bytes. The stored bytes
+      // can differ from what the app re-encodes after a restart, so the token is
+      // the canonical re-encoding on both sides.
+      final Recording r = rec('v', at: day(1), transcript: 'hello');
+      final String stored = '${jsonEncode(r.toJson())} ';
+      fx.insert(r, payload: stored);
+      final Map<String, dynamic> first =
+          (await next())['captures'].single as Map<String, dynamic>;
+      expect(first['version'], sha(jsonEncode(r.toJson())));
+      expect(first['version'], isNot(sha(stored)));
 
-    final String edited = jsonEncode(
-      rec('v', at: day(1), transcript: 'hello world').toJson(),
-    );
-    fx.db.execute(
-      'UPDATE recordings SET json_payload = ? WHERE id = ?',
-      <Object?>[edited, 'v'],
-    );
-    final Map<String, dynamic> second =
-        (await next())['captures'].single as Map<String, dynamic>;
-    expect(second['version'], sha(edited));
-    expect(second['version'], isNot(first['version']));
-  });
+      final Recording edited = rec('v', at: day(1), transcript: 'hello world');
+      fx.db.execute(
+        'UPDATE recordings SET json_payload = ? WHERE id = ?',
+        <Object?>[jsonEncode(edited.toJson()), 'v'],
+      );
+      final Map<String, dynamic> second =
+          (await next())['captures'].single as Map<String, dynamic>;
+      expect(second['version'], sha(jsonEncode(edited.toJson())));
+      expect(second['version'], isNot(first['version']));
+    },
+  );
 
   test('version of a degraded row uses re-encoded toJson', () async {
     // AC-4
@@ -207,6 +211,29 @@ void main() {
         (await next())['captures'].single as Map<String, dynamic>;
     expect(c['transcript'], 'from index');
     expect(c['version'], sha(jsonEncode(r.toJson())));
+  });
+
+  test('a capture scheduled for the future is not in the queue', () async {
+    // AC-3 (#474 gate rule): mirrors the desk filter, so an agent never
+    // closes something the user parked until later.
+    final DateTime future = DateTime.now().add(const Duration(days: 3));
+    final DateTime past = DateTime.now().subtract(const Duration(days: 1));
+    fx.insert(rec('later', at: day(1)).copyWith(resurfaceAt: future));
+    fx.insert(rec('due', at: day(2)).copyWith(resurfaceAt: past));
+    fx.insert(
+      rec(
+        'repeat-due',
+        at: day(3),
+      ).copyWith(resurfaceAt: past, repeatEveryDays: 7),
+    );
+    fx.insert(
+      rec(
+        'repeat-later',
+        at: day(4),
+      ).copyWith(resurfaceAt: future, repeatEveryDays: 7),
+    );
+    fx.insert(rec('plain', at: day(5)));
+    expect(ids(await next()), <String>['due', 'repeat-due', 'plain']);
   });
 
   test('honours recordings.db-stale', () async {
