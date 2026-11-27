@@ -4,6 +4,9 @@ import 'dart:io';
 import 'package:audioplayers/audioplayers.dart';
 import 'package:augustyniak_capture/features/enrichment/domain/enrichment_context.dart';
 import 'package:augustyniak_capture/features/enrichment/domain/enrichment_result.dart';
+import 'package:augustyniak_capture/features/enrichment/domain/priorities_note.dart';
+import 'package:augustyniak_capture/features/switchboard/data/rule_table_capture_policy.dart';
+import 'package:augustyniak_capture/features/switchboard/domain/context_facts.dart';
 import 'package:augustyniak_capture/features/enrichment/domain/enrichment_service.dart';
 import 'package:augustyniak_capture/features/processing/domain/processor.dart';
 import 'package:augustyniak_capture/features/processing/domain/processor_registry.dart';
@@ -93,6 +96,12 @@ class _Source implements EnrichmentContextSource {
     requestedFor.add(projectId);
     return context;
   }
+}
+
+class _ThrowingSource implements EnrichmentContextSource {
+  @override
+  Future<EnrichmentContext> contextFor(String? projectId) async =>
+      throw const FileSystemException('priorities unreadable');
 }
 
 class _GrantingRecorder implements AudioRecorder {
@@ -192,10 +201,15 @@ class _Policy implements CapturePolicy {
   _Policy(this.answer);
   Decision? Function(CaptureFacts facts) answer;
   final List<CaptureFacts> seen = <CaptureFacts>[];
+  final List<ContextFacts> seenContext = <ContextFacts>[];
 
   @override
-  Decision? decide(CaptureFacts facts) {
+  Decision? decide(
+    CaptureFacts facts, [
+    ContextFacts context = ContextFacts.none,
+  ]) {
     seen.add(facts);
+    seenContext.add(context);
     return answer(facts);
   }
 }
@@ -283,6 +297,7 @@ void main() {
     bool omitPolicy = false,
     _Router? router,
     _Enrichment? enrichment,
+    EnrichmentContextSource? contextSource,
   }) async {
     note = File(p.join(dir.path, 'rec-1.txt'))..writeAsStringSync('hello');
     repo.saved = <Recording>[
@@ -299,7 +314,8 @@ void main() {
       recorder: _GrantingRecorder(),
       player: _FakePlayer(),
       enrichmentService: enrichment ?? _Enrichment(result),
-      enrichmentContextSource: _Source(EnrichmentContext.none),
+      enrichmentContextSource:
+          contextSource ?? _Source(EnrichmentContext.none),
       projectById: (String id) => _projects[id],
       captureRouter:
           router ??
@@ -628,6 +644,84 @@ void main() {
         'auto': true,
       });
       expect(log.rows, isEmpty);
+    });
+  });
+
+  group('context facts', () {
+    EnrichmentContext withNote(String text) => EnrichmentContext(
+      prioritiesText: text,
+      prioritiesSource: 'PRIORITIES.md',
+      priorities: PrioritiesNote.parse(text),
+    );
+
+    // AC-5
+    test('the policy receives the parsed priorities, tier and status',
+        () async {
+      final _Policy policy = _Policy((CaptureFacts f) => null);
+      final RecordingsController c = await seeded(
+        _row(),
+        policy: policy,
+        contextSource: _Source(
+          withNote(
+            '---\ntier: 2\nstatus: active\n---\n'
+            '- Ship the alpha\n- Renew the domain\n',
+          ),
+        ),
+      );
+      await reEnrich(c);
+
+      expect(policy.seenContext, hasLength(1));
+      expect(policy.seenContext.single.priorities, <String>[
+        'Ship the alpha',
+        'Renew the domain',
+      ]);
+      expect(policy.seenContext.single.tier, 2);
+      expect(policy.seenContext.single.status, 'active');
+    });
+
+    // AC-3
+    test('no note gives ContextFacts.none', () async {
+      final _Policy policy = _Policy((CaptureFacts f) => null);
+      final RecordingsController c = await seeded(_row(), policy: policy);
+      await reEnrich(c);
+
+      expect(policy.seenContext.single.isEmpty, isTrue);
+    });
+
+    // AC-5
+    test('the logged decision carries the count, not a second read', () async {
+      final _Log log = _Log(repo);
+      final RecordingsController c = await seeded(
+        _row(),
+        log: log,
+        policy: RuleTableCapturePolicy(
+          commandCategories: <CaptureCategory>{CaptureCategory.agentTask},
+        ),
+        contextSource: _Source(withNote('- Ship the alpha\n- Renew the domain')),
+      );
+      await reEnrich(c);
+
+      expect(log.rows, hasLength(1));
+      expect(log.rows.single.decision.context.priorities, hasLength(2));
+      expect(log.rows.single.decision.context.toJson(), <String, dynamic>{
+        'priorityCount': 2,
+      });
+    });
+
+    // AC-3
+    test('a throwing context source gives none and the capture completes',
+        () async {
+      final _Policy policy = _Policy((CaptureFacts f) => null);
+      final RecordingsController c = await seeded(
+        _row(),
+        policy: policy,
+        contextSource: _ThrowingSource(),
+      );
+      await reEnrich(c);
+
+      expect(policy.seenContext.single.isEmpty, isTrue);
+      expect(c.recordings.single.title, 'Titled');
+      expect(c.recordings.single.status, RecordingStatus.completed);
     });
   });
 

@@ -2,6 +2,7 @@ import '../../recordings/domain/capture_category.dart';
 import '../../recordings/domain/suggested_route.dart';
 import '../domain/capture_facts.dart';
 import '../domain/capture_policy.dart';
+import '../domain/context_facts.dart';
 import '../domain/decision.dart';
 
 /// The ordered rule table; the first rule that matches wins.
@@ -21,14 +22,23 @@ class RuleTableCapturePolicy implements CapturePolicy {
   final Set<CaptureCategory> commandCategories;
 
   @override
-  Decision? decide(CaptureFacts facts) {
+  Decision? decide(
+    CaptureFacts facts, [
+    ContextFacts context = ContextFacts.none,
+  ]) {
     final CaptureCategory? category = facts.category;
     if (category == null) return null;
     final List<SuggestedRouteKind> available = facts.availableRouteKinds;
     final bool agentTask = commandCategories.contains(category);
 
     Decision decision(String ruleId, SuggestedRouteKind kind, String reason) =>
-        Decision(ruleId: ruleId, kind: kind, reason: reason, facts: facts);
+        Decision(
+          ruleId: ruleId,
+          kind: kind,
+          reason: reason,
+          facts: facts,
+          context: context,
+        );
 
     if (agentTask && available.contains(SuggestedRouteKind.command)) {
       return decision(

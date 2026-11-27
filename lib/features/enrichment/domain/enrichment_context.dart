@@ -4,6 +4,7 @@ import 'package:crypto/crypto.dart';
 
 import '../../recordings/domain/suggested_route.dart';
 import '../../recordings/domain/untrusted_markdown.dart' as markdown;
+import 'priorities_note.dart';
 
 /// One project the model may file a capture under: its id (the only thing the
 /// answer is checked against), its name, and an optional one-line description.
@@ -35,6 +36,10 @@ class EnrichmentContext {
     this.projectSource,
     this.projects = const <EnrichmentProjectOption>[],
     this.routeKinds = const <SuggestedRouteKind>[],
+    this.prioritiesText,
+    this.prioritiesSource,
+    this.prioritiesFallback,
+    this.priorities,
   });
 
   static const EnrichmentContext none = EnrichmentContext();
@@ -75,6 +80,22 @@ class EnrichmentContext {
   /// the prompt adds it itself. Empty means no route is asked for.
   final List<SuggestedRouteKind> routeKinds;
 
+  /// The raw text of the user's priorities note, sent to the model. Null when
+  /// no note is configured or it could not be read.
+  final String? prioritiesText;
+
+  /// The note's file name, for the log line.
+  final String? prioritiesSource;
+
+  /// Why a configured note was **not** used (`PRIORITIES.md missing`). Does
+  /// not make the context non-empty: it is only reported in [sourceSummary].
+  final String? prioritiesFallback;
+
+  /// The parsed note. Null means unset or unreadable; an empty list means it
+  /// was read and nothing parsed. Never sent to the model: it exists for the
+  /// switchboard, which receives a count.
+  final PrioritiesNote? priorities;
+
   /// The same context offering different destinations.
   EnrichmentContext withRouteKinds(List<SuggestedRouteKind> next) =>
       EnrichmentContext(
@@ -85,6 +106,10 @@ class EnrichmentContext {
         projectSource: projectSource,
         projects: projects,
         routeKinds: next,
+        prioritiesText: prioritiesText,
+        prioritiesSource: prioritiesSource,
+        prioritiesFallback: prioritiesFallback,
+        priorities: priorities,
       );
 
   /// The same context offering a different project list.
@@ -97,6 +122,10 @@ class EnrichmentContext {
         projectSource: projectSource,
         projects: next,
         routeKinds: routeKinds,
+        prioritiesText: prioritiesText,
+        prioritiesSource: prioritiesSource,
+        prioritiesFallback: prioritiesFallback,
+        priorities: priorities,
       );
 
   /// Hard ceilings, applied here rather than only in the editor.
@@ -111,6 +140,7 @@ class EnrichmentContext {
   /// shipped default alone is close to the old bound.
   static const int maxProfileChars = 4000;
   static const int maxProjectChars = 4000;
+  static const int maxPrioritiesChars = 4000;
   static const int maxProjectOptions = 50;
   static const int maxProjectNameChars = 80;
   static const int maxProjectDescriptionChars = 200;
@@ -118,6 +148,7 @@ class EnrichmentContext {
   bool get isEmpty =>
       _blankToNull(profile) == null &&
       _blankToNull(project) == null &&
+      _blankToNull(prioritiesText) == null &&
       normalized().projects.isEmpty &&
       normalized().routeKinds.isEmpty;
 
@@ -137,6 +168,10 @@ class EnrichmentContext {
                 ? 'profile'
                 : 'profile (${resolved.profileFallback})'),
       if (resolved.project != null) resolved.projectSource ?? 'project',
+      if (resolved.prioritiesText != null)
+        'priorities'
+      else if (resolved.prioritiesFallback != null)
+        'priorities (${resolved.prioritiesFallback})',
     ];
     return layers.isEmpty ? null : layers.join(' + ');
   }
@@ -155,6 +190,13 @@ class EnrichmentContext {
     project: _clamp(defuseFenceMarkers(project), maxProjectChars),
     projectSource: _blankToNull(projectSource),
     projects: _normalizedProjects(),
+    prioritiesText: _clamp(
+      defuseFenceMarkers(prioritiesText),
+      maxPrioritiesChars,
+    ),
+    prioritiesSource: _blankToNull(prioritiesSource),
+    prioritiesFallback: _blankToNull(prioritiesFallback),
+    priorities: priorities,
     routeKinds: <SuggestedRouteKind>{
       for (final SuggestedRouteKind kind in routeKinds)
         if (kind != SuggestedRouteKind.none) kind,

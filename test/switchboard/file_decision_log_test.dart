@@ -5,15 +5,21 @@ import 'package:augustyniak_capture/features/recordings/domain/capture_category.
 import 'package:augustyniak_capture/features/recordings/domain/suggested_route.dart';
 import 'package:augustyniak_capture/features/switchboard/data/file_decision_log.dart';
 import 'package:augustyniak_capture/features/switchboard/domain/capture_facts.dart';
+import 'package:augustyniak_capture/features/switchboard/domain/context_facts.dart';
 import 'package:augustyniak_capture/features/switchboard/domain/decision.dart';
 import 'package:augustyniak_capture/features/switchboard/domain/decision_log.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:path/path.dart' as p;
 
-Decision _decision(String ruleId, SuggestedRouteKind kind) => Decision(
+Decision _decision(
+  String ruleId,
+  SuggestedRouteKind kind, {
+  ContextFacts context = ContextFacts.none,
+}) => Decision(
   ruleId: ruleId,
   kind: kind,
   reason: 'because $ruleId',
+  context: context,
   facts: CaptureFacts(
     category: CaptureCategory.agentTask,
     projectId: 'proj',
@@ -80,6 +86,54 @@ void main() {
     expect(rows[1]['kind'], 'none');
     expect(rows[1]['applied'], isFalse);
     expect(rows[1]['skipReason'], 'dismissed');
+  });
+
+  // AC-5
+  test('a v0 row has no context key', () async {
+    final FileDecisionLog log = FileDecisionLog(directory: () async => root);
+    await log.append(
+      at: DateTime.utc(2026, 11, 23, 9),
+      captureId: 'rec-1',
+      decision: _decision('R10', SuggestedRouteKind.command),
+      applied: true,
+    );
+    final List<Map<String, dynamic>> rows = FileDecisionLog.parse(
+      File(p.join(root.path, 'decisions.jsonl')).readAsStringSync(),
+    );
+    expect(rows.single.containsKey('context'), isFalse);
+  });
+
+  // AC-5
+  test('a row logs the priority count, tier and status, never the items',
+      () async {
+    final FileDecisionLog log = FileDecisionLog(directory: () async => root);
+    await log.append(
+      at: DateTime.utc(2026, 11, 23, 9),
+      captureId: 'rec-1',
+      decision: _decision(
+        'R10',
+        SuggestedRouteKind.command,
+        context: const ContextFacts(
+          priorities: <String>['Ship the alpha', 'Renew the domain'],
+          tier: 1,
+          status: 'active',
+        ),
+      ),
+      applied: true,
+    );
+    final String raw = File(
+      p.join(root.path, 'decisions.jsonl'),
+    ).readAsStringSync();
+    final List<Map<String, dynamic>> rows = FileDecisionLog.parse(raw);
+    expect(rows.single['context'], <String, dynamic>{
+      'priorityCount': 2,
+      'tier': 1,
+      'status': 'active',
+    });
+    // The note is private: no item text may reach decisions.jsonl, which is
+    // a backup payload member.
+    expect(raw, isNot(contains('Ship the alpha')));
+    expect(raw, isNot(contains('Renew the domain')));
   });
 
   test('parse skips a torn line and keeps every other row', () {

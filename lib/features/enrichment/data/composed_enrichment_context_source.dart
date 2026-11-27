@@ -1,6 +1,7 @@
 import '../../projects/data/project_context_reader.dart';
 import '../../projects/domain/project.dart';
 import '../domain/enrichment_context.dart';
+import '../domain/priorities_note.dart';
 import 'soul_reader.dart';
 
 /// Builds the enrichment context out of the two places it actually lives: the
@@ -15,11 +16,13 @@ class ComposedEnrichmentContextSource implements EnrichmentContextSource {
     required String? Function() profile,
     required Project? Function(String projectId) projectById,
     String? Function()? soulPath,
+    String? Function()? prioritiesPath,
     List<Project> Function()? projects,
     ProjectContextReader reader = const ProjectContextReader(),
     SoulReader soulReader = const SoulReader(),
   }) : _profile = profile,
        _soulPath = soulPath ?? (() => null),
+       _prioritiesPath = prioritiesPath ?? (() => null),
        _projects = projects ?? (() => const <Project>[]),
        _projectById = projectById,
        _reader = reader,
@@ -32,6 +35,10 @@ class ComposedEnrichmentContextSource implements EnrichmentContextSource {
   /// soul, exactly as before this existed.
   final String? Function() _soulPath;
   final SoulReader _soulReader;
+
+  /// Where the priorities note lives, read per call like [_soulPath]. Null or
+  /// blank means no note.
+  final String? Function() _prioritiesPath;
   final List<Project> Function() _projects;
   final Project? Function(String projectId) _projectById;
   final ProjectContextReader _reader;
@@ -57,6 +64,19 @@ class ComposedEnrichmentContextSource implements EnrichmentContextSource {
           '${soul.error == null ? '' : ': ${soul.error}'}'
           ' — using the typed profile';
     }
+    final ResolvedSoul note = await _soulReader.resolve(
+      path: _prioritiesPath(),
+      typed: '',
+    );
+    final bool noteRead = note.origin == SoulOrigin.file;
+    final String? prioritiesText = noteRead ? note.text : null;
+    final String? prioritiesSource = noteRead ? note.fileName : null;
+    final PrioritiesNote? priorities = noteRead
+        ? PrioritiesNote.parse(note.text)
+        : null;
+    final String? prioritiesFallback = note.origin.isFallback
+        ? '${note.fileName} ${note.origin.name}'
+        : null;
     final List<EnrichmentProjectOption> options = <EnrichmentProjectOption>[
       for (final Project candidate in _projects())
         EnrichmentProjectOption(
@@ -78,6 +98,10 @@ class ComposedEnrichmentContextSource implements EnrichmentContextSource {
         profile: profile,
         profileSource: profileSource,
         profileFallback: profileFallback,
+        prioritiesText: prioritiesText,
+        prioritiesSource: prioritiesSource,
+        prioritiesFallback: prioritiesFallback,
+        priorities: priorities,
         projects: options,
       );
     }
@@ -91,6 +115,10 @@ class ComposedEnrichmentContextSource implements EnrichmentContextSource {
         profile: profile,
         profileSource: profileSource,
         profileFallback: profileFallback,
+        prioritiesText: prioritiesText,
+        prioritiesSource: prioritiesSource,
+        prioritiesFallback: prioritiesFallback,
+        priorities: priorities,
         projects: options,
       );
     }
@@ -103,6 +131,10 @@ class ComposedEnrichmentContextSource implements EnrichmentContextSource {
         profile: profile,
         profileSource: profileSource,
         profileFallback: profileFallback,
+        prioritiesText: prioritiesText,
+        prioritiesSource: prioritiesSource,
+        prioritiesFallback: prioritiesFallback,
+        priorities: priorities,
         projects: options,
         // The project's own `description` is the fallback, not the primary:
         // it is a one-line label typed once, while the repository file is
@@ -119,6 +151,10 @@ class ComposedEnrichmentContextSource implements EnrichmentContextSource {
         profile: profile,
         profileSource: profileSource,
         profileFallback: profileFallback,
+        prioritiesText: prioritiesText,
+        prioritiesSource: prioritiesSource,
+        prioritiesFallback: prioritiesFallback,
+        priorities: priorities,
         projects: options,
         project: project.description,
         projectSource: project.description == null
