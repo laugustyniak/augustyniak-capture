@@ -5,6 +5,7 @@ import 'package:material_ui/material_ui.dart';
 import '../../../app/ui_kit.dart';
 import '../../enrichment/data/soul_reader.dart';
 import '../../enrichment/domain/enrichment_context.dart';
+import '../../enrichment/domain/priorities_note.dart';
 import '../../projects/data/directory_picker.dart';
 import '../../projects/data/project_context_probe.dart';
 import '../../projects/data/project_context_reader.dart';
@@ -92,6 +93,17 @@ class _EnrichmentContextSectionState extends State<EnrichmentContextSection> {
   /// keeps every existing Config test off the filesystem.
   ResolvedSoul? _soul;
   String? _pickerError;
+
+  late final TextEditingController _prioritiesField = TextEditingController(
+    text: _storedPrioritiesPath,
+  );
+  final FocusNode _prioritiesFocus = FocusNode();
+  late String _syncedPrioritiesPath = _storedPrioritiesPath;
+
+  /// What the priorities note resolves to right now, probed like [_soul]: only
+  /// with a path configured, and never from `build`.
+  ResolvedSoul? _priorities;
+  int _prioritiesCount = 0;
 
   /// Captures on the desk ranked under an older soul. Null until counted.
   int? _staleCount;
@@ -329,6 +341,9 @@ class _EnrichmentContextSectionState extends State<EnrichmentContextSection> {
   }
 
   String get _storedSoulPath => widget.controller.soulPath ?? '';
+  String get _storedPrioritiesPath => widget.controller.prioritiesPath ?? '';
+  bool get _prioritiesDirty =>
+      _prioritiesField.text.trim() != _syncedPrioritiesPath.trim();
   bool get _soulDirty => _soulField.text.trim() != _syncedSoulPath.trim();
 
   @override
@@ -345,6 +360,11 @@ class _EnrichmentContextSectionState extends State<EnrichmentContextSection> {
     _soulFocus.addListener(() {
       if (!_soulFocus.hasFocus && _soulDirty) _commitSoulPath();
     });
+    _prioritiesFocus.addListener(() {
+      if (!_prioritiesFocus.hasFocus && _prioritiesDirty) {
+        _commitPrioritiesPath();
+      }
+    });
     _glossaryFocus.addListener(() {
       if (!_glossaryFocus.hasFocus) _commitGlossary();
     });
@@ -352,6 +372,7 @@ class _EnrichmentContextSectionState extends State<EnrichmentContextSection> {
       if (!_embeddingFocus.hasFocus) _commitEmbeddingModel();
     });
     _probeSoul();
+    _probePriorities();
     _refreshStale();
   }
 
@@ -401,6 +422,77 @@ class _EnrichmentContextSectionState extends State<EnrichmentContextSection> {
     }
   }
 
+  Future<void> _probePriorities() async {
+    final String path = _syncedPrioritiesPath.trim();
+    if (path.isEmpty) {
+      if (_priorities != null && mounted) setState(() => _priorities = null);
+      return;
+    }
+    final ResolvedSoul note = await widget.soulReader.resolve(
+      path: path,
+      typed: '',
+    );
+    if (!mounted || path != _syncedPrioritiesPath.trim()) return;
+    setState(() {
+      _priorities = note;
+      _prioritiesCount = note.origin == SoulOrigin.file
+          ? PrioritiesNote.parse(note.text).items.length
+          : 0;
+    });
+  }
+
+  Future<void> _commitPrioritiesPath() async {
+    final String value = _prioritiesField.text.trim();
+    setState(() {
+      _syncedPrioritiesPath = value;
+      _priorities = null;
+    });
+    await widget.controller.setPrioritiesPath(value);
+    await _probePriorities();
+  }
+
+  /// Picks the folder and names `PRIORITIES.md` in it, like [_browseSoul].
+  Future<void> _browsePriorities() async {
+    setState(() => _pickerError = null);
+    try {
+      final String current = _syncedPrioritiesPath.trim();
+      final String? folder = await widget.picker.pick(
+        initialDirectory: current.isEmpty ? null : File(current).parent.path,
+      );
+      if (folder == null || !mounted) return;
+      _prioritiesField.text =
+          '$folder${Platform.pathSeparator}$_prioritiesName';
+      await _commitPrioritiesPath();
+    } catch (exception) {
+      if (!mounted) return;
+      setState(() => _pickerError = exception.toString());
+    }
+  }
+
+  static const String _prioritiesName = 'PRIORITIES.md';
+
+  Widget _prioritiesStatus() {
+    final ResolvedSoul? note = _priorities;
+    final (String text, Color color) = switch (note) {
+      null when _syncedPrioritiesPath.trim().isEmpty => (
+        'Optional. Re-read for every capture.',
+        Console.mutedSoft,
+      ),
+      null => ('Checking…', Console.dimText),
+      ResolvedSoul(origin: SoulOrigin.file) => (
+        'USING ${note.fileName} \u00b7 $_prioritiesCount '
+            '${_prioritiesCount == 1 ? 'item' : 'items'}',
+        Console.accent,
+      ),
+      ResolvedSoul() => (
+        '${note.fileName} ${note.origin.name.toUpperCase()} \u2014 '
+            'NOT SENT',
+        Console.amber,
+      ),
+    };
+    return Text(text, style: ConsoleText.micro.copyWith(color: color));
+  }
+
   /// The line under the path: what the next capture will actually be sent.
   Widget _soulStatus() {
     final ResolvedSoul? soul = _soul;
@@ -444,6 +536,12 @@ class _EnrichmentContextSectionState extends State<EnrichmentContextSection> {
       _syncedSoulPath = _storedSoulPath;
       _soulField.text = _syncedSoulPath;
       _probeSoul();
+    }
+    if (_storedPrioritiesPath != _syncedPrioritiesPath &&
+        !_prioritiesDirty) {
+      _syncedPrioritiesPath = _storedPrioritiesPath;
+      _prioritiesField.text = _syncedPrioritiesPath;
+      _probePriorities();
     }
   }
 
@@ -489,6 +587,8 @@ class _EnrichmentContextSectionState extends State<EnrichmentContextSection> {
     _field.dispose();
     _soulFocus.dispose();
     _soulField.dispose();
+    _prioritiesFocus.dispose();
+    _prioritiesField.dispose();
     _embeddingFocus.dispose();
     _embeddingField.dispose();
     _glossaryFocus.dispose();
@@ -610,6 +710,33 @@ class _EnrichmentContextSectionState extends State<EnrichmentContextSection> {
               _soulStatus(),
               if (widget.recordings case final RecordingsController r)
                 _rerankRow(r),
+              const SizedBox(height: 4),
+              Row(
+                children: <Widget>[
+                  Text('PRIORITIES NOTE', style: ConsoleText.fieldLabel),
+                  const SizedBox(width: 10),
+                  Expanded(child: _prioritiesStatus()),
+                ],
+              ),
+              const SizedBox(height: 2),
+              ConsoleField(
+                controller: _prioritiesField,
+                focusNode: _prioritiesFocus,
+                monospace: true,
+                fontSize: 12,
+                textInputAction: TextInputAction.done,
+                onSubmitted: (String _) => _commitPrioritiesPath(),
+                onChanged: (String _) => setState(() {}),
+                hintText: '/Users/you/Notes/PRIORITIES.md',
+                suffixIcon: widget.picker.isAvailable
+                    ? IconButton(
+                        onPressed: _browsePriorities,
+                        icon: const Icon(Icons.folder_open, size: 18),
+                        tooltip: 'Choose the folder holding PRIORITIES.md',
+                        color: Console.muted,
+                      )
+                    : null,
+              ),
               const SizedBox(height: 12),
               Text(
                 _soul?.origin == SoulOrigin.file

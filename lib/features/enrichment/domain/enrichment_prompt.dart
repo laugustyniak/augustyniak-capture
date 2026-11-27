@@ -94,7 +94,8 @@ String buildEnrichmentSystemPrompt({
     ..writeln()
     ..writeln(
       'Judge priority against the goals, anti-goals and priority rules in the '
-      'user profile below when it states them; without them, judge by urgency '
+      'user profile${resolved.prioritiesText == null ? '' : ' and priorities'} '
+      'below when it states them; without them, judge by urgency '
       'and consequence.',
     );
 
@@ -135,6 +136,16 @@ void _appendContext(StringBuffer buffer, EnrichmentContext context) {
       ..writeln('--- BEGIN USER PROFILE ---')
       ..writeln(profile)
       ..writeln('--- END USER PROFILE ---');
+  }
+
+  final String? priorities = context.prioritiesText;
+  if (priorities != null) {
+    final String source = context.prioritiesSource ?? 'priorities note';
+    buffer
+      ..writeln()
+      ..writeln('--- BEGIN PRIORITIES ($source) ---')
+      ..writeln(priorities)
+      ..writeln('--- END PRIORITIES ---');
   }
 
   final String? project = context.project;

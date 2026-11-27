@@ -484,6 +484,7 @@ class _RecordingsPageState extends State<RecordingsPage>
       enrichmentContextSource: ComposedEnrichmentContextSource(
         profile: () => settings.enrichmentInstructions,
         soulPath: () => settings.soulPath,
+        prioritiesPath: () => settings.prioritiesPath,
         projectById: _projectById,
         projects: () => projects.projects,
       ),

@@ -1,4 +1,5 @@
 import 'capture_facts.dart';
+import 'context_facts.dart';
 import 'decision.dart';
 
 /// Decides, deterministically and without IO, where a saved capture goes next.
@@ -6,7 +7,10 @@ import 'decision.dart';
 /// Null means "no decision" — notably when enrichment never classified the
 /// capture, which is not the same fact as deciding `none`.
 abstract class CapturePolicy {
-  Decision? decide(CaptureFacts facts);
+  Decision? decide(
+    CaptureFacts facts, [
+    ContextFacts context = ContextFacts.none,
+  ]);
 }
 
 /// The default: decides nothing, so an unconfigured install behaves exactly as
@@ -15,5 +19,8 @@ class DisabledCapturePolicy implements CapturePolicy {
   const DisabledCapturePolicy();
 
   @override
-  Decision? decide(CaptureFacts facts) => null;
+  Decision? decide(
+    CaptureFacts facts, [
+    ContextFacts context = ContextFacts.none,
+  ]) => null;
 }

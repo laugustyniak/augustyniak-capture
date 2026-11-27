@@ -57,6 +57,7 @@ class FileDecisionLog implements DecisionLog {
       'applied': applied,
       'skipReason': ?skipReason,
       'facts': decision.facts.toJson(),
+      if (!decision.context.isEmpty) 'context': decision.context.toJson(),
     };
     await File(p.join(directory.path, 'decisions.jsonl')).writeAsString(
       '${jsonEncode(row)}\n',
