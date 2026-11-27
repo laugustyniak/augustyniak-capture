@@ -289,7 +289,7 @@ void main() {
       () async {
         final String path = note(
           <String>[
-            for (int i = 0; i < 30; i++) '- ${'w' * 100} number $i',
+            for (int i = 0; i < 30; i++) '- ${'w' * 150} number $i',
           ].join('\n'),
         );
         final EnrichmentContext context = await source(
