@@ -5748,6 +5748,7 @@ class RecordingsController extends ChangeNotifier {
       RouteKind.agent ||
       RouteKind.command ||
       RouteKind.assistant => ClosureKind.handoff,
+      RouteKind.external => ClosureKind.agent,
     };
   }
 

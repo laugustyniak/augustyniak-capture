@@ -43,7 +43,16 @@ enum RouteKind {
   ///
   /// The cost is the same as [command] was accepted at: an older build reading
   /// a row with this kind drops it, because [fromName] refuses to guess.
-  assistant;
+  assistant,
+
+  /// Closed by an external agent (over MCP `submit_decision`) that did the work
+  /// itself, somewhere this app cannot see. [RouteRecord.target] is the agent's
+  /// name and `decision.did` says what it did.
+  ///
+  /// **Not `agent`**: that kind means a session this app opened. The cost is
+  /// the one [command] and [assistant] accepted: an older build reading a row
+  /// with this kind drops it, because [fromName] refuses to guess.
+  external;
 
   /// Null for an unrecognised name, which drops that one row on load.
   ///
@@ -192,31 +201,57 @@ class RouteOutcome {
 bool isSafeSessionName(String name) =>
     RegExp(r'^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$').hasMatch(name);
 
-/// Which Switchboard rule proposed the destination a delivery followed, and
-/// why. Only these two travel with the row (and sync); the full facts the rule
+/// Which rule proposed the destination a delivery followed, and why. Only these
+/// fields travel with the row (and sync); the full facts the Switchboard rule
 /// saw stay in the local `decisions.jsonl`.
+///
+/// [decidedBy], [did] and [decisionId] record an external agent's decision
+/// (#474) through the same shape. All three are absent for the user and the
+/// Switchboard, and their keys stay out of the JSON then, so a legacy row
+/// serialises byte for byte as before.
 class RouteDecision {
-  const RouteDecision({required this.ruleId, required this.reason});
+  const RouteDecision({
+    required this.ruleId,
+    required this.reason,
+    this.decidedBy,
+    this.did,
+    this.decisionId,
+  });
 
   final String ruleId;
   final String? reason;
 
+  /// `agent:<name>` when an external agent decided; absent for the user.
+  final String? decidedBy;
+
+  /// What the agent itself did, when it acted before closing the capture.
+  final String? did;
+
+  /// The id of the decision file this came from: what makes a replay a no-op.
+  final String? decisionId;
+
   Map<String, dynamic> toJson() => <String, dynamic>{
     'ruleId': ruleId,
     if (reason != null) 'reason': reason,
+    if (decidedBy != null) 'decidedBy': decidedBy,
+    if (did != null) 'did': did,
+    if (decisionId != null) 'decisionId': decisionId,
   };
+
+  static String? _text(Object? value) =>
+      value is String && value.trim().isNotEmpty ? value.trim() : null;
 
   /// Null without a usable `ruleId`: a reason with no rule names nothing.
   static RouteDecision? fromJson(Object? json) {
     if (json is! Map) return null;
     final Object? ruleId = json['ruleId'];
     if (ruleId is! String || ruleId.trim().isEmpty) return null;
-    final Object? reason = json['reason'];
     return RouteDecision(
       ruleId: ruleId.trim(),
-      reason: reason is String && reason.trim().isNotEmpty
-          ? reason.trim()
-          : null,
+      reason: _text(json['reason']),
+      decidedBy: _text(json['decidedBy']),
+      did: _text(json['did']),
+      decisionId: _text(json['decisionId']),
     );
   }
 }
