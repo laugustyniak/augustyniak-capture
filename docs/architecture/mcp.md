@@ -1,6 +1,6 @@
 # MCP server
 
-A local, **read-only** [MCP](https://modelcontextprotocol.io) server that lets a coding agent (Claude Code, Codex, Gemini CLI) search and read the user's captures. Read this before touching `bin/capture_mcp.dart` or `features/mcp/`.
+A local [MCP](https://modelcontextprotocol.io) server that lets a coding agent (Claude Code, Codex, Gemini CLI) search and read the user's captures, and, only with `--allow-decisions`, tell the app what it did with one. Read this before touching `bin/capture_mcp.dart` or `features/mcp/`.
 
 It is a separate binary, not part of the Flutter app: the agent host launches it over stdio, it answers, and it exits when the host closes the pipe. There is no network listener.
 
@@ -13,9 +13,9 @@ It is a separate binary, not part of the Flutter app: the agent host launches it
 
 **No `package:flutter` anywhere in that graph, transitively.** The binary is built with plain `dart`, which cannot link `dart:ui`. That is why the reader does not reuse `RecordingsRepository` (it reaches `core/database/app_database.dart`, which calls `debugPrint`) and re-implements the read rules by hand; it does reuse the pure `Recording` and `Project` domain classes. `test/mcp/mcp_flutter_free_test.dart` walks the import graph (including conditional-import targets) and fails on the first `package:flutter` or `dart:ui`.
 
-## The read-only guarantee
+## The write guarantee: the server never writes the database
 
-The database is opened with `OpenMode.readOnly`, per tool call, and closed again. Nothing is cached, because the app keeps writing while the host holds the server open. The app runs WAL, so the reader neither blocks the writer nor sees an uncommitted row; `test/mcp/capture_reader_test.dart` holds an open `BEGIN IMMEDIATE` transaction on a second connection and reads around it. The server never writes data — not to the database, not to the recordings folder, not to a repository. One caveat: on a read-only open of a WAL database while the app is not running, SQLite itself may create the `-shm`/`-wal` sidecar files; they hold no data of its own. `test/mcp/capture_reader_test.dart` snapshots every file's size and mtime in both directories (sidecars included) around reads on each path and asserts nothing changed or appeared — in particular no `.corrupt-`/`.partial-` backup. There is deliberately no write tool: creating a note or marking a capture routed must go through `RecordingsController`'s entry points, which is a follow-up.
+The database is opened with `OpenMode.readOnly`, per tool call, and closed again. Nothing is cached, because the app keeps writing while the host holds the server open. The app runs WAL, so the reader neither blocks the writer nor sees an uncommitted row; `test/mcp/capture_reader_test.dart` holds an open `BEGIN IMMEDIATE` transaction on a second connection and reads around it. The server never writes data — not to the database, not to the recordings folder, not to a repository. One caveat: on a read-only open of a WAL database while the app is not running, SQLite itself may create the `-shm`/`-wal` sidecar files; they hold no data of its own. `test/mcp/capture_reader_test.dart` snapshots every file's size and mtime in both directories (sidecars included) around reads on each path and asserts nothing changed or appeared — in particular no `.corrupt-`/`.partial-` backup. The one write the server can make is `submit_decision` (below): with `--allow-decisions` it writes files under `decisions/` and **nothing else**. A capture is never closed from here; the file is an outbox that `RecordingsController` drains and applies, because only it may write the index.
 
 Output carries content only. **No `filePath`, thumbnail, segment or artifact path ever leaves the server**, and neither do bytes; `routes` carry kind, target, time, the outcome's state and PR URL, and the Switchboard `decision` (`ruleId`, `reason`) when there is one. Keys whose value is absent are omitted rather than sent as `null` (absent and empty are different facts). Discarded and deleted captures have no row, so they are never returned.
 
@@ -34,9 +34,10 @@ Errors that reach the agent are fixed, generic messages (`Capture store unavaila
 | `search_captures` | `query` (required), `project?`, `since?` (ISO date), `limit?` (default 20, max 100) | Case-insensitive substring over title, summary, transcript and tags; transcripts cut to ~300 characters |
 | `get_capture` | `id` | One capture, full transcript |
 | `list_project_captures` | `project`, `status?`, `limit?` | Newest first; `status` is a `RecordingStatus` name |
-| `next_open_captures` | `limit?` (default 10, max 100), `after?`, `project?` | Completed captures not marked processed, oldest first (`createdAt`, then `id`), full transcript and enrichment as in `get_capture`, plus `version`; `next` cursor, absent on the last page |
+| `next_open_captures` | `limit?` (default 10, max 100), `after?`, `project?` | Completed captures not marked processed and not scheduled for later, without a pending decision file, oldest first (`createdAt`, then `id`), full transcript and enrichment as in `get_capture`, plus `version`; `next` cursor, absent on the last page |
+| `submit_decision` | `id`, `version`, `action` (`done`, `route_file`, `route_command`, `skip`), `reason`, `agent`, `did?`, `target?` | Only with `--allow-decisions`. Writes `decisions/<uuid>.json`; returns the decision id |
 
-`next_open_captures` is the work queue and is read-only. `after` is an opaque cursor (base64url of `createdAtMs:id`); a malformed one is invalid params. `version` is the sha256 of the row's stored `json_payload`; on the JSON-index path, and for a row rebuilt from columns, there is no stored string, so it hashes `jsonEncode(toJson())` instead. Pages are not a snapshot: a row edited between calls changes its `version`, one inserted before the cursor is missed on that walk.
+`next_open_captures` is the work queue and is read-only. `after` is an opaque cursor (base64url of `createdAtMs:id`); a malformed one is invalid params. `version` is `recordingVersion(recording)`: sha256 of `jsonEncode(toJson())` of the parsed row, the same function the app calls, so a legacy payload that does not re-encode byte for byte cannot make the two sides disagree. Every tool also returns `suggestedRoute` (`kind`, `ruleId?`, `reason?`, `auto`) when the Switchboard proposed one. Pages are not a snapshot: a row edited between calls changes its `version`, one inserted before the cursor is missed on that walk.
 
 `project` is an id or a case-insensitive name.
 
@@ -49,6 +50,16 @@ Errors that reach the agent are fixed, generic messages (`Capture store unavaila
 | Recordings dir | `<documents>/recordings` — `XDG_DOCUMENTS_DIR` from `~/.config/user-dirs.dirs` on Linux, `~/Documents` otherwise |
 
 `--db <path>` and `--recordings-dir <path>` override. Any other platform must pass both. The macOS paths are derived from the unsandboxed setup in `docs/platform-setup.md`, not yet checked on a Mac.
+
+## Decisions (`--allow-decisions`)
+
+`submit_decision` writes `decisions/<uuid>.json` (`AgentDecision`, `recordings/domain/agent_decision.dart`, shared by server and app so the schema cannot drift) as `.tmp` then rename, in `dirname(--db)/decisions`. A symlinked `decisions/` is refused. The server never opens the database to write and does not check that the id exists; the app does. `next_open_captures` hides a capture with a pending file even without the flag.
+
+The app's `DecisionDrainer` (`recordings/data/decision_drainer.dart`, shaped like `InboxDrainer`) drains `<application-support>/decisions` after load, on resume and every 30 s on desktop, and calls `RecordingsController.applyAgentDecision`. The directory is writable by any local process, so every file is untrusted: the name must be a uuid equal to `decisionId`, at most 64 KB, not a symlink, and a valid `AgentDecision`; anything else, and any decision the controller rejects, moves to `decisions/rejected/<name>` with `<uuid>.reason.txt`, never read again. A file is deleted only after `applied` or `alreadyClosed`; an apply that throws (not initialized, unreadable index, a write that did not land) keeps it for the next pass.
+
+Outcomes: `not found` and `stale version` (the `version` no longer matches, so the capture changed since the agent read it), `scheduled for later`, `kind unavailable` (`route_file` on a Command-bound project or the reverse), a delivery error, and `deleted during delivery` (the delivery already happened and is logged). A capture already closed, or already carrying this `decisionId` in its routes (replay after the user reopened it), is `alreadyClosed`. `done` closes with `RouteKind.external` and `ClosureKind.agent`; on a repeating capture it completes the occurrence instead. `skip` is logged and changes nothing, so the agent must track its own skips. If a delivery succeeds and the persist then fails, the retry delivers again.
+
+The server writes `dirname(--db)/decisions` and the app reads `<application-support>/decisions`; they match only with the default `--db`. The bundle at `~/.local/opt/<cli>-mcp` is built separately: re-run `tool/deploy.sh` or an old bundle computes a different `version` or lacks the tool.
 
 ## Install
 
