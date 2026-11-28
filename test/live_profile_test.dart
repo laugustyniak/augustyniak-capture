@@ -1,7 +1,13 @@
 import 'package:augustyniak_capture/features/settings/domain/app_settings.dart';
 import 'package:augustyniak_capture/features/settings/domain/provider_profile.dart';
+import 'package:augustyniak_capture/features/settings/presentation/settings_controller.dart';
+import 'package:augustyniak_capture/features/transcription/data/live/deepgram_live_service.dart';
+import 'package:augustyniak_capture/features/transcription/data/live/openai_live_service.dart';
 import 'package:augustyniak_capture/features/transcription/data/transcription_service.dart';
+import 'package:augustyniak_capture/features/transcription/domain/live_transcription.dart';
 import 'package:flutter_test/flutter_test.dart';
+
+import 'support/harness.dart';
 
 ProviderProfile _live({
   String endpoint = 'wss://api.deepgram.com/v1/listen',
@@ -38,8 +44,9 @@ void main() {
     test('toService never builds an HTTP whisper client for it', () {
       expect(_live().toService(), isA<DisabledTranscriptionService>());
       expect(
-        _live(endpoint: 'https://api.openai.com/v1/audio/transcriptions')
-            .toService(),
+        _live(
+          endpoint: 'https://api.openai.com/v1/audio/transcriptions',
+        ).toService(),
         isA<DisabledTranscriptionService>(),
       );
     });
@@ -94,6 +101,136 @@ void main() {
         s.copyWith(clearActiveLiveProfileId: true).activeLiveProfileId,
         isNull,
       );
+    });
+  });
+
+  group('SettingsController live wiring', () {
+    Future<SettingsController> build([AppSettings? stored]) async {
+      final SettingsController c = buildSettingsController(stored: stored);
+      await c.initialize();
+      return c;
+    }
+
+    test('nothing configured means a disabled live service', () async {
+      final SettingsController c = await build();
+      expect(
+        c.liveTranscriptionService,
+        isA<DisabledLiveTranscriptionService>(),
+      );
+      expect(c.liveTranscriptionService.isAvailable, isFalse);
+    });
+
+    test('adding a live profile activates it, and only it', () async {
+      final SettingsController c = await build();
+      final ProviderProfile first = await c.addProfile(
+        name: 'HTTP',
+        endpoint: 'https://api.openai.com/v1/audio/transcriptions',
+      );
+      final ProviderProfile live = await c.addProfile(
+        name: 'Deepgram',
+        endpoint: 'wss://api.deepgram.com/v1/listen',
+        kind: ProfileKind.liveTranscription,
+        model: 'nova-3',
+        language: 'pl',
+        bearerToken: 'k',
+      );
+      expect(c.settings.activeProfileId, first.id);
+      expect(c.settings.activeLiveProfileId, live.id);
+      expect(c.liveTranscriptionService, isA<DeepgramLiveService>());
+      expect(c.liveTranscriptionService.sampleRate, 16000);
+    });
+
+    test('the OpenAI host builds the 24 kHz adapter', () async {
+      final SettingsController c = await build();
+      await c.addProfile(
+        name: 'OpenAI live',
+        endpoint: 'wss://api.openai.com/v1/realtime?intent=transcription',
+        kind: ProfileKind.liveTranscription,
+      );
+      expect(c.liveTranscriptionService, isA<OpenAiLiveService>());
+      expect(c.liveTranscriptionService.sampleRate, 24000);
+    });
+
+    test(
+      'an https, public ws or unknown-host endpoint stays disabled',
+      () async {
+        for (final String endpoint in <String>[
+          'https://api.deepgram.com/v1/listen',
+          'ws://api.deepgram.com/v1/listen',
+          'wss://stt.example.org/listen',
+          '',
+        ]) {
+          final SettingsController c = await build();
+          await c.addProfile(
+            name: 'x',
+            endpoint: endpoint,
+            kind: ProfileKind.liveTranscription,
+          );
+          expect(
+            c.liveTranscriptionService,
+            isA<DisabledLiveTranscriptionService>(),
+            reason: endpoint,
+          );
+        }
+      },
+    );
+
+    test('the service is cached until the connection details change', () async {
+      final SettingsController c = await build();
+      final ProviderProfile live = await c.addProfile(
+        name: 'Deepgram',
+        endpoint: 'wss://api.deepgram.com/v1/listen',
+        kind: ProfileKind.liveTranscription,
+      );
+      final LiveTranscriptionService a = c.liveTranscriptionService;
+      expect(identical(a, c.liveTranscriptionService), isTrue);
+      await c.updateProfile(live.copyWith(language: 'en'));
+      expect(identical(a, c.liveTranscriptionService), isFalse);
+    });
+
+    test(
+      'deleting the active live profile falls back within its kind',
+      () async {
+        final SettingsController c = await build();
+        final ProviderProfile one = await c.addProfile(
+          name: 'one',
+          endpoint: 'wss://api.deepgram.com/v1/listen',
+          kind: ProfileKind.liveTranscription,
+        );
+        final ProviderProfile two = await c.addProfile(
+          name: 'two',
+          endpoint: 'wss://api.openai.com/v1/realtime',
+          kind: ProfileKind.liveTranscription,
+        );
+        final ProviderProfile http = await c.addProfile(
+          name: 'http',
+          endpoint: 'https://api.openai.com/v1/audio/transcriptions',
+        );
+        expect(c.settings.activeLiveProfileId, two.id);
+        await c.deleteProfile(two.id);
+        expect(c.settings.activeLiveProfileId, one.id);
+        await c.deleteProfile(one.id);
+        expect(c.settings.activeLiveProfileId, isNull);
+        expect(c.settings.activeProfileId, http.id);
+      },
+    );
+
+    test('setActiveLiveProfile selects and clears', () async {
+      final SettingsController c = await build();
+      final ProviderProfile one = await c.addProfile(
+        name: 'one',
+        endpoint: 'wss://api.deepgram.com/v1/listen',
+        kind: ProfileKind.liveTranscription,
+      );
+      await c.addProfile(
+        name: 'two',
+        endpoint: 'wss://api.openai.com/v1/realtime',
+        kind: ProfileKind.liveTranscription,
+      );
+      await c.setActiveLiveProfile(one.id);
+      expect(c.activeLiveProfile?.id, one.id);
+      await c.setActiveLiveProfile(null);
+      expect(c.activeLiveProfile, isNull);
     });
   });
 }
