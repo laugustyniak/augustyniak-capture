@@ -210,6 +210,104 @@ void main() {
     expect(controller.settings.activeProfileId, transcriptionActive);
   });
 
+  testWidgets('live dictation is the third section, activated apart', (
+    WidgetTester tester,
+  ) async {
+    final SettingsController controller = await controllerWithProfiles(1);
+    final ProviderProfile one = await controller.addProfile(
+      name: 'Deepgram',
+      endpoint: 'wss://api.deepgram.com/v1/listen',
+      kind: ProfileKind.liveTranscription,
+      model: 'nova-3',
+    );
+    await controller.addProfile(
+      name: 'Soniox',
+      endpoint: 'wss://stt-rt.soniox.com/transcribe-websocket',
+      kind: ProfileKind.liveTranscription,
+    );
+    await controller.setActiveLiveProfile(one.id);
+    final String transcriptionActive = controller.settings.activeProfileId!;
+    await pumpModels(tester, controller);
+
+    await scrollTo(tester, find.text('LIVE DICTATION PROFILES'));
+    expect(find.text('LIVE DICTATION PROFILES'), findsOneWidget);
+    await scrollTo(tester, find.text('Soniox'));
+    await tester.ensureVisible(find.text('Soniox'));
+    await tester.pump();
+    await tester.tap(
+      find.descendant(
+        of: find.ancestor(
+          of: find.text('Soniox'),
+          matching: find.byType(ConsoleCard),
+        ),
+        matching: find.byIcon(Icons.radio_button_unchecked),
+      ),
+    );
+    await tester.pump();
+
+    expect(controller.activeLiveProfile?.name, 'Soniox');
+    expect(controller.settings.activeProfileId, transcriptionActive);
+  });
+
+  testWidgets('with no live profile the section says live dictation is off', (
+    WidgetTester tester,
+  ) async {
+    final SettingsController controller = buildSettingsController();
+    await controller.initialize();
+    await pumpModels(tester, controller);
+
+    await scrollTo(tester, find.text('No live dictation profiles.'));
+    expect(find.text('Live dictation disabled'), findsOneWidget);
+  });
+
+  testWidgets('the live presets are offered and fill the live form', (
+    WidgetTester tester,
+  ) async {
+    final SettingsController controller = buildSettingsController();
+    await controller.initialize();
+    await pumpModels(tester, controller);
+
+    await scrollTo(tester, find.text('ADD LIVE DICTATION PROFILE'));
+    await tester.ensureVisible(find.text('ADD LIVE DICTATION PROFILE'));
+    await tester.pump();
+    await tester.tap(find.text('ADD LIVE DICTATION PROFILE'));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 400));
+
+    expect(find.text('NEW LIVE DICTATION PROFILE'), findsOneWidget);
+    // The chips scroll horizontally and build lazily, so only the first ones
+    // are asserted; the full list is pinned in live_profile_test.dart.
+    expect(find.widgetWithText(ActionChip, 'Deepgram Nova-3'), findsOneWidget);
+    expect(find.widgetWithText(ActionChip, 'Soniox'), findsOneWidget);
+
+    await tester.tap(find.widgetWithText(ActionChip, 'Deepgram Nova-3'));
+    await tester.pump();
+
+    expect(
+      find.widgetWithText(TextFormField, 'wss://api.deepgram.com/v1/listen'),
+      findsOneWidget,
+    );
+    expect(find.widgetWithText(TextFormField, 'nova-3'), findsOneWidget);
+    expect(find.widgetWithText(TextFormField, 'pl'), findsOneWidget);
+    expect(find.text('Deepgram API key'), findsOneWidget);
+  });
+
+  testWidgets('a public plain ws live endpoint is visibly blocked', (
+    WidgetTester tester,
+  ) async {
+    final SettingsController controller = buildSettingsController();
+    await controller.initialize();
+    await controller.addProfile(
+      name: 'Leaky live',
+      endpoint: 'ws://api.example.com/listen',
+      kind: ProfileKind.liveTranscription,
+    );
+    await pumpModels(tester, controller);
+    await scrollTo(tester, find.text('Leaky live'));
+
+    expect(find.text('BLOCKED · USE WSS'), findsWidgets);
+  });
+
   // The enrichment profile is also the only OCR engine. So the three
   // vision-capable presets have
   // to be reachable in the sheet, not merely present in `ProviderPreset.all`:

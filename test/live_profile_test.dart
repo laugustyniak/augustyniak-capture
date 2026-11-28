@@ -1,7 +1,9 @@
 import 'package:augustyniak_capture/features/settings/domain/app_settings.dart';
 import 'package:augustyniak_capture/features/settings/domain/provider_profile.dart';
 import 'package:augustyniak_capture/features/settings/presentation/settings_controller.dart';
+import 'package:augustyniak_capture/core/http/transport_guard.dart';
 import 'package:augustyniak_capture/features/transcription/data/live/deepgram_live_service.dart';
+import 'package:augustyniak_capture/features/transcription/data/live/live_provider_factory.dart';
 import 'package:augustyniak_capture/features/transcription/data/live/openai_live_service.dart';
 import 'package:augustyniak_capture/features/transcription/data/transcription_service.dart';
 import 'package:augustyniak_capture/features/transcription/domain/live_transcription.dart';
@@ -231,6 +233,35 @@ void main() {
       expect(c.activeLiveProfile?.id, one.id);
       await c.setActiveLiveProfile(null);
       expect(c.activeLiveProfile, isNull);
+    });
+  });
+
+  group('live presets', () {
+    final List<ProviderPreset> live = ProviderPreset.all
+        .where((ProviderPreset p) => p.kind == ProfileKind.liveTranscription)
+        .toList();
+
+    test('Deepgram Nova-3 is first and the four providers are offered', () {
+      expect(live.first.name, 'Deepgram Nova-3');
+      expect(live.first.language, 'pl');
+      expect(live.map((ProviderPreset p) => p.name), <String>[
+        'Deepgram Nova-3',
+        'Soniox',
+        'ElevenLabs Scribe realtime',
+        'OpenAI live transcribe',
+      ]);
+    });
+
+    test('every preset is an allowed wss endpoint with an adapter', () {
+      for (final ProviderPreset preset in live) {
+        final Uri uri = Uri.parse(preset.endpoint);
+        expect(liveEndpointIsAllowed(uri), isTrue, reason: preset.name);
+        expect(liveProviderForHost(uri.host), isNotNull, reason: preset.name);
+      }
+    });
+
+    test('the OpenAI preset says Polish support is unconfirmed', () {
+      expect(live.last.tokenHint, contains('unconfirmed'));
     });
   });
 }
