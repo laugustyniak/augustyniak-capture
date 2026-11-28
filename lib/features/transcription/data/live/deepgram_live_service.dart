@@ -23,6 +23,10 @@ class DeepgramLiveService extends LiveWsService {
   @override
   Duration? get keepAliveInterval => keepAlive;
 
+  /// Deepgram answers `CloseStream` by flushing and closing normally.
+  @override
+  bool get closeIsTerminal => true;
+
   @override
   Object? get keepAliveMessage =>
       jsonEncode(<String, String>{'type': 'KeepAlive'});

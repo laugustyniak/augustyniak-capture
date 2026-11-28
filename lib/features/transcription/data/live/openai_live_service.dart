@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'dart:math' as math;
 import 'dart:typed_data';
 
 import 'live_ws_service.dart';
@@ -67,8 +68,45 @@ class OpenAiLiveService extends LiveWsService {
   Map<String, String> _partials(LiveSessionState s) =>
       (s.scratch['partials'] ??= <String, String>{}) as Map<String, String>;
 
-  void _syncPartial(LiveSessionState s) =>
-      s.partial = _partials(s).values.join(' ');
+  /// Item ids in the order the server committed them to the buffer.
+  List<String> _order(LiveSessionState s) =>
+      (s.scratch['order'] ??= <String>[]) as List<String>;
+
+  /// Finished items: id to transcript (empty for a failed one).
+  Map<String, String> _done(LiveSessionState s) =>
+      (s.scratch['done'] ??= <String, String>{}) as Map<String, String>;
+
+  /// Committed text is released in buffer order, never in arrival order: a
+  /// short item can finish before the long one before it. An item waiting for
+  /// a predecessor is shown as partial until it can be released.
+  void _rebuild(LiveSessionState s) {
+    final List<String> order = _order(s);
+    final Map<String, String> done = _done(s);
+    final Map<String, String> partials = _partials(s);
+    s.committed = '';
+    int i = 0;
+    while (i < order.length && done.containsKey(order[i])) {
+      s.commit(done[order[i]]!);
+      i++;
+    }
+    final List<String> tail = <String>[
+      for (int j = i; j < order.length; j++)
+        done[order[j]] ?? partials[order[j]] ?? '',
+      for (final MapEntry<String, String> e in partials.entries)
+        if (!order.contains(e.key)) e.value,
+    ];
+    s.partial = tail.where((String t) => t.isNotEmpty).join(' ');
+  }
+
+  void _finishItem(LiveSessionState s, Map<String, dynamic> message, String t) {
+    final String id = message['item_id']?.toString() ?? '';
+    _partials(s).remove(id);
+    final List<String> order = _order(s);
+    if (!order.contains(id)) order.add(id);
+    _done(s)[id] = t;
+    s.scratch['pending'] = math.max(0, _count(s, 'pending') - 1);
+    _rebuild(s);
+  }
 
   @override
   List<Object> encodeAudio(Uint8List chunk, LiveSessionState state) {
@@ -98,16 +136,22 @@ class OpenAiLiveService extends LiveWsService {
         final Map<String, String> partials = _partials(state);
         partials[id] =
             (partials[id] ?? '') + (message['delta']?.toString() ?? '');
-        _syncPartial(state);
+        _rebuild(state);
+      case 'input_audio_buffer.committed':
+        final String id = message['item_id']?.toString() ?? '';
+        final List<String> order = _order(state);
+        if (id.isEmpty || order.contains(id)) break;
+        final int after = order.indexOf(
+          message['previous_item_id']?.toString() ?? '',
+        );
+        order.insert(after < 0 ? order.length : after + 1, id);
       case 'conversation.item.input_audio_transcription.completed':
-        _partials(state).remove(message['item_id']?.toString() ?? '');
-        state.commit(message['transcript']?.toString() ?? '');
-        _syncPartial(state);
-        state.scratch['pending'] = _count(state, 'pending') - 1;
+        _finishItem(state, message, message['transcript']?.toString() ?? '');
       case 'conversation.item.input_audio_transcription.failed':
-        _partials(state).remove(message['item_id']?.toString() ?? '');
-        _syncPartial(state);
-        state.scratch['pending'] = _count(state, 'pending') - 1;
+        // A segment without text is a hole: the live text must not be vouched
+        // for, so `finish()` throws and the batch pipeline runs on the WAV.
+        state.incomplete = 'a segment could not be transcribed';
+        _finishItem(state, message, '');
       case 'error':
         final dynamic error = message['error'];
         state.error =
@@ -117,7 +161,9 @@ class OpenAiLiveService extends LiveWsService {
 
   @override
   List<Object> finishMessages(LiveSessionState state) {
-    if (_count(state, 'uncommitted') > 0) {
+    // The server rejects a commit of under 100 ms of audio, and that error
+    // would discard text that is otherwise complete. The sliver is dropped.
+    if (_count(state, 'uncommitted') >= sampleRate * 2 ~/ 10) {
       state.scratch['uncommitted'] = 0;
       state.scratch['pending'] = _count(state, 'pending') + 1;
       return <Object>[_commit];

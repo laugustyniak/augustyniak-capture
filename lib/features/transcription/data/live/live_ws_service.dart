@@ -27,6 +27,11 @@ class LiveSessionState {
   /// A provider-reported fatal error. The base class ends the session.
   String? error;
 
+  /// The provider reported a hole in the text (a segment it could not
+  /// transcribe) without ending the session. The live display carries on, but
+  /// `finish()` will not vouch for the text.
+  String? incomplete;
+
   /// Provider-owned bookkeeping (counters, per-item partials).
   final Map<String, Object?> scratch = <String, Object?>{};
 
@@ -105,12 +110,17 @@ abstract class LiveWsService implements LiveTranscriptionService {
   /// Frames that make the provider flush; may be empty.
   List<Object> finishMessages(LiveSessionState state);
 
+  /// Whether a **normal** (1000) close after `finish()` began is the provider's
+  /// own "done". Only Deepgram says so; elsewhere a close without the explicit
+  /// terminal message means the stream was cut and the tail may be missing.
+  bool get closeIsTerminal => false;
+
   /// Checked right after [finishMessages] was sent: true when the provider owes
   /// nothing more, so `finish()` need not wait for [isTerminal].
   bool isDrained(LiveSessionState state) => false;
 
   /// Whether [message] is the provider's answer to the end-of-stream request.
-  /// The socket closing is always terminal too.
+  /// The socket closing is terminal too, but only where [closeIsTerminal].
   bool isTerminal(Map<String, dynamic> message, LiveSessionState state);
 
   @override
@@ -144,6 +154,9 @@ class LiveWsSession implements LiveTranscriptionSession {
   bool _closed = false;
   bool _sentSinceTick = false;
 
+  /// First reason the session ended without a clean finish.
+  String? _failure;
+
   /// The provider's final/terminal signal (or a close after finish) arrived.
   bool _cleanEnd = false;
 
@@ -151,11 +164,22 @@ class LiveWsSession implements LiveTranscriptionSession {
   Stream<LiveTranscript> get updates => _updates.stream;
 
   Future<bool> _connect() async {
+    final Future<WebSocket> attempt = WebSocket.connect(
+      _service.buildUri().toString(),
+      headers: _service.headers(),
+    );
     try {
-      final WebSocket socket = await WebSocket.connect(
-        _service.buildUri().toString(),
-        headers: _service.headers(),
-      ).timeout(_service.connectTimeout);
+      final WebSocket socket;
+      try {
+        socket = await attempt.timeout(_service.connectTimeout);
+      } on TimeoutException {
+        // `timeout` does not cancel the handshake: a socket that opens later
+        // would stay open for nobody.
+        unawaited(
+          attempt.then<void>(_closeSocket, onError: (Object _) {}),
+        );
+        rethrow;
+      }
       if (_closed || _dead) {
         unawaited(_closeSocket(socket));
         return false;
@@ -163,9 +187,20 @@ class LiveWsSession implements LiveTranscriptionSession {
       _socket = socket;
       socket.listen(
         _onData,
-        onError: (Object _) => _die(),
-        // A close after finish() began is how some providers say "done".
-        onDone: () => _die(clean: _state.finishing && !_dead),
+        onError: (Object _) => _die(reason: 'socket error'),
+        onDone: () {
+          final int? code = socket.closeCode;
+          // A normal close after finish() began is how some providers say
+          // "done"; any other close is a cut stream.
+          _die(
+            clean:
+                _state.finishing &&
+                !_dead &&
+                _service.closeIsTerminal &&
+                code == WebSocketStatus.normalClosure,
+            reason: 'connection closed (code ${code ?? 'unknown'})',
+          );
+        },
         cancelOnError: true,
       );
       _open = true;
@@ -175,10 +210,21 @@ class LiveWsSession implements LiveTranscriptionSession {
       }
       _pendingBytes = 0;
       return true;
-    } catch (_) {
-      _die();
+    } catch (error) {
+      _die(reason: _connectFailure(error));
       return false;
     }
+  }
+
+  /// A reason fit for the log. A [WebSocketException]'s own text names the
+  /// request URI, so only its HTTP status is kept.
+  static String _connectFailure(Object error) {
+    if (error is TimeoutException) return 'connect timed out';
+    final Match? status = RegExp(
+      r'HTTP status code: (\d+)',
+    ).firstMatch(error.toString());
+    if (status != null) return 'connection refused (HTTP ${status.group(1)})';
+    return 'connection failed';
   }
 
   void _onData(dynamic data) {
@@ -197,7 +243,7 @@ class LiveWsSession implements LiveTranscriptionSession {
       return;
     }
     if (_state.error != null) {
-      _die();
+      _die(reason: _state.error);
       return;
     }
     _emit();
@@ -214,6 +260,7 @@ class LiveWsSession implements LiveTranscriptionSession {
         committed: _state.committed,
         partial: failed ? '' : _state.partial,
         failed: failed,
+        reason: failed ? _failure : null,
       ),
     );
   }
@@ -223,9 +270,13 @@ class LiveWsSession implements LiveTranscriptionSession {
   }
 
   /// The socket died or the provider reported a fatal error.
-  void _die({bool clean = false}) {
+  void _die({bool clean = false, String? reason}) {
     if (_dead) return;
-    if (clean) _cleanEnd = true;
+    if (clean) {
+      _cleanEnd = true;
+    } else {
+      _failure ??= reason;
+    }
     _dead = true;
     _open = false;
     _keepAlive?.cancel();
@@ -256,7 +307,7 @@ class LiveWsSession implements LiveTranscriptionSession {
       }
       _sentSinceTick = true;
     } catch (_) {
-      _die();
+      _die(reason: 'send failed');
     }
   }
 
@@ -304,6 +355,7 @@ class LiveWsSession implements LiveTranscriptionSession {
     try {
       if (_closed) throw const LiveTranscriptionIncomplete('cancelled');
       if (_dead) {
+        _failure ??= 'session ended';
         _state.finishing = true;
         await _closeUpdates();
       } else {
@@ -323,7 +375,11 @@ class LiveWsSession implements LiveTranscriptionSession {
           deadline.cancel();
         }
         _state.finishing = true;
-        clean = _cleanEnd;
+        clean = _cleanEnd && _state.incomplete == null;
+        if (!clean) {
+          _failure ??=
+              _state.incomplete ?? 'no final signal from the provider';
+        }
         text = _state.full;
         await _shutdown();
       }
@@ -333,7 +389,9 @@ class LiveWsSession implements LiveTranscriptionSession {
       clean = false;
       await _shutdown();
     }
-    if (!clean) throw const LiveTranscriptionIncomplete();
+    if (!clean) {
+      throw LiveTranscriptionIncomplete(_failure ?? 'incomplete');
+    }
     return text;
   }
 

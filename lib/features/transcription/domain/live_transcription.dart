@@ -11,11 +11,16 @@ class LiveTranscript {
     this.committed = '',
     this.partial = '',
     this.failed = false,
+    this.reason,
   });
 
   final String committed;
   final String partial;
   final bool failed;
+
+  /// Why the session died, for the log: a close code or the provider's own
+  /// error text. Never a URI, header or token.
+  final String? reason;
 }
 
 /// Streaming speech-to-text used **beside** recording, never instead of

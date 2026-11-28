@@ -256,7 +256,7 @@ void main() {
       },
     );
 
-    test('finish times out and returns the partial as best effort', () async {
+    test('finish times out and throws incomplete', () async {
       final LiveTranscriptionSession session = open(
         service(finishTimeout: const Duration(milliseconds: 200)),
       );
@@ -366,6 +366,112 @@ void main() {
       },
     );
 
+    test('a close with a failure code during finish is incomplete', () async {
+      final LiveTranscriptionSession session = open(service());
+      server.onFrame = (_Server s, Object frame) {
+        if (frame is String && _json(frame)['type'] == 'CloseStream') {
+          s.send(results('urwane', isFinal: true));
+          s.socket!.close(WebSocketStatus.internalServerError);
+        }
+      };
+      await server.connected;
+      session.addAudio(_pcm(64));
+      await expectLater(
+        session.finish(),
+        throwsA(
+          isA<LiveTranscriptionIncomplete>().having(
+            (LiveTranscriptionIncomplete e) => e.reason,
+            'reason',
+            contains('1011'),
+          ),
+        ),
+      );
+    });
+
+    test('a normal close after CloseStream is Deepgram\'s done', () async {
+      final LiveTranscriptionSession session = open(service());
+      server.onFrame = (_Server s, Object frame) {
+        if (frame is String && _json(frame)['type'] == 'CloseStream') {
+          s.send(results('komplet', isFinal: true));
+          s.socket!.close(WebSocketStatus.normalClosure);
+        }
+      };
+      await server.connected;
+      session.addAudio(_pcm(64));
+      expect(await session.finish(), 'komplet');
+    });
+
+    test('a connect timeout closes the socket that opens late', () async {
+      server.gate = Completer<void>();
+      open(
+        DeepgramLiveService(
+          endpoint: server.uri,
+          bearerToken: 'dg-key',
+          connectTimeout: const Duration(milliseconds: 100),
+          keepAlive: null,
+        ),
+      );
+      await _until(() => server.request != null, what: 'request');
+      // Past the timeout: the session has given up on this handshake.
+      await Future<void>.delayed(const Duration(milliseconds: 300));
+      server.gate!.complete();
+      await server.connected;
+      await _until(
+        () => server.socket!.closeCode != null,
+        what: 'late socket closed',
+      );
+    });
+
+    test('a provider Error reaches the failed update and finish', () async {
+      final LiveTranscriptionSession session = open(service());
+      final List<LiveTranscript> seen = <LiveTranscript>[];
+      session.updates.listen(seen.add);
+      await server.connected;
+      server.send(<String, Object?>{
+        'type': 'Error',
+        'description': 'quota exhausted',
+      });
+      await _until(() => seen.any((LiveTranscript t) => t.failed));
+      expect(seen.last.reason, 'quota exhausted');
+      await expectLater(
+        session.finish(),
+        throwsA(
+          isA<LiveTranscriptionIncomplete>().having(
+            (LiveTranscriptionIncomplete e) => e.reason,
+            'reason',
+            'quota exhausted',
+          ),
+        ),
+      );
+    });
+
+    test('a refused upgrade names the status, never the token or URI', () async {
+      final HttpServer refuser = await HttpServer.bind(
+        InternetAddress.loopbackIPv4,
+        0,
+      );
+      refuser.listen((HttpRequest request) {
+        request.response
+          ..statusCode = HttpStatus.unauthorized
+          ..close();
+      });
+      addTearDown(() => refuser.close(force: true));
+      final LiveTranscriptionSession session = open(
+        DeepgramLiveService(
+          endpoint: Uri.parse('ws://127.0.0.1:${refuser.port}/stream'),
+          bearerToken: 'sentinel-9z',
+          keepAlive: null,
+        ),
+      );
+      final List<LiveTranscript> seen = <LiveTranscript>[];
+      session.updates.listen(seen.add);
+      await _until(() => seen.any((LiveTranscript t) => t.failed));
+      final String reason = seen.last.reason!;
+      expect(reason, contains('401'));
+      expect(reason, isNot(contains('sentinel-9z')));
+      expect(reason, isNot(contains('127.0.0.1')));
+    });
+
     test('an idle session sends KeepAlive', () async {
       open(service(keepAlive: const Duration(milliseconds: 50)));
       await server.connected;
@@ -472,7 +578,7 @@ void main() {
       await _until(() => seen.any((LiveTranscript t) => t.failed));
     });
 
-    test('a drop keeps the committed text and finish returns it', () async {
+    test('a drop keeps the committed text and finish throws incomplete', () async {
       final LiveTranscriptionSession session = open(service());
       final List<LiveTranscript> seen = <LiveTranscript>[];
       session.updates.listen(seen.add);
@@ -486,6 +592,25 @@ void main() {
       await server.socket!.close(WebSocketStatus.goingAway);
       await _until(() => seen.any((LiveTranscript t) => t.failed));
       expect(seen.last.committed, 'Zapis');
+      await expectLater(
+        session.finish(),
+        throwsA(isA<LiveTranscriptionIncomplete>()),
+      );
+    });
+
+    test('a normal close without the finished marker is incomplete', () async {
+      final LiveTranscriptionSession session = open(service());
+      server.onFrame = (_Server s, Object frame) {
+        if (frame is String && frame.isEmpty) {
+          s.send(<String, Object?>{
+            'tokens': <Object>[
+              <String, Object?>{'text': 'ucięte', 'is_final': true},
+            ],
+          });
+          s.socket!.close(WebSocketStatus.normalClosure);
+        }
+      };
+      await server.connected;
       await expectLater(
         session.finish(),
         throwsA(isA<LiveTranscriptionIncomplete>()),
@@ -538,7 +663,7 @@ void main() {
       expect(q['model_id'], 'scribe_v2_realtime');
       expect(q['audio_format'], 'pcm_16000');
       expect(q['language_code'], 'pl');
-      expect(q['commit_strategy'], 'vad');
+      expect(q['commit_strategy'], 'manual');
     });
 
     test('language_code is left out without a language', () async {
@@ -606,10 +731,70 @@ void main() {
           }
         };
         await server.connected;
+        session.addAudio(_pcm(4800));
         expect(await session.finish(), 'całość');
         final Map<String, dynamic> last = _json(server.texts.last);
         expect(last['audio_base_64'], '');
         expect(last['commit'], true);
+      },
+    );
+
+    test('commits every commitEvery of audio, flagged on the chunk', () async {
+      final LiveTranscriptionSession session = open(
+        ElevenLabsLiveService(
+          endpoint: server.uri,
+          bearerToken: 'k',
+          commitEvery: const Duration(seconds: 1),
+        ),
+      );
+      await server.connected;
+      session.addAudio(_pcm(16000)); // 0.5 s: no commit
+      session.addAudio(_pcm(16000)); // 1 s: commit
+      await _until(() => server.texts.length == 2, what: 'chunks');
+      expect(_json(server.texts[0])['commit'], false);
+      expect(_json(server.texts[1])['commit'], true);
+    });
+
+    test(
+      'a commit answered after finish began does not end the wait early',
+      () async {
+        final LiveTranscriptionSession session = open(
+          ElevenLabsLiveService(
+            endpoint: server.uri,
+            bearerToken: 'k',
+            commitEvery: const Duration(seconds: 1),
+            finishTimeout: const Duration(seconds: 5),
+          ),
+        );
+        final List<Map<String, dynamic>> commits = <Map<String, dynamic>>[];
+        server.onFrame = (_Server s, Object frame) {
+          if (frame is String && _json(frame)['commit'] == true) {
+            commits.add(_json(frame));
+          }
+        };
+        final List<LiveTranscript> seen = <LiveTranscript>[];
+        session.updates.listen(seen.add);
+        await server.connected;
+        session.addAudio(_pcm(32000)); // 1 s: a commit goes out
+        await _until(() => commits.length == 1, what: 'periodic commit');
+        session.addAudio(_pcm(9600)); // the tail
+        final Future<String> done = session.finish();
+        await _until(() => commits.length == 2, what: 'end commit');
+        // The first answer belongs to the earlier commit: it must not be
+        // taken for the end. Delivered alone, so the client has acted on it
+        // before the second one exists.
+        server.send(<String, Object?>{
+          'message_type': 'committed_transcript',
+          'text': 'wcześniej',
+        });
+        await _until(
+          () => seen.any((LiveTranscript t) => t.committed == 'wcześniej'),
+        );
+        server.send(<String, Object?>{
+          'message_type': 'committed_transcript',
+          'text': 'na koniec',
+        });
+        expect(await done, 'wcześniej na koniec');
       },
     );
 
@@ -626,7 +811,7 @@ void main() {
     });
 
     test(
-      'a drop keeps committed text; finish timeout returns the partial',
+      'a drop keeps committed text; finish timeout throws incomplete',
       () async {
         final LiveTranscriptionSession session = open(
           ElevenLabsLiveService(
@@ -647,6 +832,7 @@ void main() {
           'text': 'dwa',
         });
         await _until(() => seen.any((LiveTranscript t) => t.partial == 'dwa'));
+        session.addAudio(_pcm(4800));
         // The server never answers the commit.
         await expectLater(
           session.finish(),
@@ -763,7 +949,7 @@ void main() {
         }
       };
       await server.connected;
-      session.addAudio(_pcm(100));
+      session.addAudio(_pcm(4800));
       expect(await session.finish(), 'ogon');
     });
 
@@ -798,10 +984,79 @@ void main() {
         'delta': 'niedokończone',
       });
       await _until(() => seen.isNotEmpty);
-      session.addAudio(_pcm(100));
+      session.addAudio(_pcm(4800));
       await expectLater(
         session.finish(),
         throwsA(isA<LiveTranscriptionIncomplete>()),
+      );
+    });
+
+    test('a failed transcription is a hole: finish throws', () async {
+      final LiveTranscriptionSession session = open(service());
+      server.onFrame = (_Server s, Object frame) {
+        if (frame is String &&
+            _json(frame)['type'] == 'input_audio_buffer.commit') {
+          s.send(<String, Object?>{
+            'type': 'conversation.item.input_audio_transcription.failed',
+            'item_id': 'x',
+          });
+        }
+      };
+      await server.connected;
+      session.addAudio(_pcm(4800));
+      await expectLater(
+        session.finish(),
+        throwsA(isA<LiveTranscriptionIncomplete>()),
+      );
+    });
+
+    test('committed text follows buffer order, not arrival order', () async {
+      final LiveTranscriptionSession session = open(service());
+      final List<LiveTranscript> seen = <LiveTranscript>[];
+      session.updates.listen(seen.add);
+      await server.connected;
+      server.send(<String, Object?>{
+        'type': 'input_audio_buffer.committed',
+        'item_id': 'a',
+        'previous_item_id': null,
+      });
+      server.send(<String, Object?>{
+        'type': 'input_audio_buffer.committed',
+        'item_id': 'b',
+        'previous_item_id': 'a',
+      });
+      server.send(<String, Object?>{
+        'type': 'conversation.item.input_audio_transcription.completed',
+        'item_id': 'b',
+        'transcript': 'drugie',
+      });
+      await _until(() => seen.isNotEmpty);
+      // b is held back behind a: shown as partial, not committed.
+      expect(seen.last.committed, '');
+      expect(seen.last.partial, 'drugie');
+      server.send(<String, Object?>{
+        'type': 'conversation.item.input_audio_transcription.completed',
+        'item_id': 'a',
+        'transcript': 'pierwsze',
+      });
+      await _until(
+        () => seen.any(
+          (LiveTranscript t) => t.committed == 'pierwsze drugie',
+        ),
+      );
+      expect(seen.last.partial, '');
+    });
+
+    test('finish does not commit a sliver under 100 ms', () async {
+      final LiveTranscriptionSession session = open(service());
+      await server.connected;
+      session.addAudio(_pcm(4000)); // 83 ms at 24 kHz
+      expect(await session.finish().timeout(const Duration(seconds: 2)), '');
+      expect(
+        server.texts.any(
+          (String t) => _json(t)['type'] == 'input_audio_buffer.commit',
+        ),
+        isFalse,
       );
     });
 

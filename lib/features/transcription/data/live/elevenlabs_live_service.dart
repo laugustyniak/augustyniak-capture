@@ -1,11 +1,17 @@
 import 'dart:convert';
+import 'dart:math' as math;
 import 'dart:typed_data';
 
 import 'live_ws_service.dart';
 
 /// ElevenLabs Scribe realtime. Audio goes as base64 inside JSON text frames;
-/// results are `partial_transcript` / `committed_transcript`. Unverified: the
-/// end-of-stream request (an empty chunk with `commit: true`).
+/// results are `partial_transcript` / `committed_transcript`. Commits are
+/// **manual**: the adapter commits every [commitEvery] of audio and once at the
+/// end, and counts the answers, so the end is known when every commit it sent
+/// was answered. (With `commit_strategy=vad` a commit the server made on its own
+/// is indistinguishable from the answer to ours.) Unverified: the commit-flagged
+/// chunks, the end-of-stream request being an empty one, and the minimum audio
+/// a commit accepts.
 class ElevenLabsLiveService extends LiveWsService {
   ElevenLabsLiveService({
     required super.endpoint,
@@ -15,7 +21,10 @@ class ElevenLabsLiveService extends LiveWsService {
     super.connectTimeout,
     super.finishTimeout,
     super.maxBufferedSeconds,
+    this.commitEvery = const Duration(seconds: 15),
   });
+
+  final Duration commitEvery;
 
   static const Set<String> _textTypes = <String>{
     'session_started',
@@ -33,7 +42,7 @@ class ElevenLabsLiveService extends LiveWsService {
       'audio_format': 'pcm_$sampleRate',
       if (language?.trim().isNotEmpty ?? false)
         'language_code': language!.trim(),
-      'commit_strategy': 'vad',
+      'commit_strategy': 'manual',
       ...endpoint.queryParameters,
     },
   );
@@ -55,9 +64,15 @@ class ElevenLabsLiveService extends LiveWsService {
       });
 
   @override
-  List<Object> encodeAudio(Uint8List chunk, LiveSessionState state) => <Object>[
-    _chunk(base64Encode(chunk), commit: false),
-  ];
+  List<Object> encodeAudio(Uint8List chunk, LiveSessionState state) {
+    final int uncommitted = _count(state, 'uncommitted') + chunk.length;
+    final bool commit = uncommitted >= sampleRate * 2 * commitEvery.inSeconds;
+    state.scratch['uncommitted'] = commit ? 0 : uncommitted;
+    if (commit) state.scratch['pending'] = _count(state, 'pending') + 1;
+    return <Object>[_chunk(base64Encode(chunk), commit: commit)];
+  }
+
+  int _count(LiveSessionState s, String key) => (s.scratch[key] as int?) ?? 0;
 
   @override
   void handle(Map<String, dynamic> message, LiveSessionState state) {
@@ -70,6 +85,9 @@ class ElevenLabsLiveService extends LiveWsService {
       case 'committed_transcript_with_timestamps':
         state.commit(text);
         state.partial = '';
+        // Clamped: an answer nobody asked for must not cancel a commit that is
+        // still owed.
+        state.scratch['pending'] = math.max(0, _count(state, 'pending') - 1);
       default:
         if (!_textTypes.contains(type) &&
             (message['error'] != null ||
@@ -82,14 +100,25 @@ class ElevenLabsLiveService extends LiveWsService {
   }
 
   @override
-  List<Object> finishMessages(LiveSessionState state) => <Object>[
-    _chunk('', commit: true),
-  ];
+  List<Object> finishMessages(LiveSessionState state) {
+    // Under 100 ms (or nothing) uncommitted: nothing worth a commit, which
+    // could only draw an error. Commits already in flight are still awaited.
+    if (_count(state, 'uncommitted') < sampleRate * 2 ~/ 10) {
+      return const <Object>[];
+    }
+    state.scratch['uncommitted'] = 0;
+    state.scratch['pending'] = _count(state, 'pending') + 1;
+    return <Object>[_chunk('', commit: true)];
+  }
+
+  @override
+  bool isDrained(LiveSessionState state) => _count(state, 'pending') <= 0;
 
   @override
   bool isTerminal(Map<String, dynamic> message, LiveSessionState state) {
     final String type = message['message_type']?.toString() ?? '';
-    return type == 'committed_transcript' ||
-        type == 'committed_transcript_with_timestamps';
+    return (type == 'committed_transcript' ||
+            type == 'committed_transcript_with_timestamps') &&
+        _count(state, 'pending') <= 0;
   }
 }
