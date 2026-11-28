@@ -144,6 +144,9 @@ class LiveWsSession implements LiveTranscriptionSession {
   bool _closed = false;
   bool _sentSinceTick = false;
 
+  /// The provider's final/terminal signal (or a close after finish) arrived.
+  bool _cleanEnd = false;
+
   @override
   Stream<LiveTranscript> get updates => _updates.stream;
 
@@ -161,7 +164,8 @@ class LiveWsSession implements LiveTranscriptionSession {
       socket.listen(
         _onData,
         onError: (Object _) => _die(),
-        onDone: _die,
+        // A close after finish() began is how some providers say "done".
+        onDone: () => _die(clean: _state.finishing && !_dead),
         cancelOnError: true,
       );
       _open = true;
@@ -198,6 +202,7 @@ class LiveWsSession implements LiveTranscriptionSession {
     }
     _emit();
     if (_state.finishing && _service.isTerminal(message, _state)) {
+      _cleanEnd = true;
       _finishTerminal();
     }
   }
@@ -218,8 +223,9 @@ class LiveWsSession implements LiveTranscriptionSession {
   }
 
   /// The socket died or the provider reported a fatal error.
-  void _die() {
+  void _die({bool clean = false}) {
     if (_dead) return;
+    if (clean) _cleanEnd = true;
     _dead = true;
     _open = false;
     _keepAlive?.cancel();
@@ -293,37 +299,42 @@ class LiveWsSession implements LiveTranscriptionSession {
 
   @override
   Future<String> finish() async {
+    bool clean = false;
+    String text = '';
     try {
-      if (_closed) return _state.full;
+      if (_closed) throw const LiveTranscriptionIncomplete('cancelled');
       if (_dead) {
         _state.finishing = true;
         await _closeUpdates();
-        return _state.full;
-      }
-      final Timer deadline = Timer(_service.finishTimeout, _finishTerminal);
-      try {
-        final bool connected = await _connected.timeout(
-          _service.finishTimeout,
-          onTimeout: () => false,
-        );
-        if (connected && !_dead) {
-          _state.finishing = true;
-          final List<Object> frames = _service.finishMessages(_state);
-          _send(frames);
-          if (!_dead && !_service.isDrained(_state)) await _terminal.future;
+      } else {
+        final Timer deadline = Timer(_service.finishTimeout, _finishTerminal);
+        try {
+          final bool connected = await _connected.timeout(
+            _service.finishTimeout,
+            onTimeout: () => false,
+          );
+          if (connected && !_dead) {
+            _state.finishing = true;
+            _send(_service.finishMessages(_state));
+            if (!_dead && _service.isDrained(_state)) _cleanEnd = true;
+            if (!_dead && !_cleanEnd) await _terminal.future;
+          }
+        } finally {
+          deadline.cancel();
         }
-      } finally {
-        deadline.cancel();
+        _state.finishing = true;
+        clean = _cleanEnd;
+        text = _state.full;
+        await _shutdown();
       }
-      _state.finishing = true;
-      final String text = _state.full;
-      await _shutdown();
-      return text;
+    } on LiveTranscriptionIncomplete {
+      rethrow;
     } catch (_) {
-      final String text = _state.full;
+      clean = false;
       await _shutdown();
-      return text;
     }
+    if (!clean) throw const LiveTranscriptionIncomplete();
+    return text;
   }
 
   @override

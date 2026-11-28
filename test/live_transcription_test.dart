@@ -269,7 +269,10 @@ void main() {
       });
       await heard.future;
       // The server never answers CloseStream.
-      expect(await session.finish(), 'pierwsze drugie');
+      await expectLater(
+        session.finish(),
+        throwsA(isA<LiveTranscriptionIncomplete>()),
+      );
     });
 
     test(
@@ -290,7 +293,10 @@ void main() {
         expect(failed.committed, 'zapisane');
         // Audio after the drop is swallowed, never thrown.
         session.addAudio(_pcm(100));
-        expect(await session.finish(), 'zapisane');
+        await expectLater(
+          session.finish(),
+          throwsA(isA<LiveTranscriptionIncomplete>()),
+        );
       },
     );
 
@@ -307,7 +313,10 @@ void main() {
       await server.socket!.close(WebSocketStatus.goingAway);
       await _until(() => seen.any((LiveTranscript t) => t.failed));
       expect(seen.last.partial, '');
-      expect(await session.finish(), 'zapisane');
+      await expectLater(
+        session.finish(),
+        throwsA(isA<LiveTranscriptionIncomplete>()),
+      );
     });
 
     test('a provider Error message ends the session as failed', () async {
@@ -329,7 +338,10 @@ void main() {
         session.updates.listen(seen.add);
         await _until(() => seen.any((LiveTranscript t) => t.failed));
         session.addAudio(_pcm(10));
-        expect(await session.finish(), '');
+        await expectLater(
+          session.finish(),
+          throwsA(isA<LiveTranscriptionIncomplete>()),
+        );
         server = await _Server.start();
       },
     );
@@ -474,7 +486,10 @@ void main() {
       await server.socket!.close(WebSocketStatus.goingAway);
       await _until(() => seen.any((LiveTranscript t) => t.failed));
       expect(seen.last.committed, 'Zapis');
-      expect(await session.finish(), 'Zapis');
+      await expectLater(
+        session.finish(),
+        throwsA(isA<LiveTranscriptionIncomplete>()),
+      );
     });
 
     test('finish times out without the finished marker', () async {
@@ -492,7 +507,10 @@ void main() {
         ],
       });
       await _until(() => server.socket != null);
-      expect(await session.finish(), 'Tyle');
+      await expectLater(
+        session.finish(),
+        throwsA(isA<LiveTranscriptionIncomplete>()),
+      );
     });
 
     test('cancel closes the socket', () async {
@@ -630,7 +648,10 @@ void main() {
         });
         await _until(() => seen.any((LiveTranscript t) => t.partial == 'dwa'));
         // The server never answers the commit.
-        expect(await session.finish(), 'jeden dwa');
+        await expectLater(
+          session.finish(),
+          throwsA(isA<LiveTranscriptionIncomplete>()),
+        );
       },
     );
 
@@ -778,7 +799,10 @@ void main() {
       });
       await _until(() => seen.isNotEmpty);
       session.addAudio(_pcm(100));
-      expect(await session.finish(), 'niedokończone');
+      await expectLater(
+        session.finish(),
+        throwsA(isA<LiveTranscriptionIncomplete>()),
+      );
     });
 
     test('an error event ends the session as failed', () async {
@@ -807,7 +831,10 @@ void main() {
       await server.socket!.close(WebSocketStatus.goingAway);
       await _until(() => seen.any((LiveTranscript t) => t.failed));
       expect(seen.last.committed, 'zostaje');
-      expect(await session.finish(), 'zostaje');
+      await expectLater(
+        session.finish(),
+        throwsA(isA<LiveTranscriptionIncomplete>()),
+      );
     });
 
     test('cancel closes the socket', () async {

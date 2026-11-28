@@ -47,15 +47,28 @@ class DisabledLiveTranscriptionService implements LiveTranscriptionService {
       throw StateError('Live dictation is not configured.');
 }
 
+/// [LiveTranscriptionSession.finish] could not vouch for the text it has.
+class LiveTranscriptionIncomplete implements Exception {
+  const LiveTranscriptionIncomplete([this.reason = 'incomplete']);
+
+  final String reason;
+
+  @override
+  String toString() => 'LiveTranscriptionIncomplete: $reason';
+}
+
 abstract class LiveTranscriptionSession {
   Stream<LiveTranscript> get updates;
 
   /// Feed little-endian 16-bit mono PCM. Never throws.
   void addAudio(Uint8List pcm16le);
 
-  /// Flush and return the full text (committed plus any unfinalised partial).
-  /// Bounded by the session's timeout; returns what it has if the provider
-  /// never answers or the socket died.
+  /// Flush and return the full committed text. Returns only on a **clean**
+  /// finish: the provider sent its final or terminal signal. Throws
+  /// [LiveTranscriptionIncomplete] when the session died (drop, error, refused
+  /// connection) or no such signal arrived before the session's timeout, so the
+  /// caller falls back to the batch pipeline instead of trusting a text that may
+  /// be missing its tail.
   Future<String> finish();
 
   /// Drop the session without waiting for a result.
