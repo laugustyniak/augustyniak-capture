@@ -93,6 +93,7 @@ import '../../timer/domain/focus_session.dart';
 import '../../timer/presentation/focus_timer_controller.dart';
 import '../../timer/presentation/timer_tab.dart';
 import '../../work_dashboard/presentation/work_dashboard_tab.dart';
+import '../../transcription/domain/live_transcription.dart';
 import '../../transcription/data/audio_splitter.dart';
 import '../../transcription/data/chunked_transcription_service.dart';
 import '../../transcription/data/audio_decoder.dart';
@@ -440,6 +441,8 @@ class _RecordingsPageState extends State<RecordingsPage>
     );
     controller = RecordingsController(
       repository: repository,
+      // A resolver: a Models change reaches the next take, never a running one.
+      liveTranscription: () => settings.liveTranscriptionService,
       gamificationController: gamification,
       // Desktop only, like the hotkeys that drive it; a phone has its own
       // screenshot gesture and an image upload already takes its result.
@@ -1038,11 +1041,16 @@ class _RecordingsPageState extends State<RecordingsPage>
     // the binding ceiling moves with both: `gpt-4o-transcribe` truncates at
     // roughly eight minutes, while whisper-1 only has 25 MB to spend — nearly an
     // hour at 64 kbps, half that at 128.
+    // A live take is written as PCM (16 bits per sample), not AAC, so the
+    // upload ceiling is derived from that bitrate while live is available.
+    final LiveTranscriptionService live = settings.liveTranscriptionService;
     controller.recordingLimit = _audioSplitter.isAvailable
         ? null
         : TranscriptionLimits.forRequest(
             model: settings.activeProfile?.model,
-            audio: settings.audio,
+            audio: live.isAvailable
+                ? settings.audio.copyWith(bitRate: live.sampleRate * 16)
+                : settings.audio,
           );
     controller.enrichmentService = settings.enrichmentService;
     controller.connectionReasoner = settings.enrichmentService is ConnectionReasoner

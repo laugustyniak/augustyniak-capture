@@ -748,7 +748,10 @@ class _ConfigTabState extends State<ConfigTab> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: <Widget>[
-            InfoRow(label: 'CODEC', value: 'AAC-LC · .m4a (fixed)'),
+            InfoRow(
+              label: 'CODEC',
+              value: 'AAC-LC · .m4a (fixed; WAV PCM when live dictation is on)',
+            ),
             Divider(color: Console.border, height: 22),
             _ChoiceRow<int>(
               label: 'SAMPLE RATE',
