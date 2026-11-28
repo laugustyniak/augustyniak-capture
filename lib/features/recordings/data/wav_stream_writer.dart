@@ -2,6 +2,8 @@ import 'dart:async';
 import 'dart:io';
 import 'dart:typed_data';
 
+import 'package:flutter/foundation.dart' show visibleForTesting;
+
 /// Writes a live PCM stream to a `.wav` file that is **readable at every
 /// moment**, which is what lets a live take keep the persist-before-process
 /// guarantee.
@@ -14,6 +16,10 @@ import 'dart:typed_data';
 class WavStreamWriter {
   WavStreamWriter._(this._file, this._raf);
 
+  /// For tests: a writer over a [RandomAccessFile] that can be made to fail.
+  @visibleForTesting
+  WavStreamWriter.forTesting(this._file, this._raf);
+
   static const int headerBytes = 44;
   static const int _unknown = 0xFFFFFFFF;
 
@@ -25,7 +31,7 @@ class WavStreamWriter {
 
   File get file => _file;
 
-  /// PCM bytes accepted so far (the header is not counted).
+  /// PCM bytes written so far (the header is not counted).
   int get bytesWritten => _dataBytes;
 
   /// Creates [file] and writes the open-ended header. 16-bit little-endian PCM.
@@ -70,10 +76,12 @@ class WavStreamWriter {
   /// The returned future carries an IO failure: await it or catch it.
   Future<void> write(Uint8List chunk) {
     if (_closed) return Future<void>.value();
-    _dataBytes += chunk.length;
     final Future<void> next = _tail.then((_) async {
       await _raf.writeFrom(chunk);
       await _raf.flush();
+      // Counted only once it is on disk: the sizes patched into the header at
+      // close must describe bytes that exist.
+      _dataBytes += chunk.length;
     });
     _tail = next.catchError((Object _) {});
     return next;

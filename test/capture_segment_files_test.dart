@@ -91,4 +91,19 @@ void main() {
     expect(orphans, hasLength(1));
     expect(orphans.single.id, 'lost-1');
   });
+
+  test('findOrphans skips a header-only wav, adopts one with audio', () async {
+    await File(
+      p.join(dir.path, 'header-only.wav'),
+    ).writeAsBytes(List<int>.filled(44, 0));
+    await File(
+      p.join(dir.path, 'live-take.wav'),
+    ).writeAsBytes(List<int>.filled(45, 0));
+
+    final List<Recording> orphans = await repository.findOrphans(<Recording>[]);
+
+    expect(orphans.map((Recording r) => p.basename(r.filePath)), <String>[
+      'live-take.wav',
+    ]);
+  });
 }

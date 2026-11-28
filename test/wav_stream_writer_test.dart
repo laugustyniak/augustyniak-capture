@@ -115,4 +115,52 @@ void main() {
     expect(file.lengthSync(), 54);
     expect(header(file).getUint32(40, Endian.little), 10);
   });
+
+  test('a failed write is not counted into the patched sizes', () async {
+    final RandomAccessFile real = await file.open(mode: FileMode.write);
+    final _FlakyRaf flaky = _FlakyRaf(real);
+    final WavStreamWriter writer = WavStreamWriter.forTesting(file, flaky);
+    await writer.write(pcm(10, 1));
+    flaky.failNext = true;
+    await expectLater(writer.write(pcm(6, 2)), throwsA(isA<IOException>()));
+    expect(writer.bytesWritten, 10);
+    await writer.close();
+    expect(header(file).getUint32(40, Endian.little), 10);
+  });
+}
+
+/// Delegates to a real file but can refuse the next write.
+class _FlakyRaf implements RandomAccessFile {
+  _FlakyRaf(this._real);
+
+  final RandomAccessFile _real;
+  bool failNext = false;
+
+  @override
+  Future<RandomAccessFile> writeFrom(
+    List<int> buffer, [
+    int start = 0,
+    int? end,
+  ]) {
+    if (failNext) {
+      failNext = false;
+      return Future<RandomAccessFile>.error(
+        const FileSystemException('disk full'),
+      );
+    }
+    return _real.writeFrom(buffer, start, end);
+  }
+
+  @override
+  Future<RandomAccessFile> flush() => _real.flush();
+
+  @override
+  Future<RandomAccessFile> setPosition(int position) =>
+      _real.setPosition(position);
+
+  @override
+  Future<void> close() => _real.close();
+
+  @override
+  dynamic noSuchMethod(Invocation invocation) => super.noSuchMethod(invocation);
 }
