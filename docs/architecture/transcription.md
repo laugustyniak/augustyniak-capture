@@ -97,6 +97,51 @@ adb shell am instrument -w ai.augustyniak.capture.test/androidx.test.runner.Andr
 
 **Transcription** (`features/transcription/data/transcription_service.dart`): `TranscriptionService` interface with two remote impls. `DisabledTranscriptionService` throws `TranscriptionNotConfiguredException`; it is the fallback whenever no provider profile is active. `HttpWhisperTranscriptionService` POSTs `multipart/form-data` field `file` to a configurable endpoint, optional bearer token, expects `{"text": ...}` (falls back to `transcript`).
 
+## Live dictation
+
+Streaming speech-to-text **beside** recording (#481), selected by an active `ProfileKind.liveTranscription` profile (`AppSettings.activeLiveProfileId`, the Models tab's third section). It does not replace persistence or the batch pipeline: the WAV is written to disk chunk by chunk regardless, and any failure of the live path means the take is transcribed after stop like any other. The capture-side order is in `docs/architecture/capture-pipeline.md#live-dictation-capture`; the endpoint guard is in `docs/architecture/settings-security.md`.
+
+**The seam** (`transcription/domain/live_transcription.dart`). `LiveTranscriptionService` (`isAvailable`, `sampleRate`, `start()`) and `LiveTranscriptionSession` (`updates`, `addAudio`, `finish`, `cancel`). `DisabledLiveTranscriptionService` is the default: `isAvailable` false, `start()` throws, so an unconfigured install records m4a exactly as before. `LiveTranscript` is `committed` (text the provider will not revise), `partial` (the current guess, replaced by every update) and `failed` plus an optional `reason` (the session died; the screen says live is off and the take is transcribed after stop; the reason is a close code, an HTTP status or the provider's own error text, **never a URI, header or token**, because the controller logs it). `SettingsController.liveTranscriptionService` is a resolver cached by signature, like `transcriptionService`; the controller takes a `Function()`, so a Models change only affects takes started afterwards.
+
+**The adapters** (`transcription/data/live/`). `LiveWsService` owns the connection (`dart:io` `WebSocket.connect`, no new dependency), and a provider subclass states only its wire protocol (`buildUri`, `headers`, `openMessages`, `encodeAudio`, `handle`, `finishMessages`, `isDrained`, `isTerminal`, optional keepalive). `start()` returns at once and connects in the background; audio is buffered (30 s, oldest dropped) until the socket opens. `addAudio` never throws. A socket error, close or provider error emits `failed: true` (with a `reason`) with the committed text kept and the unfinalised partial dropped (a guess from a dead stream is not text the provider committed to). **Provider by host** (`live_provider_factory.dart`, `liveProviderForHost`): `deepgram.com`, `soniox.com`, `elevenlabs.io`, `openai.com` (and subdomains); an unknown host gives the disabled service rather than a guessed protocol. A connect that times out closes the socket if the handshake completes late (`WebSocket.connect(...).timeout` does not cancel it). The factory's `provider:` override exists so tests can point an adapter at a loopback `ws://` server.
+
+**`finish()` contract.** It sends the provider's end frames and waits for the provider's final or terminal signal, bounded by `finishTimeout` (default 8 s). It **returns the full committed text, partial included, only on a clean finish**. It **throws `LiveTranscriptionIncomplete`** (its `reason` says why) when the session died before finishing (drop, error, refused connection), when it was cancelled, when the provider reported a hole (`LiveSessionState.incomplete`: OpenAI `…transcription.failed`), or when no final signal arrived before the timeout. **A socket close is a terminal signal only for Deepgram (`closeIsTerminal`) and only with code 1000**; for the others a close during finish is a cut stream, and a 1006/1011 close never counts as complete anywhere. The controller turns that into `null` and runs the batch processor on the WAV: a text that may be missing its tail is never trusted. The controller bounds its own wait for the future at 20 s (`liveResultTimeout`) on top of the session's 8 s.
+
+**Keepalive per provider** (sent only when no audio went out in the interval, and not once `finishing`):
+
+| Provider | Keepalive |
+| --- | --- |
+| Deepgram | `{"type":"KeepAlive"}` every 5 s (server closes after about 10 s of silence) |
+| Soniox | `{"type":"keepalive"}` every 15 s (documented maximum gap 40 s) |
+| ElevenLabs | none |
+| OpenAI | none |
+
+**Pause.** `toggleRecordingPause` calls `recorder.pause()`, which stops the chunks; the session sees a gap with no audio. Deepgram and Soniox ride it out on the keepalive. **ElevenLabs and OpenAI have no keepalive here and may drop the socket on a long pause**; that turns into `failed` (the log line carries the close code, so the cause is visible), and the take falls back to batch at stop. Whether `pause()` actually silences the stream on the pinned `record_linux` fork has not been exercised in stream mode.
+
+**Per provider** (endpoint, auth, framing, end of stream):
+
+| Provider | Endpoint, auth | Audio | Ends with |
+| --- | --- | --- | --- |
+| Deepgram Nova-3 | `wss://api.deepgram.com/v1/listen?model=…&encoding=linear16&sample_rate=16000&interim_results=true…`, `Authorization: Token <key>` | binary PCM16 frames | `Finalize`, `CloseStream`; terminal is `Metadata` or a close |
+| Soniox | `wss://stt-rt.soniox.com/transcribe-websocket`, `Authorization: Bearer` and `api_key` in the first config frame | binary frames; tokens concatenated verbatim, `<end>`/`<fin>` dropped | `{"type":"finalize"}`, then an **empty text frame**; terminal is `finished: true` |
+| ElevenLabs Scribe realtime | `wss://api.elevenlabs.io/v1/speech-to-text/realtime?model_id=…&audio_format=pcm_16000&commit_strategy=manual`, `xi-api-key` | JSON text frames, `input_audio_chunk` with base64; the adapter commits every 15 s (`commit: true` on the chunk) | an empty chunk with `commit: true` (only if at least 100 ms is uncommitted); terminal is the `committed_transcript` that answers the last commit **sent**: commits are counted, so an earlier answer arriving late does not end the wait (with `commit_strategy=vad` a server-made commit is indistinguishable from the answer to ours) |
+| OpenAI `gpt-live-transcribe` | `wss://api.openai.com/v1/realtime?intent=transcription`, `Authorization: Bearer`, **24 kHz** | JSON `input_audio_buffer.append` with base64; no server VAD, so the adapter commits every 15 s | a commit (only if at least 100 ms is uncommitted: the server rejects less, and that error would discard complete text); terminal is the last pending `…transcription.completed`/`failed`. Committed text is released **in buffer order** (`input_audio_buffer.committed` `item_id`/`previous_item_id`), not arrival order; a `failed` item is a hole and `finish()` throws |
+
+**Verified only against the vendors' docs of 2026-11-28 and against loopback test servers (`test/live_transcription_test.dart`) — never against the live services in CI.** Each unverified detail below is written in the adapter's doc comment too; `test/live_stt_smoke_test.dart` is the opt-in check that closes them.
+
+| Provider | Unverified |
+| --- | --- |
+| Deepgram | the `KeepAlive` frame; behaviour of `Metadata` as the terminal reply after `CloseStream` |
+| Soniox | `audio_format: pcm_s16le`; whether `api_key` in the config is still required beside the Bearer header; the `keepalive` and error frame shapes (`error_code`/`error_message`); `finished: true` |
+| ElevenLabs | `commit_strategy=manual` with `commit: true` on audio chunks; the end-of-stream request (empty chunk with `commit: true`) and the minimum audio a commit accepts (the 100 ms floor is a guess); that a `committed_transcript` follows each commit; error `message_type` names |
+| OpenAI | the `input_audio_buffer.committed` event carrying `previous_item_id`; the `session.update` nesting (`session.audio.input.format/transcription/turn_detection`); Polish support (the preset says so); the 24 kHz rate and the commit-every-15 s workaround |
+
+An unverified end-of-stream request costs at most the `finishTimeout`, then a `LiveTranscriptionIncomplete` and the batch fallback: the failure mode of a wrong guess is a slower transcript, never a lost one.
+
+**No usage or cost events for live takes in v1.** A live take is not billed through `UsageSink`: the provider's per-minute price is not in the `PriceBook`, and when the live text is used the batch processor never runs, so the editor's COST panel shows nothing for the take. A batch fallback is costed as usual.
+
+**The opt-in smoke test.** `test/live_stt_smoke_test.dart` builds each real adapter through `buildLiveTranscriptionService` with the preset's endpoint and model and streams a speech WAV (`LIVE_STT_SAMPLE_WAV`). A provider runs only when `LIVE_STT_<DEEPGRAM|SONIOX|ELEVENLABS|OPENAI>_KEY` is set; otherwise it is skipped, so plain `flutter test` never touches the network. The OpenAI case needs a 24 kHz sample.
+
 ## Long audio
 
 **Long audio has three ceilings and only one of them tells you** — the 25 MB upload cap and the 1500 s duration limit answer 400, while the 2000-token output limit answers **HTTP 200 with a truncated transcript**. Every supported platform therefore splits before sending (`ChunkedTranscriptionService`); unknown platforms cap the recording instead. See `docs/architecture/transcription.md`.

@@ -42,11 +42,13 @@ import '../../sync/domain/sync_snapshot.dart';
 import '../../sync/domain/sync_table.dart';
 import '../../sync/domain/sync_transport.dart';
 import '../../transcription/data/transcription_service.dart';
+import '../../transcription/domain/live_transcription.dart';
 import '../../transcription/domain/transcription_limits.dart';
 import '../data/media_importer.dart';
 import '../data/media_picker.dart';
 import '../data/recordings_repository.dart';
 import '../data/revisions_repository.dart';
+import '../data/wav_stream_writer.dart';
 import '../../projects/data/projects_repository.dart';
 import '../../projects/data/native_agent_jobs.dart';
 import '../../projects/domain/agent_session_launcher.dart'
@@ -170,10 +172,21 @@ class RecordingsController extends ChangeNotifier {
     })?
     syncBindingGate,
     Duration recorderTimeout = const Duration(seconds: 8),
+    // Live dictation (#481): a resolver, so a Models change reaches the next
+    // take and never one already running. The default is Disabled, which keeps
+    // every capture on the m4a path.
+    LiveTranscriptionService Function()? liveTranscription,
+    // How long a finished live take's processing waits for the provider's
+    // result before falling back to the batch processor on the WAV.
+    Duration liveResultTimeout = const Duration(seconds: 20),
     // How long a hand edit waits before it is pushed, so a burst of field
     // edits is one sync run rather than one per blur.
     Duration editSyncDelay = const Duration(seconds: 2),
   }) : _recorderTimeout = recorderTimeout,
+       _liveTranscription =
+           liveTranscription ??
+           (() => const DisabledLiveTranscriptionService()),
+       _liveResultTimeout = liveResultTimeout,
        _editSyncDelay = editSyncDelay,
        _repository = repository,
        _commandClient = commandClient,
@@ -422,6 +435,25 @@ class RecordingsController extends ChangeNotifier {
     Duration.zero,
   );
   final ValueNotifier<double> _levelTicker = ValueNotifier<double>(0);
+
+  final LiveTranscriptionService Function() _liveTranscription;
+  final Duration _liveResultTimeout;
+
+  /// What the capture screen shows while a live take runs; null when the take
+  /// in progress is not live. Its own notifier for the reason [elapsedTicker]
+  /// is: partials arrive several times a second.
+  final ValueNotifier<LiveTranscript?> _liveTicker =
+      ValueNotifier<LiveTranscript?>(null);
+
+  /// The live take in progress. One holder per take, so nothing about a take
+  /// can leak into the next one through shared fields.
+  _LiveTake? _liveTake;
+
+  /// A finished live take's text, by capture id, awaited by [_processOne]. A
+  /// restart loses it and the item falls back to the batch processor by itself.
+  /// Null in a value means the session could not vouch for its text.
+  final Map<String, Future<String?>> _liveResults = <String, Future<String?>>{};
+  bool _loggedLiveAppend = false;
   StreamSubscription<Amplitude>? _amplitudeSub;
   Timer? _timer;
   List<Recording> _recordings = <Recording>[];
@@ -613,6 +645,9 @@ class RecordingsController extends ChangeNotifier {
   /// controller when all you render is the running time — it repaints one label
   /// rather than the whole page.
   ValueListenable<Duration> get elapsedTicker => _elapsedTicker;
+
+  /// Live transcript of the take in progress, or null when it is not live.
+  ValueListenable<LiveTranscript?> get liveTicker => _liveTicker;
 
   /// Ticks every 500 ms while a processing job is in flight. Listen to this
   /// instead of the controller when all you render is the running time — it
@@ -1931,7 +1966,21 @@ class RecordingsController extends ChangeNotifier {
     _activeSegmentIndex = appendIndex;
 
     final String id = const Uuid().v4();
-    final File audioFile = appendTo == null
+    // A fragment appended to an existing capture stays m4a: its parent's
+    // segment 0 may be anything, and one live text stream per fragment would
+    // need merging into the parent's transcript. Logged once.
+    final LiveTranscriptionService liveService = _liveTranscription();
+    bool useLive = appendTo == null && liveService.isAvailable;
+    if (appendTo != null && liveService.isAvailable && !_loggedLiveAppend) {
+      _loggedLiveAppend = true;
+      _logSink.log(
+        'Live dictation is not used for appended fragments — they record '
+        'as m4a and are transcribed after stop.',
+      );
+    }
+    File audioFile = useLive
+        ? await _repository.createSourceFile(id, 'wav')
+        : appendTo == null
         ? await _repository.createAudioFile(id)
         : await _repository.createSegmentFile(appendTo, appendIndex!, 'm4a');
     _activeFilePath = audioFile.path;
@@ -1967,17 +2016,42 @@ class RecordingsController extends ChangeNotifier {
     // nothing. The mic is unrecoverable in-process either way; saying so is the
     // part that is fixable.
     try {
-      await _recorder
-          .start(
-            RecordConfig(
-              encoder: AudioEncoder.aacLc,
-              sampleRate: _audioConfig.sampleRate,
-              numChannels: _audioConfig.numChannels,
-              bitRate: _audioConfig.bitRate,
-            ),
-            path: audioFile.path,
-          )
-          .timeout(_recorderTimeout);
+      if (useLive) {
+        try {
+          _liveTake = await _startLiveTake(liveService, audioFile, id);
+        } catch (exception) {
+          // Live text is a bonus on top of the recording, so a live start that
+          // fails must not cost the take: record it as m4a on a fresh file and
+          // transcribe it after stop. `_startLiveTake` already tore down the
+          // session and the writer; the half-open WAV goes so the orphan sweep
+          // does not adopt a take that never started.
+          _logSink.log(
+            'Live dictation could not start — recording as m4a instead: '
+            '$exception',
+            level: LogLevel.warn,
+            recordingId: id,
+          );
+          try {
+            if (await audioFile.exists()) await audioFile.delete();
+          } catch (_) {}
+          useLive = false;
+          audioFile = await _repository.createAudioFile(id);
+          _activeFilePath = audioFile.path;
+        }
+      }
+      if (!useLive) {
+        await _recorder
+            .start(
+              RecordConfig(
+                encoder: AudioEncoder.aacLc,
+                sampleRate: _audioConfig.sampleRate,
+                numChannels: _audioConfig.numChannels,
+                bitRate: _audioConfig.bitRate,
+              ),
+              path: audioFile.path,
+            )
+            .timeout(_recorderTimeout);
+      }
     } catch (exception) {
       // Two different failures, and "restart the app" is only right for one of
       // them: a timeout here means the platform recorder is still wedged by the
@@ -2003,8 +2077,10 @@ class RecordingsController extends ChangeNotifier {
       return;
     }
     _logSink.log(
-      'Recording started · ${_audioConfig.sampleRate} Hz · '
-      '${_audioConfig.numChannels} channel(s) · ${_audioConfig.bitRate ~/ 1000} kbps',
+      useLive
+          ? 'Live recording started · ${liveService.sampleRate} Hz · mono PCM'
+          : 'Recording started · ${_audioConfig.sampleRate} Hz · '
+                '${_audioConfig.numChannels} channel(s) · ${_audioConfig.bitRate ~/ 1000} kbps',
       recordingId: id,
     );
 
@@ -2024,6 +2100,133 @@ class RecordingsController extends ChangeNotifier {
     _isRecordingPaused = false;
     _isRecording = true;
     notifyListeners();
+  }
+
+  /// Opens the live session, the WAV and the PCM stream for one take.
+  ///
+  /// The WAV is open before the first chunk arrives and every chunk is written
+  /// to it **before** it is offered to the session, so the live text can only
+  /// ever be a bonus on top of audio that is already on disk. On failure the
+  /// take is torn down here and the exception rethrown to the caller.
+  Future<_LiveTake> _startLiveTake(
+    LiveTranscriptionService service,
+    File file,
+    String id,
+  ) async {
+    final LiveTranscriptionSession session = service.start();
+    WavStreamWriter? writer;
+    _LiveTake? take;
+    try {
+      writer = await WavStreamWriter.open(file, sampleRate: service.sampleRate);
+      take = _LiveTake(session: session, writer: writer, file: file);
+      final Stream<Uint8List> stream = await _recorder
+          .startStream(
+            RecordConfig(
+              encoder: AudioEncoder.pcm16bits,
+              sampleRate: service.sampleRate,
+              numChannels: 1,
+            ),
+          )
+          .timeout(_recorderTimeout);
+      _liveTicker.value = const LiveTranscript();
+      take.updatesSub = session.updates.listen((LiveTranscript update) {
+        _liveTicker.value = update;
+        // The first reason only: a dead session emits one failed update, and
+        // the log should say why live text stopped without repeating itself.
+        if (update.failed && !take!.deathLogged) {
+          take.deathLogged = true;
+          _logSink.log(
+            'Live transcription stopped — the take is still recorded and '
+            'will be transcribed after stop: '
+            '${update.reason ?? 'no reason given'}',
+            level: LogLevel.warn,
+            recordingId: id,
+          );
+        }
+      }, onError: (Object _) {});
+      take.audioSub = stream.listen(
+        (Uint8List chunk) => _onLiveChunk(take!, chunk, id),
+        onError: (Object exception) => _logSink.log(
+          'Live audio stream error: $exception',
+          level: LogLevel.warn,
+          recordingId: id,
+        ),
+        onDone: () {
+          if (!take!.audioDone.isCompleted) take.audioDone.complete();
+        },
+      );
+      return take;
+    } catch (_) {
+      if (take != null) {
+        await _abandonLiveTake(take);
+      } else {
+        unawaited(session.cancel().catchError((Object _) {}));
+        try {
+          await writer?.close();
+        } catch (_) {}
+      }
+      _liveTicker.value = null;
+      rethrow;
+    }
+  }
+
+  void _onLiveChunk(_LiveTake take, Uint8List chunk, String id) {
+    // Copied: the writer flushes later and the recorder may reuse its buffer.
+    unawaited(
+      take.writer.write(Uint8List.fromList(chunk)).catchError((Object e) {
+        if (take.writeFailureLogged) return;
+        take.writeFailureLogged = true;
+        _logSink.log(
+          'Live WAV write failed: $e',
+          level: LogLevel.error,
+          recordingId: id,
+        );
+      }),
+    );
+    try {
+      take.session.addAudio(chunk);
+    } catch (exception) {
+      if (take.sessionFailureLogged) return;
+      take.sessionFailureLogged = true;
+      _logSink.log(
+        'Live session refused audio — the take is still recorded: $exception',
+        level: LogLevel.warn,
+        recordingId: id,
+      );
+    }
+  }
+
+  /// Stops listening to the take's stream and closes its WAV. The session is
+  /// left alone: `stopRecording` finishes it, a discard cancels it.
+  Future<void> _closeLiveTakeAudio(_LiveTake take) async {
+    try {
+      await take.audioDone.future.timeout(_recorderTimeout);
+    } catch (_) {}
+    try {
+      await take.audioSub?.cancel();
+    } catch (_) {}
+    try {
+      await take.writer.close();
+    } catch (exception) {
+      _logSink.log('Live WAV close failed: $exception', level: LogLevel.warn);
+    }
+  }
+
+  /// Drops a take without a result: session cancelled, WAV closed.
+  Future<void> _abandonLiveTake(_LiveTake take) async {
+    take.handedOff = true;
+    try {
+      await take.audioSub?.cancel();
+    } catch (_) {}
+    try {
+      await take.updatesSub?.cancel();
+    } catch (_) {}
+    try {
+      await take.session.cancel();
+    } catch (_) {}
+    try {
+      await take.writer.close();
+    } catch (_) {}
   }
 
   /// Drives the capture clock and, where a cap applies, saves at it.
@@ -2141,6 +2344,7 @@ class RecordingsController extends ChangeNotifier {
     _isBusy = true;
     notifyListeners();
 
+    final _LiveTake? take = _liveTake;
     try {
       String? stoppedPath;
       // Held rather than dropped: if the salvage below finds nothing, this is
@@ -2195,6 +2399,13 @@ class RecordingsController extends ChangeNotifier {
               'saved, but restart the app before recording again.';
         }
       }
+      // A live take has no path from `stop()`: the stream drains, the WAV is
+      // closed (which patches its sizes), and the file is the one opened at
+      // start. Everything after this point is the ordinary save.
+      if (take != null) {
+        await _closeLiveTakeAudio(take);
+        stoppedPath = take.file.path;
+      }
       // Stopped here rather than in the teardown below so `durationMs` is the
       // length of the audio, not of the audio plus the two `stat` calls that
       // verify it.
@@ -2209,7 +2420,9 @@ class RecordingsController extends ChangeNotifier {
       // One `length()` call serves both jobs: it is the emptiness check that
       // gates persistence, and it is the size the card reports afterwards.
       final int sizeBytes = await file.exists() ? await file.length() : 0;
-      if (sizeBytes == 0) {
+      // A WAV that holds only its header is as empty as a zero-length file.
+      if (sizeBytes <= (take != null ? WavStreamWriter.headerBytes : 0)) {
+        if (take != null) await _abandonLiveTake(take);
         // Deleted rather than left where it is, and this is the one place in
         // the app that deletes a source outside `deleteRecording`. It does not
         // weaken persist-before-process: an empty file is not a capture the app
@@ -2291,6 +2504,25 @@ class RecordingsController extends ChangeNotifier {
 
       _addedCapture.value = (seq: ++_addedCaptureSeq, id: saved.id);
 
+      // The live text is asked for only now, after the audio is durably
+      // indexed: it is a shortcut around the batch processor, never a
+      // precondition of the save. A session that cannot vouch for its text
+      // answers null and `_processOne` runs the processor on the WAV.
+      if (take != null) {
+        take.handedOff = true;
+        _liveResults[saved.id] = take.session.finish().then<String?>(
+          (String text) => text,
+          onError: (Object exception) {
+            _logSink.log(
+              'Live transcript unusable — transcribing after stop: $exception',
+              level: LogLevel.warn,
+              recordingId: saved.id,
+            );
+            return null;
+          },
+        );
+      }
+
       // Processing is a separate step and starts only after durable save.
       // Enqueue for background processing and return; the drain loop runs the
       // job off the capture lock so it never blocks the next capture.
@@ -2314,6 +2546,12 @@ class RecordingsController extends ChangeNotifier {
       unawaited(_amplitudeSub?.cancel());
       _amplitudeSub = null;
       _levelTicker.value = 0;
+      _liveTake = null;
+      _liveTicker.value = null;
+      if (take != null) {
+        unawaited(take.updatesSub?.cancel());
+        if (!take.handedOff) unawaited(_abandonLiveTake(take));
+      }
       if (_stopwatch.isRunning) _stopwatch.stop();
       _isRecording = false;
       _isRecordingPaused = false;
@@ -2369,10 +2607,12 @@ class RecordingsController extends ChangeNotifier {
     notifyListeners();
 
     final String? id = _activeId;
+    final _LiveTake? take = _liveTake;
     try {
       final String? stoppedPath = await _stopCaptureRecorder();
       _isRecording = false;
       _isRecordingPaused = false;
+      if (take != null) await _abandonLiveTake(take);
 
       final String? path = stoppedPath ?? _activeFilePath;
       if (path != null) {
@@ -2399,6 +2639,11 @@ class RecordingsController extends ChangeNotifier {
       unawaited(_amplitudeSub?.cancel());
       _amplitudeSub = null;
       _levelTicker.value = 0;
+      _liveTake = null;
+      _liveTicker.value = null;
+      // Also when the recorder's stop threw: the session must not outlive a
+      // take nobody will ever finish.
+      if (take != null) unawaited(_abandonLiveTake(take));
       if (_stopwatch.isRunning) _stopwatch.stop();
       _isRecording = false;
       _isRecordingPaused = false;
@@ -2507,6 +2752,7 @@ class RecordingsController extends ChangeNotifier {
     String id, {
     required Future<void> Function(Recording item) dispose,
   }) async {
+    _liveResults.remove(id);
     if (_indexUnreadable) {
       _error =
           'Deletion is disabled — the recordings index could not be read, so '
@@ -4797,7 +5043,13 @@ class RecordingsController extends ChangeNotifier {
           await _refreshSegmentIdentity(id, segment);
           String? text;
           try {
-            text = await processor.process(segment);
+            // Segment 0 of a live take may already have its text. Awaited
+            // bounded, and only a non-empty answer is used; anything else
+            // (empty, unusable session, timeout) runs the processor on the
+            // WAV exactly as for a take that was never live.
+            if (segment.index == 0) text = await _takeLiveText(id);
+            if (_cancelledProcessingIds.contains(id)) return;
+            text ??= await processor.process(segment);
           } catch (exception) {
             if (_cancelledProcessingIds.contains(id)) return;
             failure = exception.toString();
@@ -4940,6 +5192,30 @@ class RecordingsController extends ChangeNotifier {
       _processingId = null;
       if (!_disposed) notifyListeners();
     }
+  }
+
+  /// The live text for [id], consumed once, or null to run the processor.
+  Future<String?> _takeLiveText(String id) async {
+    final Future<String?>? pending = _liveResults.remove(id);
+    if (pending == null) return null;
+    String? text;
+    try {
+      text = await pending.timeout(_liveResultTimeout, onTimeout: () => null);
+    } catch (_) {
+      text = null;
+    }
+    if (text == null || text.trim().isEmpty) {
+      _logSink.log(
+        'No usable live transcript — transcribing the recording.',
+        recordingId: id,
+      );
+      return null;
+    }
+    _logSink.log(
+      'Live transcript used · ${text.length} characters.',
+      recordingId: id,
+    );
+    return text;
   }
 
   /// Which stage a capture's processor bills under. Derived from the item's
@@ -5955,6 +6231,11 @@ class RecordingsController extends ChangeNotifier {
     _processingTicker.dispose();
     _addedCapture.dispose();
     _levelTicker.dispose();
+    final _LiveTake? liveTake = _liveTake;
+    _liveTake = null;
+    if (liveTake != null) unawaited(_abandonLiveTake(liveTake));
+    _liveResults.clear();
+    _liveTicker.dispose();
     _playerCompleteSub?.cancel();
     _playerPositionSub?.cancel();
     _playerDurationSub?.cancel();
@@ -5981,6 +6262,25 @@ class RecordingsController extends ChangeNotifier {
     if (_isRecording) _endCaptureSession();
     super.dispose();
   }
+}
+
+/// Everything one live take owns. A new instance per take, so a late callback
+/// from a finished take can only ever touch its own state.
+class _LiveTake {
+  _LiveTake({required this.session, required this.writer, required this.file});
+
+  final LiveTranscriptionSession session;
+  final WavStreamWriter writer;
+  final File file;
+  final Completer<void> audioDone = Completer<void>();
+  StreamSubscription<Uint8List>? audioSub;
+  StreamSubscription<LiveTranscript>? updatesSub;
+  bool writeFailureLogged = false;
+  bool sessionFailureLogged = false;
+  bool deathLogged = false;
+
+  /// The session was finished or cancelled by whoever took it from here.
+  bool handedOff = false;
 }
 
 class _UsageScopedConnectionReasoner implements ConnectionReasoner {

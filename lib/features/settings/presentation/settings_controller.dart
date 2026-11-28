@@ -16,7 +16,9 @@ import '../../shortcuts/domain/shortcut_action.dart';
 import '../../timer/domain/alarm_sound.dart';
 import '../../timer/domain/timer_defaults.dart';
 import '../../transcription/data/local_transcription_service.dart';
+import '../../transcription/data/live/live_provider_factory.dart';
 import '../../transcription/data/transcription_service.dart';
+import '../../transcription/domain/live_transcription.dart';
 import '../../transcription/domain/local_transcription_engine.dart';
 import '../data/settings_repository.dart';
 import '../domain/app_settings.dart';
@@ -98,6 +100,8 @@ class SettingsController extends ChangeNotifier {
   // http.Client — on every notification.
   TranscriptionService? _service;
   String? _serviceSignature;
+  LiveTranscriptionService? _liveService;
+  String? _liveServiceSignature;
   EnrichmentService? _enrichment;
   EmbeddingService? _embedding;
   String? _embeddingSignature;
@@ -255,6 +259,52 @@ class SettingsController extends ChangeNotifier {
       _serviceSignature = signature;
     }
     return _service!;
+  }
+
+  ProviderProfile? get activeLiveProfile => _settings.activeLiveProfile;
+
+  /// The live-dictation service the recordings controller should use for the
+  /// next take. Disabled when no live profile is active, its endpoint is not a
+  /// usable `wss://` (or own-network `ws://`) address, or its host is not one
+  /// of the supported providers. Cached by connection details, like
+  /// [transcriptionService].
+  LiveTranscriptionService get liveTranscriptionService {
+    final ProviderProfile? active = _settings.activeLiveProfile;
+    final String signature = active == null
+        ? 'disabled'
+        : <String?>[
+            active.kind.name,
+            active.id,
+            active.endpoint,
+            active.model,
+            active.language,
+            active.bearerToken,
+          ].join('|');
+    if (_liveService == null || _liveServiceSignature != signature) {
+      _liveService = _buildLiveService(active);
+      _liveServiceSignature = signature;
+    }
+    return _liveService!;
+  }
+
+  LiveTranscriptionService _buildLiveService(ProviderProfile? active) {
+    if (active == null || active.kind != ProfileKind.liveTranscription) {
+      return const DisabledLiveTranscriptionService();
+    }
+    final Uri? uri = active.endpoint.trim().isEmpty
+        ? null
+        : Uri.tryParse(active.endpoint.trim());
+    if (uri == null || !uri.hasScheme || !liveEndpointIsAllowed(uri)) {
+      return const DisabledLiveTranscriptionService();
+    }
+    final String? model = active.model?.trim();
+    final String? language = active.language?.trim();
+    return buildLiveTranscriptionService(
+      endpoint: uri,
+      bearerToken: active.usableBearerToken,
+      model: model == null || model.isEmpty ? null : model,
+      language: language == null || language.isEmpty ? null : language,
+    );
   }
 
   /// A local profile is built here rather than in `ProviderProfile.toService`,
@@ -462,6 +512,9 @@ class SettingsController extends ChangeNotifier {
         activeEnrichmentProfileId: kind == ProfileKind.enrichment
             ? profile.id
             : _settings.activeEnrichmentProfileId,
+        activeLiveProfileId: kind == ProfileKind.liveTranscription
+            ? profile.id
+            : _settings.activeLiveProfileId,
       ),
     );
     return profile;
@@ -510,6 +563,10 @@ class SettingsController extends ChangeNotifier {
       _settings.activeEnrichmentProfileId,
       ProfileKind.enrichment,
     );
+    final String? nextLive = resolve(
+      _settings.activeLiveProfileId,
+      ProfileKind.liveTranscription,
+    );
 
     await _persist(
       _settings.copyWith(
@@ -518,6 +575,8 @@ class SettingsController extends ChangeNotifier {
         clearActiveProfileId: nextActive == null,
         activeEnrichmentProfileId: nextEnrichment,
         clearActiveEnrichmentProfileId: nextEnrichment == null,
+        activeLiveProfileId: nextLive,
+        clearActiveLiveProfileId: nextLive == null,
       ),
     );
   }
@@ -578,6 +637,15 @@ class SettingsController extends ChangeNotifier {
       _settings.copyWith(
         activeEnrichmentProfileId: id,
         clearActiveEnrichmentProfileId: id == null,
+      ),
+    );
+  }
+
+  Future<void> setActiveLiveProfile(String? id) async {
+    await _persist(
+      _settings.copyWith(
+        activeLiveProfileId: id,
+        clearActiveLiveProfileId: id == null,
       ),
     );
   }

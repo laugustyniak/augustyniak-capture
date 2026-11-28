@@ -34,7 +34,17 @@ enum ProfileKind {
   /// existed and wrong here. Such a build then posts to a blank endpoint and
   /// degrades to the disabled service: a local profile in an old build is
   /// inert, not destructive. Written down before it is discovered.
-  localWhisper;
+  localWhisper,
+
+  /// A streaming (WebSocket) speech endpoint used while recording, so the
+  /// transcript grows on screen as the user speaks.
+  ///
+  /// Last in the enum on purpose: stored names never shift. **An older build
+  /// reads this as [transcription]** ([fromName] falls back), gets a null
+  /// request endpoint because its guard refuses `wss`, and degrades to the
+  /// disabled service: a live profile in an old build is inert, not
+  /// destructive.
+  liveTranscription;
 
   /// Legacy rows have no `kind`, and every profile written before enrichment
   /// existed was a transcription profile.
@@ -46,6 +56,7 @@ enum ProfileKind {
     ProfileKind.transcription => 'TRANSCRIPTION PROFILES',
     ProfileKind.enrichment => 'ENRICHMENT PROFILES',
     ProfileKind.localWhisper => 'ON-DEVICE MODELS',
+    ProfileKind.liveTranscription => 'LIVE DICTATION PROFILES',
   };
 
   /// Whether this kind reaches the network at all. Read by the editor, which
@@ -112,7 +123,7 @@ class ProviderProfile {
   /// field would bury the first.
   bool get usesInsecureTransport {
     final Uri? uri = hasEndpoint ? Uri.tryParse(endpoint.trim()) : null;
-    return uri != null && uri.hasScheme && !providerEndpointIsAllowed(uri);
+    return uri != null && uri.hasScheme && !_endpointIsAllowed(uri);
   }
 
   /// The token a request may actually send: null when unset, blank, or still
@@ -207,7 +218,11 @@ class ProviderProfile {
   TranscriptionService toService({
     UsageSink usageSink = const NoopUsageSink(),
   }) {
-    if (!kind.isRemote) return const DisabledTranscriptionService();
+    // A live profile speaks WebSocket; the settings controller builds its
+    // service. Never hand its endpoint to the HTTP client.
+    if (!kind.isRemote || kind == ProfileKind.liveTranscription) {
+      return const DisabledTranscriptionService();
+    }
     final Uri? uri = _requestEndpoint;
     if (uri == null) {
       return const DisabledTranscriptionService();
@@ -312,11 +327,15 @@ class ProviderProfile {
   /// servers; public hosts require HTTPS.
   Uri? get _requestEndpoint {
     final Uri? uri = hasEndpoint ? Uri.tryParse(endpoint.trim()) : null;
-    if (uri == null || !uri.hasScheme || !providerEndpointIsAllowed(uri)) {
+    if (uri == null || !uri.hasScheme || !_endpointIsAllowed(uri)) {
       return null;
     }
     return uri;
   }
+
+  bool _endpointIsAllowed(Uri uri) => kind == ProfileKind.liveTranscription
+      ? liveEndpointIsAllowed(uri)
+      : providerEndpointIsAllowed(uri);
 
   static const Set<String> _knownTextOnlyModels = <String>{
     'gpt-3.5-turbo',
@@ -381,6 +400,7 @@ class ProviderPreset {
     this.model,
     this.models = const <String>[],
     this.tokenHint,
+    this.language,
   });
 
   final String name;
@@ -399,6 +419,10 @@ class ProviderPreset {
 
   /// Shown under the token field so the user knows what kind of key to paste.
   final String? tokenHint;
+
+  /// The language hint pre-filled when the preset is picked. Null leaves the
+  /// field as it was.
+  final String? language;
 
   static const List<ProviderPreset> all = <ProviderPreset>[
     // OpenAI's current recommendation for transcribing recorded speech.
@@ -528,6 +552,46 @@ class ProviderPreset {
       name: 'Custom endpoint',
       kind: ProfileKind.enrichment,
       endpoint: '',
+    ),
+    // Live dictation: streaming speech-to-text beside recording. The audio is
+    // still saved first and transcribed in batch if the stream fails. Wire
+    // details (and what is unverified) are in the adapters under
+    // `transcription/data/live/`. The factory picks the adapter by host, so a
+    // custom endpoint has no preset here.
+    ProviderPreset(
+      name: 'Deepgram Nova-3',
+      kind: ProfileKind.liveTranscription,
+      endpoint: 'wss://api.deepgram.com/v1/listen',
+      model: 'nova-3',
+      models: <String>['nova-3', 'nova-2'],
+      language: 'pl',
+      tokenHint: 'Deepgram API key',
+    ),
+    ProviderPreset(
+      name: 'Soniox',
+      kind: ProfileKind.liveTranscription,
+      endpoint: 'wss://stt-rt.soniox.com/transcribe-websocket',
+      model: 'stt-rt-v6',
+      models: <String>['stt-rt-v6'],
+      language: 'pl',
+      tokenHint: 'Soniox API key',
+    ),
+    ProviderPreset(
+      name: 'ElevenLabs Scribe realtime',
+      kind: ProfileKind.liveTranscription,
+      endpoint: 'wss://api.elevenlabs.io/v1/speech-to-text/realtime',
+      model: 'scribe_v2_realtime',
+      models: <String>['scribe_v2_realtime'],
+      language: 'pl',
+      tokenHint: 'ElevenLabs API key',
+    ),
+    ProviderPreset(
+      name: 'OpenAI live transcribe',
+      kind: ProfileKind.liveTranscription,
+      endpoint: 'wss://api.openai.com/v1/realtime?intent=transcription',
+      model: 'gpt-live-transcribe',
+      models: <String>['gpt-live-transcribe'],
+      tokenHint: 'OpenAI API key (sk-…) — Polish support is unconfirmed',
     ),
   ];
 }

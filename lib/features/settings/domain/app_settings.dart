@@ -18,6 +18,7 @@ class AppSettings {
     this.profiles = const <ProviderProfile>[],
     this.activeProfileId,
     this.activeEnrichmentProfileId,
+    this.activeLiveProfileId,
     String? enrichmentInstructions,
     this.soulPath,
     this.prioritiesPath,
@@ -110,6 +111,7 @@ class AppSettings {
   final List<ProviderProfile> profiles;
   final String? activeProfileId;
   final String? activeEnrichmentProfileId;
+  final String? activeLiveProfileId;
 
   ProviderProfile? get activeProfile {
     final String? id = activeProfileId;
@@ -122,6 +124,15 @@ class AppSettings {
 
   ProviderProfile? get activeEnrichmentProfile {
     final String? id = activeEnrichmentProfileId;
+    if (id == null) return null;
+    for (final ProviderProfile p in profiles) {
+      if (p.id == id) return p;
+    }
+    return null;
+  }
+
+  ProviderProfile? get activeLiveProfile {
+    final String? id = activeLiveProfileId;
     if (id == null) return null;
     for (final ProviderProfile p in profiles) {
       if (p.id == id) return p;
@@ -313,6 +324,8 @@ class AppSettings {
     bool clearActiveProfileId = false,
     String? activeEnrichmentProfileId,
     bool clearActiveEnrichmentProfileId = false,
+    String? activeLiveProfileId,
+    bool clearActiveLiveProfileId = false,
     String? enrichmentInstructions,
     bool resetEnrichmentInstructions = false,
     String? soulPath,
@@ -380,6 +393,9 @@ class AppSettings {
       activeEnrichmentProfileId: clearActiveEnrichmentProfileId
           ? null
           : (activeEnrichmentProfileId ?? this.activeEnrichmentProfileId),
+      activeLiveProfileId: clearActiveLiveProfileId
+          ? null
+          : (activeLiveProfileId ?? this.activeLiveProfileId),
       enrichmentInstructions: resetEnrichmentInstructions
           ? null
           : (enrichmentInstructions ?? _enrichmentInstructions),
@@ -463,6 +479,7 @@ class AppSettings {
           .toList(),
       'activeProfileId': activeProfileId,
       'activeEnrichmentProfileId': activeEnrichmentProfileId,
+      'activeLiveProfileId': activeLiveProfileId,
       'audio': audio.toJson(),
       'themeMode': themeMode.name,
       if (textScale != defaultTextScale) 'textScale': textScale,
@@ -573,6 +590,9 @@ class AppSettings {
           : null,
       activeEnrichmentProfileId: json['activeEnrichmentProfileId'] is String
           ? json['activeEnrichmentProfileId'] as String
+          : null,
+      activeLiveProfileId: json['activeLiveProfileId'] is String
+          ? json['activeLiveProfileId'] as String
           : null,
       enrichmentInstructions: json['enrichmentInstructions'] is String
           ? json['enrichmentInstructions'] as String

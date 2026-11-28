@@ -5,6 +5,7 @@ import 'package:material_ui/material_ui.dart';
 import '../../../app/ui_kit.dart';
 import '../../projects/domain/project.dart';
 import '../../settings/domain/audio_config.dart';
+import '../../transcription/domain/live_transcription.dart';
 import '../../transcription/domain/transcription_limits.dart';
 import '../domain/recording.dart';
 import 'card_parts.dart';
@@ -160,8 +161,12 @@ class RecordingView extends StatelessWidget {
                       ),
                       const SizedBox(height: 16),
                       _LevelMeter(level: controller.levelTicker),
+                      _LiveTranscriptPanel(ticker: controller.liveTicker),
                       const SizedBox(height: 26),
-                      _PipelineChecklist(paused: paused),
+                      _PipelineChecklist(
+                        paused: paused,
+                        live: controller.liveTicker.value != null,
+                      ),
                     ],
                   ),
                 ),
@@ -232,6 +237,9 @@ class _ElapsedReadout extends StatelessWidget {
     return ValueListenableBuilder<Duration>(
       valueListenable: controller.elapsedTicker,
       builder: (BuildContext context, Duration elapsed, Widget? child) {
+        // A live take is written as PCM, not AAC: say so, and drop the AAC
+        // size estimate that would not describe the file.
+        final bool live = controller.liveTicker.value != null;
         // Bytes so far, from the configured bitrate — marked `~` because it is
         // the encoder's target, not a measurement of the file on disk.
         final int approximateBytes =
@@ -270,11 +278,13 @@ class _ElapsedReadout extends StatelessWidget {
             const SizedBox(height: 10),
             Text(
               <String>[
-                'AAC-LC',
-                '${(audio.sampleRate / 1000).toStringAsFixed(audio.sampleRate % 1000 == 0 ? 0 : 1)} kHz',
-                audio.isMono ? 'mono' : 'stereo',
-                '${audio.bitRate ~/ 1000} kbps',
-                if (size != null) '~$size',
+                if (live) ...<String>['WAV PCM', 'mono', 'live dictation'] else ...<String>[
+                  'AAC-LC',
+                  '${(audio.sampleRate / 1000).toStringAsFixed(audio.sampleRate % 1000 == 0 ? 0 : 1)} kHz',
+                  audio.isMono ? 'mono' : 'stereo',
+                  '${audio.bitRate ~/ 1000} kbps',
+                  if (size != null) '~$size',
+                ],
               ].join(' · '),
               style: ConsoleText.cardMeta.copyWith(fontWeight: FontWeight.w500),
             ),
@@ -445,12 +455,77 @@ class _LevelMeterState extends State<_LevelMeter> {
   }
 }
 
+/// The live transcript under the meter: text the provider has committed in the
+/// normal colour, its current guess greyed, and — when the session died — one
+/// line saying the take is still being recorded and will be transcribed after
+/// stop. Absent for a take that is not live.
+class _LiveTranscriptPanel extends StatelessWidget {
+  _LiveTranscriptPanel({required this.ticker});
+
+  final ValueListenable<LiveTranscript?> ticker;
+
+  /// Public text of the failed state, asserted by the widget test.
+  static const String failedLabel = 'live off: will transcribe after stop';
+
+  @override
+  Widget build(BuildContext context) {
+    return ValueListenableBuilder<LiveTranscript?>(
+      valueListenable: ticker,
+      builder: (BuildContext context, LiveTranscript? live, Widget? child) {
+        if (live == null) return const SizedBox.shrink();
+        final TextStyle base = ConsoleText.cardMeta.copyWith(
+          fontSize: 14,
+          height: 1.4,
+          color: Console.text,
+        );
+        final bool empty = live.committed.isEmpty && live.partial.isEmpty;
+        return Padding(
+          padding: const EdgeInsets.only(top: 16),
+          child: ConsoleCard(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: <Widget>[
+                if (live.failed) ...<Widget>[
+                  Text(
+                    failedLabel,
+                    style: ConsoleText.micro.copyWith(color: Console.amber),
+                  ),
+                  if (!empty) const SizedBox(height: 8),
+                ],
+                if (empty && !live.failed)
+                  Text('listening…', style: ConsoleText.micro)
+                else if (!empty)
+                  Text.rich(
+                    TextSpan(
+                      children: <InlineSpan>[
+                        TextSpan(text: live.committed, style: base),
+                        if (live.committed.isNotEmpty && live.partial.isNotEmpty)
+                          TextSpan(text: ' ', style: base),
+                        TextSpan(
+                          text: live.partial,
+                          style: base.copyWith(color: Console.dim),
+                        ),
+                      ],
+                    ),
+                  ),
+              ],
+            ),
+          ),
+        );
+      },
+    );
+  }
+}
+
 /// The four ordered steps of a capture, with the one in progress lit. Stating
 /// the order on screen is the point: persist happens before processing, always.
 class _PipelineChecklist extends StatelessWidget {
-  _PipelineChecklist({required this.paused});
+  _PipelineChecklist({required this.paused, this.live = false});
 
   final bool paused;
+
+  /// A live take is written as `.wav`, not `.m4a`.
+  final bool live;
 
   static const List<String> _steps = <String>[
     'recording → .m4a',
@@ -484,7 +559,10 @@ class _PipelineChecklist extends StatelessWidget {
                   const SizedBox(width: 10),
                   Expanded(
                     child: Text(
-                      index == 0 && paused ? 'paused → .m4a' : _steps[index],
+                      index == 0
+                          ? '${paused ? 'paused' : 'recording'} → '
+                                '${live ? '.wav (live)' : '.m4a'}'
+                          : _steps[index],
                       style: index == 0
                           ? ConsoleText.cardMeta.copyWith(
                               fontWeight: FontWeight.w500,

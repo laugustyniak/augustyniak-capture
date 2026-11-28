@@ -45,6 +45,8 @@ class ModelsTab extends StatelessWidget {
           const SizedBox(height: 22),
           ..._section(context, ProfileKind.enrichment),
           const SizedBox(height: 22),
+          ..._section(context, ProfileKind.liveTranscription),
+          const SizedBox(height: 22),
           // Last of the three: it is the newest, and the two remote sections
           // are what an existing install is here to edit.
           LocalModelsSection(controller: controller, store: modelStore),
@@ -110,34 +112,50 @@ class ModelsTab extends StatelessWidget {
   /// which controller setter a tap reaches and which copy the empty state shows.
   List<Widget> _section(BuildContext context, ProfileKind kind) {
     final List<ProviderProfile> profiles = controller.profilesOfKind(kind);
-    final bool isTranscription = kind == ProfileKind.transcription;
-    final String? activeId = isTranscription
-        ? controller.settings.activeProfileId
-        : controller.settings.activeEnrichmentProfileId;
+    final String? activeId = switch (kind) {
+      ProfileKind.transcription => controller.settings.activeProfileId,
+      ProfileKind.enrichment => controller.settings.activeEnrichmentProfileId,
+      ProfileKind.liveTranscription => controller.settings.activeLiveProfileId,
+      ProfileKind.localWhisper => null,
+    };
+    final ProviderProfile? active = switch (kind) {
+      ProfileKind.transcription => controller.activeProfile,
+      ProfileKind.enrichment => controller.activeEnrichmentProfile,
+      ProfileKind.liveTranscription => controller.activeLiveProfile,
+      ProfileKind.localWhisper => null,
+    };
 
     return <Widget>[
-      _ActiveProfileCard(
-        profile: isTranscription
-            ? controller.activeProfile
-            : controller.activeEnrichmentProfile,
-        kind: kind,
-      ),
+      _ActiveProfileCard(profile: active, kind: kind),
       const SizedBox(height: 18),
       SectionHeader(title: kind.label, trailing: '${profiles.length} ITEMS'),
       const SizedBox(height: 12),
       if (profiles.isEmpty)
         EmptyPanel(
-          icon: isTranscription ? Icons.memory_outlined : Icons.auto_awesome,
-          title: isTranscription
-              ? 'No transcription profiles.'
-              : 'No enrichment profiles.',
-          blurb: isTranscription
-              ? 'Add a profile to enable transcription. Recording works '
-                    'without one — audio is always saved locally.'
-              : 'Add a profile to have finished items named and categorised — '
-                    'it also powers image OCR, so pick a vision-capable model. '
-                    'Without one, items are captured as usual, just left '
-                    'untitled, and images fall back to local OCR on desktop.',
+          icon: switch (kind) {
+            ProfileKind.enrichment => Icons.auto_awesome,
+            ProfileKind.liveTranscription => Icons.graphic_eq,
+            _ => Icons.memory_outlined,
+          },
+          title: switch (kind) {
+            ProfileKind.enrichment => 'No enrichment profiles.',
+            ProfileKind.liveTranscription => 'No live dictation profiles.',
+            _ => 'No transcription profiles.',
+          },
+          blurb: switch (kind) {
+            ProfileKind.enrichment =>
+              'Add a profile to have finished items named and categorised — '
+                  'it also powers image OCR, so pick a vision-capable model. '
+                  'Without one, items are captured as usual, just left '
+                  'untitled, and images fall back to local OCR on desktop.',
+            ProfileKind.liveTranscription =>
+              'Add a profile to see the transcript appear while you speak. '
+                  'The audio is still saved first, and if the live stream '
+                  'fails the take is transcribed after you stop.',
+            _ =>
+              'Add a profile to enable transcription. Recording works '
+                  'without one — audio is always saved locally.',
+          },
         )
       else
         ...profiles.map(
@@ -146,9 +164,15 @@ class ModelsTab extends StatelessWidget {
             child: _ProfileCard(
               profile: profile,
               isActive: profile.id == activeId,
-              onActivate: () => isTranscription
-                  ? controller.setActiveProfile(profile.id)
-                  : controller.setActiveEnrichmentProfile(profile.id),
+              onActivate: () => switch (kind) {
+                ProfileKind.enrichment => controller.setActiveEnrichmentProfile(
+                  profile.id,
+                ),
+                ProfileKind.liveTranscription => controller.setActiveLiveProfile(
+                  profile.id,
+                ),
+                _ => controller.setActiveProfile(profile.id),
+              },
               onEdit: () => _openEditor(context, kind, existing: profile),
               onDelete: () => _confirmDelete(context, profile),
             ),
@@ -167,9 +191,11 @@ class ModelsTab extends StatelessWidget {
         ),
         icon: const Icon(Icons.add),
         label: Text(
-          isTranscription
-              ? 'ADD TRANSCRIPTION PROFILE'
-              : 'ADD ENRICHMENT PROFILE',
+          switch (kind) {
+            ProfileKind.enrichment => 'ADD ENRICHMENT PROFILE',
+            ProfileKind.liveTranscription => 'ADD LIVE DICTATION PROFILE',
+            _ => 'ADD TRANSCRIPTION PROFILE',
+          },
           style: const TextStyle(
             fontWeight: FontWeight.w900,
             letterSpacing: .5,
@@ -268,9 +294,12 @@ class _ActiveProfileCard extends StatelessWidget {
                   children: <Widget>[
                     Text(
                       item?.name ??
-                          (kind == ProfileKind.transcription
-                              ? 'Transcription disabled'
-                              : 'Enrichment disabled'),
+                          switch (kind) {
+                            ProfileKind.enrichment => 'Enrichment disabled',
+                            ProfileKind.liveTranscription =>
+                              'Live dictation disabled',
+                            _ => 'Transcription disabled',
+                          },
                       style: const TextStyle(
                         fontSize: 14,
                         fontWeight: FontWeight.w800,
@@ -302,9 +331,9 @@ class _ActiveProfileCard extends StatelessWidget {
                   label: item!.model!.toUpperCase(),
                   color: Console.green,
                 ),
-              // Only transcription sends a language hint; the enrichment
+              // Only the speech kinds send a language hint; the enrichment
               // prompt asks the model to answer in the language of the input.
-              if (kind == ProfileKind.transcription && item?.language != null)
+              if (kind != ProfileKind.enrichment && item?.language != null)
                 StatusPill(
                   label: 'LANG ${item!.language!.toUpperCase()}',
                   color: Console.green,
@@ -325,7 +354,12 @@ class _ActiveProfileCard extends StatelessWidget {
               // the warning belongs beside TOKEN SET rather than only on the
               // card further down the tab.
               if (item?.usesInsecureTransport ?? false)
-                StatusPill(label: 'BLOCKED · USE HTTPS', color: Console.red),
+                StatusPill(
+                  label: item!.kind == ProfileKind.liveTranscription
+                      ? 'BLOCKED · USE WSS'
+                      : 'BLOCKED · USE HTTPS',
+                  color: Console.red,
+                ),
             ],
           ),
         ],
@@ -416,7 +450,9 @@ class _ProfileCard extends StatelessWidget {
                           StatusPill(label: 'NO OCR', color: Console.amber),
                         if (profile.usesInsecureTransport)
                           StatusPill(
-                            label: 'BLOCKED · USE HTTPS',
+                            label: profile.kind == ProfileKind.liveTranscription
+                                ? 'BLOCKED · USE WSS'
+                                : 'BLOCKED · USE HTTPS',
                             color: Console.red,
                           ),
                       ],
@@ -517,6 +553,7 @@ class _ProfileEditorSheetState extends State<_ProfileEditorSheet> {
       if (_name.text.trim().isEmpty) _name.text = preset.name;
       _endpoint.text = preset.endpoint;
       _model.text = preset.model ?? '';
+      if (preset.language != null) _language.text = preset.language!;
     });
   }
 
@@ -557,7 +594,7 @@ class _ProfileEditorSheetState extends State<_ProfileEditorSheet> {
   @override
   Widget build(BuildContext context) {
     final bool isEdit = widget.existing != null;
-    final bool isTranscription = widget.kind == ProfileKind.transcription;
+    final bool isEnrichment = widget.kind == ProfileKind.enrichment;
     // Only the presets that speak this stage's protocol: a chat endpoint cannot
     // transcribe, and a Whisper endpoint cannot classify.
     final List<ProviderPreset> presets = ProviderPreset.all
@@ -579,7 +616,11 @@ class _ProfileEditorSheetState extends State<_ProfileEditorSheet> {
             children: <Widget>[
               Text(
                 '${isEdit ? 'EDIT' : 'NEW'} '
-                '${isTranscription ? 'TRANSCRIPTION' : 'ENRICHMENT'} PROFILE',
+                '${switch (widget.kind) {
+                  ProfileKind.enrichment => 'ENRICHMENT',
+                  ProfileKind.liveTranscription => 'LIVE DICTATION',
+                  _ => 'TRANSCRIPTION',
+                }} PROFILE',
                 style: TextStyle(
                   fontSize: 12,
                   fontWeight: FontWeight.w900,
@@ -619,9 +660,11 @@ class _ProfileEditorSheetState extends State<_ProfileEditorSheet> {
               _SheetField(
                 controller: _name,
                 label: 'Name',
-                hint: isTranscription
-                    ? 'e.g. OpenAI Whisper'
-                    : 'e.g. OpenAI GPT-4o mini',
+                hint: switch (widget.kind) {
+                  ProfileKind.enrichment => 'e.g. OpenAI GPT-4o mini',
+                  ProfileKind.liveTranscription => 'e.g. Deepgram Nova-3',
+                  _ => 'e.g. OpenAI Whisper',
+                },
                 validator: (String? value) =>
                     (value == null || value.trim().isEmpty)
                     ? 'Enter a profile name.'
@@ -630,9 +673,11 @@ class _ProfileEditorSheetState extends State<_ProfileEditorSheet> {
               _SheetField(
                 controller: _endpoint,
                 label: 'Endpoint',
-                hint: isTranscription
-                    ? 'https://…/v1/audio/transcriptions'
-                    : 'https://…/v1/chat/completions',
+                hint: switch (widget.kind) {
+                  ProfileKind.enrichment => 'https://…/v1/chat/completions',
+                  ProfileKind.liveTranscription => 'wss://…',
+                  _ => 'https://…/v1/audio/transcriptions',
+                },
                 keyboardType: TextInputType.url,
                 validator: (String? value) {
                   final String text = (value ?? '').trim();
@@ -647,9 +692,11 @@ class _ProfileEditorSheetState extends State<_ProfileEditorSheet> {
               _SheetField(
                 controller: _model,
                 label: 'Model',
-                hint: isTranscription
-                    ? 'whisper-1 (optional)'
-                    : 'gpt-4o-mini (optional)',
+                hint: switch (widget.kind) {
+                  ProfileKind.enrichment => 'gpt-4o-mini (optional)',
+                  ProfileKind.liveTranscription => 'nova-3 (optional)',
+                  _ => 'whisper-1 (optional)',
+                },
               ),
               // Known-good models for the matched provider, as one-tap fills.
               // The field above stays free-text — the list is a suggestion,
@@ -682,7 +729,7 @@ class _ProfileEditorSheetState extends State<_ProfileEditorSheet> {
                 ),
                 const SizedBox(height: 12),
               ],
-              if (!isTranscription &&
+              if (isEnrichment &&
                   !ProviderProfile(
                     id: 'preview',
                     name: _name.text,
@@ -711,9 +758,9 @@ class _ProfileEditorSheetState extends State<_ProfileEditorSheet> {
                   ),
                 ),
               ],
-              // Transcription only: the enrichment prompt already asks the
+              // Speech kinds only: the enrichment prompt already asks the
               // model to answer in the language of the input text.
-              if (isTranscription)
+              if (!isEnrichment)
                 _SheetField(
                   controller: _language,
                   label: 'Language',

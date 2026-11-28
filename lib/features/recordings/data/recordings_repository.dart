@@ -587,6 +587,13 @@ class RecordingsRepository {
 
       final FileStat stat = await entity.stat();
       if (stat.size == 0) continue;
+      // A live take's WAV opens with its 44-byte header: one that never got a
+      // chunk is as empty as a zero-length file.
+      if (type == CaptureType.audioUpload &&
+          name.toLowerCase().endsWith('.wav') &&
+          stat.size <= 44) {
+        continue;
+      }
 
       orphans.add(
         Recording(

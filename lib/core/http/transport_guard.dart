@@ -27,6 +27,17 @@ bool providerEndpointIsAllowed(Uri uri) {
   return scheme == 'http' && isOwnNetworkHost(uri.host);
 }
 
+/// Whether a live-dictation (WebSocket) endpoint uses a supported transport:
+/// `wss` for any named host, or plain `ws` only to a loopback/private-network
+/// server. The streaming twin of [providerEndpointIsAllowed], which refuses
+/// both schemes.
+bool liveEndpointIsAllowed(Uri uri) {
+  if (uri.host.isEmpty) return false;
+  final String scheme = uri.scheme.toLowerCase();
+  if (scheme == 'wss') return true;
+  return scheme == 'ws' && isOwnNetworkHost(uri.host);
+}
+
 /// Loopback, or one of the three private IPv4 ranges.
 ///
 /// The `172.16/12` boundary is the one worth getting exactly right: 172.15

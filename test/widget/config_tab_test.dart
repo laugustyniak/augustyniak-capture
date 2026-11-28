@@ -88,7 +88,10 @@ void main() {
     await pumpConfig(tester, controller, initialCategory: ConfigCategory.capture);
 
     expect(find.text('AUDIO CAPTURE'), findsOneWidget);
-    expect(find.text('AAC-LC · .m4a (fixed)'), findsOneWidget);
+    expect(
+      find.text('AAC-LC · .m4a (fixed; WAV PCM when live dictation is on)'),
+      findsOneWidget,
+    );
     // The defaults name themselves — the Config tab marks the values the
     // pipeline was tuned for rather than leaving four equal-looking options.
     expect(find.text('16 kHz (Recommended)'), findsOneWidget);
