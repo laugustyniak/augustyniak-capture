@@ -273,6 +273,7 @@ class SettingsController extends ChangeNotifier {
     final String signature = active == null
         ? 'disabled'
         : <String?>[
+            active.kind.name,
             active.id,
             active.endpoint,
             active.model,

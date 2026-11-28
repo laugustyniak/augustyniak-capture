@@ -225,7 +225,11 @@ class LiveWsSession implements LiveTranscriptionSession {
     _keepAlive?.cancel();
     _pending.clear();
     _pendingBytes = 0;
-    if (!_closed && !_state.finishing) _emit(failed: true);
+    if (!_closed && !_state.finishing) {
+      // A guess from a dead stream is not text the provider committed to.
+      _state.partial = '';
+      _emit(failed: true);
+    }
     _finishTerminal();
     final WebSocket? socket = _socket;
     if (socket != null) unawaited(_closeSocket(socket));

@@ -294,6 +294,22 @@ void main() {
       },
     );
 
+    test('a drop discards the unfinalised partial, keeps committed', () async {
+      final LiveTranscriptionSession session = open(service());
+      final List<LiveTranscript> seen = <LiveTranscript>[];
+      session.updates.listen(seen.add);
+      await server.connected;
+      server.send(results('zapisane', isFinal: true));
+      server.send(results('niepewne', isFinal: false));
+      await _until(
+        () => seen.any((LiveTranscript t) => t.partial == 'niepewne'),
+      );
+      await server.socket!.close(WebSocketStatus.goingAway);
+      await _until(() => seen.any((LiveTranscript t) => t.failed));
+      expect(seen.last.partial, '');
+      expect(await session.finish(), 'zapisane');
+    });
+
     test('a provider Error message ends the session as failed', () async {
       final LiveTranscriptionSession session = open(service());
       final List<LiveTranscript> seen = <LiveTranscript>[];
