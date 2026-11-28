@@ -181,4 +181,33 @@ void main() {
       },
     );
   });
+
+  group('liveEndpointIsAllowed', () {
+    test('wss is allowed to any host with a name', () {
+      expect(
+        liveEndpointIsAllowed(Uri.parse('wss://api.deepgram.com/v1/listen')),
+        isTrue,
+      );
+      expect(liveEndpointIsAllowed(Uri.parse('WSS://example.org/x')), isTrue);
+    });
+
+    test('ws is allowed only to the user\'s own network', () {
+      expect(liveEndpointIsAllowed(Uri.parse('ws://127.0.0.1:9/x')), isTrue);
+      expect(liveEndpointIsAllowed(Uri.parse('ws://localhost/x')), isTrue);
+      expect(liveEndpointIsAllowed(Uri.parse('ws://192.168.1.5/x')), isTrue);
+      expect(liveEndpointIsAllowed(Uri.parse('ws://203.0.113.10/x')), isFalse);
+      expect(liveEndpointIsAllowed(Uri.parse('ws://172.32.0.1/x')), isFalse);
+    });
+
+    test('http(s) and hostless endpoints are not live endpoints', () {
+      expect(liveEndpointIsAllowed(Uri.parse('https://example.org')), isFalse);
+      expect(liveEndpointIsAllowed(Uri.parse('http://localhost')), isFalse);
+      expect(liveEndpointIsAllowed(Uri.parse('wss:///x')), isFalse);
+      expect(liveEndpointIsAllowed(Uri.parse('')), isFalse);
+    });
+
+    test('the plain provider guard still refuses wss', () {
+      expect(providerEndpointIsAllowed(Uri.parse('wss://example.org')), isFalse);
+    });
+  });
 }
