@@ -1970,7 +1970,7 @@ class RecordingsController extends ChangeNotifier {
     // segment 0 may be anything, and one live text stream per fragment would
     // need merging into the parent's transcript. Logged once.
     final LiveTranscriptionService liveService = _liveTranscription();
-    final bool useLive = appendTo == null && liveService.isAvailable;
+    bool useLive = appendTo == null && liveService.isAvailable;
     if (appendTo != null && liveService.isAvailable && !_loggedLiveAppend) {
       _loggedLiveAppend = true;
       _logSink.log(
@@ -1978,7 +1978,7 @@ class RecordingsController extends ChangeNotifier {
         'as m4a and are transcribed after stop.',
       );
     }
-    final File audioFile = useLive
+    File audioFile = useLive
         ? await _repository.createSourceFile(id, 'wav')
         : appendTo == null
         ? await _repository.createAudioFile(id)
@@ -2017,8 +2017,29 @@ class RecordingsController extends ChangeNotifier {
     // part that is fixable.
     try {
       if (useLive) {
-        _liveTake = await _startLiveTake(liveService, audioFile, id);
-      } else {
+        try {
+          _liveTake = await _startLiveTake(liveService, audioFile, id);
+        } catch (exception) {
+          // Live text is a bonus on top of the recording, so a live start that
+          // fails must not cost the take: record it as m4a on a fresh file and
+          // transcribe it after stop. `_startLiveTake` already tore down the
+          // session and the writer; the half-open WAV goes so the orphan sweep
+          // does not adopt a take that never started.
+          _logSink.log(
+            'Live dictation could not start — recording as m4a instead: '
+            '$exception',
+            level: LogLevel.warn,
+            recordingId: id,
+          );
+          try {
+            if (await audioFile.exists()) await audioFile.delete();
+          } catch (_) {}
+          useLive = false;
+          audioFile = await _repository.createAudioFile(id);
+          _activeFilePath = audioFile.path;
+        }
+      }
+      if (!useLive) {
         await _recorder
             .start(
               RecordConfig(
@@ -2032,13 +2053,6 @@ class RecordingsController extends ChangeNotifier {
             .timeout(_recorderTimeout);
       }
     } catch (exception) {
-      if (useLive) {
-        // Nothing was accepted: drop the half-open WAV so the orphan sweep
-        // does not adopt a take that never started.
-        try {
-          if (await audioFile.exists()) await audioFile.delete();
-        } catch (_) {}
-      }
       // Two different failures, and "restart the app" is only right for one of
       // them: a timeout here means the platform recorder is still wedged by the
       // previous capture, while a plain throw is a mic already in use or an
@@ -2115,10 +2129,21 @@ class RecordingsController extends ChangeNotifier {
           )
           .timeout(_recorderTimeout);
       _liveTicker.value = const LiveTranscript();
-      take.updatesSub = session.updates.listen(
-        (LiveTranscript update) => _liveTicker.value = update,
-        onError: (Object _) {},
-      );
+      take.updatesSub = session.updates.listen((LiveTranscript update) {
+        _liveTicker.value = update;
+        // The first reason only: a dead session emits one failed update, and
+        // the log should say why live text stopped without repeating itself.
+        if (update.failed && !take!.deathLogged) {
+          take.deathLogged = true;
+          _logSink.log(
+            'Live transcription stopped — the take is still recorded and '
+            'will be transcribed after stop: '
+            '${update.reason ?? 'no reason given'}',
+            level: LogLevel.warn,
+            recordingId: id,
+          );
+        }
+      }, onError: (Object _) {});
       take.audioSub = stream.listen(
         (Uint8List chunk) => _onLiveChunk(take!, chunk, id),
         onError: (Object exception) => _logSink.log(
@@ -5186,8 +5211,10 @@ class RecordingsController extends ChangeNotifier {
       );
       return null;
     }
-    _logSink.log('Live transcript used · ${text.length} characters.',
-        recordingId: id);
+    _logSink.log(
+      'Live transcript used · ${text.length} characters.',
+      recordingId: id,
+    );
     return text;
   }
 
@@ -6250,6 +6277,7 @@ class _LiveTake {
   StreamSubscription<LiveTranscript>? updatesSub;
   bool writeFailureLogged = false;
   bool sessionFailureLogged = false;
+  bool deathLogged = false;
 
   /// The session was finished or cancelled by whoever took it from here.
   bool handedOff = false;

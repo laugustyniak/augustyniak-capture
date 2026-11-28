@@ -4,6 +4,7 @@ import 'dart:io';
 import 'package:augustyniak_capture/features/enrichment/domain/enrichment_context.dart';
 import 'package:augustyniak_capture/features/enrichment/domain/enrichment_result.dart';
 import 'package:augustyniak_capture/features/enrichment/domain/enrichment_service.dart';
+import 'package:augustyniak_capture/features/logs/domain/log_event.dart';
 import 'package:augustyniak_capture/features/processing/domain/processor.dart';
 import 'package:augustyniak_capture/features/processing/domain/processor_registry.dart';
 import 'package:augustyniak_capture/features/recordings/data/recordings_repository.dart';
@@ -44,11 +45,28 @@ class _Repo extends RecordingsRepository {
   }
 }
 
+class _Logs implements LogSink {
+  final List<({LogLevel level, String message})> lines =
+      <({LogLevel level, String message})>[];
+
+  @override
+  void log(
+    String message, {
+    LogLevel level = LogLevel.info,
+    String? recordingId,
+  }) => lines.add((level: level, message: message));
+
+  Iterable<String> warnings() => lines
+      .where((l) => l.level == LogLevel.warn)
+      .map((l) => l.message);
+}
+
 class _Recorder implements AudioRecorder {
   final StreamController<Uint8List> pcm = StreamController<Uint8List>();
   int startCalls = 0;
   int streamCalls = 0;
   Object? streamError;
+  Object? startError;
   String? path;
 
   @override
@@ -57,6 +75,7 @@ class _Recorder implements AudioRecorder {
   @override
   Future<void> start(RecordConfig config, {required String path}) async {
     startCalls++;
+    if (startError != null) throw startError!;
     File(path).writeAsStringSync('m4a bytes', flush: true);
     this.path = path;
   }
@@ -183,6 +202,7 @@ void main() {
   late _Service service;
   late _BatchProcessor batch;
   late _Enrichment enrichment;
+  late _Logs logs;
 
   setUp(() async {
     dir = await Directory.systemTemp.createTemp('live-dictation');
@@ -192,6 +212,7 @@ void main() {
     service = _Service(session);
     batch = _BatchProcessor();
     enrichment = _Enrichment();
+    logs = _Logs();
   });
 
   tearDown(() async {
@@ -207,6 +228,7 @@ void main() {
       repository: repository ?? repo,
       transcriptionService: const DisabledTranscriptionService(),
       recorder: recorder,
+      logSink: logs,
       enrichmentService: enrichment,
       liveTranscription: live == null ? null : () => live,
       liveResultTimeout: liveResultTimeout,
@@ -374,17 +396,82 @@ void main() {
       },
     );
 
-    test('a start failure removes the file and cancels the session', () async {
+    test(
+      'a live start failure falls back to m4a: the take is not lost',
+      () async {
+        recorder.streamError = StateError('mic busy');
+        final RecordingsController c = build(live: service);
+        await c.initialize();
+        await c.startRecording();
+
+        expect(c.isRecording, isTrue);
+        expect(c.error, isNull);
+        expect(recorder.startCalls, 1);
+        expect(session.cancelled, isTrue);
+        expect(c.liveTicker.value, isNull);
+        expect(
+          dir.listSync().whereType<File>().where(
+            (File f) => f.path.endsWith('.wav'),
+          ),
+          isEmpty,
+        );
+        expect(logs.warnings().join('\n'), contains('mic busy'));
+
+        await c.stopRecording();
+        await c.waitForProcessing();
+        expect(p.extension(c.recordings.single.filePath), '.m4a');
+        expect(c.recordings.single.status, RecordingStatus.completed);
+        expect(batch.calls, 1);
+        expect(session.finishCalled, isFalse);
+        c.dispose();
+      },
+    );
+
+    test('a take fails only when the m4a fallback fails too', () async {
       recorder.streamError = StateError('mic busy');
+      recorder.startError = StateError('encoder refused');
       final RecordingsController c = build(live: service);
       await c.initialize();
       await c.startRecording();
 
       expect(c.isRecording, isFalse);
-      expect(c.error, contains('mic busy'));
+      expect(c.error, contains('encoder refused'));
       expect(session.cancelled, isTrue);
       expect(dir.listSync().whereType<File>(), isEmpty);
-      expect(c.liveTicker.value, isNull);
+      c.dispose();
+    });
+
+    test('a session that dies mid-take logs its reason once', () async {
+      final RecordingsController c = build(live: service);
+      await c.initialize();
+      await c.startRecording();
+      session.emit(
+        const LiveTranscript(failed: true, reason: 'connection refused (HTTP 401)'),
+      );
+      session.emit(
+        const LiveTranscript(failed: true, reason: 'connection refused (HTTP 401)'),
+      );
+      await _until(() => c.liveTicker.value?.failed == true);
+      await _until(() => logs.warnings().isNotEmpty);
+
+      expect(
+        logs.warnings().where((String m) => m.contains('HTTP 401')),
+        hasLength(1),
+      );
+      await c.discardRecording();
+      c.dispose();
+    });
+
+    test('an incomplete finish logs why it was unusable', () async {
+      final RecordingsController c = build(live: service);
+      await recordLiveTake(c);
+      session.result.completeError(
+        const LiveTranscriptionIncomplete('connection closed (code 1011)'),
+      );
+      await c.waitForProcessing();
+
+      expect(logs.warnings().join('\n'), contains('code 1011'));
+      expect(batch.calls, 1);
       c.dispose();
     });
 
